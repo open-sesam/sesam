@@ -1,5 +1,7 @@
 # We are trying to build an alternative to git-secret
 
+![Sesam](sesam.png)
+
 ## Requirements
 
 - Tool written in Golang
