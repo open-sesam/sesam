@@ -1,0 +1,156 @@
+version: 1
+
+# This is a demonstration file of Sesam.
+# All kinds of features are listed here, you will likely only need a fraction of them.
+
+# The signature is protecting some of the settings below:
+# By default only users in the admin group may change user and group
+# configuration. This signature is verified by most sesam commands.
+#
+# This part here is written by the sesam tool itself.
+verify:
+  hash: xxxxxx
+  signed_by: cpahl # last admin that signed this.
+  signature: yyyyyy
+  last_modified: ISO8601
+  modified_by: sgrünewald # TODO: Needed? git log and so on.
+
+# TODO: Attack vectors: Somebody could still overwrite contents with un-decryptable stuff.
+#       git push --force should not be allowed ideally, but the decentral nature of git helps here.
+#       Also signatures would notice this.
+# TODO: What if attacker does not use sesam itself but age directly?
+#       He needs the private key of an existing user, so he can't.
+# TODO: Where to store private key? -> .ssh directory?
+# TODO: Need to integrate with ssh-agent to allow passphrased keys.
+#     -> seems well possible.
+# TODO: age provides confidentiality of file, but not integrity (git provides us authenticity)
+# TODO: yaml decode/encode of sesam tool will probably get rid of comments... how to solve that?
+# -> Need to use yaml.Node and modify the yaml tree, not the decoded values. Annoying but ok.
+
+# Use cases & technical implication:
+#
+# - Admin adds person to user list and groups. Individual secrets are updated as well possibly.
+#   -> config.users, config.group and secrets.*.access has to be extracted.
+#   -> This gets written to a normalized JSON document where spaces and so on do not matter.
+#   -> Document gets hashed by private key(s?) to create a signature value above.
+#   -> Existing secrets need to be re-encrypted.
+#   -> Push to Github, other pull.
+#   -> If signature checks out, sesam will reveal things.
+#      If not, user is alerted so wrong entry is detected.
+#      Attacker cannot re-encrypt existing files.
+#      Side-effect: Using age directly without sesam is therefore not encouraged.
+#
+# - User changes his/her key.
+#   - Same case as removing+adding this user (just needs to re-encrypt once)
+# - Admin changes his/her key.
+#   - There must be at least one valid admin.
+#   - Otherwise like normal user.
+# - Adding a new admin.
+# - Removing an admin.
+#   - There must be at least one valid admin.
+#   - When degrading an admin to user and making an existing user an admin it has too happen in two transactions (because otherwise the signature is wrong)
+# - Removing an user.
+#   - remove from config.
+#   - re-encrypt
+# - New secrets are added.
+#   - encrypt them.
+# - Existing secrets are changed.
+# - Secrets are modified.
+# - Access list to secrets are modified.
+#   -> Only users having already access (i.e. can decrypt file) may edit the access list. (Or should we only allow admins? Maybe config value?)
+#   -> How do we notice if someone did not just add himself to the list of access users?
+#   -> We know which public keys encrypted a file
+
+# CLI options:
+# - private key path (like ssh -i)
+# - config file path
+# - repo path
+
+config:
+  general:
+    # encrypt all files, even when no change is needed when true.
+    # This is a security consideration as only re-encrypting the files needed
+    # could tell an attacker which files where changed by whom over time.
+    # On the other hand, it is often rightfully useful to know when secrets were changed by whom.
+    - encrypt_all: false
+  users:
+    - name: c.pahl@germanbionic.com
+      desc: Chris Pahl
+      # Key is the public key of this user. It will be used to encrypt files.
+      # Decryption is only possible when you possess the fitting private key.
+      #
+      # You can specify the key either...
+      # - ...literally (as ssh key)
+      # - ...as forge id
+      # - ...as link
+      # - ...as local path (can be used for larger keys)
+      #
+      # Forge-ids and links (e.g. to keyservers) are downloaded once by the admin and stored in the repo (under .sesam/keys/).
+      # They are monitored on user or group changes, whenever the link/forge contents change, we will emit
+      # a warning and the admin has to check whether that link is still valid.
+      key: github:sahib
+    - name: s.gruenewald@germanbionic.com
+      desc: Sören Grünewald
+      key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN5VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj sören@dahoam
+    - name: a.bablees@germanbionic.com
+      desc: Adel Bablees
+      key: https://adel.com/key.txt
+    - name: m.alice@germanbionic.com
+      desc: Im Evil
+      key: some/path/key.txt
+
+  groups:
+    admin:
+      # This is the only user that by definition may change user/groups.
+      # We recommend to have at least two people here. These users also
+      # by definition have access to all files (as adding users require re-encrypting)
+      # TODO: Would it be possible to lock yourself out?
+      - cpahl
+    deployers:
+      - cpahl
+      - sgrünewald
+
+# TODO: CONSTRAINTS:
+# - Group names must be unique.
+# - User names must be unique.
+# - Group and user names may not overlap.
+
+# NOTE: You can use yaml anchors to re-use config that is often used.
+
+secrets:
+  # You can include more yml files to allow nesting.
+  # It is often clearer to specify secrets per directory.
+  # You may not repeat the "config" key in sub files though.
+  - include: platform/secrets.yml
+  - include: ssh/secrets.yml
+  - type: password
+    path: some_password.txt
+    # Optional:
+    access:
+      - admin
+      - deployers
+    description: Blub blub
+    rotate:
+      - zxcvbn: 3
+      - constraint: alphanumeric
+      - template:
+          - match: "^GBS_DATA_POSTGRES_PASSWORD:.*$"
+          - fmt: "GBS_DATA_POSTGRES_PASSWORD: {{ .PASSWORD }}"
+    swap:
+      - cmd: pass insert some/password/local {{ .PASSWORD }}
+  - type: ssh_key
+    path: ssh/blub.key
+    # Optional:
+    access:
+      - admin
+    description: Foo bar
+    rotate:
+      - algorithm: ssh-ed25519
+      - passphrase: name-of-another-secret
+    swap:
+      - host: ubuntu@sesam.io
+
+# allow toplevel keys starting with x-... to store re-usable snippets
+x-password-settings:
+  - zxcvbn: 3
+  - constraint: alphanumeric

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/open-sesam/sesam/recipients_schema.json",
+  "title": "Sesam Schema",
+  "description": "Sesam's config file (containing user/groups and secret definitions)",
+  "$defs": {
+    "pubkey": {
+      "type": "string",
+      "description": "Public key of this user, either as literal, forge-id, file path or link TODO: Several keys possible?"
+    }
+  },
+  "type": "object",
+  "properties": {
+    "version": {
+      "description": "The version of this recipients file",
+      "type": "integer",
+      "default": 1,
+      "minimum": 1,
+      "maximum": 1
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "users": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "pubkey"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name of a user - can be email TODO: Maybe enforce mails for future uses?"
+              },
+              "desc": {
+                "type": "string",
+                "description": "Description or full name of this user"
+              },
+              "pubkey": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/pubkey"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/pubkey"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "One of the names described in users above"
+            }
+          }
+        }
+      }
+    }
+  }
+}
