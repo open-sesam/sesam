@@ -76,6 +76,7 @@ Secret types:
 - Store encrypted files in .sesam, not alongside actual files.
 - Implement command to view ownership of files easily.
 - Note: Adding/Removing persons require re-encryption of all files.
+- sesam should support several .sesam dirs per git repo
 - Make rotation command with multiple stages:
 
   - plan: Show which secrets are rotated, which are exchanged.
@@ -84,9 +85,42 @@ Secret types:
 
 - Logo idea: Sesame pod, but seeds replaced with small golden keys => Done
 - README: Make clear that this is not vibe coded. Also mention that we think about rewriting in Rust after 1.0
+- We should not encourage use of `git push --force` - recommend in the README that it should be disabled to avoid
+  overwriting history.
 
-TODO: What about same password used in several files? Is this one or two secret entries?
-TODO: sesam should support several .sesam dirs per git repo
+### Use cases
+
+- Admin adds person to user list and groups. Individual secrets are updated as well possibly.
+  -> config.users, config.group and secrets.*.access has to be extracted.
+  -> This gets written to a normalized JSON document where spaces and so on do not matter.
+  -> Document gets hashed by private key(s?) to create a signature value above.
+  -> Existing secrets need to be re-encrypted.
+  -> Push to Github, other pull.
+  -> If signature checks out, sesam will reveal things.
+     If not, user is alerted so wrong entry is detected.
+     Attacker cannot re-encrypt existing files.
+     Side-effect: Using age directly without sesam is therefore not encouraged.
+
+- User changes his/her key.
+  - Same case as removing+adding this user (just needs to re-encrypt once)
+- Admin changes his/her key.
+  - There must be at least one valid admin.
+  - Otherwise like normal user.
+- Adding a new admin.
+- Removing an admin.
+  - There must be at least one valid admin.
+  - When degrading an admin to user and making an existing user an admin it has too happen in two transactions (because otherwise the signature is wrong)
+- Removing an user.
+  - remove from config.
+  - re-encrypt
+- New secrets are added.
+  - encrypt them.
+- Existing secrets are changed.
+- Secrets are modified.
+- Access list to secrets are modified.
+  -> Only users having already access (i.e. can decrypt file) may edit the access list. (Or should we only allow admins? Maybe config value?)
+  -> How do we notice if someone did not just add himself to the list of access users?
+  -> We know which public keys encrypted a file
 
 ## YAML Example
 
@@ -97,6 +131,12 @@ See sesam.yml  for an example file
 Commands are subcommands of the sesam binary.
 The binary can also be called as `git sesam`.
 
+### CLI Global options
+
+- private key path (like ssh -i)
+- config file path
+- repo path
+
 ### init
 
 - Create initial sesam.yml
@@ -104,6 +144,7 @@ The binary can also be called as `git sesam`.
 - Set up .sesam/ dir
 - Setup .gitignore file (ignore all but .sesam, sesam.yml)
 - Setup .gitattributes file for smudge filters.
+- Create git hooks to run verify before commit and potentially others
 - Setup access to sesam as `git sesam`
 
 ### verify
@@ -115,6 +156,7 @@ The binary can also be called as `git sesam`.
   - Since the attacker is not able to decrypt files actually we can use that as a way to verify the
   - For every encrypted file we need to store a hash of the encrypted file, hash of the decrypted file and a signature.
   - This way we can detect if an attacker substituted a file with a version he controls.
+  - If it was freshly added: Complain if the user that added it has no access to it.
 - Verify is implicitly called after a pull, reveal or hide.
 - Ideally this is also run as part of a CI pipeline.
 
@@ -195,3 +237,50 @@ There are more enterpris-y tools that run on server side:
 - Doppler
 - Vault (hashicorp or ansible)
 - ...
+
+They are kinda an alternative if you are a large organisation.
+But they run a less decentralized model and are only partly self-hosted.
+What's good: They also integrate with the applications using the secrets.
+
+## Implementation
+
+Private key handling is outsourced to the user via ssh-agent.
+If he wants to have a passphrase, then he has to facilitate that using ssh-agent.
+
+### Libraries
+
+- CLI: <https://cli.urfave.org/> - best CLI library.
+- YAML: <https://github.com/goccy/go-yaml> - good error messages, well maintained.
+  -> We need to work with the YAML ast directly to preserve comments!
+- age: <https://github.com/FiloSottile/age> - actual encryption
+- ssh: <https://pkg.go.dev/golang.org/x/crypto/ssh> - ssh key loading/signatures
+- ssh: <https://pkg.go.dev/golang.org/x/crypto/ssh/agent> - agent integration
+- renameio: <https://github.com/google/renameioc> - Atomic writes to disk
+- zxcvbn: <https://pkg.go.dev/github.com/wneessen/zxcvbn-go> - Testing password strength
+- password: <https://github.com/sethvargo/go-password> - Password generation
+- git: <https://github.com/go-git/go-git> - git integration (like checking for remote changes)
+
+### Modules
+
+- CLI
+- Config API
+  - CRUD API user/groups
+  - CRUD API secrets
+  - Validation/Constraints:
+    - Group names must be unique
+    - User names must be unique
+    - Group and user names may not overlap
+- Repo API
+  - init bootstrapping
+  - git API
+  - Sign/Verify
+  - audit log
+- Secret API
+  - Encryption/Decryption
+  - IO handling
+  - Rotation
+  - Swap
+- Utils:
+  - Signer
+  - Pub/Priv Key handling
+  - ssh agent integration

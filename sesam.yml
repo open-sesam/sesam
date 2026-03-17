@@ -1,3 +1,4 @@
+# Optional; always 1 for now.
 version: 1
 
 # This is a demonstration file of Sesam.
@@ -8,63 +9,14 @@ version: 1
 # configuration. This signature is verified by most sesam commands.
 #
 # This part here is written by the sesam tool itself.
+# TODO: Any good reason to not put this in .sesam/signature.yml actually?
+#       It's not supposed to be hand-edited.
 verify:
   hash: xxxxxx
   signed_by: cpahl # last admin that signed this.
   signature: yyyyyy
   last_modified: ISO8601
-  modified_by: sgrünewald # TODO: Needed? git log and so on.
-
-# TODO: Attack vectors: Somebody could still overwrite contents with un-decryptable stuff.
-#       git push --force should not be allowed ideally, but the decentral nature of git helps here.
-#       Also signatures would notice this.
-# TODO: What if attacker does not use sesam itself but age directly?
-#       He needs the private key of an existing user, so he can't.
-# TODO: Where to store private key? -> .ssh directory?
-# TODO: Need to integrate with ssh-agent to allow passphrased keys.
-#     -> seems well possible.
-# TODO: age provides confidentiality of file, but not integrity (git provides us authenticity)
-# TODO: yaml decode/encode of sesam tool will probably get rid of comments... how to solve that?
-# -> Need to use yaml.Node and modify the yaml tree, not the decoded values. Annoying but ok.
-
-# Use cases & technical implication:
-#
-# - Admin adds person to user list and groups. Individual secrets are updated as well possibly.
-#   -> config.users, config.group and secrets.*.access has to be extracted.
-#   -> This gets written to a normalized JSON document where spaces and so on do not matter.
-#   -> Document gets hashed by private key(s?) to create a signature value above.
-#   -> Existing secrets need to be re-encrypted.
-#   -> Push to Github, other pull.
-#   -> If signature checks out, sesam will reveal things.
-#      If not, user is alerted so wrong entry is detected.
-#      Attacker cannot re-encrypt existing files.
-#      Side-effect: Using age directly without sesam is therefore not encouraged.
-#
-# - User changes his/her key.
-#   - Same case as removing+adding this user (just needs to re-encrypt once)
-# - Admin changes his/her key.
-#   - There must be at least one valid admin.
-#   - Otherwise like normal user.
-# - Adding a new admin.
-# - Removing an admin.
-#   - There must be at least one valid admin.
-#   - When degrading an admin to user and making an existing user an admin it has too happen in two transactions (because otherwise the signature is wrong)
-# - Removing an user.
-#   - remove from config.
-#   - re-encrypt
-# - New secrets are added.
-#   - encrypt them.
-# - Existing secrets are changed.
-# - Secrets are modified.
-# - Access list to secrets are modified.
-#   -> Only users having already access (i.e. can decrypt file) may edit the access list. (Or should we only allow admins? Maybe config value?)
-#   -> How do we notice if someone did not just add himself to the list of access users?
-#   -> We know which public keys encrypted a file
-
-# CLI options:
-# - private key path (like ssh -i)
-# - config file path
-# - repo path
+  modified_by: sgrünewald
 
 config:
   general:
@@ -104,18 +56,11 @@ config:
       # This is the only user that by definition may change user/groups.
       # We recommend to have at least two people here. These users also
       # by definition have access to all files (as adding users require re-encrypting)
-      # TODO: Would it be possible to lock yourself out?
+      # TODO: Would it be possible to lock yourself out as admin?
       - cpahl
     deployers:
       - cpahl
       - sgrünewald
-
-# TODO: CONSTRAINTS:
-# - Group names must be unique.
-# - User names must be unique.
-# - Group and user names may not overlap.
-
-# NOTE: You can use yaml anchors to re-use config that is often used.
 
 secrets:
   # You can include more yml files to allow nesting.
@@ -124,18 +69,19 @@ secrets:
   - include: platform/secrets.yml
   - include: ssh/secrets.yml
   - type: password
+    name: some_password # optional, for display path is used otherwise.
     path: some_password.txt
     # Optional:
     access:
+      # If not specified, then only admin has access to the file!
+      # Make sure to add your group here if you are not admin and if you are manually editing this file (i.e. not over sesam commands)
+      # If you try to hide it, sesam verify will complain otherwise.
       - admin
       - deployers
-    description: Blub blub
+    description: Where it used, who owns it, Contact...
     rotate:
-      - zxcvbn: 3
+      - min-score: 3 # measured by zxcvbn
       - constraint: alphanumeric
-      - template:
-          - match: "^GBS_DATA_POSTGRES_PASSWORD:.*$"
-          - fmt: "GBS_DATA_POSTGRES_PASSWORD: {{ .PASSWORD }}"
     swap:
       - cmd: pass insert some/password/local {{ .PASSWORD }}
   - type: ssh_key
@@ -149,8 +95,34 @@ secrets:
       - passphrase: name-of-another-secret
     swap:
       - host: ubuntu@sesam.io
+  # Templates are kind of a "container" for several other secrets.
+  # They are mostly intented to be used for .env files or .json files
+  # that contain secrets that need to be embedded into a bigger document.
+  - type: template
+    path: platform/secrets.env
+    template: |
+      | # some comment
+      | SECRET_ENV="<<NAME_OF_SECRET>>"
+      |
+      | # other comment - also preserved.
+      | OTHER_ENV="<<OTHER_ENV>>"
+    secrets:
+      # path is optional for those secrets.
+      # They are encoded in to the template above and also read when we have to rotate the secrets.
+      # Therefore we can't do any destructive templating action like `{{ .NAME_OF_SECRET | upper }}`
+      # If we need special encoding, we can use the "encoding" config.
+      - type: password
+        name: NAME_OF_SECRET
+        # Sometimes password might contain things like quotes. In this case
+        # we need to escape them before writing it to the template.
+        # NOTE: Don't like that solution that much... but better than introducing special templating syntax.
+        encoding: shell # json, url, ...
+        access: [deploy]
+      # You can also include other files in here if you want to.
+      - include: other.yml
 
+# NOTE: You can use yaml anchors to re-use config that is often used.
 # allow toplevel keys starting with x-... to store re-usable snippets
 x-password-settings:
-  - zxcvbn: 3
+  - min-score: 3
   - constraint: alphanumeric
