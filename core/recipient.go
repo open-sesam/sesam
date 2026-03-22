@@ -61,7 +61,7 @@ func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode
 }
 
 func cachePath(repoDir, url string) string {
-	return filepath.Join(repoDir, "links", strings.ReplaceAll(url, "/", "_"))
+	return filepath.Join(repoDir, ".sesam", "links", strings.ReplaceAll(url, "/", "_"))
 }
 
 // TODO: implement command to check if links and forge-ids are out-dated? Maybe part of verify?
