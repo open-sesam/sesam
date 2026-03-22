@@ -49,7 +49,7 @@ config:
       key: https://adel.com/key.txt
     - name: m.alice@germanbionic.com
       desc: Im Evil
-      key: some/path/key.txt
+      key: file://some/path/key.txt
 
   groups:
     admin:
