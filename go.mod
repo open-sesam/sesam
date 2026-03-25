@@ -5,6 +5,7 @@ go 1.25.1
 require (
 	filippo.io/age v1.3.1
 	github.com/chzyer/readline v1.5.1
+	github.com/google/renameio v1.0.1
 	github.com/zalando/go-keyring v0.2.7
 	golang.org/x/crypto v0.45.0
 )

@@ -192,7 +192,8 @@ The binary can also be called as `git sesam`.
   - This way we can detect if an attacker substituted a file with a version he controls.
   - If it was freshly added: Complain if the user that added it has no access to it.
 - For each user:
-  - Check which public keys belong to his configured identity.
+  - Check which public keys belong to his configured identity. There should be at least one.
+  - Check if the private key belongs to the signing public key in the config.
 - Verify is implicitly called after a pull, reveal or hide.
 - Ideally this is also run as part of a CI pipeline.
 

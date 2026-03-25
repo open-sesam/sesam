@@ -45,9 +45,11 @@ func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode
 	case strings.HasPrefix(arg, "bitbucket:"):
 		url := fmt.Sprintf("https://bitbucket.org/api/1.0/users/%s/ssh-keys", url.QueryEscape(forgeIdToUser(arg)))
 		return resolveCachedLink(ctx, repoDir, url, cacheMode)
-	case strings.HasPrefix(arg, "https://:"):
+	case strings.HasPrefix(arg, "https://"):
 		return resolveCachedLink(ctx, repoDir, arg, cacheMode)
 	case strings.HasPrefix(arg, "file://"):
+		// TODO: Strip "file://" prefix before reading. Also consider restricting
+		// to paths within the repo directory to prevent reading arbitrary files.
 		data, err := os.ReadFile(arg)
 		if err != nil {
 			return "", fmt.Errorf("failed to find %s: %w", arg, err)
@@ -94,6 +96,7 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 	if err != nil {
 		return "", fmt.Errorf("failed to download %s: %w", url, err)
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("%s failed with code %d", url, resp.StatusCode)
@@ -130,10 +133,10 @@ func ParseRecipient(arg string) (age.Recipient, error) {
 	// NOTE: Shamelessly stolen from age cli.
 	// TODO: For yubikeys etc. we need to support a couple more lines here I guess.
 	switch {
-	case strings.HasPrefix(arg, "age1"):
-		r, err = age.ParseX25519Recipient(arg)
 	case strings.HasPrefix(arg, "age1pq1"):
 		r, err = age.ParseHybridRecipient(arg)
+	case strings.HasPrefix(arg, "age1"):
+		r, err = age.ParseX25519Recipient(arg)
 	case strings.HasPrefix(arg, "ssh-"):
 		r, err = agessh.ParseRecipient(arg)
 	default:
