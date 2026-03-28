@@ -67,6 +67,7 @@ type Secret struct {
 }
 
 type SecretSignature struct {
+	// TODO: Add signed by?
 	Path      string `json:"path"`
 	Hash      string `json:"hash"`
 	Signature string `json:"signature"`
