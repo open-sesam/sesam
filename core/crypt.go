@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/google/renameio"
 	"golang.org/x/crypto/sha3"
@@ -23,26 +22,38 @@ type Signer interface {
 }
 
 type SecretManager struct {
+	// RepoDir is the path to sesam repository.
+	// It is the dir the .sesam directory is in.
 	RepoDir string
 
-	// TOOD: Needs to be parsed from a list of private keys supplied by the user.
+	// Identities are the private keys the current user of sesam supplies.
 	Identities []age.Identity
 
+	// Signer is a sesam generated signing key.
 	Signer Signer
 }
 
 func (sm *SecretManager) cryptPath(path string) string {
-	return filepath.Join(sm.RepoDir, ".sesam", "objects", path)
+	return filepath.Join(sm.RepoDir, ".sesam", "objects", path+".age")
 }
 
 func (sm *SecretManager) cryptWriter(path string) (io.WriteCloser, string, error) {
 	cryptPath := sm.cryptPath(path)
+
+	// TODO: Move that to an init module and add a .donotdelete file in it so that git does not kill it.
+	// .sesam/tmp should be also part of gitignore
 	if err := os.MkdirAll(filepath.Dir(cryptPath), 0700); err != nil {
 		return nil, "", err
 	}
 
 	fd, err := os.Create(cryptPath)
 	return fd, cryptPath, err
+}
+
+func (sm *SecretManager) tmpDir() string {
+	tmpDir := filepath.Join(sm.RepoDir, ".sesam", "tmp")
+	_ = os.MkdirAll(tmpDir, 0700)
+	return tmpDir
 }
 
 type Secret struct {
@@ -56,14 +67,6 @@ type Secret struct {
 	Recipients []age.Recipient
 }
 
-// NOTE: Signature strategy:
-//
-// - Hash file using sha3 after encrypt.
-// - Decrypt signing key to memory.
-// - Sign hash with private signing key.
-// - Zero out signing key in memory. (if all files done)
-// - Write hash + signature to .sesam/objects/$path.sig.json
-
 // TODO: use self describing hashes like ipfs?
 type SecretSignature struct {
 	Path      string `json:"path"`
@@ -72,21 +75,19 @@ type SecretSignature struct {
 }
 
 func (s *Secret) Seal() error {
-	fmt.Println("SEAL", s.RevealedPath)
-
 	rd, err := os.Open(filepath.Join(s.Mgr.RepoDir, s.RevealedPath))
 	if err != nil {
 		return fmt.Errorf("failed to open secret: %w", err)
 	}
-	defer rd.Close()
+	defer closeLogged(rd)
 
 	wc, encryptedPath, err := s.Mgr.cryptWriter(s.RevealedPath)
 	if err != nil {
 		return fmt.Errorf("failed to open encrypted file in repo: %w", err)
 	}
-	defer wc.Close()
+	defer closeLogged(wc)
 
-	// use the stream to compute the hash, what is written to wc, is also written to the hash.
+	// use the stream to compute the hash, what is written to wc, is also written to the hash:
 	h := sha3.New256()
 	mw := io.MultiWriter(wc, h)
 
@@ -105,8 +106,7 @@ func (s *Secret) Seal() error {
 	}
 
 	// NOTE: We use the path as well to make sure files cannot just be moved around.
-	fmt.Println("HASH", s.RevealedPath)
-	h.Write([]byte(s.RevealedPath))
+	_, _ = h.Write([]byte(s.RevealedPath))
 	hashBytes := h.Sum(nil)
 
 	sig, err := s.Mgr.Signer.Sign(hashBytes)
@@ -114,80 +114,82 @@ func (s *Secret) Seal() error {
 		return fmt.Errorf("failed to compuite signature for %s: %w", encryptedPath, err)
 	}
 
+	// Write signature to buffer:
 	sigBuf := &bytes.Buffer{}
 	enc := json.NewEncoder(sigBuf)
 	enc.SetIndent("", "  ")
-	enc.Encode(SecretSignature{
+	_ = enc.Encode(SecretSignature{
 		Path:      s.RevealedPath,
 		Hash:      base64.StdEncoding.EncodeToString(hashBytes),
 		Signature: sig,
 	})
 
-	signaturePath := strings.TrimSuffix(encryptedPath, ".age") + ".sig.json"
-
 	// write the signature file along the encrypted file:
-	return renameio.WriteFile(signaturePath, sigBuf.Bytes(), 0600)
+	sigPath := SignaturePath(s.Mgr.RepoDir, s.RevealedPath)
+	return renameio.WriteFile(sigPath, sigBuf.Bytes(), 0600)
 }
 
+// Reveal decrypts secret `s` and verifies its detached signature.
+// No error is only returned if the reveal has been fully successful.
 func (s *Secret) Reveal() error {
 	cryptPath := s.Mgr.cryptPath(s.RevealedPath)
-	fmt.Println("REVEAL", cryptPath)
 	srcFd, err := os.Open(cryptPath)
 	if err != nil {
 		// if it does not exist, it probably means that the secret was not encrypted yet.
 		return fmt.Errorf("opening secret file failed: %w", err)
 	}
 
+	defer closeLogged(srcFd)
+
+	// Setup hashing parallel to decrypting:
 	h := sha3.New256()
 	tr := io.TeeReader(srcFd, h)
-
 	encR, err := age.Decrypt(tr, s.Mgr.Identities...)
 	if err != nil {
-		_ = srcFd.Close()
 		return fmt.Errorf("failed to decrypt %s: %w", s.RevealedPath, err)
 	}
 
-	dstFd, err := os.Create(filepath.Join(s.Mgr.RepoDir, s.RevealedPath))
+	// Write revealed file to a temp file first, so we can get rid of it later easily:
+	dstPath := filepath.Join(s.Mgr.RepoDir, s.RevealedPath)
+	dstFd, err := renameio.TempFile(s.Mgr.tmpDir(), dstPath)
 	if err != nil {
-		_ = srcFd.Close()
 		return fmt.Errorf("failed to create revealed file: %w", err)
 	}
 
+	defer func() {
+		// This will be a no-op when reaching CloseAtomicallyReplace() down.
+		_ = dstFd.Cleanup()
+	}()
+
+	// Kick-off the decrypting and hashing:
 	_, err = io.Copy(dstFd, encR)
 	if err != nil {
-		_ = srcFd.Close()
-		_ = dstFd.Close()
 		return fmt.Errorf("failed to copy decrypted secret back in place: %w", err)
 	}
 
-	_ = srcFd.Close()
-	_ = dstFd.Close()
+	sigDesc, err := ReadStoredSignature(s.Mgr.RepoDir, s.RevealedPath)
+	if err != nil {
+		return fmt.Errorf("failed to read signature: %w", err)
+	}
+
+	// Finish hash (includes path to make sure it is )
+	_, _ = h.Write([]byte(s.RevealedPath))
+	sha3HashBytes := h.Sum(nil)
+	expectedHash := base64.StdEncoding.EncodeToString(sha3HashBytes[:])
 
 	// Verify the signature:
-	h.Write([]byte(s.RevealedPath))
-	sha3HashBytes := h.Sum(nil)
-	signaturePath := strings.TrimSuffix(cryptPath, ".age") + ".sig.json"
-	fd, err := os.Open(signaturePath)
-	if err != nil {
-		return fmt.Errorf("failed to open signature json: %w", err)
-	}
-	defer fd.Close()
-
-	var sigDesc SecretSignature
-	dec := json.NewDecoder(fd)
-	if err := dec.Decode(&sigDesc); err != nil {
-		return fmt.Errorf("failed to decode signature json %s: %w", signaturePath, err)
-	}
-
-	expectedHash := base64.StdEncoding.EncodeToString(sha3HashBytes[:])
 	if expectedHash != sigDesc.Hash {
 		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", expectedHash, sigDesc.Hash)
 	}
 
 	if err := s.Mgr.Signer.Verify(sha3HashBytes, sigDesc.Signature); err != nil {
-		// verification failed; abort. TODO: We already decrypted the file though. Remove it again?
+		// verification failed, abort.
 		return err
 	}
 
-	return nil
+	// TODO: Seal and reveal should carry over permissions and other attrs from the original file.
+	// Git can only differentiate between executable and normal files, not between 0600 and 0644.
+	// So default to 0600 to avoid troubles with ssh keys for now?
+	_ = dstFd.Chmod(0600)
+	return dstFd.CloseAtomicallyReplace()
 }

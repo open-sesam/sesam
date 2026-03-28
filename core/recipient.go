@@ -67,7 +67,6 @@ func cachePath(repoDir, url string) string {
 }
 
 // TODO: implement command to check if links and forge-ids are out-dated? Maybe part of verify?
-// TODO: Do we need something like a TTL for the urls? Maybe not...
 
 // resolveCachedLink will download the specified `url` and write it to a cache under `repoDir`.
 // If the cached response is already available, then it is returned directly.

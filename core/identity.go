@@ -14,7 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// TODO: We might need to think about a way to destroy identities in the program after they are not longer needed.
+// TODO: We might need to think about a way to destroy identities in memory after they are not longer needed.
 
 // ParseIdentities parses raw key bytes into age identities. It tries native
 // age keys first, then falls back to SSH key parsing. Passphrase protected keys are supported
