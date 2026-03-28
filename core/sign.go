@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,13 +25,16 @@ func (es *ed25519Signer) Sign(data []byte) (string, error) {
 		return "", err
 	}
 
-	return base64.StdEncoding.EncodeToString(sig), nil
+	return MulticodeEncode(sig, MhEdDSA), nil
 }
 
 func (es *ed25519Signer) Verify(data []byte, signature string) error {
-	sigData, err := base64.StdEncoding.DecodeString(signature)
+	sigData, code, err := MulticodeDecode(signature)
 	if err != nil {
 		return err
+	}
+	if code != MhEdDSA {
+		return fmt.Errorf("unexpected multihash code %d for signature, expected eddsa", code)
 	}
 
 	ok := ed25519.Verify(es.pub, data, sigData)
@@ -62,14 +64,17 @@ func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error
 
 	defer closeLogged(cryptedSignPrivKeyFd)
 
-	signingKeyBase64, err := io.ReadAll(dr)
+	signingKeyEncoded, err := io.ReadAll(dr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt signing key: %v", err)
 	}
 
-	signPrivKeyRaw, err := base64.StdEncoding.DecodeString(string(bytes.TrimSpace(signingKeyBase64)))
+	signPrivKeyRaw, code, err := MulticodeDecode(string(bytes.TrimSpace(signingKeyEncoded)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode sign key %s: %w", signKeyPath, err)
+	}
+	if code != MhEd25519Priv {
+		return nil, fmt.Errorf("unexpected multihash code %d for signing key, expected ed25519-priv", code)
 	}
 
 	// ed25519 priv keys should always be 64 bytes.
@@ -106,8 +111,9 @@ func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer,
 		return nil, fmt.Errorf("failed to encrypt signing key: %w", err)
 	}
 
-	if _, err := wc.Write([]byte(base64.StdEncoding.EncodeToString(priv[:]))); err != nil {
-		return nil, fmt.Errorf("failed to encrypt hash: %w", err)
+	privMh := MulticodeEncode(priv[:], MhEd25519Priv)
+	if _, err := wc.Write([]byte(privMh)); err != nil {
+		return nil, fmt.Errorf("failed to encrypt signing key: %w", err)
 	}
 
 	if err := wc.Close(); err != nil {
@@ -124,7 +130,7 @@ func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer,
 	// - The encryption itself is not signed, i.e. someone could just replace it without us noticing.
 	// - We therefore need to store the public key (and maybe a hash of the private key)
 	//   (hash is not necessary probably, because )
-	fmt.Println("TODO: Store this in admin signed config", base64.StdEncoding.EncodeToString(pub))
+	fmt.Println("TODO: Store this in admin signed config", MulticodeEncode(pub, MhEd25519Pub))
 	return &ed25519Signer{
 		pub:  pub,
 		priv: priv,

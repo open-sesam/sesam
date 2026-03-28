@@ -2,7 +2,6 @@ package core
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -67,7 +66,6 @@ type Secret struct {
 	Recipients []age.Recipient
 }
 
-// TODO: use self describing hashes like ipfs?
 type SecretSignature struct {
 	Path      string `json:"path"`
 	Hash      string `json:"hash"`
@@ -120,7 +118,7 @@ func (s *Secret) Seal() error {
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(SecretSignature{
 		Path:      s.RevealedPath,
-		Hash:      base64.StdEncoding.EncodeToString(hashBytes),
+		Hash:      MulticodeEncode(hashBytes, MhSHA3_256),
 		Signature: sig,
 	})
 
@@ -175,9 +173,9 @@ func (s *Secret) Reveal() error {
 	// Finish hash (includes path to make sure it is )
 	_, _ = h.Write([]byte(s.RevealedPath))
 	sha3HashBytes := h.Sum(nil)
-	expectedHash := base64.StdEncoding.EncodeToString(sha3HashBytes[:])
 
-	// Verify the signature:
+	// Verify the signature, but check before if hashes are the same at all as quick check:
+	expectedHash := MulticodeEncode(sha3HashBytes, MhSHA3_256)
 	if expectedHash != sigDesc.Hash {
 		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", expectedHash, sigDesc.Hash)
 	}

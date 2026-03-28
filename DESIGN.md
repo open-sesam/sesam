@@ -120,6 +120,9 @@ Secret types:
 - We should not encourage use of `git push --force` - recommend in the README that it should be disabled to avoid
   overwriting history.
 
+- We should use multicode to encode hashes, priv/pub keys and signatures: <https://github.com/sj14/multicode>
+  This way we can figure out if a byte blob is a signature, hash or something else.
+
 ### Use cases
 
 - Admin adds person to user list and groups. Individual secrets are updated as well possibly.
