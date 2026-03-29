@@ -15,6 +15,7 @@ require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
+	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/minio/sha256-simd v1.0.0 // indirect
