@@ -7,6 +7,7 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/google/renameio v1.0.1
 	github.com/multiformats/go-multihash v0.2.3
+	github.com/urfave/cli/v3 v3.8.0
 	github.com/zalando/go-keyring v0.2.7
 	golang.org/x/crypto v0.45.0
 )
