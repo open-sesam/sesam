@@ -17,6 +17,13 @@ const (
 	OpSeal             = Operation("seal")
 )
 
+// AuditDetail is a type constraint covering all valid detail types.
+type AuditDetail interface {
+	AuditEntryUserTell | AuditEntryUserKill |
+		AuditEntryGroupJoin | AuditEntryGroupLeave |
+		AuditEntryAccessListChange | AuditEntrySeal
+}
+
 type AuditEntry struct {
 	// Operation describes the operation that happened.
 	// See above for a full list.
@@ -32,7 +39,7 @@ type AuditEntry struct {
 	// Time is when this operation happened (ISO8601, UTC)
 	Time time.Time `json:"time"`
 
-	// ChangeBy is the user that executed the operation.
+	// ChangedBy is the user that executed the operation.
 	ChangedBy string `json:"changed_by"`
 
 	// Detail are operation specific details.
@@ -40,14 +47,40 @@ type AuditEntry struct {
 	unmarshaledDetail any             `json:"-"`
 }
 
-func (ae *AuditEntry) SetDetail(d any) {
-	ae.unmarshaledDetail = d
+// NewAuditEntry creates a new entry with compile-time type safety on the detail.
+// SeqID, PreviousHash and Time are filled by AuditLog.AddEntry().
+func NewAuditEntry[T AuditDetail](op Operation, changedBy string, detail *T) (*AuditEntry, error) {
+	raw, err := json.Marshal(detail)
+	if err != nil {
+		return nil, fmt.Errorf("marshal detail: %w", err)
+	}
+
+	return &AuditEntry{
+		Operation:         op,
+		ChangedBy:         changedBy,
+		Detail:            raw,
+		unmarshaledDetail: detail,
+	}, nil
 }
 
-// GetDetail returns the detail
-// (Sorry, you have )
-func (ae *AuditEntry) GetDetail() any {
-	return ae.unmarshaledDetail
+// ParseDetail unmarshals the detail into the given type.
+// The result is cached so repeated calls don't re-unmarshal.
+func ParseDetail[T AuditDetail](e *AuditEntry) (*T, error) {
+	if e.unmarshaledDetail != nil {
+		if d, ok := e.unmarshaledDetail.(*T); ok {
+			return d, nil
+		}
+
+		return nil, fmt.Errorf("entry %d: detail is %T, not *%T", e.SeqID, e.unmarshaledDetail, *new(T))
+	}
+
+	var d T
+	if err := json.Unmarshal(e.Detail, &d); err != nil {
+		return nil, fmt.Errorf("unmarshal detail for seq %d: %w", e.SeqID, err)
+	}
+
+	e.unmarshaledDetail = &d
+	return &d, nil
 }
 
 type AuditEntrySigned struct {
@@ -177,14 +210,23 @@ type AuditLog struct {
 }
 
 func (al *AuditLog) AddEntry(entry *AuditEntry) error {
-	data, err := json.Marshal(entry.unmarshaledDetail)
-	if err != nil {
-		return fmt.Errorf("failed to marshal details: %w", err)
+	entry.SeqID = uint64(len(al.Entries)) + 1
+	entry.Time = time.Now().UTC()
+
+	if len(al.Entries) > 0 {
+		prev := al.Entries[len(al.Entries)-1]
+		prevJSON, err := json.Marshal(prev)
+		if err != nil {
+			return fmt.Errorf("marshal previous entry: %w", err)
+		}
+
+		// TODO: Use multihash-encoded SHA3-256 here.
+		_ = prevJSON
+		entry.PreviousHash = "TODO"
 	}
 
-	entry.Detail = data
-
-	// TODO: Build signature and marshal the whole thing.
+	// TODO: Build signature over the entry.
+	al.Entries = append(al.Entries, *entry)
 	return nil
 }
 
