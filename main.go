@@ -24,8 +24,7 @@ func main() {
 	}
 
 	recp, err := core.ParseRecipient(rawPubKey)
-	if err != nil {
-		log.Fatalf("failed to parse recipient: %v", err)
+	if err != nil { log.Fatalf("failed to parse recipient: %v", err)
 	}
 
 	privKey, err := os.ReadFile("/home/chris/.ssh/id_rsa")

@@ -110,7 +110,7 @@ func (s *Secret) Seal() error {
 
 	sig, err := s.Mgr.Signer.Sign(hashBytes)
 	if err != nil {
-		return fmt.Errorf("failed to compuite signature for %s: %w", encryptedPath, err)
+		return fmt.Errorf("failed to compute signature for %s: %w", encryptedPath, err)
 	}
 
 	// Write signature to buffer:
