@@ -42,8 +42,8 @@ func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode
 	case strings.HasPrefix(arg, "gitlab:"):
 		url := fmt.Sprintf("https://gitlab.com/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
 		return resolveCachedLink(ctx, repoDir, url, cacheMode)
-	case strings.HasPrefix(arg, "bitbucket:"):
-		url := fmt.Sprintf("https://bitbucket.org/api/1.0/users/%s/ssh-keys", url.QueryEscape(forgeIdToUser(arg)))
+	case strings.HasPrefix(arg, "codeberg:"):
+		url := fmt.Sprintf("https://codeberg.org/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
 		return resolveCachedLink(ctx, repoDir, url, cacheMode)
 	case strings.HasPrefix(arg, "https://"):
 		return resolveCachedLink(ctx, repoDir, arg, cacheMode)
