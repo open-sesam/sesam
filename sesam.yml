@@ -44,12 +44,13 @@ config:
     - name: s.gruenewald@germanbionic.com
       desc: Sören Grünewald
       key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN5VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj sören@dahoam
+      signkey: blubdiblub # TODO: xxx
     - name: a.bablees@germanbionic.com
       desc: Adel Bablees
       key: https://adel.com/key.txt
     - name: m.alice@germanbionic.com
       desc: Im Evil
-      key: some/path/key.txt
+      key: file://some/path/key.txt
 
   groups:
     admin:

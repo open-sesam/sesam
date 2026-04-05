@@ -26,11 +26,43 @@ Use 'age' as encrypt/decrypt tool. Advantages:
 - We don't need to implement it ourself.
 - Supports Hybrid Encryption really easily.
 - Has support for Postquantum crypto even (when not using ssh keys and only age keys)
+- age's plugin system (see <https://github.com/FiloSottile/awesome-age#plugins>) enables
+  support for Yubikeys (age-plugin-yubikey via PIV), TPMs, Secure Enclave, etc. without
+  sesam needing to know about any of them.
+- SSH keys are supported as age identities via the agessh package, so users with existing
+  SSH keys do not need to generate a separate age key.
 - Forges have a way to download user public keys as sort of key registry:
   - <https://github.com/USER>.<key>
   - <https://bitbucket.org/api/1.0/users/><accountname>/ssh-keys
   - <https://gitlab.com/USER.keys>
 - Users could be specified as forge-username (e.g. github:sahib) or age public keys are transmitted separately.
+
+#### Key Architecture
+
+age identities are the primary key source. They handle all encryption and decryption.
+Sesam does not implement any crypto itself — it delegates entirely to age.
+
+Supported identity types (transparent to sesam):
+
+- Native age key files (X25519)
+- SSH keys via agessh (Ed25519, RSA — age converts internally)
+- Hardware tokens via age plugins (Yubikey/PIV, TPM, Secure Enclave, ...)
+
+Signing is handled by a separate Ed25519 keypair that sesam generates per user.
+The signing private key is encrypted with the user's age public key and stored in the
+repo at `.sesam/signkeys/$user.age`. The signing public key is stored in plaintext
+alongside it. This means:
+
+- Only the user (who can decrypt with their age identity) can sign.
+- Anyone can verify signatures using the plaintext public key.
+- Sesam never touches the user's age private key directly — age handles that.
+
+| Operation       | Needs                          | Source                                          |
+|-----------------|--------------------------------|-------------------------------------------------|
+| Seal (encrypt)  | Recipients' age public keys    | Repo config                                     |
+| Reveal (decrypt)| User's age identity            | Local (key file, SSH key, plugin — user's choice)|
+| Sign            | Ed25519 signing private key    | Decrypt `.sesam/signkeys/$user.age` via age     |
+| Verify          | Ed25519 signing public key     | Repo (plaintext)                                |
 
 ### Configuration
 
@@ -88,6 +120,9 @@ Secret types:
 - We should not encourage use of `git push --force` - recommend in the README that it should be disabled to avoid
   overwriting history.
 
+- We should use multicode to encode hashes, priv/pub keys and signatures: <https://github.com/sj14/multicode>
+  This way we can figure out if a byte blob is a signature, hash or something else.
+
 ### Use cases
 
 - Admin adds person to user list and groups. Individual secrets are updated as well possibly.
@@ -133,15 +168,17 @@ The binary can also be called as `git sesam`.
 
 ### CLI Global options
 
-- private key path (like ssh -i)
+- age identity path (default: `~/.config/sesam/key.txt`, or SSH key path, or plugin)
 - config file path
 - repo path
 
 ### init
 
 - Create initial sesam.yml
-- Make initial user admin-
-- Set up .sesam/ dir
+- Make initial user admin
+- Set up .sesam/ dir (including .sesam/signkeys/)
+- Generate Ed25519 signing keypair for the user, encrypt private key with user's age
+  public key, store at `.sesam/signkeys/$user.age` (public key alongside in plaintext)
 - Setup .gitignore file (ignore all but .sesam, sesam.yml)
 - Setup .gitattributes file for smudge filters.
 - Create git hooks to run verify before commit and potentially others
@@ -152,11 +189,14 @@ The binary can also be called as `git sesam`.
 - Check signature in sesam.yml
 - For each secret:
   - Check that the configured access list is the same as the people that are able to decrypt the file.
-  - This is to protect against an attacker that would attack himself to the access list.
-  - Since the attacker is not able to decrypt files actually we can use that as a way to verify the
+  - This is to protect against an attacker that would add himself to the access list.
+  - Since the attacker is not able to decrypt files we can use that as a way to verify the integrity
   - For every encrypted file we need to store a hash of the encrypted file, hash of the decrypted file and a signature.
   - This way we can detect if an attacker substituted a file with a version he controls.
   - If it was freshly added: Complain if the user that added it has no access to it.
+- For each user:
+  - Check which public keys belong to his configured identity. There should be at least one.
+  - Check if the private key belongs to the signing public key in the config.
 - Verify is implicitly called after a pull, reveal or hide.
 - Ideally this is also run as part of a CI pipeline.
 
@@ -164,7 +204,7 @@ Signature algorithm: Ed25519
 
 ### id
 
-Identifies user based on ssh key.
+Identifies user based on their age identity (age key, SSH key, or plugin).
 
 ### seal
 
@@ -174,7 +214,7 @@ NOTE: Only seals the files that were changed by default.
 
 ### reveal
 
-Reveals all secret files the user (defined by ssh-key) has access to.
+Reveals all secret files the user (identified by age identity) has access to.
 
 NOTE: Only the files that you can access are visible in the git working dir.
 
@@ -228,6 +268,7 @@ Commands only work when you are in the admin group.
 - [Keyringer](https://keyringer.pw/)
 - [Transcrypt](https://github.com/elasticdog/transcrypt )
 - [git-crypt](https://www.agwa.name/projects/git-crypt/)
+- [agebox](<https://github.com/slok/agebox>)
 
 None of them supports leveled access though.
 
@@ -244,17 +285,19 @@ What's good: They also integrate with the applications using the secrets.
 
 ## Implementation
 
-Private key handling is outsourced to the user via ssh-agent.
-If he wants to have a passphrase, then he has to facilitate that using ssh-agent.
+Private key handling is delegated entirely to age and its plugin ecosystem.
+Sesam never reads or manages private keys directly. Users provide an age identity
+which can be a native age key file, an SSH private key (loaded via agessh), or a
+hardware token via an age plugin. Passphrase handling for SSH keys is done by age
+internally.
 
 ### Libraries
 
 - CLI: <https://cli.urfave.org/> - best CLI library.
 - YAML: <https://github.com/goccy/go-yaml> - good error messages, well maintained.
   -> We need to work with the YAML ast directly to preserve comments!
-- age: <https://github.com/FiloSottile/age> - actual encryption
-- ssh: <https://pkg.go.dev/golang.org/x/crypto/ssh> - ssh key loading/signatures
-- ssh: <https://pkg.go.dev/golang.org/x/crypto/ssh/agent> - agent integration
+- age: <https://github.com/FiloSottile/age> - encryption/decryption (including agessh for SSH key identities)
+- ed25519: <https://pkg.go.dev/crypto/ed25519> - signing/verification of config and secrets
 - renameio: <https://github.com/google/renameioc> - Atomic writes to disk
 - zxcvbn: <https://pkg.go.dev/github.com/wneessen/zxcvbn-go> - Testing password strength
 - password: <https://github.com/sethvargo/go-password> - Password generation
@@ -278,9 +321,22 @@ If he wants to have a passphrase, then he has to facilitate that using ssh-agent
 - Secret API
   - Encryption/Decryption
   - IO handling
-  - Rotation
+  - Rotation/Exchange Plugin Architecture
   - Swap
-- Utils:
-  - Signer
-  - Pub/Priv Key handling
-  - ssh agent integration
+- Identity:
+  - Load age identity (native key, SSH key via agessh, or plugin)
+  - Manage signing keypairs (generate, encrypt/store in `.sesam/signkeys/`, decrypt for signing)
+  - Sign/Verify using Ed25519
+
+### Extensions
+
+Things like exchanging aws keys or generating github api keys should not be done by the main binary.
+For security reasons, this binary should stay as small as possible with only the core features in it.
+Everything else should be a downloadable plugin, which means:
+
+- We need a plugion architecture - go supports this using plugin: <https://pkg.go.dev/plugin>
+- Plugins should be downloadable using an URL and the main sesam tool should come with a list of officially tested plugins
+  with their URL, correct hash and maybe even signature using a key pair of the maintainers.
+- A specific sesam version points to specific plugin versions. The versions are curated to avoid sneaking in malicious plugins xz-style (aka supply chain attack).
+
+Other things like a TUI should be a separate tool.
