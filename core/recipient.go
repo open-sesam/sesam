@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
@@ -94,7 +95,11 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 		return "", fmt.Errorf("failed to build request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to download %s: %w", url, err)
 	}
