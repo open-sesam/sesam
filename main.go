@@ -61,9 +61,28 @@ func main() {
 		Recipients:   []age.Recipient{recp},
 	}
 
+	auditLog, err := core.LoadAuditLog(
+		".",
+		signer,
+	)
+	if err != nil {
+		log.Fatalf("failed to create audit log: %w", err)
+	}
+
 	fmt.Println("SEAL", secret.RevealedPath)
 	if err := secret.Seal(); err != nil {
 		log.Fatalf("seal failed: %v", err)
+	}
+
+	if err := auditLog.AddEntry(core.OpSeal, "sahib", core.AuditEntrySeal{
+		RootHash:    core.Hash([]byte("blub")), // TODO: build util method to create this hash, for now dummy.
+		FilesSealed: 1,
+	}); err != nil {
+		log.Fatalf("add seal audit failed: %w", err)
+	}
+
+	if err := auditLog.Store(); err != nil {
+		log.Fatalf("storing log failed: %w", err)
 	}
 
 	fmt.Println("REVEAL", secret.RevealedPath)

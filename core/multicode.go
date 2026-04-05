@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	mh "github.com/multiformats/go-multihash"
+	"golang.org/x/crypto/sha3"
 )
 
 // Multicodec codes used by sesam.
@@ -37,4 +38,11 @@ func MulticodeDecode(s string) (digest []byte, code uint64, err error) {
 	}
 
 	return decoded.Digest, decoded.Code, nil
+}
+
+// Hash builds uses the default hash algorithm for `data` and returns a multicode encoded stirng.
+func Hash(data []byte) string {
+	h := sha3.New256()
+	_, _ = h.Write(data)
+	return MulticodeEncode(h.Sum(nil), MhSHA3_256)
 }

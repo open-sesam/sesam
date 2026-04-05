@@ -3,12 +3,17 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
+
+	"github.com/google/renameio"
 )
 
 type Operation string
 
 const (
+	OpInit             = Operation("init")
 	OpUserTell         = Operation("user.tell")
 	OpUserKill         = Operation("user.kill")
 	OpGroupJoin        = Operation("group.join")
@@ -19,7 +24,8 @@ const (
 
 // AuditDetail is a type constraint covering all valid detail types.
 type AuditDetail interface {
-	AuditEntryUserTell | AuditEntryUserKill |
+	AuditEntryInit |
+		AuditEntryUserTell | AuditEntryUserKill |
 		AuditEntryGroupJoin | AuditEntryGroupLeave |
 		AuditEntryAccessListChange | AuditEntrySeal
 }
@@ -29,22 +35,23 @@ type AuditEntry struct {
 	// See above for a full list.
 	Operation Operation `json:"operation"`
 
-	// SeqID is a monontonically increasing. First entry is 1.
-	SeqID uint64 `json:"seq_id"`
-
-	// PreviousHash is the hash of the json-encoded previous entry.
-	// The hash algorithm is encoded via multihash in the hash itself.
-	PreviousHash string `json:"hash"`
-
-	// Time is when this operation happened (ISO8601, UTC)
-	Time time.Time `json:"time"`
-
 	// ChangedBy is the user that executed the operation.
 	ChangedBy string `json:"changed_by"`
 
 	// Detail are operation specific details.
 	Detail            json.RawMessage `json:"detail"`
 	unmarshaledDetail any             `json:"-"`
+
+	// SeqID is a monontonically increasing. First entry is 1.
+	SeqID uint64 `json:"seq_id"`
+
+	// PreviousHash is the hash of the json-encoded previous entry.
+	// The hash algorithm is encoded via multihash in the hash itself.
+	// It also includes the signature of the previous entry.
+	PreviousHash string `json:"previous_hash"`
+
+	// Time is when this operation happened (ISO8601, UTC)
+	Time time.Time `json:"time"`
 }
 
 // NewAuditEntry creates a new entry with compile-time type safety on the detail.
@@ -86,9 +93,18 @@ func ParseDetail[T AuditDetail](e *AuditEntry) (*T, error) {
 type AuditEntrySigned struct {
 	AuditEntry
 
+	// Signature is a signature made by the user in `ChangedBy` of this entry.
+	//
 	// Signature includes all fields of AuditEntry (encoded as canonical json)
 	// Signed by the user that executed the operation.
+	//
+	// Since an entry also contains a link to the previous entry we indirectly also
+	// sign all previous entries.
 	Signature string `json:"signature"`
+}
+
+type AuditEntryInit struct {
+	// none currently, just added for consistency.
 }
 
 // AuditEntryUserTell describes a newly added user.
@@ -107,16 +123,16 @@ type AuditEntrySigned struct {
 // - If a user is changed (different key e.g.) then this counts as add and remove.
 type AuditEntryUserTell struct {
 	// User to add
-	User string
+	User string `json:"user"`
 
 	// TODO: Reference the user struct of config here?
 
 	// PubKeys of that user over time.
-	PubKey     []string
-	SignPubKey string
+	PubKey     []string `json:"pub_key"`
+	SignPubKey string   `json:"sign_pub_key"`
 
 	// Signature of above fields to avoid self-add.
-	CounterSignature string
+	CounterSignature string `json:"counter_signature"`
 }
 
 // AuditEntryUserKill describes the operation of removing a user from the repo.
@@ -127,10 +143,10 @@ type AuditEntryUserTell struct {
 // - The user may not be the last "admin" user in the repo.
 // - A seal with different RootHash should follow after this.
 type AuditEntryUserKill struct {
-	User string
+	User string `json:"user"`
 
 	// Signature of above fields to avoid self-add
-	CounterSignature string
+	CounterSignature string `json:"counter_signature"`
 }
 
 // AuditEntryGroupJoin describes the operation of adding a user to a group.
@@ -144,29 +160,29 @@ type AuditEntryUserKill struct {
 //
 // - Joining the "admin" group is also done using this.
 type AuditEntryGroupJoin struct {
-	User             string
-	Group            string
-	CounterSignature string
+	User             string `json:"user"`
+	Group            string `json:"group"`
+	CounterSignature string `json:"counter_signature"`
 }
 
 type AuditEntryGroupLeave struct {
-	User             string
-	Group            string
-	CounterSignature string
+	User             string `json:"user"`
+	Group            string `json:"group"`
+	CounterSignature string `json:"counter_signature"`
 }
 
 type AuditEntryAccessListChange struct {
-	RevealedPath     string
-	Groups           []string
-	CounterSignature string
+	RevealedPath     string   `json:"revealed_path"`
+	Groups           []string `json:"groups"`
+	CounterSignature string   `json:"counter_signature"`
 }
 
 type AuditEntrySeal struct {
 	// This hash is build from the sorted list of all .sig.json files after seal.
-	RootHash string
+	RootHash string `json:"root_hash"`
 
 	// FilesSealed is the number of files that were sealed.
-	FilesSealed int
+	FilesSealed int `json:"files_sealed"`
 }
 
 // AuditLog records all operations that change the state of the sesam repo.
@@ -206,41 +222,137 @@ type AuditLog struct {
 	// 			00000.log.json
 	// 			00100.log.json // rotate every 100 entries.
 	// 			00200.log.json // rotate every 100 entries.
-	Entries []AuditEntry
+	Entries []AuditEntrySigned `json:"entries"`
+
+	// RepoDir is the dir in which .sesam resides.
+	RepoDir string `json:"-"`
+
+	// Signer needed to add new entries and verify old ones.
+	Signer Signer `json:"-"`
 }
 
-func (al *AuditLog) AddEntry(entry *AuditEntry) error {
-	entry.SeqID = uint64(len(al.Entries)) + 1
-	entry.Time = time.Now().UTC()
+func EmptyLog(repoDir string, signer Signer) (*AuditLog, error) {
+	al := &AuditLog{
+		RepoDir: repoDir,
+		Signer:  signer,
+	}
+
+	// TODO: We need to pass the user here...?
+	if err := al.AddEntry(OpInit, "sahib", AuditEntryInit{}); err != nil {
+		return nil, fmt.Errorf("failed to init log: %w", err)
+	}
+
+	return al, nil
+}
+
+func (al *AuditLog) AddEntry(op Operation, changedBy string, detail any) error {
+	detailJSON, err := json.Marshal(detail)
+	if err != nil {
+		return fmt.Errorf("marshal detail: %w", err)
+	}
+
+	entry := &AuditEntrySigned{
+		AuditEntry: AuditEntry{
+			Operation:         op,
+			ChangedBy:         changedBy,
+			Detail:            detailJSON,
+			unmarshaledDetail: detail,
+			SeqID:             uint64(len(al.Entries)) + 1,
+			Time:              time.Now().UTC(),
+		},
+	}
 
 	if len(al.Entries) > 0 {
+		// Compute hash of previous entry:
 		prev := al.Entries[len(al.Entries)-1]
 		prevJSON, err := json.Marshal(prev)
 		if err != nil {
 			return fmt.Errorf("marshal previous entry: %w", err)
 		}
 
-		// TODO: Use multihash-encoded SHA3-256 here.
-		_ = prevJSON
-		entry.PreviousHash = "TODO"
+		entry.PreviousHash = Hash(prevJSON)
+	} else {
+		// use a fixed hash, just so we don't have to deal with that value being sometimes empty.
+		entry.PreviousHash = Hash([]byte("init"))
 	}
 
-	// TODO: Build signature over the entry.
+	// build signature of now complete entry:
+	wholeEntryJSON, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("marshal current entry: %w", err)
+	}
+
+	entry.Signature, err = al.Signer.Sign(wholeEntryJSON)
+	if err != nil {
+		return fmt.Errorf("failed to sign entry: %w", err)
+	}
+
 	al.Entries = append(al.Entries, *entry)
 	return nil
 }
 
-func (al *AuditLog) Iterate(fn func(entry *AuditEntry) error) error {
-	// TODO: xxx
+func (al *AuditLog) Iterate(fn func(entry *AuditEntrySigned) error) error {
+	for idx := 0; idx < len(al.Entries); idx++ {
+		// entry := &al.Entries[idx]
+		// if entry.unmarshaledDetail == nil && len(entry.Detail) > 0 {
+		// 	entry.unmarshaledDetail = nil
+		// }
+
+		// TODO: lazy load detail here?
+		if err := fn(&al.Entries[idx]); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 func (al *AuditLog) Store() error {
-	// TODO: xxx
-	return nil
+	// TODO: implement chunking at some point; for now just one big log.
+	logPath := filepath.Join(al.RepoDir, ".sesam", "audit", fmt.Sprintf("%06d.log", 0))
+	fd, err := renameio.TempFile(al.RepoDir, logPath)
+	if err != nil {
+		return err
+	}
+
+	defer fd.Cleanup()
+
+	enc := json.NewEncoder(fd)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(al); err != nil {
+		return fmt.Errorf("marshal entries: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+
+	return fd.CloseAtomicallyReplace()
 }
 
-func LoadAuditLog(path string) (*AuditLog, error) {
-	// TODO: xxx
-	return nil, nil
+func LoadAuditLog(repoDir string, signer Signer) (*AuditLog, error) {
+	// TODO: also implement chunking for loading.
+	logPath := filepath.Join(repoDir, ".sesam", "audit", fmt.Sprintf("%06d.log", 0))
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		return EmptyLog(repoDir, signer)
+	}
+
+	fd, err := os.Open(logPath)
+	if err != nil {
+		return nil, err
+	}
+
+	defer fd.Close()
+
+	al := AuditLog{
+		RepoDir: repoDir,
+		Signer:  signer,
+	}
+
+	dec := json.NewDecoder(fd)
+	if err := dec.Decode(&al); err != nil {
+		return nil, err
+	}
+
+	return &al, nil
 }
