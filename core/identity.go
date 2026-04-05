@@ -1,11 +1,13 @@
 package core
 
 import (
-	"bytes"
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rsa"
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
@@ -16,20 +18,133 @@ import (
 
 // TODO: We might need to think about a way to destroy identities in memory after they are not longer needed.
 
+// ComparablePublicKey is a public key that can be compared with another key safely.
+type ComparablePublicKey interface {
+	Equal(o ComparablePublicKey) bool
+}
+
+// age public keys are only available as string in the api.
+// Good enough for comparing them, albeit a bit awkward.
+type stringPubKey string
+
+func (spk stringPubKey) Equal(o ComparablePublicKey) bool {
+	ospk, ok := o.(stringPubKey)
+	if !ok {
+		return false
+	}
+
+	return subtle.ConstantTimeCompare([]byte(spk), []byte(ospk)) == 1
+}
+
+type cryptoPubKey struct {
+	equalPubKey interface {
+		// normal crypto.PublicKey type has no Equal method,
+		// but all types implement it nevertheless.
+		Equal(x crypto.PublicKey) bool
+	}
+}
+
+func (cpk cryptoPubKey) Equal(o ComparablePublicKey) bool {
+	ocpk, ok := o.(cryptoPubKey)
+	if !ok {
+		return false
+	}
+
+	return cpk.equalPubKey.Equal(ocpk.equalPubKey)
+}
+
+type Identity struct {
+	age.Identity
+	pub ComparablePublicKey
+}
+
+func (gi *Identity) Public() ComparablePublicKey {
+	return gi.pub
+}
+
+type Identities []*Identity
+
+func (ids Identities) AgeIdentities() []age.Identity {
+	ageIds := make([]age.Identity, 0, len(ids))
+	for _, id := range ids {
+		ageIds = append(ageIds, id.Identity)
+	}
+
+	return ageIds
+}
+
+func sshKeyToIdentity(rawKey any) (*Identity, error) {
+	// NOTE: This is the same as agessh.ParseIdentities(), but without the parsing..
+	// If age ever extends the list of supported ssh keys we have to intervene here.
+	switch k := rawKey.(type) {
+	case *ed25519.PrivateKey:
+		id, err := agessh.NewEd25519Identity(*k)
+		if err != nil {
+			return nil, err
+		}
+
+		return &Identity{
+			Identity: id,
+			pub:      cryptoPubKey{k.Public().(ed25519.PublicKey)},
+		}, nil
+	case ed25519.PrivateKey:
+		id, err := agessh.NewEd25519Identity(k)
+		if err != nil {
+			return nil, err
+		}
+
+		return &Identity{
+			Identity: id,
+			pub:      cryptoPubKey{k.Public().(ed25519.PublicKey)},
+		}, nil
+	case *rsa.PrivateKey:
+		id, err := agessh.NewRSAIdentity(k)
+		if err != nil {
+			return nil, err
+		}
+
+		return &Identity{
+			Identity: id,
+			pub:      cryptoPubKey{k.Public().(*rsa.PublicKey)},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported ssh key type: %T", k)
+	}
+}
+
 // ParseIdentities parses raw key bytes into age identities. It tries native
 // age keys first, then falls back to SSH key parsing. Passphrase protected keys are supported
 // via the `passphraseProvider`.
-func ParseIdentities(data []byte, passphraseProvider PassphraseProvider) ([]age.Identity, error) {
+func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity, error) {
 	// Try native age identities first (AGE-SECRET-KEY-1...).
-	ids, err := age.ParseIdentities(bytes.NewReader(data))
-	if err == nil {
-		return ids, nil
+	switch {
+	case strings.HasPrefix(key, "AGE-SECRET-KEY-1"):
+		x25519id, err := age.ParseX25519Identity(key)
+		if err != nil {
+			return nil, err
+		}
+
+		return &Identity{
+			Identity: x25519id,
+			pub:      stringPubKey(x25519id.Recipient().String()),
+		}, nil
+	case strings.HasPrefix(key, "AGE-SECRET-KEY-PQ-1"):
+		hybridID, err := age.ParseHybridIdentity(key)
+		if err != nil {
+			return nil, err
+		}
+
+		return &Identity{
+			Identity: hybridID,
+			pub:      stringPubKey(hybridID.Recipient().String()),
+		}, nil
 	}
 
-	// Try parsing it as an unencrypted SSH key first.
-	id, err := agessh.ParseIdentity(data)
+	// Try parsing it as an unencrypted SSH key first, since it's apparently not age.
+	rawKey, err := ssh.ParseRawPrivateKey([]byte(key))
 	if err == nil {
-		return []age.Identity{id}, nil
+		// no passphrase was required.
+		return sshKeyToIdentity(rawKey)
 	}
 
 	if _, ok := err.(*ssh.PassphraseMissingError); !ok {
@@ -46,32 +161,12 @@ func ParseIdentities(data []byte, passphraseProvider PassphraseProvider) ([]age.
 		return nil, fmt.Errorf("failed to read passphrase: %w", err)
 	}
 
-	rawKey, err := ssh.ParseRawPrivateKeyWithPassphrase(data, passphrase)
+	rawKey, err = ssh.ParseRawPrivateKeyWithPassphrase([]byte(key), passphrase)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt SSH key: %w", err)
 	}
 
-	wrapErr := func(id age.Identity, err error) ([]age.Identity, error) {
-		if err != nil {
-			return nil, err
-		}
-
-		return []age.Identity{id}, nil
-	}
-
-	// NOTE: This is the same as agessh.ParseIdentities(), but without the parsing..
-	// If age ever extends the list of supported ssh keys we have to intervene here.
-	switch k := rawKey.(type) {
-	case *ed25519.PrivateKey:
-		return wrapErr(agessh.NewEd25519Identity(*k))
-	// ParseRawPrivateKey returns inconsistent types. See Issue 429.
-	case ed25519.PrivateKey:
-		return wrapErr(agessh.NewEd25519Identity(k))
-	case *rsa.PrivateKey:
-		return wrapErr(agessh.NewRSAIdentity(k))
-	default:
-		return nil, fmt.Errorf("unsupported ssh key type: %T", k)
-	}
+	return sshKeyToIdentity(rawKey)
 }
 
 type PassphraseProvider interface {

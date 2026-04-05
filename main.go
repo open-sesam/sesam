@@ -24,7 +24,8 @@ func main() {
 	}
 
 	recp, err := core.ParseRecipient(rawPubKey)
-	if err != nil { log.Fatalf("failed to parse recipient: %v", err)
+	if err != nil {
+		log.Fatalf("failed to parse recipient: %v", err)
 	}
 
 	privKey, err := os.ReadFile("/home/chris/.ssh/id_rsa")
@@ -32,7 +33,7 @@ func main() {
 		log.Fatalf("failed to read private key: %v", err)
 	}
 
-	ids, err := core.ParseIdentities(privKey, &core.KeyringPassphraseProvider{
+	id, err := core.ParseIdentity(string(privKey), &core.KeyringPassphraseProvider{
 		KeyFingerprint: "sesam.id.chris",
 		Fallback:       &core.StdinPassphraseProvider{},
 	})
@@ -40,7 +41,7 @@ func main() {
 		log.Fatalf("failed to parse identities: %v", err)
 	}
 
-	signer, err := core.LoadSignKey(".", "sahib", ids[0])
+	signer, err := core.LoadSignKey(".", "sahib", id)
 	if err != nil {
 		signer, err = core.GenerateSignKey(".", "sahib", recp)
 		if err != nil {
@@ -50,7 +51,7 @@ func main() {
 
 	sm := &core.SecretManager{
 		RepoDir:    ".",
-		Identities: ids,
+		Identities: core.Identities{id},
 		Signer:     signer,
 	}
 
