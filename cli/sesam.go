@@ -28,10 +28,12 @@ func Main(args []string) error {
 			Usage:  "Identify the current user by age identity",
 		}, {
 			Name:   "seal",
+			Flags:  flagsSeal,
 			Action: commands.HandleSeal,
 			Usage:  "Encrypt and sign changed secrets",
 		}, {
 			Name:   "reveal",
+			Flags:  flagsReveal,
 			Action: commands.HandleReveal,
 			Usage:  "Decrypt all secrets available to the current user",
 		}, {
