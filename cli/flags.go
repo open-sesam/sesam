@@ -22,3 +22,34 @@ var flagsGeneral = []cli.Flag{
 		Usage:   "Path to the git repository",
 	},
 }
+
+var flagsSeal = []cli.Flag{
+	&cli.StringFlag{
+		Name:     "secret",
+		Required: true,
+		Usage:    "Path to the secret file to encrypt (relative to repo)",
+	},
+	&cli.StringFlag{
+		Name:     "recipient",
+		Required: true,
+		Usage:    "Recipient key, forge id (github:user), or https:// key URL",
+	},
+	&cli.StringFlag{
+		Name:     "user",
+		Required: true,
+		Usage:    "User name used for the signing key file",
+	},
+}
+
+var flagsReveal = []cli.Flag{
+	&cli.StringFlag{
+		Name:     "secret",
+		Required: true,
+		Usage:    "Path to the secret file to decrypt (relative to repo)",
+	},
+	&cli.StringFlag{
+		Name:     "user",
+		Required: true,
+		Usage:    "User name used for the signing key file",
+	},
+}

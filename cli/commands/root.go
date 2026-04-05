@@ -24,14 +24,6 @@ func HandleID(_ context.Context, _ *cli.Command) error {
 	return handleStub("id")
 }
 
-func HandleSeal(_ context.Context, _ *cli.Command) error {
-	return handleStub("seal")
-}
-
-func HandleReveal(_ context.Context, _ *cli.Command) error {
-	return handleStub("reveal")
-}
-
 func HandleServer(_ context.Context, _ *cli.Command) error {
 	return handleStub("server")
 }
