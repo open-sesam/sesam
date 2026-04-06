@@ -68,21 +68,21 @@ type Secret struct {
 
 type SecretSignature struct {
 	// TODO: Add signed by?
-	Path      string `json:"path"`
-	Hash      string `json:"hash"`
-	Signature string `json:"signature"`
+	RevealedPath string `json:"path"`
+	Hash         string `json:"hash"`
+	Signature    string `json:"signature"`
 }
 
-func (s *Secret) Seal() error {
+func (s *Secret) Seal() (*SecretSignature, error) {
 	rd, err := os.Open(filepath.Join(s.Mgr.RepoDir, s.RevealedPath))
 	if err != nil {
-		return fmt.Errorf("failed to open secret: %w", err)
+		return nil, fmt.Errorf("failed to open secret: %w", err)
 	}
 	defer closeLogged(rd)
 
 	wc, encryptedPath, err := s.Mgr.cryptWriter(s.RevealedPath)
 	if err != nil {
-		return fmt.Errorf("failed to open encrypted file in repo: %w", err)
+		return nil, fmt.Errorf("failed to open encrypted file in repo: %w", err)
 	}
 	defer closeLogged(wc)
 
@@ -92,16 +92,16 @@ func (s *Secret) Seal() error {
 
 	encW, err := age.Encrypt(mw, s.Recipients.AgeRecipients()...)
 	if err != nil {
-		return fmt.Errorf("failed to initiate encryption: %w", err)
+		return nil, fmt.Errorf("failed to initiate encryption: %w", err)
 	}
 
 	_, err = io.Copy(encW, rd)
 	if err != nil {
-		return fmt.Errorf("failed to encrypt secret %s: %w", s.RevealedPath, err)
+		return nil, fmt.Errorf("failed to encrypt secret %s: %w", s.RevealedPath, err)
 	}
 
 	if err := encW.Close(); err != nil {
-		return fmt.Errorf("failed to close encrypted writer: %w", err)
+		return nil, fmt.Errorf("failed to close encrypted writer: %w", err)
 	}
 
 	// NOTE: We use the path as well to make sure files cannot just be moved around.
@@ -110,22 +110,28 @@ func (s *Secret) Seal() error {
 
 	sig, err := s.Mgr.Signer.Sign(hashBytes)
 	if err != nil {
-		return fmt.Errorf("failed to compute signature for %s: %w", encryptedPath, err)
+		return nil, fmt.Errorf("failed to compute signature for %s: %w", encryptedPath, err)
+	}
+
+	ss := SecretSignature{
+		RevealedPath: s.RevealedPath,
+		Hash:         MulticodeEncode(hashBytes, MhSHA3_256),
+		Signature:    sig,
 	}
 
 	// Write signature to buffer:
 	sigBuf := &bytes.Buffer{}
 	enc := json.NewEncoder(sigBuf)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(SecretSignature{
-		Path:      s.RevealedPath,
-		Hash:      MulticodeEncode(hashBytes, MhSHA3_256),
-		Signature: sig,
-	})
+	_ = enc.Encode(ss)
 
 	// write the signature file along the encrypted file:
 	sigPath := SignaturePath(s.Mgr.RepoDir, s.RevealedPath)
-	return renameio.WriteFile(sigPath, sigBuf.Bytes(), 0600)
+	if err := renameio.WriteFile(sigPath, sigBuf.Bytes(), 0600); err != nil {
+		return nil, err
+	}
+
+	return &ss, nil
 }
 
 // Reveal decrypts secret `s` and verifies its detached signature.

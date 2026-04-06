@@ -78,12 +78,14 @@ func main() {
 	}
 
 	fmt.Println("SEAL", secret.RevealedPath)
-	if err := secret.Seal(); err != nil {
+
+	sig, err := secret.Seal()
+	if err != nil {
 		log.Fatalf("seal failed: %v", err)
 	}
 
 	entry := core.NewAuditEntry(core.OpSeal, "sahib", &core.DetailSeal{
-		RootHash:    core.Hash([]byte("blub")), // TODO: build util method to create this hash, for now dummy.
+		RootHash:    core.BuildRootHash([]*core.SecretSignature{sig}),
 		FilesSealed: 1,
 	})
 

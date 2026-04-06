@@ -1,10 +1,12 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/google/renameio"
@@ -374,4 +376,23 @@ func LoadAuditLog(repoDir string, signer Signer) (*AuditLog, error) {
 	}
 
 	return &al, nil
+}
+
+// BuildRootHash will produce a combined hash ("Root Hash") out of all
+// hashes of encrypted files. It serves as general integrity protection
+// (a bit similar like a merkle tree, just not with hierarchy)
+//
+// TODO: Pass in all sealed files in here? What about partial seals?
+func BuildRootHash(sigs []*SecretSignature) string {
+	sort.Slice(sigs, func(i, j int) bool {
+		return sigs[i].RevealedPath < sigs[j].RevealedPath
+	})
+
+	b := bytes.NewBuffer(nil)
+	for _, sig := range sigs {
+		b.WriteString(sig.Hash)
+		b.WriteByte('\n')
+	}
+
+	return Hash(b.Bytes())
 }
