@@ -235,6 +235,16 @@ Show audit log:
 
 Allow filtering by specific secrets or directories.
 
+### config
+
+#### diff
+
+Show diffs between audit log and sesam.yml
+
+#### apply
+
+Apply the changes made to sesam.yml so they will appear in the audit log.
+
 ### undo
 
 Check out an older secret by commit and restore it.

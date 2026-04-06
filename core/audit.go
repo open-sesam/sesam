@@ -126,12 +126,13 @@ type DetailInit struct {
 //
 // Verification:
 //
-//   - An add may never be followed by an add of the same user,
+//   - An tell may never be followed by an tell of the same user,
 //     unless there was a kill in between.
 //   - Adding a user should always be followed by a seal.
 //   - The seal has to result in a different RootHash than before.
 //   - The ChangedBy user has to be an admin user.
 //   - Only if SeqID is 1 (inital user) we allow that a user signs itself.
+//   - CounterSignature must be valid.
 //
 // Note:
 //
@@ -250,6 +251,7 @@ type DetailSeal struct {
 //  3. Eve truncates the log and rebuilds it to her liking:
 //     => verify needs to check that the log in the previous commit had the same initial root.
 //
+// /
 // In all cases verify would complain about it and warn an user about Eve.
 type AuditLog struct {
 	// NOTE: We should chunk the log to make life for git easier and avoid loading too big files at once:
