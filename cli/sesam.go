@@ -16,6 +16,7 @@ func Main(args []string) error {
 	app.Commands = []*cli.Command{
 		{
 			Name:   "init",
+			Flags:  flagsInit,
 			Action: commands.HandleInit,
 			Usage:  "Initialize sesam in the current repository",
 		}, {

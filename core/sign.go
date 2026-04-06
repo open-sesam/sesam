@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,10 @@ type ed25519Signer struct {
 	user string
 }
 
+func signKeyPath(repoDir, user string) string {
+	return filepath.Join(repoDir, ".sesam", "signkeys", user+".age")
+}
+
 func (es *ed25519Signer) Sign(data []byte) (string, error) {
 	sig, err := es.priv.Sign(rand.Reader, data, &ed25519.Options{})
 	if err != nil {
@@ -28,6 +33,23 @@ func (es *ed25519Signer) Sign(data []byte) (string, error) {
 	}
 
 	return MulticodeEncode(sig, MhEdDSA), nil
+}
+
+func (es *ed25519Signer) Verify(data []byte, signature string) error {
+	sigData, code, err := MulticodeDecode(signature)
+	if err != nil {
+		return err
+	}
+
+	if code != MhEdDSA {
+		return fmt.Errorf("signature has invalid code: %d", code)
+	}
+
+	if !ed25519.Verify(es.pub, data, sigData) {
+		return fmt.Errorf("signature mismatch")
+	}
+
+	return nil
 }
 
 func (es *ed25519Signer) PublicKey() []byte {
@@ -40,10 +62,10 @@ func (es *ed25519Signer) UserName() string {
 
 // LoadSignKey will load a signer specific to a user and decrypt it via `userIdentity`
 func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error) {
-	signKeyPath := filepath.Join(repoDir, ".sesam", "signkey", user+".age")
-	cryptedSignPrivKeyFd, err := os.Open(signKeyPath)
+	signPath := signKeyPath(repoDir, user)
+	cryptedSignPrivKeyFd, err := os.Open(signPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load sign key %s: %w", signKeyPath, err)
+		return nil, fmt.Errorf("failed to load sign key %s: %w", signPath, err)
 	}
 
 	dr, err := age.Decrypt(io.LimitReader(cryptedSignPrivKeyFd, 1024), userIdentity)
@@ -60,7 +82,7 @@ func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error
 
 	signPrivKeyRaw, code, err := MulticodeDecode(string(bytes.TrimSpace(signingKeyEncoded)))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode sign key %s: %w", signKeyPath, err)
+		return nil, fmt.Errorf("failed to decode sign key %s: %w", signPath, err)
 	}
 	if code != MhEd25519Priv {
 		return nil, fmt.Errorf("unexpected multihash code %d for signing key, expected ed25519-priv", code)
@@ -81,13 +103,13 @@ func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error
 
 // GenerateSignKey will generate a new ed25519 signing key only accessible to `userRecipient`
 func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer, error) {
-	signKeyPath := filepath.Join(repoDir, ".sesam", "signkey", user+".age")
+	signPath := signKeyPath(repoDir, user)
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate signing key %s: %w", signKeyPath, err)
+		return nil, fmt.Errorf("failed to generate signing key %s: %w", signPath, err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(signKeyPath), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(signPath), 0o700); err != nil {
 		return nil, fmt.Errorf("failed to mkdir signing key dir: %w", err)
 	}
 
@@ -106,10 +128,15 @@ func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer,
 		return nil, fmt.Errorf("failed to close encrypted writer: %w", err)
 	}
 
-	if err := renameio.WriteFile(signKeyPath, ageBuf.Bytes(), 0600); err != nil {
-		return nil, fmt.Errorf("failed to write signing key %s: %w", signKeyPath, err)
+	if err := renameio.WriteFile(signPath, ageBuf.Bytes(), 0o600); err != nil {
+		return nil, fmt.Errorf("failed to write signing key %s: %w", signPath, err)
 	}
 
+	slog.Warn(
+		"generated signing key without persisting public key in admin-signed config",
+		slog.String("user", user),
+		slog.String("public_key", MulticodeEncode(pub, MhEd25519Pub)),
+	)
 	return &ed25519Signer{
 		pub:  pub,
 		priv: priv,

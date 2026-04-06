@@ -12,10 +12,6 @@ func HandleRoot(_ context.Context, _ *cli.Command) error {
 	return nil
 }
 
-func HandleInit(_ context.Context, _ *cli.Command) error {
-	return handleStub("init")
-}
-
 func HandleVerify(_ context.Context, _ *cli.Command) error {
 	return handleStub("verify")
 }

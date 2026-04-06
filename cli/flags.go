@@ -23,6 +23,17 @@ var flagsGeneral = []cli.Flag{
 	},
 }
 
+var flagsInit = []cli.Flag{
+	&cli.StringFlag{
+		Name:  "user",
+		Usage: "Initial admin user name (defaults to current OS user)",
+	},
+	&cli.StringFlag{
+		Name:  "recipient",
+		Usage: "Initial admin recipient key (optional when derivable from --identity)",
+	},
+}
+
 var flagsSeal = []cli.Flag{
 	&cli.StringFlag{
 		Name:     "secret",
