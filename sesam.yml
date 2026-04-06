@@ -3,21 +3,6 @@ version: 1
 
 # This is a demonstration file of Sesam.
 # All kinds of features are listed here, you will likely only need a fraction of them.
-
-# The signature is protecting some of the settings below:
-# By default only users in the admin group may change user and group
-# configuration. This signature is verified by most sesam commands.
-#
-# This part here is written by the sesam tool itself.
-# TODO: Any good reason to not put this in .sesam/signature.yml actually?
-#       It's not supposed to be hand-edited.
-verify:
-  hash: xxxxxx
-  signed_by: cpahl # last admin that signed this.
-  signature: yyyyyy
-  last_modified: ISO8601
-  modified_by: sgrünewald
-
 config:
   general:
     # encrypt all files, even when no change is needed when true.
@@ -44,7 +29,6 @@ config:
     - name: s.gruenewald@germanbionic.com
       desc: Sören Grünewald
       key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN5VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj sören@dahoam
-      signkey: blubdiblub # TODO: xxx
     - name: a.bablees@germanbionic.com
       desc: Adel Bablees
       key: https://adel.com/key.txt
