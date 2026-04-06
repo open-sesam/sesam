@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
@@ -42,8 +43,8 @@ func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode
 	case strings.HasPrefix(arg, "gitlab:"):
 		url := fmt.Sprintf("https://gitlab.com/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
 		return resolveCachedLink(ctx, repoDir, url, cacheMode)
-	case strings.HasPrefix(arg, "bitbucket:"):
-		url := fmt.Sprintf("https://bitbucket.org/api/1.0/users/%s/ssh-keys", url.QueryEscape(forgeIdToUser(arg)))
+	case strings.HasPrefix(arg, "codeberg:"):
+		url := fmt.Sprintf("https://codeberg.org/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
 		return resolveCachedLink(ctx, repoDir, url, cacheMode)
 	case strings.HasPrefix(arg, "https://"):
 		return resolveCachedLink(ctx, repoDir, arg, cacheMode)
@@ -94,7 +95,11 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 		return "", fmt.Errorf("failed to build request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to download %s: %w", url, err)
 	}

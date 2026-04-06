@@ -26,7 +26,7 @@ type SecretManager struct {
 	RepoDir string
 
 	// Identities are the private keys the current user of sesam supplies.
-	Identities []age.Identity
+	Identities Identities
 
 	// Signer is a sesam generated signing key.
 	Signer Signer
@@ -110,7 +110,7 @@ func (s *Secret) Seal() error {
 
 	sig, err := s.Mgr.Signer.Sign(hashBytes)
 	if err != nil {
-		return fmt.Errorf("failed to compuite signature for %s: %w", encryptedPath, err)
+		return fmt.Errorf("failed to compute signature for %s: %w", encryptedPath, err)
 	}
 
 	// Write signature to buffer:
@@ -143,7 +143,9 @@ func (s *Secret) Reveal() error {
 	// Setup hashing parallel to decrypting:
 	h := sha3.New256()
 	tr := io.TeeReader(srcFd, h)
-	encR, err := age.Decrypt(tr, s.Mgr.Identities...)
+
+	ageIds := s.Mgr.Identities.AgeIdentities()
+	encR, err := age.Decrypt(tr, ageIds...)
 	if err != nil {
 		return fmt.Errorf("failed to decrypt %s: %w", s.RevealedPath, err)
 	}

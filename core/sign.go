@@ -101,7 +101,7 @@ func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer,
 		return nil, fmt.Errorf("failed to generate signing key %s: %w", signKeyPath, err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(signKeyPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(signKeyPath), 0o700); err != nil {
 		return nil, fmt.Errorf("failed to mkdir signing key dir: %w", err)
 	}
 
