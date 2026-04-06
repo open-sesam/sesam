@@ -14,7 +14,24 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
+	"golang.org/x/crypto/ssh"
 )
+
+type Recipient struct {
+	age.Recipient
+	ComparablePublicKey
+}
+
+type Recipients []*Recipient
+
+func (rs Recipients) AgeRecipients() []age.Recipient {
+	ageRecps := make([]age.Recipient, 0, len(rs))
+	for _, recp := range rs {
+		ageRecps = append(ageRecps, recp.Recipient)
+	}
+
+	return ageRecps
+}
 
 type CacheMode int
 
@@ -133,22 +150,49 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 
 // ParseRecipient will turn a public key to a recipient that age can understand.
 // This function does not resolve forge-ids or links.
-func ParseRecipient(arg string) (age.Recipient, error) {
+func ParseRecipient(arg string) (*Recipient, error) {
 	var r age.Recipient
+	var s string
 	var err error
 
-	// NOTE: Shamelessly stolen from age cli.
+	// NOTE: Code based on age cli.
 	// TODO: For yubikeys etc. we need to support a couple more lines here I guess.
 	switch {
 	case strings.HasPrefix(arg, "age1pq1"):
-		r, err = age.ParseHybridRecipient(arg)
+		hr, err := age.ParseHybridRecipient(arg)
+		if err != nil {
+			return nil, err
+		}
+
+		r, s = hr, hr.String()
 	case strings.HasPrefix(arg, "age1"):
-		r, err = age.ParseX25519Recipient(arg)
+		xr, err := age.ParseX25519Recipient(arg)
+		if err != nil {
+			return nil, err
+		}
+
+		r, s = xr, xr.String()
 	case strings.HasPrefix(arg, "ssh-"):
-		r, err = agessh.ParseRecipient(arg)
+		// ssh keys have no stringer sadly. Incoming ssh keys might contain comments (like user@host) or options.
+		// which can making comparison hard. Parse it therefore and re-marshal to strip that kind of stops.
+		sshPub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(arg))
+		if err != nil {
+			return nil, err
+		}
+
+		sr, err := agessh.ParseRecipient(arg)
+		if err != nil {
+			return nil, err
+		}
+
+		r, s = sr, string(ssh.MarshalAuthorizedKey(sshPub))
 	default:
 		return nil, fmt.Errorf("unknown recipient type: %s", arg)
 	}
 
-	return r, err
+	spk := stringPubKey(s)
+	return &Recipient{
+		Recipient:           r,
+		ComparablePublicKey: spk,
+	}, err
 }

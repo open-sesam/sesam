@@ -1,11 +1,13 @@
 package core
 
 import (
-	"crypto"
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/subtle"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 
@@ -21,10 +23,13 @@ import (
 // ComparablePublicKey is a public key that can be compared with another key safely.
 type ComparablePublicKey interface {
 	Equal(o ComparablePublicKey) bool
+	String() string
 }
 
 // age public keys are only available as string in the api.
 // Good enough for comparing them, albeit a bit awkward.
+// We can do something similar for ssh keys, just need to make
+// sure they are normalized (no comments like user@host)
 type stringPubKey string
 
 func (spk stringPubKey) Equal(o ComparablePublicKey) bool {
@@ -36,21 +41,8 @@ func (spk stringPubKey) Equal(o ComparablePublicKey) bool {
 	return subtle.ConstantTimeCompare([]byte(spk), []byte(ospk)) == 1
 }
 
-type cryptoPubKey struct {
-	equalPubKey interface {
-		// normal crypto.PublicKey type has no Equal method,
-		// but all types implement it nevertheless.
-		Equal(x crypto.PublicKey) bool
-	}
-}
-
-func (cpk cryptoPubKey) Equal(o ComparablePublicKey) bool {
-	ocpk, ok := o.(cryptoPubKey)
-	if !ok {
-		return false
-	}
-
-	return cpk.equalPubKey.Equal(ocpk.equalPubKey)
+func (spk stringPubKey) String() string {
+	return string(spk)
 }
 
 type Identity struct {
@@ -83,9 +75,15 @@ func sshKeyToIdentity(rawKey any) (*Identity, error) {
 			return nil, err
 		}
 
+		pub := k.Public().(ed25519.PublicKey)
+		sshPub, err := ssh.NewPublicKey(pub)
+		if err != nil {
+			return nil, err
+		}
+
 		return &Identity{
 			Identity: id,
-			pub:      cryptoPubKey{k.Public().(ed25519.PublicKey)},
+			pub:      stringPubKey(ssh.MarshalAuthorizedKey(sshPub)),
 		}, nil
 	case ed25519.PrivateKey:
 		id, err := agessh.NewEd25519Identity(k)
@@ -93,9 +91,15 @@ func sshKeyToIdentity(rawKey any) (*Identity, error) {
 			return nil, err
 		}
 
+		pub := k.Public().(ed25519.PublicKey)
+		sshPub, err := ssh.NewPublicKey(pub)
+		if err != nil {
+			return nil, err
+		}
+
 		return &Identity{
 			Identity: id,
-			pub:      cryptoPubKey{k.Public().(ed25519.PublicKey)},
+			pub:      stringPubKey(ssh.MarshalAuthorizedKey(sshPub)),
 		}, nil
 	case *rsa.PrivateKey:
 		id, err := agessh.NewRSAIdentity(k)
@@ -103,9 +107,15 @@ func sshKeyToIdentity(rawKey any) (*Identity, error) {
 			return nil, err
 		}
 
+		pub := k.Public().(*rsa.PublicKey)
+		sshPub, err := ssh.NewPublicKey(pub)
+		if err != nil {
+			return nil, err
+		}
+
 		return &Identity{
 			Identity: id,
-			pub:      cryptoPubKey{k.Public().(*rsa.PublicKey)},
+			pub:      stringPubKey(ssh.MarshalAuthorizedKey(sshPub)),
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported ssh key type: %T", k)
@@ -216,4 +226,61 @@ func (kpp *KeyringPassphraseProvider) ReadPassphrase() ([]byte, error) {
 	}
 
 	return passphrase, nil
+}
+
+// IdentityToUser checks which public key corresponds to which recipient public key.
+// This function returns the mapped user or an error.
+//
+// It will fail when:
+// - There is no public key for this user.
+// - There are several matching users (techically possible, but disencouraged).
+// - We failed to test the relation by a quick test of encrypt/decrypt.
+//
+// TODO: the map is just a placeholder until we have a config.
+func IdentityToUser(id *Identity, userToPub map[string]*Recipient) (string, error) {
+	ownPub := id.Public()
+
+	var matchCount int
+	var matchedUser string
+	var matchedRecipient *Recipient
+
+	for userName, recp := range userToPub {
+		if ownPub.Equal(recp.ComparablePublicKey) {
+			matchCount++
+			matchedUser = userName
+			matchedRecipient = recp
+		}
+	}
+
+	if matchCount == 0 {
+		return "", errors.New("no matching users found")
+	}
+
+	if matchCount > 1 {
+		return "", errors.New("too many matching users found")
+	}
+
+	// encrypt a dummy text with the matched recipient:
+	const dummyText = "sesam open"
+	buf := &bytes.Buffer{}
+	w, _ := age.Encrypt(buf, matchedRecipient)
+	_, _ = w.Write([]byte(dummyText))
+	_ = w.Close()
+
+	// decrypt it with the supplied identity to check if both are really linked:
+	r, err := age.Decrypt(buf, id)
+	if err != nil {
+		return "", fmt.Errorf("mismatch between recipient and id: %w", err)
+	}
+	resp, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("mismatch between recipient and id: %w", err)
+	}
+
+	if sr := string(resp); sr != dummyText {
+		return "", fmt.Errorf("encrypt+decrypt test worked but different outcome: %s", sr)
+	}
+
+	// all good, we can return.
+	return matchedUser, nil
 }

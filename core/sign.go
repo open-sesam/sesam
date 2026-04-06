@@ -33,6 +33,7 @@ func (es *ed25519Signer) Verify(data []byte, signature string) error {
 	if err != nil {
 		return err
 	}
+
 	if code != MhEdDSA {
 		return fmt.Errorf("unexpected multihash code %d for signature, expected eddsa", code)
 	}

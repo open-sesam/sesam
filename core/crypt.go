@@ -63,7 +63,7 @@ type Secret struct {
 	RevealedPath string
 
 	// TODO: Needs to be parsed from a recipient file or public key list using age.ParseRecipient
-	Recipients []age.Recipient
+	Recipients Recipients
 }
 
 type SecretSignature struct {
@@ -90,7 +90,7 @@ func (s *Secret) Seal() error {
 	h := sha3.New256()
 	mw := io.MultiWriter(wc, h)
 
-	encW, err := age.Encrypt(mw, s.Recipients...)
+	encW, err := age.Encrypt(mw, s.Recipients.AgeRecipients()...)
 	if err != nil {
 		return fmt.Errorf("failed to initiate encryption: %w", err)
 	}

@@ -1,48 +1,63 @@
 package core
 
 import (
-	"bytes"
+	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
-	"strings"
-
-	"filippo.io/age"
 )
 
-// TODO: Later we should pass users in here so we know which users can use which public keys.
-//
-//	That mapping should then match with the
-//
-// TODO: That is a very dumb algorithm. It has only been chosen because it was somewhat foolproof.
-func MatchIdentitiesToRecipients(ids []age.Identity, rps []age.Recipient) error {
-	const dummyText = "sesam"
+func Verify(log *AuditLog) error {
+	// TODO: need to verify that previous logs are a prefix of this one here.
 
-	rpTexts := make([]string, len(rps))
-	for idx, rp := range rps {
-		buf := &bytes.Buffer{}
-		w, _ := age.Encrypt(buf, rp)
-		_, _ = w.Write([]byte(dummyText))
-		_ = w.Close()
-		rpTexts[idx] = buf.String()
-	}
-
-	for idx, rpText := range rpTexts {
-		for _, id := range ids {
-			r, err := age.Decrypt(strings.NewReader(rpText), id)
-			if err != nil {
-				// most likely not matching.
-				continue
-			}
-
-			resp, _ := io.ReadAll(r)
-			if string(resp) != dummyText {
-				slog.Warn("could decrypt fake message, but not the right content")
-				continue
-			}
-
-			fmt.Println(id, rpTexts[idx])
+	var previousEntry *AuditEntrySigned
+	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
+		// check the signature
+		if err := entry.Verify(log.Signer); err != nil {
+			return fmt.Errorf("failed to verify signature on entry %d: %w", idx, err)
 		}
+
+		if previousEntry != nil {
+			prevJSON, err := json.Marshal(previousEntry)
+			if err != nil {
+				return fmt.Errorf("marshal previous entry: %w", err)
+			}
+
+			expectedHash := Hash(prevJSON)
+			if expectedHash != entry.PreviousHash {
+				return fmt.Errorf(
+					"broken chain at idx %d: %s != %s",
+					idx,
+					expectedHash,
+					entry.PreviousHash,
+				)
+			}
+		}
+
+		switch entry.Operation {
+		case OpInit:
+			if entry.SeqID != 1 {
+				return fmt.Errorf("init at wrong seq_id: %d (!= 1)", entry.SeqID)
+			}
+		case OpUserTell:
+			tellDetails, err := ParseDetail[DetailUserTell](entry)
+			if err != nil {
+				return err
+			}
+
+			_ = tellDetails // TODO: do the actual verification.
+		case OpSeal:
+			sealDetails, err := ParseDetail[DetailSeal](entry)
+			if err != nil {
+				return fmt.Errorf("parse detail: %w", err)
+			}
+
+			_ = sealDetails // TODO: do the actual verification.
+		}
+
+		previousEntry = entry
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	return nil

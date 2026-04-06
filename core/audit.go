@@ -10,6 +10,10 @@ import (
 	"github.com/google/renameio"
 )
 
+const (
+	sesamInitialHashSeed = "sesam.init"
+)
+
 type Operation string
 
 const (
@@ -24,10 +28,10 @@ const (
 
 // AuditDetail is a type constraint covering all valid detail types.
 type AuditDetail interface {
-	AuditEntryInit |
-		AuditEntryUserTell | AuditEntryUserKill |
-		AuditEntryGroupJoin | AuditEntryGroupLeave |
-		AuditEntryAccessListChange | AuditEntrySeal
+	DetailInit |
+		DetailUserTell | DetailUserKill |
+		DetailGroupJoin | DetailGroupLeave |
+		DetailAccessListChange | DetailSeal
 }
 
 type AuditEntry struct {
@@ -56,23 +60,20 @@ type AuditEntry struct {
 
 // NewAuditEntry creates a new entry with compile-time type safety on the detail.
 // SeqID, PreviousHash and Time are filled by AuditLog.AddEntry().
-func NewAuditEntry[T AuditDetail](op Operation, changedBy string, detail *T) (*AuditEntry, error) {
-	raw, err := json.Marshal(detail)
-	if err != nil {
-		return nil, fmt.Errorf("marshal detail: %w", err)
-	}
-
+func NewAuditEntry[T AuditDetail](op Operation, changedBy string, detail *T) *AuditEntry {
+	detailJSON, _ := json.Marshal(detail)
 	return &AuditEntry{
 		Operation:         op,
 		ChangedBy:         changedBy,
-		Detail:            raw,
+		Time:              time.Now().UTC(),
+		Detail:            detailJSON,
 		unmarshaledDetail: detail,
-	}, nil
+	}
 }
 
 // ParseDetail unmarshals the detail into the given type.
 // The result is cached so repeated calls don't re-unmarshal.
-func ParseDetail[T AuditDetail](e *AuditEntry) (*T, error) {
+func ParseDetail[T AuditDetail](e *AuditEntrySigned) (*T, error) {
 	if e.unmarshaledDetail != nil {
 		if d, ok := e.unmarshaledDetail.(*T); ok {
 			return d, nil
@@ -103,25 +104,37 @@ type AuditEntrySigned struct {
 	Signature string `json:"signature"`
 }
 
-type AuditEntryInit struct {
-	// none currently, just added for consistency.
+func (aes *AuditEntrySigned) Verify(signer Signer) error {
+	wholeEntryJSON, err := json.Marshal(aes.AuditEntry)
+	if err != nil {
+		return err
+	}
+
+	return signer.Verify(wholeEntryJSON, aes.Signature)
 }
 
-// AuditEntryUserTell describes a newly added user.
+///////// DETAILS /////////////
+
+type DetailInit struct {
+	// none currently, just added for consistency
+	// and to have something prior to hash.
+}
+
+// DetailUserTell describes a newly added user.
 //
 // Verification:
 //
-// - A add may never be followed by an add of the same user.
-// - Adding a user should always be followed by a seal.
-// - The seal should result in a different RootHash than before.
-// - The ChangedBy user has to be an admin user.
-// - A user tell may only be done by an init user.
-// - Only if SeqID is 1 (inital user) we allow that a user signs itself.
+//   - An add may never be followed by an add of the same user,
+//     unless there was a kill in between.
+//   - Adding a user should always be followed by a seal.
+//   - The seal has to result in a different RootHash than before.
+//   - The ChangedBy user has to be an admin user.
+//   - Only if SeqID is 1 (inital user) we allow that a user signs itself.
 //
 // Note:
 //
 // - If a user is changed (different key e.g.) then this counts as add and remove.
-type AuditEntryUserTell struct {
+type DetailUserTell struct {
 	// User to add
 	User string `json:"user"`
 
@@ -135,21 +148,23 @@ type AuditEntryUserTell struct {
 	CounterSignature string `json:"counter_signature"`
 }
 
-// AuditEntryUserKill describes the operation of removing a user from the repo.
+// DetailUserKill describes the operation of removing a user from the repo.
 //
 // Verification:
 //
 // - The user may not be the last user in the repo.
 // - The user may not be the last "admin" user in the repo.
-// - A seal with different RootHash should follow after this.
-type AuditEntryUserKill struct {
+// - A seal with different RootHash has to follow after this.
+//
+// TODO: What if changing the only user in the repo? (i.e. add a new pub key)
+type DetailUserKill struct {
 	User string `json:"user"`
 
 	// Signature of above fields to avoid self-add
 	CounterSignature string `json:"counter_signature"`
 }
 
-// AuditEntryGroupJoin describes the operation of adding a user to a group.
+// DetailGroupJoin describes the operation of adding a user to a group.
 //
 // Verification:
 //
@@ -159,30 +174,49 @@ type AuditEntryUserKill struct {
 // Note:
 //
 // - Joining the "admin" group is also done using this.
-type AuditEntryGroupJoin struct {
+type DetailGroupJoin struct {
 	User             string `json:"user"`
 	Group            string `json:"group"`
 	CounterSignature string `json:"counter_signature"`
 }
 
-type AuditEntryGroupLeave struct {
+type DetailGroupLeave struct {
 	User             string `json:"user"`
 	Group            string `json:"group"`
 	CounterSignature string `json:"counter_signature"`
 }
 
-type AuditEntryAccessListChange struct {
+// DetailAccessListChange describes the operation of changing the set of groups
+// that are allowed to access a file:
+//
+// Verification:
+//
+// - "admin" may not be part of `Groups`.
+// - `Groups` may not be empty.
+// - `RevealedPath` has to point to an existing secret.
+type DetailAccessListChange struct {
 	RevealedPath     string   `json:"revealed_path"`
 	Groups           []string `json:"groups"`
 	CounterSignature string   `json:"counter_signature"`
 }
 
-type AuditEntrySeal struct {
+// DetailSeal is the operation of sealing all files.
+//
+// Verification:
+//
+// - RootHash is the hash of all encrypted files (sorted by path before hash).
+//
+// Note:
+//
+// - FilesSealed is purely informative.
+type DetailSeal struct {
 	// This hash is build from the sorted list of all .sig.json files after seal.
 	RootHash string `json:"root_hash"`
 
 	// FilesSealed is the number of files that were sealed.
 	FilesSealed int `json:"files_sealed"`
+
+	// TODO: Also include the total number of secrets?
 }
 
 // AuditLog records all operations that change the state of the sesam repo.
@@ -238,29 +272,20 @@ func EmptyLog(repoDir string, signer Signer) (*AuditLog, error) {
 	}
 
 	// TODO: We need to pass the user here...?
-	if err := al.AddEntry(OpInit, "sahib", AuditEntryInit{}); err != nil {
+	initEntry := NewAuditEntry(OpInit, "sahib", &DetailInit{})
+	if err := al.AddEntry(initEntry); err != nil {
 		return nil, fmt.Errorf("failed to init log: %w", err)
 	}
 
 	return al, nil
 }
 
-func (al *AuditLog) AddEntry(op Operation, changedBy string, detail any) error {
-	detailJSON, err := json.Marshal(detail)
-	if err != nil {
-		return fmt.Errorf("marshal detail: %w", err)
+func (al *AuditLog) AddEntry(e *AuditEntry) error {
+	entry := &AuditEntrySigned{
+		AuditEntry: *e,
 	}
 
-	entry := &AuditEntrySigned{
-		AuditEntry: AuditEntry{
-			Operation:         op,
-			ChangedBy:         changedBy,
-			Detail:            detailJSON,
-			unmarshaledDetail: detail,
-			SeqID:             uint64(len(al.Entries)) + 1,
-			Time:              time.Now().UTC(),
-		},
-	}
+	entry.SeqID = uint64(len(al.Entries)) + 1
 
 	if len(al.Entries) > 0 {
 		// Compute hash of previous entry:
@@ -273,11 +298,11 @@ func (al *AuditLog) AddEntry(op Operation, changedBy string, detail any) error {
 		entry.PreviousHash = Hash(prevJSON)
 	} else {
 		// use a fixed hash, just so we don't have to deal with that value being sometimes empty.
-		entry.PreviousHash = Hash([]byte("init"))
+		entry.PreviousHash = Hash([]byte(sesamInitialHashSeed))
 	}
 
 	// build signature of now complete entry:
-	wholeEntryJSON, err := json.Marshal(entry)
+	wholeEntryJSON, err := json.Marshal(entry.AuditEntry)
 	if err != nil {
 		return fmt.Errorf("marshal current entry: %w", err)
 	}
@@ -291,15 +316,9 @@ func (al *AuditLog) AddEntry(op Operation, changedBy string, detail any) error {
 	return nil
 }
 
-func (al *AuditLog) Iterate(fn func(entry *AuditEntrySigned) error) error {
+func (al *AuditLog) Iterate(fn func(idx int, entry *AuditEntrySigned) error) error {
 	for idx := 0; idx < len(al.Entries); idx++ {
-		// entry := &al.Entries[idx]
-		// if entry.unmarshaledDetail == nil && len(entry.Detail) > 0 {
-		// 	entry.unmarshaledDetail = nil
-		// }
-
-		// TODO: lazy load detail here?
-		if err := fn(&al.Entries[idx]); err != nil {
+		if err := fn(idx, &al.Entries[idx]); err != nil {
 			return err
 		}
 	}

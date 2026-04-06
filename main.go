@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 
-	"filippo.io/age"
 	"github.com/open-sesam/sesam/core"
 )
 
@@ -41,9 +40,18 @@ func main() {
 		log.Fatalf("failed to parse identities: %v", err)
 	}
 
+	whoami, err := core.IdentityToUser(id, map[string]*core.Recipient{
+		"sahib": recp,
+	})
+	if err != nil {
+		log.Fatalf("failed to identity ourselves: %v", err)
+	}
+
+	fmt.Println("I am:", whoami)
+
 	signer, err := core.LoadSignKey(".", "sahib", id)
 	if err != nil {
-		signer, err = core.GenerateSignKey(".", "sahib", recp)
+		signer, err = core.GenerateSignKey(".", "sahib", recp.Recipient)
 		if err != nil {
 			log.Fatalf("failed to load/gen signing key: %v", err)
 		}
@@ -58,7 +66,7 @@ func main() {
 	secret := &core.Secret{
 		Mgr:          sm,
 		RevealedPath: "DESIGN.new",
-		Recipients:   []age.Recipient{recp},
+		Recipients:   core.Recipients{recp},
 	}
 
 	auditLog, err := core.LoadAuditLog(
@@ -74,19 +82,25 @@ func main() {
 		log.Fatalf("seal failed: %v", err)
 	}
 
-	if err := auditLog.AddEntry(core.OpSeal, "sahib", core.AuditEntrySeal{
+	entry := core.NewAuditEntry(core.OpSeal, "sahib", &core.DetailSeal{
 		RootHash:    core.Hash([]byte("blub")), // TODO: build util method to create this hash, for now dummy.
 		FilesSealed: 1,
-	}); err != nil {
-		log.Fatalf("add seal audit failed: %w", err)
+	})
+
+	if err := auditLog.AddEntry(entry); err != nil {
+		log.Fatalf("add seal audit failed: %v", err)
 	}
 
 	if err := auditLog.Store(); err != nil {
-		log.Fatalf("storing log failed: %w", err)
+		log.Fatalf("storing log failed: %v", err)
 	}
 
 	fmt.Println("REVEAL", secret.RevealedPath)
 	if err := secret.Reveal(); err != nil {
 		log.Fatalf("seal failed: %v", err)
+	}
+
+	if err := core.Verify(auditLog); err != nil {
+		log.Fatalf("failed to verify log: %v", err)
 	}
 }
