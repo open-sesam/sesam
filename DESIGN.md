@@ -263,12 +263,6 @@ Check out an older secret by commit and restore it.
 
 ## Implementation
 
-Private key handling is delegated entirely to age and its plugin ecosystem.
-Sesam never reads or manages private keys directly. Users provide an age identity
-which can be a native age key file, an SSH private key (loaded via agessh), or a
-hardware token via an age plugin. Passphrase handling for SSH keys is done by age
-internally.
-
 ### Libraries
 
 - CLI: <https://cli.urfave.org/> - best CLI library.
