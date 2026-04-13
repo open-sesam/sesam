@@ -41,6 +41,8 @@ func main() {
 	}
 
 	whoami, err := core.IdentityToUser(id, map[string]*core.Recipient{
+		// TODO: This mapping will later come from the config or audit log.
+		// 			 Should we double check there is no mismatch between audit and config?
 		"sahib": recp,
 	})
 	if err != nil {
@@ -49,32 +51,38 @@ func main() {
 
 	fmt.Println("I am:", whoami)
 
-	signer, err := core.LoadSignKey(".", "sahib", id)
+	signer, err := core.LoadSignKey(".", whoami, id)
 	if err != nil {
-		signer, err = core.GenerateSignKey(".", "sahib", recp.Recipient)
+		signer, err = core.GenerateSignKey(".", whoami, recp.Recipient)
 		if err != nil {
 			log.Fatalf("failed to load/gen signing key: %v", err)
 		}
 	}
 
+	keyring := core.NewMemoryKeyring()
+	keyring.AddSignPubKey(whoami, signer.PublicKey())
+	keyring.AddRecipient(whoami, recp)
+
 	sm := &core.SecretManager{
 		RepoDir:    ".",
 		Identities: core.Identities{id},
 		Signer:     signer,
+		Keyring:    keyring,
 	}
 
 	secret := &core.Secret{
 		Mgr:          sm,
 		RevealedPath: "DESIGN.new",
-		Recipients:   core.Recipients{recp},
+		Recipients:   keyring.Recipients([]string{"sahib"}),
 	}
 
 	auditLog, err := core.LoadAuditLog(
 		".",
 		signer,
+		keyring,
 	)
 	if err != nil {
-		log.Fatalf("failed to create audit log: %w", err)
+		log.Fatalf("failed to create audit log: %v", err)
 	}
 
 	fmt.Println("SEAL", secret.RevealedPath)
@@ -84,12 +92,12 @@ func main() {
 		log.Fatalf("seal failed: %v", err)
 	}
 
-	entry := core.NewAuditEntry(core.OpSeal, "sahib", &core.DetailSeal{
+	entry := core.NewAuditEntry(core.OpSeal, whoami, &core.DetailSeal{
 		RootHash:    core.BuildRootHash([]*core.SecretSignature{sig}),
 		FilesSealed: 1,
 	})
 
-	if err := auditLog.AddEntry(entry); err != nil {
+	if _, err := auditLog.AddEntry(entry); err != nil {
 		log.Fatalf("add seal audit failed: %v", err)
 	}
 
@@ -102,7 +110,9 @@ func main() {
 		log.Fatalf("seal failed: %v", err)
 	}
 
-	if err := core.Verify(auditLog); err != nil {
+	// NOTE: normally we would do that before much else.
+	_, err = core.Verify(auditLog, keyring)
+	if err != nil {
 		log.Fatalf("failed to verify log: %v", err)
 	}
 }

@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/renameio"
+	"github.com/google/uuid"
 )
 
 const (
@@ -19,21 +21,20 @@ const (
 type Operation string
 
 const (
-	OpInit             = Operation("init")
-	OpUserTell         = Operation("user.tell")
-	OpUserKill         = Operation("user.kill")
-	OpGroupJoin        = Operation("group.join")
-	OpGroupLeave       = Operation("group.leave")
-	OpAccessListChange = Operation("access.change")
-	OpSeal             = Operation("seal")
+	OpInit         = Operation("init")
+	OpUserTell     = Operation("user.tell")
+	OpUserKill     = Operation("user.kill")
+	OpSecretChange = Operation("secret.change")
+	OpSecretRemove = Operation("secret.remove")
+	OpSeal         = Operation("seal")
 )
 
 // AuditDetail is a type constraint covering all valid detail types.
 type AuditDetail interface {
 	DetailInit |
 		DetailUserTell | DetailUserKill |
-		DetailGroupJoin | DetailGroupLeave |
-		DetailAccessListChange | DetailSeal
+		DetailSecretChange | DetailSecretRemove |
+		DetailSeal
 }
 
 type AuditEntry struct {
@@ -106,20 +107,30 @@ type AuditEntrySigned struct {
 	Signature string `json:"signature"`
 }
 
-func (aes *AuditEntrySigned) Verify(signer Signer) error {
+// Hash computes the current hash of the entry when all fields (including signature) are set.
+func (aes *AuditEntrySigned) Hash() string {
+	// include signature:
+	sigJSON, _ := json.Marshal(aes)
+	return Hash(sigJSON)
+}
+
+func (aes *AuditEntrySigned) Verify(kr Keyring) (string, error) {
+	// do not include signature:
 	wholeEntryJSON, err := json.Marshal(aes.AuditEntry)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	return signer.Verify(wholeEntryJSON, aes.Signature)
+	return kr.Verify(wholeEntryJSON, aes.Signature)
 }
 
 ///////// DETAILS /////////////
 
 type DetailInit struct {
-	// none currently, just added for consistency
-	// and to have something prior to hash.
+	// This is uniquely generated per repo.
+	// It has no specific purpose beyond debugging
+	// and as input for the initial hash.
+	InitUUID string `json:"init_uuid"`
 }
 
 // DetailUserTell describes a newly added user.
@@ -132,23 +143,26 @@ type DetailInit struct {
 //   - The seal has to result in a different RootHash than before.
 //   - The ChangedBy user has to be an admin user.
 //   - Only if SeqID is 1 (inital user) we allow that a user signs itself.
-//   - CounterSignature must be valid.
+//   - Signature must have been made by a public key of the admin users.
 //
 // Note:
 //
-// - If a user is changed (different key e.g.) then this counts as add and remove.
+// - If a user is changed (different key e.g.) then this is handled as remove and add.
+// - The log contains only the security relevant aspects.
 type DetailUserTell struct {
-	// User to add
+	// User to add.
 	User string `json:"user"`
 
-	// TODO: Reference the user struct of config here?
+	// Groups the user should be added to.
+	Groups []string `json:"group"`
 
 	// PubKeys of that user over time.
-	PubKey     []string `json:"pub_key"`
-	SignPubKey string   `json:"sign_pub_key"`
+	PubKeys []string `json:"pub_key"`
 
-	// Signature of above fields to avoid self-add.
-	CounterSignature string `json:"counter_signature"`
+	// SignPubKeys of that user.
+	// This should most likely just be one,
+	// but due to key-rotation it might be in theory several.
+	SignPubKeys []string `json:"sign_pub_key"`
 }
 
 // DetailUserKill describes the operation of removing a user from the repo.
@@ -162,45 +176,35 @@ type DetailUserTell struct {
 // TODO: What if changing the only user in the repo? (i.e. add a new pub key)
 type DetailUserKill struct {
 	User string `json:"user"`
-
-	// Signature of above fields to avoid self-add
-	CounterSignature string `json:"counter_signature"`
 }
 
-// DetailGroupJoin describes the operation of adding a user to a group.
+// DetailSecretChange describes the operation of adding/changing a secret.
 //
 // Verification:
 //
-// - The ChangedBy user has to be an admin.
-// - A seal of all files should follow closely after this.
+// - "admin" may be part of `Groups`, but is implicitly added anyways.
+// - `Groups` may not be empty.
+// - `Groups` should not have duplicates.
+// - If `RevealedPath` has to point to an existing, sealed file
+//   - Only users that already have access to it may issue another Change.
 //
 // Note:
 //
-// - Joining the "admin" group is also done using this.
-type DetailGroupJoin struct {
-	User             string `json:"user"`
-	Group            string `json:"group"`
-	CounterSignature string `json:"counter_signature"`
+// - When changing the access list it is okay to issue another SecretMod
+type DetailSecretChange struct {
+	Type         string   `json:"type"`
+	RevealedPath string   `json:"revealed_path"`
+	Groups       []string `json:"groups"`
 }
 
-type DetailGroupLeave struct {
-	User             string `json:"user"`
-	Group            string `json:"group"`
-	CounterSignature string `json:"counter_signature"`
-}
-
-// DetailAccessListChange describes the operation of changing the set of groups
-// that are allowed to access a file:
+// DetailSecretRemove is the act of removing a secret.
 //
 // Verification:
 //
-// - "admin" may not be part of `Groups`.
-// - `Groups` may not be empty.
-// - `RevealedPath` has to point to an existing secret.
-type DetailAccessListChange struct {
-	RevealedPath     string   `json:"revealed_path"`
-	Groups           []string `json:"groups"`
-	CounterSignature string   `json:"counter_signature"`
+//   - Only users with access to this secret may remove it.
+//     (User still could remove it from disk/git though...)
+type DetailSecretRemove struct {
+	RevealedPath string `json:"revealed_path"`
 }
 
 // DetailSeal is the operation of sealing all files.
@@ -218,8 +222,6 @@ type DetailSeal struct {
 
 	// FilesSealed is the number of files that were sealed.
 	FilesSealed int `json:"files_sealed"`
-
-	// TODO: Also include the total number of secrets?
 }
 
 // AuditLog records all operations that change the state of the sesam repo.
@@ -250,8 +252,13 @@ type DetailSeal struct {
 //     => verify would therefore notice a self-signed signature.
 //  3. Eve truncates the log and rebuilds it to her liking:
 //     => verify needs to check that the log in the previous commit had the same initial root.
+//     => For this we write .sesam/audit/init - the hash of the initial log entry.
+//     => This hash is then compared to the init of current audit log.
+//     => If it matches, we can assume the log did not get truncated.
+//     => For added safety, we can also check if .sesam/audit/init was never changed via git.
+//     => If no .git/ repo is there we should not just have a hard dependency but print a warning.
+//     => This is also the reason why we should not allow git push --force, as this might be used to rewrite history.
 //
-// /
 // In all cases verify would complain about it and warn an user about Eve.
 type AuditLog struct {
 	// NOTE: We should chunk the log to make life for git easier and avoid loading too big files at once:
@@ -265,26 +272,55 @@ type AuditLog struct {
 	// RepoDir is the dir in which .sesam resides.
 	RepoDir string `json:"-"`
 
-	// Signer needed to add new entries and verify old ones.
+	// Signer needed to add new entries
 	Signer Signer `json:"-"`
+
+	// The hash from the .sesam/audit/init file.
+	// It should be the same hash as the prev_hash of the 2nd entry.
+	InitHash string `json:"-"`
+
+	// Keyring contains all known public keys
+	Keyring Keyring `json:"-"`
 }
 
-func EmptyLog(repoDir string, signer Signer) (*AuditLog, error) {
+// EmptyLog initializes an empty audit log on repo init.
+// It creates the first init entry as well.
+func EmptyLog(repoDir string, signer Signer, kr Keyring) (*AuditLog, error) {
 	al := &AuditLog{
 		RepoDir: repoDir,
 		Signer:  signer,
+		Keyring: kr,
 	}
 
-	// TODO: We need to pass the user here...?
-	initEntry := NewAuditEntry(OpInit, "sahib", &DetailInit{})
-	if err := al.AddEntry(initEntry); err != nil {
+	// Give the init a specific uuid, so we have a specific uuid for a repo.
+	initUUID := uuid.New().String()
+
+	initEntry := NewAuditEntry(OpInit, signer.UserName(), &DetailInit{
+		InitUUID: initUUID,
+	})
+
+	signedEntry, err := al.AddEntry(initEntry)
+	if err != nil {
 		return nil, fmt.Errorf("failed to init log: %w", err)
 	}
 
+	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
+	_ = os.MkdirAll(filepath.Dir(initPath), 0700)
+
+	initHash := signedEntry.Hash()
+	if err := renameio.WriteFile(
+		initPath,
+		[]byte(initHash),
+		0600,
+	); err != nil {
+		return nil, fmt.Errorf("failed to write init file: %w", err)
+	}
+
+	al.InitHash = initHash
 	return al, nil
 }
 
-func (al *AuditLog) AddEntry(e *AuditEntry) error {
+func (al *AuditLog) AddEntry(e *AuditEntry) (*AuditEntrySigned, error) {
 	entry := &AuditEntrySigned{
 		AuditEntry: *e,
 	}
@@ -293,13 +329,7 @@ func (al *AuditLog) AddEntry(e *AuditEntry) error {
 
 	if len(al.Entries) > 0 {
 		// Compute hash of previous entry:
-		prev := al.Entries[len(al.Entries)-1]
-		prevJSON, err := json.Marshal(prev)
-		if err != nil {
-			return fmt.Errorf("marshal previous entry: %w", err)
-		}
-
-		entry.PreviousHash = Hash(prevJSON)
+		entry.PreviousHash = al.Entries[len(al.Entries)-1].Hash()
 	} else {
 		// use a fixed hash, just so we don't have to deal with that value being sometimes empty.
 		entry.PreviousHash = Hash([]byte(sesamInitialHashSeed))
@@ -308,16 +338,16 @@ func (al *AuditLog) AddEntry(e *AuditEntry) error {
 	// build signature of now complete entry:
 	wholeEntryJSON, err := json.Marshal(entry.AuditEntry)
 	if err != nil {
-		return fmt.Errorf("marshal current entry: %w", err)
+		return nil, fmt.Errorf("marshal current entry: %w", err)
 	}
 
 	entry.Signature, err = al.Signer.Sign(wholeEntryJSON)
 	if err != nil {
-		return fmt.Errorf("failed to sign entry: %w", err)
+		return nil, fmt.Errorf("failed to sign entry: %w", err)
 	}
 
 	al.Entries = append(al.Entries, *entry)
-	return nil
+	return entry, nil
 }
 
 func (al *AuditLog) Iterate(fn func(idx int, entry *AuditEntrySigned) error) error {
@@ -331,8 +361,7 @@ func (al *AuditLog) Iterate(fn func(idx int, entry *AuditEntrySigned) error) err
 }
 
 func (al *AuditLog) Store() error {
-	// TODO: implement chunking at some point; for now just one big log.
-	logPath := filepath.Join(al.RepoDir, ".sesam", "audit", fmt.Sprintf("%06d.log", 0))
+	logPath := filepath.Join(al.RepoDir, ".sesam", "audit", "log.json")
 	fd, err := renameio.TempFile(al.RepoDir, logPath)
 	if err != nil {
 		return err
@@ -353,11 +382,16 @@ func (al *AuditLog) Store() error {
 	return fd.CloseAtomicallyReplace()
 }
 
-func LoadAuditLog(repoDir string, signer Signer) (*AuditLog, error) {
-	// TODO: also implement chunking for loading.
-	logPath := filepath.Join(repoDir, ".sesam", "audit", fmt.Sprintf("%06d.log", 0))
+func LoadAuditLog(repoDir string, signer Signer, kr Keyring) (*AuditLog, error) {
+	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.json")
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {
-		return EmptyLog(repoDir, signer)
+		return EmptyLog(repoDir, signer, kr)
+	}
+
+	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
+	initData, err := os.ReadFile(initPath)
+	if err != nil {
+		return nil, err
 	}
 
 	fd, err := os.Open(logPath)
@@ -365,11 +399,13 @@ func LoadAuditLog(repoDir string, signer Signer) (*AuditLog, error) {
 		return nil, err
 	}
 
-	defer fd.Close()
+	defer closeLogged(fd)
 
 	al := AuditLog{
-		RepoDir: repoDir,
-		Signer:  signer,
+		RepoDir:  repoDir,
+		Signer:   signer,
+		InitHash: strings.TrimSpace(string(initData)),
+		Keyring:  kr,
 	}
 
 	dec := json.NewDecoder(fd)

@@ -16,8 +16,8 @@ import (
 
 type Signer interface {
 	Sign(data []byte) (string, error)
-	Verify(data []byte, signature string) error
 	PublicKey() []byte
+	UserName() string
 }
 
 type SecretManager struct {
@@ -28,8 +28,11 @@ type SecretManager struct {
 	// Identities are the private keys the current user of sesam supplies.
 	Identities Identities
 
-	// Signer is a sesam generated signing key.
+	// Signer is our way to sign things with a per-user generated key.
 	Signer Signer
+
+	// Keyring is a collection of public keys
+	Keyring Keyring
 }
 
 func (sm *SecretManager) cryptPath(path string) string {
@@ -189,7 +192,7 @@ func (s *Secret) Reveal() error {
 		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", expectedHash, sigDesc.Hash)
 	}
 
-	if err := s.Mgr.Signer.Verify(sha3HashBytes, sigDesc.Signature); err != nil {
+	if _, err := s.Mgr.Keyring.Verify(sha3HashBytes, sigDesc.Signature); err != nil {
 		// verification failed, abort.
 		return err
 	}

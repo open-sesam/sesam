@@ -168,24 +168,107 @@ Those options should be possible to specific for all commands (also via ENV vari
 
 ### verify
 
-- Verify the last audit log got not truncated.
-- Parse the audit log.
-  - Verify integrity via hashing and signatures.
-  - Build a version of the repo according to the audit log.
-  - Verify the constraints (e.g. only admins may add new users)
-- Compare the audit log state to the actual state.
-  - If there are no diffs: Good!
-  - If there are diffs:
-    - If we pulled from somebody: Alarm!
-    - If we did local changes in sesam.yml - probably fine, but warn before push.
-- For each secret:
-  - Check that the configured access list is the same as the people that are able to decrypt the file.
-  - Check the signature files for each secret. Signature and hash should be sound.
-  - Signature files are themselves signed by the audit log.
-- For each user:
-  - Check which public keys belong to his configured identity. There should be at least one.
-  - Check if the private key belongs to the signing public key in the config.
-- Ideally this is also run as part of a CI pipeline.
+Checks the integrity of the entire repository without revealing secrets.
+Implicitly called after pull, reveal or seal. Should also run in CI.
+
+#### Audit log
+
+Append-only, hash-chained log of all authorization-relevant operations.
+Stored as chunked files under `.sesam/audit/` (e.g. `00000.log.json`, `00100.log.json`),
+each with up to 100 entries. The first entry of each chunk references the last entry of
+the previous chunk.
+
+Entry structure:
+
+| Field        | Description                                              |
+|--------------|----------------------------------------------------------|
+| `seq_id`     | Monotonic sequence number (starting at 1)                |
+| `prev_hash`  | SHA3-256 (multihash-encoded) of the previous entry       |
+| `operation`  | Operation type (see below)                               |
+| `time`       | ISO8601 UTC timestamp                                    |
+| `changed_by` | User that executed the operation                         |
+| `detail`     | Operation-specific data (see below)                      |
+| `signature`  | Ed25519 signature over all other fields (canonical JSON) |
+
+Operation types:
+
+| Operation        | Detail fields                          | Notes                                           |
+|------------------|----------------------------------------|-------------------------------------------------|
+| `init`           | (none)                                 | Trust root. Self-sign allowed. See below.       |
+| `user.tell`      | User, PubKey, SignPubKey               | Must be signed by an admin (except seq 1).      |
+| `user.kill`      | User                                   | Must not remove last user or last admin.        |
+| `group.join`     | User, Group                            | Admin promotion = joining the "admin" group.    |
+| `group.leave`    | User, Group                            | Must not remove last admin.                     |
+| `access.change`  | RevealedPath, Groups                   | Changes which groups can access a secret.       |
+| `seal`           | RootHash                               | Hash over all sorted `.sig.json` files.         |
+
+Key rotation is done by removing and re-adding the user (`user.kill` + `user.tell`).
+The log doubles as key archive: past `user.tell` entries record which signing keys
+were valid at which point, allowing verification of old signatures after a user was
+removed or rotated their key.
+
+#### Authorization
+
+Every entry that modifies users, groups or access lists must be signed by an admin.
+The entry's `signature` field proves who wrote it. During verification we check that
+the signer was a member of the "admin" group at that point in the log. No separate
+counter-signature is needed since the entry signature already proves authorship.
+
+The init entry (seq 1) is special: it establishes the first admin and is the only
+entry allowed to be self-signed.
+
+#### Trust anchor (`.sesam/audit/init`)
+
+`sesam init` writes the SHA3-256 hash of the init entry (seq 1) to `.sesam/audit/init`.
+This file is created once and must never be modified afterwards.
+
+During verification, the hash of the current seq 1 entry is compared to the contents
+of this file. If they differ, the log was rebuilt from scratch. CI can additionally
+check that `git log -- .sesam/audit/init` has exactly one commit.
+
+This does not protect against `git push --force` (Eve can rewrite the first commit
+and make everything consistent). Force push protection is outside sesam's threat model
+and should be enforced at the forge level.
+
+#### Tamper detection
+
+Three checks work together:
+
+1. **Chain integrity**: `prev_hash` of each entry must equal the SHA3-256 of the
+   previous entry. Any modification, insertion or deletion breaks the chain.
+
+2. **Trust anchor**: The hash of the seq 1 entry must match `.sesam/audit/init`.
+   If not, the entire log was replaced.
+
+3. **State-vs-log consistency**: On-disk state must match the log:
+   - Replaying all user/group operations must produce the current config in
+     `sesam.yml`. If it doesn't, the config was changed outside the log.
+   - The `RootHash` in the latest `seal` entry must match the hash computed
+     from the `.sig.json` files on disk.
+
+Attack scenarios and which check catches them:
+
+- Eve modifies the config but skips the log: state-vs-log fails (config does
+  not match the replayed log).
+- Eve adds forged log entries: signature check fails (signer is not an admin).
+- Eve replaces the entire log: trust anchor check fails (init hash does not
+  match `.sesam/audit/init`).
+- Eve replaces encrypted files: the `RootHash` in the seal entry no longer
+  matches the `.sig.json` files.
+
+#### Branching and merging
+
+The audit log is linear. When branches diverge, each branch appends its own
+entries. On merge, `sesam verify` checks both branches back to their common
+ancestor. Encrypted files are opaque binary that git cannot merge, so conflicting
+secret changes require manual resolution anyway. The log just follows the same
+constraint.
+
+#### Additional checks
+
+- For each secret: `.sig.json` signature and ciphertext hash must be valid.
+- For each user: at least one public key must match the configured identity.
+- Freshly added secrets: warn if the adding user has no access to them.
 
 ### id
 

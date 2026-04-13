@@ -15,8 +15,10 @@ import (
 )
 
 type ed25519Signer struct {
+	// TODO: That is actually.... wrong? We need to have plenty keys, at least one per user here.
 	pub  ed25519.PublicKey
 	priv ed25519.PrivateKey
+	user string
 }
 
 func (es *ed25519Signer) Sign(data []byte) (string, error) {
@@ -28,26 +30,12 @@ func (es *ed25519Signer) Sign(data []byte) (string, error) {
 	return MulticodeEncode(sig, MhEdDSA), nil
 }
 
-func (es *ed25519Signer) Verify(data []byte, signature string) error {
-	sigData, code, err := MulticodeDecode(signature)
-	if err != nil {
-		return err
-	}
-
-	if code != MhEdDSA {
-		return fmt.Errorf("unexpected multihash code %d for signature, expected eddsa", code)
-	}
-
-	ok := ed25519.Verify(es.pub, data, sigData)
-	if !ok {
-		return fmt.Errorf("could not validate signature '%s'", signature)
-	}
-
-	return nil
-}
-
 func (es *ed25519Signer) PublicKey() []byte {
 	return es.pub
+}
+
+func (es *ed25519Signer) UserName() string {
+	return es.user
 }
 
 // LoadSignKey will load a signer specific to a user and decrypt it via `userIdentity`
@@ -91,6 +79,7 @@ func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error
 	return &ed25519Signer{
 		pub:  signPrivKey.Public().(ed25519.PublicKey),
 		priv: signPrivKey,
+		user: user,
 	}, nil
 }
 
@@ -125,16 +114,10 @@ func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer,
 		return nil, fmt.Errorf("failed to write signing key %s: %w", signKeyPath, err)
 	}
 
-	// TODO:
-	// - The signing key is stored encrypted via age on disk.
-	// - It is used to sign the hash of encrypted files.
-	// - The encryption itself is not signed, i.e. someone could just replace it without us noticing.
-	// - We therefore need to store the public key (and maybe a hash of the private key)
-	//   (hash is not necessary probably, because )
-	fmt.Println("TODO: Store this in admin signed config", MulticodeEncode(pub, MhEd25519Pub))
 	return &ed25519Signer{
 		pub:  pub,
 		priv: priv,
+		user: user,
 	}, nil
 }
 
