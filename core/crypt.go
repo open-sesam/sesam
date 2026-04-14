@@ -20,44 +20,6 @@ type Signer interface {
 	UserName() string
 }
 
-type SecretManager struct {
-	// RepoDir is the path to sesam repository.
-	// It is the dir the .sesam directory is in.
-	RepoDir string
-
-	// Identities are the private keys the current user of sesam supplies.
-	Identities Identities
-
-	// Signer is our way to sign things with a per-user generated key.
-	Signer Signer
-
-	// Keyring is a collection of public keys
-	Keyring Keyring
-}
-
-func (sm *SecretManager) cryptPath(path string) string {
-	return filepath.Join(sm.RepoDir, ".sesam", "objects", path+".age")
-}
-
-func (sm *SecretManager) cryptWriter(path string) (io.WriteCloser, string, error) {
-	cryptPath := sm.cryptPath(path)
-
-	// TODO: Move that to an init module and add a .donotdelete file in it so that git does not kill it.
-	// .sesam/tmp should be also part of gitignore
-	if err := os.MkdirAll(filepath.Dir(cryptPath), 0700); err != nil {
-		return nil, "", err
-	}
-
-	fd, err := os.Create(cryptPath)
-	return fd, cryptPath, err
-}
-
-func (sm *SecretManager) tmpDir() string {
-	tmpDir := filepath.Join(sm.RepoDir, ".sesam", "tmp")
-	_ = os.MkdirAll(tmpDir, 0700)
-	return tmpDir
-}
-
 type Secret struct {
 	Mgr *SecretManager
 

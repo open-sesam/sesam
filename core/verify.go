@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 )
 
@@ -17,12 +18,7 @@ func (vu *VerifiedUser) IsAdmin() bool {
 	return slices.Contains(vu.Groups, "admin")
 }
 
-type VerifiedGroup struct {
-	Name string
-}
-
 type VerifiedSecret struct {
-	// TODO: Do we verify also other attributes of secrets here? like name, rotation params, types, ...?
 	RevealedPath string
 	AccessGroups []string
 }
@@ -34,6 +30,10 @@ type VerifiedState struct {
 	// SealRequiredSeqID tells us the entry that required a seal but didn't have one yet.
 	// If a seal was provided, it is set back to 0.
 	SealRequiredSeqID int
+
+	// VerifiedUntil tells us until which seq_id we verified.
+	// This is useful to update the state which entries that were added later.
+	VerifiedUntil int
 }
 
 func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
@@ -83,6 +83,34 @@ func (s *VerifiedState) UserHasAccess(user string, groups []string) bool {
 	return false
 }
 
+func (s *VerifiedState) UsersForSecret(revealedPath string) ([]string, error) {
+	idx := slices.IndexFunc(s.Secrets, func(vs VerifiedSecret) bool {
+		return vs.RevealedPath == revealedPath
+	})
+	if idx < 0 {
+		return nil, fmt.Errorf("secret %s not found", revealedPath)
+	}
+
+	secret := &s.Secrets[idx]
+	groups := make(map[string]bool, len(secret.AccessGroups)+1)
+	for _, g := range secret.AccessGroups {
+		groups[g] = true
+	}
+	groups["admin"] = true
+
+	var users []string
+	for _, user := range s.Users {
+		for _, g := range user.Groups {
+			if groups[g] {
+				users = append(users, user.Name)
+				break
+			}
+		}
+	}
+
+	return users, nil
+}
+
 func (s *VerifiedState) RequireAdmin(entry *AuditEntrySigned) (*VerifiedUser, error) {
 	adminUser, exists := s.UserExists(entry.ChangedBy)
 	if !exists {
@@ -119,7 +147,7 @@ func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 		// BOOTSTRAP: After init we create an initial admin user.
 		// TODO: Is it more elegant to give the init detail a user field and keep it there?
 		if len(state.Users) != 0 {
-			return fmt.Errorf("there are already existing users after init")
+			return fmt.Errorf("there are already existing users after init: %s", entry)
 		}
 
 		if entry.ChangedBy != tellDetails.User {
@@ -304,10 +332,24 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) er
 }
 
 func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
+	// use an fresh empty state:
 	var state VerifiedState
 
+	if err := verify(&state, log, kr); err != nil {
+		return nil, err
+	}
+
+	return &state, nil
+}
+
+func verify(state *VerifiedState, log *AuditLog, kr Keyring) error {
 	var previousEntry *AuditEntrySigned
 	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
+		if entry.SeqID <= uint64(state.VerifiedUntil) {
+			// TODO: That's kinda inefficient.
+			return nil
+		}
+
 		// check the signature
 		signatureUser, err := entry.Verify(log.Keyring)
 		if err != nil {
@@ -342,36 +384,41 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 		}
 
 		previousEntry = entry
+		state.VerifiedUntil = int(entry.SeqID) // TODO: move after actual verify.
+
 		switch entry.Operation {
 		case OpInit:
-			return verifyInit(log, &state, entry)
+			return verifyInit(log, state, entry)
 		case OpUserTell:
-			return verifyUserTell(log, &state, entry, kr)
+			return verifyUserTell(log, state, entry, kr)
 		case OpUserKill:
-			return verifyUserKill(log, &state, entry, kr)
+			return verifyUserKill(log, state, entry, kr)
 		case OpSeal:
-			return verifySeal(log, &state, entry)
+			return verifySeal(log, state, entry)
 		case OpSecretChange:
-			return verifySecretChange(log, &state, entry)
+			return verifySecretChange(log, state, entry)
 		case OpSecretRemove:
-			return verifySecretRemove(log, &state, entry)
+			return verifySecretRemove(log, state, entry)
 		default:
 			return fmt.Errorf("unexpected core.Operation: %#v", entry.Operation)
 		}
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// TODO: Is that a hard error? Or should we just warn here?
 	// Could be that sesam was legit interrupted during operation.
 	if srs := state.SealRequiredSeqID; srs > 0 {
-		return nil, fmt.Errorf("entry %d required a seal, but none was made afer", srs)
+		slog.Warn("verify: entry required a seal, but none was made after", slog.Int("seq_id", srs))
 	}
 
 	// TODO: Check that the root hash changed from last seal.
-
 	// TODO: Verify atual sealed files to match last RootHash
 
-	return &state, nil
+	return nil
+}
+
+func (s *VerifiedState) Update(log *AuditLog, kr Keyring) error {
+	return verify(s, log, kr)
 }

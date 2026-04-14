@@ -61,6 +61,7 @@ type AuditEntry struct {
 	Time time.Time `json:"time"`
 }
 
+// TODO: Derive `op` from detail type?
 // NewAuditEntry creates a new entry with compile-time type safety on the detail.
 // SeqID, PreviousHash and Time are filled by AuditLog.AddEntry().
 func NewAuditEntry[T AuditDetail](op Operation, changedBy string, detail *T) *AuditEntry {
@@ -112,6 +113,11 @@ func (aes *AuditEntrySigned) Hash() string {
 	// include signature:
 	sigJSON, _ := json.Marshal(aes)
 	return Hash(sigJSON)
+}
+
+func (aes *AuditEntrySigned) String() string {
+	sigJSON, _ := json.MarshalIndent(aes, "", "  ")
+	return string(sigJSON)
 }
 
 func (aes *AuditEntrySigned) Verify(kr Keyring) (string, error) {
@@ -200,7 +206,6 @@ type DetailUserKill struct {
 //
 // - When changing the access list it is okay to issue another SecretMod
 type DetailSecretChange struct {
-	Type         string   `json:"type"` // TODO: We don't really do a lot with type.
 	RevealedPath string   `json:"revealed_path"`
 	Groups       []string `json:"groups"`
 }
@@ -357,6 +362,8 @@ func (al *AuditLog) AddEntry(e *AuditEntry) (*AuditEntrySigned, error) {
 	}
 
 	al.Entries = append(al.Entries, *entry)
+
+	// TODO: We should automatically verify the new entry to make sure verified-state is up-to-date.
 	return entry, nil
 }
 
@@ -392,6 +399,8 @@ func (al *AuditLog) Store() error {
 	return fd.CloseAtomicallyReplace()
 }
 
+// LoadAuditLog reads the audit log from disk and gives you an handle to operate on it.
+// It does NOT verify the log yet.
 func LoadAuditLog(repoDir string, signer Signer, kr Keyring) (*AuditLog, error) {
 	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.json")
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {

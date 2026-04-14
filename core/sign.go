@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"filippo.io/age"
 	"github.com/google/renameio"
@@ -143,4 +144,42 @@ func ReadStoredSignature(repoDir, revealedPath string) (SecretSignature, error) 
 	}
 
 	return sigDesc, nil
+}
+
+// ReadAllSignatures finds all .sig.json files under .sesam/objects/ and parses them.
+func ReadAllSignatures(repoDir string) ([]SecretSignature, error) {
+	objectsDir := filepath.Join(repoDir, ".sesam", "objects")
+
+	var sigs []SecretSignature
+	if _, err := os.Stat(objectsDir); os.IsNotExist(err) {
+		// might happen if we're in the init phase
+		return sigs, nil
+	}
+
+	err := filepath.WalkDir(objectsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() || !strings.HasSuffix(path, ".sig.json") {
+			return nil
+		}
+
+		sigFd, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("failed to open signature json %s: %w", path, err)
+		}
+		defer closeLogged(sigFd)
+
+		var sig SecretSignature
+		dec := json.NewDecoder(io.LimitReader(sigFd, 2048))
+		if err := dec.Decode(&sig); err != nil {
+			return fmt.Errorf("failed to decode signature json %s: %w", path, err)
+		}
+
+		sigs = append(sigs, sig)
+		return nil
+	})
+
+	return sigs, err
 }

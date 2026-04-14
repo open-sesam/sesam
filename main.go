@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/open-sesam/sesam/core"
 )
@@ -49,7 +50,7 @@ func main() {
 		log.Fatalf("failed to identity ourselves: %v", err)
 	}
 
-	fmt.Println("I am:", whoami)
+	fmt.Println("Who am I:", whoami)
 
 	isInit := false
 
@@ -72,6 +73,9 @@ func main() {
 		signer,
 		keyring,
 	)
+	if err != nil {
+		log.Fatalf("failed to load audit log: %v", err)
+	}
 
 	if isInit {
 		signKeyStr := core.MulticodeEncode(signer.PublicKey(), core.MhEd25519Pub)
@@ -81,51 +85,15 @@ func main() {
 			PubKeys:     []string{recp.String()},
 			SignPubKeys: []string{signKeyStr},
 		})
-		auditLog.AddEntry(entry)
+
+		if _, err := auditLog.AddEntry(entry); err != nil {
+			log.Fatalf("added audit entry: %v", err)
+		}
+
+		_ = auditLog.Store()
 	}
 
-	sm := &core.SecretManager{
-		RepoDir:    ".",
-		Identities: core.Identities{id},
-		Signer:     signer,
-		Keyring:    keyring,
-	}
-
-	secret := &core.Secret{
-		Mgr:          sm,
-		RevealedPath: "DESIGN.new",
-		Recipients:   keyring.Recipients([]string{"sahib"}),
-	}
-
-	if err != nil {
-		log.Fatalf("failed to create audit log: %v", err)
-	}
-
-	fmt.Println("SEAL", secret.RevealedPath)
-
-	sig, err := secret.Seal(whoami)
-	if err != nil {
-		log.Fatalf("seal failed: %v", err)
-	}
-
-	entry := core.NewAuditEntry(core.OpSeal, whoami, &core.DetailSeal{
-		RootHash:    core.BuildRootHash([]*core.SecretSignature{sig}),
-		FilesSealed: 1,
-	})
-
-	if _, err := auditLog.AddEntry(entry); err != nil {
-		log.Fatalf("add seal audit failed: %v", err)
-	}
-
-	if err := auditLog.Store(); err != nil {
-		log.Fatalf("storing log failed: %v", err)
-	}
-
-	fmt.Println("REVEAL", secret.RevealedPath)
-	if err := secret.Reveal(); err != nil {
-		log.Fatalf("seal failed: %v", err)
-	}
-
+	verifyStart := time.Now()
 	if err := core.VerifyInitFileUnchanged("."); err != nil {
 		log.Fatalf("init file was changed")
 	}
@@ -138,5 +106,41 @@ func main() {
 		log.Fatalf("failed to verify log: %v", err)
 	}
 
-	fmt.Printf("state: %+v\n", vstate)
+	fmt.Println("verify took", time.Since(verifyStart))
+
+	// TODO: an extended verify could also check if last root hash == sm.RootHash + also check every physical file.
+
+	sm, err := core.BuildSecretManager(
+		".",
+		whoami,
+		core.Identities{id},
+		signer,
+		keyring,
+		auditLog,
+		vstate,
+	)
+	if err != nil {
+		log.Fatalf("failed to build secret manager: %v", err)
+	}
+
+	if isInit {
+		err = sm.AddOrChangeSecret(&core.Secret{
+			RevealedPath: "DESIGN.new",
+			Recipients:   keyring.Recipients([]string{"sahib"}),
+		}, []string{"admin"})
+		if err != nil {
+			log.Fatalf("failed to add secret: %v", err)
+		}
+
+		_ = auditLog.Store()
+	}
+
+	err = sm.SealAll()
+	if err != nil {
+		log.Fatalf("failed to create audit log: %v", err)
+	}
+
+	if err := sm.RevealAll(); err != nil {
+		log.Fatalf("reveal failed: %v", err)
+	}
 }
