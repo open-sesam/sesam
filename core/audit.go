@@ -126,6 +126,14 @@ func (aes *AuditEntrySigned) Verify(kr Keyring) (string, error) {
 
 ///////// DETAILS /////////////
 
+// DetailInit is added on init.
+//
+// It is the base of audit log.
+//
+// Verification:
+//
+// - SeqID must be 1.
+// - The hash at .sesam/audit/init must be the same as the hash of this entry (including signature)
 type DetailInit struct {
 	// This is uniquely generated per repo.
 	// It has no specific purpose beyond debugging
@@ -137,13 +145,14 @@ type DetailInit struct {
 //
 // Verification:
 //
-//   - An tell may never be followed by an tell of the same user,
-//     unless there was a kill in between.
-//   - Adding a user should always be followed by a seal.
-//   - The seal has to result in a different RootHash than before.
-//   - The ChangedBy user has to be an admin user.
-//   - Only if SeqID is 1 (inital user) we allow that a user signs itself.
-//   - Signature must have been made by a public key of the admin users.
+//   - Bootstrap only: If seq_id == 2, we allow a user entry that adds himself.
+//   - Else, a user may not add himself.
+//   - The ChangedBy user must be an admin user.
+//   - The user may not exist aleady.
+//   - Adding users should always followed by a seal in the log (not an hard error, but a warning)
+//   - The seal has to resul in a different root hash than before (to make sure files really were changed)
+//   - PubKeys and SignPubKeys must be valid keys.
+//   - Groups may not have duplicates.
 //
 // Note:
 //
@@ -169,7 +178,7 @@ type DetailUserTell struct {
 //
 // Verification:
 //
-// - The user may not be the last user in the repo.
+// - ChangedBy user must be an admin.
 // - The user may not be the last "admin" user in the repo.
 // - A seal with different RootHash has to follow after this.
 //
@@ -185,14 +194,13 @@ type DetailUserKill struct {
 // - "admin" may be part of `Groups`, but is implicitly added anyways.
 // - `Groups` may not be empty.
 // - `Groups` should not have duplicates.
-// - If `RevealedPath` has to point to an existing, sealed file
-//   - Only users that already have access to it may issue another Change.
+// - If secret exists: Only users that already have access to it may issue another Change.
 //
 // Note:
 //
 // - When changing the access list it is okay to issue another SecretMod
 type DetailSecretChange struct {
-	Type         string   `json:"type"`
+	Type         string   `json:"type"` // TODO: We don't really do a lot with type.
 	RevealedPath string   `json:"revealed_path"`
 	Groups       []string `json:"groups"`
 }

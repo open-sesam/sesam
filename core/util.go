@@ -1,9 +1,18 @@
 package core
 
 import (
+	"cmp"
 	"io"
 	"log/slog"
+	"slices"
 )
+
+// Deduplicate returns a sorted copy of s with duplicates removed.
+func Deduplicate[T cmp.Ordered](s []T) []T {
+	c := slices.Clone(s)
+	slices.Sort(c)
+	return slices.Compact(c)
+}
 
 func closeLogged(fd io.Closer) {
 	if err := fd.Close(); err != nil {

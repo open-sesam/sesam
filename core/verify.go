@@ -48,6 +48,18 @@ func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
 	return &s.Users[idx], true
 }
 
+func (s *VerifiedState) SecretExists(revealedPath string) (*VerifiedSecret, bool) {
+	idx := slices.IndexFunc(s.Secrets, func(vs VerifiedSecret) bool {
+		return vs.RevealedPath == revealedPath
+	})
+
+	if idx < 0 {
+		return nil, false
+	}
+
+	return &s.Secrets[idx], true
+}
+
 // UserHasAccess checks if `user` is in one of `grous` and has therefore access.
 func (s *VerifiedState) UserHasAccess(user string, groups []string) bool {
 	groupMap := make(map[string]bool, len(groups))
@@ -105,6 +117,7 @@ func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 
 	if entry.SeqID == 2 {
 		// BOOTSTRAP: After init we create an initial admin user.
+		// TODO: Is it more elegant to give the init detail a user field and keep it there?
 		if len(state.Users) != 0 {
 			return fmt.Errorf("there are already existing users after init")
 		}
@@ -127,7 +140,7 @@ func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 		return fmt.Errorf("user %s already existed at seq_id=%d", tellDetails.User, entry.SeqID)
 	}
 
-	// Add signing keys:
+	// Add signing keys to keyring:
 	for _, signPubKey := range tellDetails.SignPubKeys {
 		signPubKeyData, _, err := MulticodeDecode(signPubKey)
 		if err != nil {
@@ -137,6 +150,7 @@ func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 		kr.AddSignPubKey(tellDetails.User, signPubKeyData)
 	}
 
+	// Add recipients to keyring:
 	for _, pubKey := range tellDetails.PubKeys {
 		recp, err := ParseRecipient(pubKey)
 		if err != nil {
@@ -151,6 +165,7 @@ func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 		Name:       tellDetails.User,
 		SignPubKey: tellDetails.SignPubKeys,
 		PubKeys:    tellDetails.PubKeys,
+		Groups:     Deduplicate(tellDetails.Groups),
 	})
 
 	return nil
@@ -161,69 +176,85 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 		return err
 	}
 
-	tellDetails, err := ParseDetail[DetailUserTell](entry)
+	killDetails, err := ParseDetail[DetailUserKill](entry)
 	if err != nil {
 		return err
 	}
 
-	user, exists := state.UserExists(tellDetails.User)
+	user, exists := state.UserExists(killDetails.User)
 	if !exists {
-		return fmt.Errorf("user %s to remove does not exist; seq_id=%d", tellDetails.User, entry.SeqID)
+		return fmt.Errorf(
+			"user %s to remove does not exist; seq_id=%d",
+			killDetails.User,
+			entry.SeqID,
+		)
 	}
 
-	kr.DeleteUser(user.Name)
+	adminUsersFound := 0
+	adminName := ""
+	for _, user := range state.Users {
+		if user.IsAdmin() {
+			adminUsersFound++
+			adminName = user.Name
+		}
+	}
 
+	// only one admin there:
+	// - if the admin is the one we gonna delete: forbid.
+	// - if we delete another user: allow.
+	if adminUsersFound == 1 && adminName == user.Name {
+		return fmt.Errorf("trying to delete last admin user: %d (seq_id=%d)", user.Name, entry.SeqID)
+	}
+
+	// Looks good, change state:
+	kr.DeleteUser(user.Name)
 	state.SealRequiredSeqID = int(entry.SeqID)
-	state.Users = append(state.Users, VerifiedUser{
-		Name:       user.Name,
-		SignPubKey: tellDetails.SignPubKeys,
-		PubKeys:    tellDetails.PubKeys,
+	state.Users = slices.DeleteFunc(state.Users, func(vu VerifiedUser) bool {
+		return vu.Name == killDetails.User
 	})
 
 	return nil
 }
 
 func verifySecretChange(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
-	secretChangeDetails, err := ParseDetail[DetailSecretChange](entry)
+	scd, err := ParseDetail[DetailSecretChange](entry)
 	if err != nil {
 		return fmt.Errorf("parse detail: %w", err)
 	}
 
-	if len(secretChangeDetails.Groups) == 0 {
-		return fmt.Errorf("groups may not be empty (%s)", secretChangeDetails.RevealedPath)
+	if len(scd.Groups) == 0 {
+		return fmt.Errorf("groups may not be empty (%s)", scd.RevealedPath)
 	}
 
-	// groupMap := make(map[])
-
-	// TODO: Check if groups have duplicates.
-	// TODO: Check if user exists.
-	// TODO: Check if admin is not in the groups.
-	// TODO: Check if the file really exists? That might not be the case if it was removed later. So need to be done after the audit log verify.
+	scd.Groups = Deduplicate(scd.Groups)
+	if slices.Contains(scd.Groups, "admin") {
+		scd.Groups = append(scd.Groups, "admin")
+	}
 
 	existsIdx := slices.IndexFunc(state.Secrets, func(vs VerifiedSecret) bool {
-		return vs.RevealedPath == secretChangeDetails.RevealedPath
+		return vs.RevealedPath == scd.RevealedPath
 	})
 
 	if existsIdx >= 0 {
 		// secret exists
-		hasAccess := state.UserHasAccess(entry.ChangedBy, secretChangeDetails.Groups)
+		hasAccess := state.UserHasAccess(entry.ChangedBy, scd.Groups)
 		if !hasAccess {
 			return fmt.Errorf(
 				"user %s may not change details of %s",
 				entry.ChangedBy,
-				secretChangeDetails.RevealedPath,
+				scd.RevealedPath,
 			)
 		}
 
 		state.Secrets[existsIdx] = VerifiedSecret{
-			RevealedPath: secretChangeDetails.RevealedPath,
-			AccessGroups: secretChangeDetails.Groups,
+			RevealedPath: scd.RevealedPath,
+			AccessGroups: scd.Groups,
 		}
 	} else {
 		// secret does not exist
 		state.Secrets = append(state.Secrets, VerifiedSecret{
-			RevealedPath: secretChangeDetails.RevealedPath,
-			AccessGroups: secretChangeDetails.Groups,
+			RevealedPath: scd.RevealedPath,
+			AccessGroups: scd.Groups,
 		})
 	}
 
@@ -232,23 +263,30 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 }
 
 func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
-	secretRemoveDetails, err := ParseDetail[DetailSecretRemove](entry)
+	srd, err := ParseDetail[DetailSecretRemove](entry)
 	if err != nil {
 		return fmt.Errorf("parse detail: %w", err)
 	}
 
-	// TODO: check if user is allowed to do this.
-
-	exists := slices.ContainsFunc(state.Secrets, func(vs VerifiedSecret) bool {
-		return vs.RevealedPath == secretRemoveDetails.RevealedPath
-	})
-
+	s, exists := state.SecretExists(srd.RevealedPath)
 	if !exists {
-		return fmt.Errorf("secret %s does not exist, cannot remove", secretRemoveDetails.RevealedPath)
+		return fmt.Errorf(
+			"secret %s does not exist, cannot remove (seq_id=%d)",
+			srd.RevealedPath,
+			entry.SeqID,
+		)
+	} else {
+		if !state.UserHasAccess(entry.ChangedBy, s.AccessGroups) {
+			return fmt.Errorf(
+				"user %s has no access, cannot remove (seq_id=%d)",
+				entry.ChangedBy,
+				entry.SeqID,
+			)
+		}
 	}
 
 	state.Secrets = slices.DeleteFunc(state.Secrets, func(s VerifiedSecret) bool {
-		return s.RevealedPath == secretRemoveDetails.RevealedPath
+		return s.RevealedPath == srd.RevealedPath
 	})
 
 	return nil
@@ -278,6 +316,12 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 
 		if signatureUser != entry.ChangedBy {
 			return fmt.Errorf("signature was made by %s, not %s (seq_id=%d)", signatureUser, entry.ChangedBy, entry.SeqID)
+		}
+
+		if entry.SeqID > 2 {
+			if _, exists := state.UserExists(entry.ChangedBy); !exists {
+				return fmt.Errorf("user does not exist %s (seq_id=%d)", entry.ChangedBy, entry.SeqID)
+			}
 		}
 
 		if previousEntry != nil {
@@ -324,6 +368,10 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 	if srs := state.SealRequiredSeqID; srs > 0 {
 		return nil, fmt.Errorf("entry %d required a seal, but none was made afer", srs)
 	}
+
+	// TODO: Check that the root hash changed from last seal.
+
+	// TODO: Verify atual sealed files to match last RootHash
 
 	return &state, nil
 }

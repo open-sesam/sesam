@@ -126,6 +126,10 @@ func main() {
 		log.Fatalf("seal failed: %v", err)
 	}
 
+	if err := core.VerifyInitFileUnchanged("."); err != nil {
+		log.Fatalf("init file was changed")
+	}
+
 	// TODO: We also need to check that audit lo was not truncated:
 	// 			 By checking git history of .sesam/audit/init
 	// NOTE: normally we would do that before much else.
