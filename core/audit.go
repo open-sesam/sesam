@@ -121,7 +121,7 @@ func (aes *AuditEntrySigned) Verify(kr Keyring) (string, error) {
 		return "", err
 	}
 
-	return kr.Verify(wholeEntryJSON, aes.Signature)
+	return kr.Verify(wholeEntryJSON, aes.Signature, aes.ChangedBy)
 }
 
 ///////// DETAILS /////////////
@@ -320,6 +320,8 @@ func EmptyLog(repoDir string, signer Signer, kr Keyring) (*AuditLog, error) {
 	return al, nil
 }
 
+// AddEntry will add another signed entry to the audit log.
+// This action is non-reversible, not even via code.
 func (al *AuditLog) AddEntry(e *AuditEntry) (*AuditEntrySigned, error) {
 	entry := &AuditEntrySigned{
 		AuditEntry: *e,

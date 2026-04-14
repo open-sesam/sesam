@@ -190,7 +190,7 @@ func ParseRecipient(arg string) (*Recipient, error) {
 		return nil, fmt.Errorf("unknown recipient type: %s", arg)
 	}
 
-	spk := stringPubKey(s)
+	spk := newStringPubKey(s)
 	return &Recipient{
 		Recipient:           r,
 		ComparablePublicKey: spk,

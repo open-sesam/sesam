@@ -173,10 +173,8 @@ Implicitly called after pull, reveal or seal. Should also run in CI.
 
 #### Audit log
 
-Append-only, hash-chained log of all authorization-relevant operations.
-Stored as chunked files under `.sesam/audit/` (e.g. `00000.log.json`, `00100.log.json`),
-each with up to 100 entries. The first entry of each chunk references the last entry of
-the previous chunk.
+Append-only, hash-chained log of all state-changing operations.
+Stored under `.sesam/audit/log.json` (chunking planned for later).
 
 Entry structure:
 
@@ -192,64 +190,66 @@ Entry structure:
 
 Operation types:
 
-| Operation        | Detail fields                          | Notes                                           |
-|------------------|----------------------------------------|-------------------------------------------------|
-| `init`           | (none)                                 | Trust root. Self-sign allowed. See below.       |
-| `user.tell`      | User, PubKey, SignPubKey               | Must be signed by an admin (except seq 1).      |
-| `user.kill`      | User                                   | Must not remove last user or last admin.        |
-| `group.join`     | User, Group                            | Admin promotion = joining the "admin" group.    |
-| `group.leave`    | User, Group                            | Must not remove last admin.                     |
-| `access.change`  | RevealedPath, Groups                   | Changes which groups can access a secret.       |
-| `seal`           | RootHash                               | Hash over all sorted `.sig.json` files.         |
+| Operation        | Detail fields                                  | Notes                                           |
+|------------------|------------------------------------------------|-------------------------------------------------|
+| `init`           | InitUUID                                       | Trust root. Self-sign allowed. See below.       |
+| `user.tell`      | User, PubKeys, SignPubKeys, Groups             | Must be signed by an admin (except after init). |
+| `user.kill`      | User                                           | Must not remove last user or last admin.        |
+| `secret.change`  | Type, RevealedPath, Groups                     | Add or update a secret and its access list.     |
+| `secret.remove`  | RevealedPath                                   | Only users with access may remove.              |
+| `seal`           | RootHash, FilesSealed                          | Hash over all sorted `.sig.json` files.         |
 
-Key rotation is done by removing and re-adding the user (`user.kill` + `user.tell`).
-The log doubles as key archive: past `user.tell` entries record which signing keys
-were valid at which point, allowing verification of old signatures after a user was
-removed or rotated their key.
+Group membership is part of the `user.tell` detail. There are no separate
+group operations. Changing a user's groups means `user.kill` + `user.tell`.
+Admin status is determined by membership in the "admin" group.
+
+Key rotation is also handled as `user.kill` + `user.tell`. The log doubles as
+key archive: past `user.tell` entries record which signing and encryption keys
+were valid at which point, so old signatures stay verifiable.
 
 #### Authorization
 
-Every entry that modifies users, groups or access lists must be signed by an admin.
-The entry's `signature` field proves who wrote it. During verification we check that
-the signer was a member of the "admin" group at that point in the log. No separate
-counter-signature is needed since the entry signature already proves authorship.
+Every entry that modifies users or secrets must be signed by an admin. The
+entry's `signature` field proves who wrote it. During verification we check
+that the signer was a member of the "admin" group at that point in the log.
 
-The init entry (seq 1) is special: it establishes the first admin and is the only
-entry allowed to be self-signed.
+The first `user.tell` (right after init) is special: it establishes the first
+admin and is the only entry allowed to be self-signed.
 
 #### Trust anchor (`.sesam/audit/init`)
 
-`sesam init` writes the SHA3-256 hash of the init entry (seq 1) to `.sesam/audit/init`.
-This file is created once and must never be modified afterwards.
+`sesam init` writes the SHA3-256 hash of the init entry (seq 1) to
+`.sesam/audit/init`. This file is created once and must never change.
 
-During verification, the hash of the current seq 1 entry is compared to the contents
-of this file. If they differ, the log was rebuilt from scratch. CI can additionally
+During verification, the hash of the current seq 1 entry is compared to this
+file. If they differ, the log was rebuilt from scratch. CI can additionally
 check that `git log -- .sesam/audit/init` has exactly one commit.
 
-This does not protect against `git push --force` (Eve can rewrite the first commit
-and make everything consistent). Force push protection is outside sesam's threat model
-and should be enforced at the forge level.
+Does not protect against `git push --force` (Eve can rewrite the first commit
+and make everything consistent). Force push protection is outside sesam's
+threat model and should be enforced at the forge level.
 
 #### Tamper detection
 
 Three checks work together:
 
-1. **Chain integrity**: `prev_hash` of each entry must equal the SHA3-256 of the
-   previous entry. Any modification, insertion or deletion breaks the chain.
+1. **Chain integrity**: `prev_hash` of each entry must equal the SHA3-256 of
+   the previous entry. Any modification, insertion or deletion breaks the chain.
 
 2. **Trust anchor**: The hash of the seq 1 entry must match `.sesam/audit/init`.
    If not, the entire log was replaced.
 
-3. **State-vs-log consistency**: On-disk state must match the log:
-   - Replaying all user/group operations must produce the current config in
-     `sesam.yml`. If it doesn't, the config was changed outside the log.
+3. **State-vs-log consistency**: Replaying the log must produce a model that
+   matches the actual state on disk:
+   - Users and their groups must match `sesam.yml`.
+   - Secrets and their access lists must match `sesam.yml`.
    - The `RootHash` in the latest `seal` entry must match the hash computed
      from the `.sig.json` files on disk.
 
 Attack scenarios and which check catches them:
 
-- Eve modifies the config but skips the log: state-vs-log fails (config does
-  not match the replayed log).
+- Eve modifies the config but skips the log: state-vs-log fails (replayed
+  model does not match `sesam.yml`).
 - Eve adds forged log entries: signature check fails (signer is not an admin).
 - Eve replaces the entire log: trust anchor check fails (init hash does not
   match `.sesam/audit/init`).
@@ -260,9 +260,8 @@ Attack scenarios and which check catches them:
 
 The audit log is linear. When branches diverge, each branch appends its own
 entries. On merge, `sesam verify` checks both branches back to their common
-ancestor. Encrypted files are opaque binary that git cannot merge, so conflicting
-secret changes require manual resolution anyway. The log just follows the same
-constraint.
+ancestor. Encrypted files are opaque binary that git cannot merge, so
+conflicting secret changes require manual resolution anyway.
 
 #### Additional checks
 

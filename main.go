@@ -51,17 +51,38 @@ func main() {
 
 	fmt.Println("I am:", whoami)
 
+	isInit := false
+
 	signer, err := core.LoadSignKey(".", whoami, id)
 	if err != nil {
 		signer, err = core.GenerateSignKey(".", whoami, recp.Recipient)
 		if err != nil {
 			log.Fatalf("failed to load/gen signing key: %v", err)
 		}
+
+		isInit = true
 	}
 
 	keyring := core.NewMemoryKeyring()
 	keyring.AddSignPubKey(whoami, signer.PublicKey())
 	keyring.AddRecipient(whoami, recp)
+
+	auditLog, err := core.LoadAuditLog(
+		".",
+		signer,
+		keyring,
+	)
+
+	if isInit {
+		signKeyStr := core.MulticodeEncode(signer.PublicKey(), core.MhEd25519Pub)
+		entry := core.NewAuditEntry(core.OpUserTell, whoami, &core.DetailUserTell{
+			User:        whoami,
+			Groups:      []string{"admin"},
+			PubKeys:     []string{recp.String()},
+			SignPubKeys: []string{signKeyStr},
+		})
+		auditLog.AddEntry(entry)
+	}
 
 	sm := &core.SecretManager{
 		RepoDir:    ".",
@@ -76,18 +97,13 @@ func main() {
 		Recipients:   keyring.Recipients([]string{"sahib"}),
 	}
 
-	auditLog, err := core.LoadAuditLog(
-		".",
-		signer,
-		keyring,
-	)
 	if err != nil {
 		log.Fatalf("failed to create audit log: %v", err)
 	}
 
 	fmt.Println("SEAL", secret.RevealedPath)
 
-	sig, err := secret.Seal()
+	sig, err := secret.Seal(whoami)
 	if err != nil {
 		log.Fatalf("seal failed: %v", err)
 	}
@@ -110,9 +126,13 @@ func main() {
 		log.Fatalf("seal failed: %v", err)
 	}
 
+	// TODO: We also need to check that audit lo was not truncated:
+	// 			 By checking git history of .sesam/audit/init
 	// NOTE: normally we would do that before much else.
-	_, err = core.Verify(auditLog, keyring)
+	vstate, err := core.Verify(auditLog, keyring)
 	if err != nil {
 		log.Fatalf("failed to verify log: %v", err)
 	}
+
+	fmt.Printf("state: %+v\n", vstate)
 }

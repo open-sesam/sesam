@@ -70,13 +70,13 @@ type Secret struct {
 }
 
 type SecretSignature struct {
-	// TODO: Add signed by?
 	RevealedPath string `json:"path"`
 	Hash         string `json:"hash"`
 	Signature    string `json:"signature"`
+	SealedBy     string `json:"sealed_by"`
 }
 
-func (s *Secret) Seal() (*SecretSignature, error) {
+func (s *Secret) Seal(sealedByUser string) (*SecretSignature, error) {
 	rd, err := os.Open(filepath.Join(s.Mgr.RepoDir, s.RevealedPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secret: %w", err)
@@ -120,6 +120,7 @@ func (s *Secret) Seal() (*SecretSignature, error) {
 		RevealedPath: s.RevealedPath,
 		Hash:         MulticodeEncode(hashBytes, MhSHA3_256),
 		Signature:    sig,
+		SealedBy:     sealedByUser,
 	}
 
 	// Write signature to buffer:
@@ -192,7 +193,11 @@ func (s *Secret) Reveal() error {
 		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", expectedHash, sigDesc.Hash)
 	}
 
-	if _, err := s.Mgr.Keyring.Verify(sha3HashBytes, sigDesc.Signature); err != nil {
+	if _, err := s.Mgr.Keyring.Verify(
+		sha3HashBytes,
+		sigDesc.Signature,
+		sigDesc.SealedBy,
+	); err != nil {
 		// verification failed, abort.
 		return err
 	}

@@ -32,6 +32,11 @@ type ComparablePublicKey interface {
 // sure they are normalized (no comments like user@host)
 type stringPubKey string
 
+func newStringPubKey(s string) stringPubKey {
+	// just make sure we don't have formatting accidents...
+	return stringPubKey(strings.TrimSpace(s))
+}
+
 func (spk stringPubKey) Equal(o ComparablePublicKey) bool {
 	ospk, ok := o.(stringPubKey)
 	if !ok {
@@ -83,7 +88,7 @@ func sshKeyToIdentity(rawKey any) (*Identity, error) {
 
 		return &Identity{
 			Identity: id,
-			pub:      stringPubKey(ssh.MarshalAuthorizedKey(sshPub)),
+			pub:      newStringPubKey(string(ssh.MarshalAuthorizedKey(sshPub))),
 		}, nil
 	case ed25519.PrivateKey:
 		id, err := agessh.NewEd25519Identity(k)
@@ -99,7 +104,7 @@ func sshKeyToIdentity(rawKey any) (*Identity, error) {
 
 		return &Identity{
 			Identity: id,
-			pub:      stringPubKey(ssh.MarshalAuthorizedKey(sshPub)),
+			pub:      newStringPubKey(string(ssh.MarshalAuthorizedKey(sshPub))),
 		}, nil
 	case *rsa.PrivateKey:
 		id, err := agessh.NewRSAIdentity(k)
@@ -115,7 +120,7 @@ func sshKeyToIdentity(rawKey any) (*Identity, error) {
 
 		return &Identity{
 			Identity: id,
-			pub:      stringPubKey(ssh.MarshalAuthorizedKey(sshPub)),
+			pub:      newStringPubKey(string(ssh.MarshalAuthorizedKey(sshPub))),
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported ssh key type: %T", k)
@@ -136,7 +141,7 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity
 
 		return &Identity{
 			Identity: x25519id,
-			pub:      stringPubKey(x25519id.Recipient().String()),
+			pub:      newStringPubKey(x25519id.Recipient().String()),
 		}, nil
 	case strings.HasPrefix(key, "AGE-SECRET-KEY-PQ-1"):
 		hybridID, err := age.ParseHybridIdentity(key)
@@ -146,7 +151,7 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity
 
 		return &Identity{
 			Identity: hybridID,
-			pub:      stringPubKey(hybridID.Recipient().String()),
+			pub:      newStringPubKey(hybridID.Recipient().String()),
 		}, nil
 	}
 

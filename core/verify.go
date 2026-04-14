@@ -89,6 +89,7 @@ func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) er
 		return fmt.Errorf("init at wrong seq_id: %d (!= 1)", entry.SeqID)
 	}
 
+	// compare with .sesam/audit/init; should always be the same.
 	if eh := entry.Hash(); eh != log.InitHash {
 		return fmt.Errorf("audit log has been possibly truncated: %s != %s", eh, log.InitHash)
 	}
@@ -97,13 +98,28 @@ func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) er
 }
 
 func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
-	if _, err := state.RequireAdmin(entry); err != nil {
-		return err
-	}
-
 	tellDetails, err := ParseDetail[DetailUserTell](entry)
 	if err != nil {
 		return err
+	}
+
+	if entry.SeqID == 2 {
+		// BOOTSTRAP: After init we create an initial admin user.
+		if len(state.Users) != 0 {
+			return fmt.Errorf("there are already existing users after init")
+		}
+
+		if entry.ChangedBy != tellDetails.User {
+			return fmt.Errorf("bootstrap user has to add himself")
+		}
+	} else {
+		if _, err := state.RequireAdmin(entry); err != nil {
+			return err
+		}
+
+		if entry.ChangedBy == tellDetails.User {
+			return fmt.Errorf("users cannot add themself (seq_id=%d)", entry.SeqID)
+		}
 	}
 
 	_, exists := state.UserExists(tellDetails.User)
