@@ -161,14 +161,15 @@ type DetailInit struct {
 //
 // Verification:
 //
-//   - Bootstrap only: If seq_id == 2, we allow a user entry that adds himself.
-//   - Else, a user may not add himself.
 //   - The ChangedBy user must be an admin user.
-//   - The user may not exist aleady.
-//   - Adding users should always followed by a seal in the log (not an hard error, but a warning)
-//   - The seal has to resul in a different root hash than before (to make sure files really were changed)
+//   - A user may not add himself.
+//   - The user may not exist already.
+//   - Adding users should always be followed by a seal in the log (not a hard error, but a warning).
+//   - The seal has to result in a different root hash than before (to make sure files really were changed).
 //   - PubKeys and SignPubKeys must be valid keys.
 //   - Groups may not have duplicates.
+//
+// The initial admin is established via DetailInit, not via a separate user.tell entry.
 //
 // Note:
 //
