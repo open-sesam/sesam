@@ -124,7 +124,7 @@ func regularMain(id *core.Identity) *core.SecretManager {
 	// Optional, just a double check:
 	report := core.VerifyIntegrity(".", vstate, keyring)
 	if !report.OK() {
-		fmt.Println(report.Error())
+		fmt.Println(report.String())
 	}
 
 	return sm

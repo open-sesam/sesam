@@ -43,7 +43,7 @@ func (ir *IntegrityReport) OK() bool {
 	return len(ir.Errors) == 0
 }
 
-func (ir *IntegrityReport) Error() string {
+func (ir *IntegrityReport) String() string {
 	if ir.OK() {
 		return "no issues"
 	}
@@ -54,6 +54,60 @@ func (ir *IntegrityReport) Error() string {
 	}
 
 	return msg
+}
+
+func verifyIntegritySingleSecret(
+	repoDir string,
+	vs VerifiedSecret,
+	report *IntegrityReport,
+	diskAgeFiles map[string]bool,
+	diskSigMap map[string]*SecretSignature,
+	kr Keyring,
+) {
+	sig, hasSig := diskSigMap[vs.RevealedPath]
+	if !hasSig {
+		report.add(vs.RevealedPath, "missing .sig.json file")
+	}
+
+	// Remove from maps so we can detect extras.
+	defer delete(diskSigMap, vs.RevealedPath)
+	defer delete(diskAgeFiles, vs.RevealedPath)
+
+	// Check .age file exists and hash matches.
+	agePath := filepath.Join(repoDir, ".sesam", "objects", vs.RevealedPath+".age")
+	ageFd, err := os.Open(agePath)
+	if err != nil {
+		report.add(vs.RevealedPath, fmt.Sprintf("missing .age file: %v", err))
+		return
+	}
+
+	defer closeLogged(ageFd)
+
+	h := sha3.New256()
+	if _, err := io.Copy(h, ageFd); err != nil {
+		report.add(vs.RevealedPath, fmt.Sprintf("failed to hash .age file: %v", err))
+		return
+	}
+
+	_, _ = h.Write([]byte(vs.RevealedPath))
+	computedHash := MulticodeEncode(h.Sum(nil), MhSHA3_256)
+
+	if hasSig && computedHash != sig.Hash {
+		report.add(vs.RevealedPath, fmt.Sprintf(
+			"hash mismatch: .sig.json says %s, .age file says %s",
+			sig.Hash, computedHash,
+		))
+	}
+
+	// Verify the signature in .sig.json.
+	if hasSig {
+		hashBytes, _, err := MulticodeDecode(sig.Hash)
+		if err != nil {
+			report.add(vs.RevealedPath, fmt.Sprintf("failed to decode hash: %v", err))
+		} else if _, err := kr.Verify(hashBytes, sig.Signature, sig.SealedBy); err != nil {
+			report.add(vs.RevealedPath, fmt.Sprintf("invalid signature: %v", err))
+		}
+	}
 }
 
 // VerifyIntegrity performs a deep integrity check comparing the verified state
@@ -77,8 +131,8 @@ func VerifyIntegrity(repoDir string, state *VerifiedState, kr Keyring) *Integrit
 	}
 
 	diskSigMap := make(map[string]*SecretSignature, len(diskSigs))
-	for i := range diskSigs {
-		diskSigMap[diskSigs[i].RevealedPath] = &diskSigs[i]
+	for idx := range diskSigs {
+		diskSigMap[diskSigs[idx].RevealedPath] = &diskSigs[idx]
 	}
 
 	// Collect all .age files on disk to detect extras.
@@ -86,54 +140,7 @@ func VerifyIntegrity(repoDir string, state *VerifiedState, kr Keyring) *Integrit
 
 	// Check every secret in the verified state.
 	for _, vs := range state.Secrets {
-		sig, hasSig := diskSigMap[vs.RevealedPath]
-		if !hasSig {
-			report.add(vs.RevealedPath, "missing .sig.json file")
-		}
-
-		// Check .age file exists and hash matches.
-		agePath := filepath.Join(repoDir, ".sesam", "objects", vs.RevealedPath+".age")
-		ageFd, err := os.Open(agePath)
-		if err != nil {
-			report.add(vs.RevealedPath, fmt.Sprintf("missing .age file: %v", err))
-			delete(diskSigMap, vs.RevealedPath)
-			delete(diskAgeFiles, vs.RevealedPath)
-			continue
-		}
-
-		h := sha3.New256()
-		if _, err := io.Copy(h, ageFd); err != nil {
-			report.add(vs.RevealedPath, fmt.Sprintf("failed to hash .age file: %v", err))
-			closeLogged(ageFd)
-			delete(diskSigMap, vs.RevealedPath)
-			delete(diskAgeFiles, vs.RevealedPath)
-			continue
-		}
-		closeLogged(ageFd)
-
-		_, _ = h.Write([]byte(vs.RevealedPath))
-		computedHash := MulticodeEncode(h.Sum(nil), MhSHA3_256)
-
-		if hasSig && computedHash != sig.Hash {
-			report.add(vs.RevealedPath, fmt.Sprintf(
-				"hash mismatch: .sig.json says %s, .age file says %s",
-				sig.Hash, computedHash,
-			))
-		}
-
-		// Verify the signature in .sig.json.
-		if hasSig {
-			hashBytes, _, err := MulticodeDecode(sig.Hash)
-			if err != nil {
-				report.add(vs.RevealedPath, fmt.Sprintf("failed to decode hash: %v", err))
-			} else if _, err := kr.Verify(hashBytes, sig.Signature, sig.SealedBy); err != nil {
-				report.add(vs.RevealedPath, fmt.Sprintf("invalid signature: %v", err))
-			}
-		}
-
-		// Remove from maps so we can detect extras.
-		delete(diskSigMap, vs.RevealedPath)
-		delete(diskAgeFiles, vs.RevealedPath)
+		verifyIntegritySingleSecret(repoDir, vs, report, diskAgeFiles, diskSigMap, kr)
 	}
 
 	// Any remaining entries are files not tracked in the state.
@@ -148,8 +155,8 @@ func VerifyIntegrity(repoDir string, state *VerifiedState, kr Keyring) *Integrit
 	// RootHash check ties it all together.
 	if state.LastSealRootHash != "" {
 		sigPtrs := make([]*SecretSignature, 0, len(diskSigs))
-		for i := range diskSigs {
-			sigPtrs = append(sigPtrs, &diskSigs[i])
+		for idx := range diskSigs {
+			sigPtrs = append(sigPtrs, &diskSigs[idx])
 		}
 
 		diskRootHash := BuildRootHash(sigPtrs)
