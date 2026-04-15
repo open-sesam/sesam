@@ -140,7 +140,7 @@ outer:
 func (s *VerifiedState) RequireAdmin(entry *AuditEntrySigned) (*VerifiedUser, error) {
 	adminUser, exists := s.UserExists(entry.ChangedBy)
 	if !exists {
-		return nil, fmt.Errorf("user %s already existed at seq_id=%d", entry.ChangedBy, entry.SeqID)
+		return nil, fmt.Errorf("user %s does not exist at seq_id=%d", entry.ChangedBy, entry.SeqID)
 	}
 
 	if !adminUser.IsAdmin() {
@@ -261,7 +261,7 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 	// - if the admin is the one we gonna delete: forbid.
 	// - if we delete another user: allow.
 	if adminUsersFound == 1 && adminName == user.Name {
-		return fmt.Errorf("trying to delete last admin user: %d (seq_id=%d)", user.Name, entry.SeqID)
+		return fmt.Errorf("trying to delete last admin user: %s (seq_id=%d)", user.Name, entry.SeqID)
 	}
 
 	// Looks good, change state:
