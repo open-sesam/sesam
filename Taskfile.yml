@@ -24,4 +24,10 @@ tasks:
     cmds:
       - go run gotest.tools/gotestsum@v1.10.1 -- -parallel 20 ./...
 
+  test:coverage:
+    desc: Run go tests with coverage report
+    cmds:
+      - go test ./... -coverprofile=coverage.out
+      - go tool cover -func=coverage.out
+
   # TODO: Build an docker image for CI + also for end users.
