@@ -192,10 +192,10 @@ Operation types:
 
 | Operation        | Detail fields                                  | Notes                                           |
 |------------------|------------------------------------------------|-------------------------------------------------|
-| `init`           | InitUUID                                       | Trust root. Self-sign allowed. See below.       |
-| `user.tell`      | User, PubKeys, SignPubKeys, Groups             | Must be signed by an admin (except after init). |
+| `init`           | InitUUID, Admin (embedded UserTell)            | Trust root. Pins first admin. See below.        |
+| `user.tell`      | User, PubKeys, SignPubKeys, Groups             | Must be signed by an admin.                     |
 | `user.kill`      | User                                           | Must not remove last user or last admin.        |
-| `secret.change`  | Type, RevealedPath, Groups                     | Add or update a secret and its access list.     |
+| `secret.change`  | RevealedPath, Groups                           | Add or update a secret and its access list.     |
 | `secret.remove`  | RevealedPath                                   | Only users with access may remove.              |
 | `seal`           | RootHash, FilesSealed                          | Hash over all sorted `.sig.json` files.         |
 
@@ -213,8 +213,8 @@ Every entry that modifies users or secrets must be signed by an admin. The
 entry's `signature` field proves who wrote it. During verification we check
 that the signer was a member of the "admin" group at that point in the log.
 
-The first `user.tell` (right after init) is special: it establishes the first
-admin and is the only entry allowed to be self-signed.
+The first admin is established by the `init` entry itself (embedded `Admin`
+field). There is no separate bootstrap `user.tell`.
 
 #### Trust anchor (`.sesam/audit/init`)
 
