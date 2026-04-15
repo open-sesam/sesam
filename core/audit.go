@@ -398,7 +398,7 @@ func (al *AuditLog) Store() error {
 	logPath := filepath.Join(al.RepoDir, ".sesam", "audit", "log.json")
 	fd, err := renameio.TempFile(al.RepoDir, logPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("create temp file for audit log: %w", err)
 	}
 
 	defer fd.Cleanup()

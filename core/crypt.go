@@ -160,8 +160,7 @@ func (s *Secret) Reveal() error {
 		sigDesc.Signature,
 		sigDesc.SealedBy,
 	); err != nil {
-		// verification failed, abort.
-		return err
+		return fmt.Errorf("signature verification failed for %s: %w", s.RevealedPath, err)
 	}
 
 	// TODO: Seal and reveal should carry over permissions and other attrs from the original file.
