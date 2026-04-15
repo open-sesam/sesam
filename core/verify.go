@@ -35,6 +35,10 @@ type VerifiedState struct {
 	// This is useful to update the state which entries that were added later.
 	VerifiedUntil int
 
+	// LastSealRootHash is the RootHash from the most recent seal entry.
+	// Compared against disk after replay to detect file substitution.
+	LastSealRootHash string
+
 	auditLog *AuditLog
 	keyring  Keyring
 }
@@ -357,7 +361,7 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) er
 	}
 
 	state.SealRequiredSeqID = 0
-	_ = sealDetails // TODO: do the actual verification.
+	state.LastSealRootHash = sealDetails.RootHash
 	return nil
 }
 
@@ -374,6 +378,28 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 
 	if err := verify(&state); err != nil {
 		return nil, err
+	}
+
+	// Verify that the latest seal's RootHash matches the .sig.json files on disk.
+	if state.LastSealRootHash != "" {
+		sigs, err := ReadAllSignatures(log.RepoDir)
+		if err != nil {
+			return nil, fmt.Errorf("reading signatures for root hash check: %w", err)
+		}
+
+		sigPtrs := make([]*SecretSignature, len(sigs))
+		for i := range sigs {
+			sigPtrs[i] = &sigs[i]
+		}
+
+		diskRootHash := BuildRootHash(sigPtrs)
+		if diskRootHash != state.LastSealRootHash {
+			return nil, fmt.Errorf(
+				"root hash mismatch: log says %s, disk says %s",
+				state.LastSealRootHash,
+				diskRootHash,
+			)
+		}
 	}
 
 	return &state, nil
