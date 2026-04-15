@@ -242,18 +242,20 @@ func (kpp *KeyringPassphraseProvider) ReadPassphrase() ([]byte, error) {
 // - We failed to test the relation by a quick test of encrypt/decrypt.
 //
 // TODO: the map is just a placeholder until we have a config.
-func IdentityToUser(id *Identity, userToPub map[string]*Recipient) (string, error) {
+func IdentityToUser(id *Identity, userToPub map[string][]*Recipient) (string, error) {
 	ownPub := id.Public()
 
 	var matchCount int
 	var matchedUser string
 	var matchedRecipient *Recipient
 
-	for userName, recp := range userToPub {
-		if ownPub.Equal(recp.ComparablePublicKey) {
-			matchCount++
-			matchedUser = userName
-			matchedRecipient = recp
+	for userName, recps := range userToPub {
+		for _, recp := range recps {
+			if ownPub.Equal(recp.ComparablePublicKey) {
+				matchCount++
+				matchedUser = userName
+				matchedRecipient = recp
+			}
 		}
 	}
 

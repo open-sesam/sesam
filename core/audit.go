@@ -316,9 +316,6 @@ type AuditLog struct {
 	// RepoDir is the dir in which .sesam resides.
 	RepoDir string `json:"-"`
 
-	// Signer needed to add new entries
-	Signer Signer `json:"-"`
-
 	// The hash from the .sesam/audit/init file.
 	// It should be the same hash as the prev_hash of the 2nd entry.
 	InitHash string `json:"-"`
@@ -327,12 +324,11 @@ type AuditLog struct {
 	Keyring Keyring `json:"-"`
 }
 
-// EmptyLog initializes an empty audit log on repo init.
+// InitLog initializes an empty audit log on repo init.
 // It creates the first init entry which also establishes the initial admin user.
-func EmptyLog(repoDir string, signer Signer, kr Keyring, admin DetailUserTell) (*AuditLog, error) {
+func InitLog(repoDir string, signer Signer, kr Keyring, admin DetailUserTell) (*AuditLog, error) {
 	al := &AuditLog{
 		RepoDir: repoDir,
-		Signer:  signer,
 		Keyring: kr,
 	}
 
@@ -341,7 +337,7 @@ func EmptyLog(repoDir string, signer Signer, kr Keyring, admin DetailUserTell) (
 		Admin:    admin,
 	})
 
-	signedEntry, err := al.AddEntry(initEntry)
+	signedEntry, err := al.AddEntry(signer, initEntry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init log: %w", err)
 	}
@@ -364,7 +360,7 @@ func EmptyLog(repoDir string, signer Signer, kr Keyring, admin DetailUserTell) (
 
 // AddEntry will add another signed entry to the audit log.
 // This action is non-reversible, not even via code.
-func (al *AuditLog) AddEntry(e *AuditEntry) (*AuditEntrySigned, error) {
+func (al *AuditLog) AddEntry(signer Signer, e *AuditEntry) (*AuditEntrySigned, error) {
 	entry := &AuditEntrySigned{
 		AuditEntry: *e,
 	}
@@ -385,7 +381,7 @@ func (al *AuditLog) AddEntry(e *AuditEntry) (*AuditEntrySigned, error) {
 		return nil, fmt.Errorf("marshal current entry: %w", err)
 	}
 
-	entry.Signature, err = al.Signer.Sign(wholeEntryJSON)
+	entry.Signature, err = signer.Sign(wholeEntryJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign entry: %w", err)
 	}
@@ -429,8 +425,8 @@ func (al *AuditLog) Store() error {
 }
 
 // LoadAuditLog reads the audit log from disk and gives you an handle to operate on it.
-// It does NOT verify the log yet.
-func LoadAuditLog(repoDir string, signer Signer, kr Keyring) (*AuditLog, error) {
+// It does NOT verify the log yet. Call Verify() for that.
+func LoadAuditLog(repoDir string, kr Keyring) (*AuditLog, error) {
 	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.json")
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
 	initData, err := os.ReadFile(initPath)
@@ -447,7 +443,6 @@ func LoadAuditLog(repoDir string, signer Signer, kr Keyring) (*AuditLog, error) 
 
 	al := AuditLog{
 		RepoDir:  repoDir,
-		Signer:   signer,
 		InitHash: strings.TrimSpace(string(initData)),
 		Keyring:  kr,
 	}

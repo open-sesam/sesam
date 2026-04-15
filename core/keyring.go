@@ -28,6 +28,9 @@ type Keyring interface {
 
 	// Recipients returns all recipients for a specific set of users.
 	Recipients(users []string) Recipients
+
+	// ListUsers() returns all users and recipients.
+	ListUsers() map[string][]*Recipient
 }
 
 type MemoryKeyring struct {
@@ -139,4 +142,8 @@ func (mk *MemoryKeyring) Recipients(users []string) Recipients {
 	}
 
 	return recps
+}
+
+func (mk *MemoryKeyring) ListUsers() map[string][]*Recipient {
+	return mk.recipients
 }

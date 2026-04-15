@@ -98,7 +98,7 @@ func (sm *SecretManager) AddOrChangeSecret(revealedPath string, groups []string)
 		Groups:       groups,
 	})
 
-	if _, err := sm.AuditLog.AddEntry(entry); err != nil {
+	if _, err := sm.AuditLog.AddEntry(sm.Signer, entry); err != nil {
 		return fmt.Errorf("audit add entry: %w", err)
 	}
 
@@ -131,7 +131,7 @@ func (sm *SecretManager) SealAll() error {
 		FilesSealed: len(sigs),
 	})
 
-	if _, err := sm.AuditLog.AddEntry(entry); err != nil {
+	if _, err := sm.AuditLog.AddEntry(sm.Signer, entry); err != nil {
 		return fmt.Errorf("audit add entry: %w", err)
 	}
 

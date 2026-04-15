@@ -411,14 +411,38 @@ func verify(state *VerifiedState) error {
 	var previousEntry *AuditEntrySigned
 	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
 		if entry.SeqID <= uint64(state.VerifiedUntil) {
-			// TODO: That's kinda inefficient.
 			return nil
+		}
+
+		// first do the logical checks & then the signature check.
+		// operations like init, tell etc. add keys to the keyring which can be required
+		// to verify signatures.
+		var err error
+		switch entry.Operation {
+		case OpInit:
+			err = verifyInit(log, state, entry, state.keyring)
+		case OpUserTell:
+			err = verifyUserTell(log, state, entry, state.keyring)
+		case OpUserKill:
+			err = verifyUserKill(log, state, entry, state.keyring)
+		case OpSeal:
+			err = verifySeal(log, state, entry)
+		case OpSecretChange:
+			err = verifySecretChange(log, state, entry)
+		case OpSecretRemove:
+			err = verifySecretRemove(log, state, entry)
+		default:
+			err = fmt.Errorf("unexpected core.Operation: %#v", entry.Operation)
+		}
+
+		if err != nil {
+			return err
 		}
 
 		// check the signature
 		signatureUser, err := entry.Verify(log.Keyring)
 		if err != nil {
-			return fmt.Errorf("failed to verify signature on entry %d: %w", idx, err)
+			return fmt.Errorf("failed to verify signature on entry %d: %w", entry.SeqID, err)
 		}
 
 		if signatureUser != entry.ChangedBy {
@@ -442,29 +466,9 @@ func verify(state *VerifiedState) error {
 			}
 		}
 
-		switch entry.Operation {
-		case OpInit:
-			err = verifyInit(log, state, entry, state.keyring)
-		case OpUserTell:
-			err = verifyUserTell(log, state, entry, state.keyring)
-		case OpUserKill:
-			err = verifyUserKill(log, state, entry, state.keyring)
-		case OpSeal:
-			err = verifySeal(log, state, entry)
-		case OpSecretChange:
-			err = verifySecretChange(log, state, entry)
-		case OpSecretRemove:
-			err = verifySecretRemove(log, state, entry)
-		default:
-			err = fmt.Errorf("unexpected core.Operation: %#v", entry.Operation)
-		}
-
-		if err == nil {
-			previousEntry = entry
-			state.VerifiedUntil = int(entry.SeqID)
-		}
-
-		return err
+		previousEntry = entry
+		state.VerifiedUntil = int(entry.SeqID)
+		return nil
 	})
 	if err != nil {
 		return err
@@ -475,9 +479,6 @@ func verify(state *VerifiedState) error {
 	if srs := state.SealRequiredSeqID; srs > 0 {
 		slog.Warn("verify: entry required a seal, but none was made after", slog.Int("seq_id", srs))
 	}
-
-	// TODO: Check that the root hash changed from last seal.
-	// TODO: Verify atual sealed files to match last RootHash
 
 	return nil
 }
