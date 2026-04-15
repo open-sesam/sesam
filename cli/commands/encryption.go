@@ -66,7 +66,7 @@ func HandleSeal(ctx context.Context, cmd *cli.Command) error {
 		Recipients:   recipients,
 	}
 
-	if _, err := secret.Seal(); err != nil {
+	if _, err := secret.Seal(user); err != nil {
 		return err
 	}
 
