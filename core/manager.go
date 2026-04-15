@@ -39,12 +39,6 @@ func BuildSecretManager(
 	log *AuditLog,
 	state *VerifiedState,
 ) (*SecretManager, error) {
-	// TODO: Shouldn't we read the signatures form the vstate?
-	sigs, err := ReadAllSignatures(repoDir)
-	if err != nil {
-		return nil, err
-	}
-
 	mgr := &SecretManager{
 		RepoDir:    repoDir,
 		WhoAmI:     whoami,
@@ -55,16 +49,12 @@ func BuildSecretManager(
 		State:      state,
 	}
 
-	for _, sig := range sigs {
-		accessUsers, err := state.UsersForSecret(sig.RevealedPath)
-		if err != nil {
-			return nil, fmt.Errorf("no secret: %w", err)
-		}
-
+	for _, vsecret := range state.Secrets {
+		accessUsers := state.UsersForSecret(vsecret.RevealedPath)
 		recps := keyring.Recipients(accessUsers)
 		mgr.secrets = append(mgr.secrets, Secret{
 			Mgr:          mgr,
-			RevealedPath: sig.RevealedPath,
+			RevealedPath: vsecret.RevealedPath,
 			Recipients:   recps,
 		})
 	}
@@ -95,15 +85,16 @@ func (sm *SecretManager) tmpDir() string {
 	return tmpDir
 }
 
-// TODO: Passing a secret struct is not a good API really.
-func (sm *SecretManager) AddOrChangeSecret(s *Secret, groups []string) error {
-	// 1. Add Secret to list.
-	// 2. Add new secret to audit log.
-	s.Mgr = sm
-	sm.secrets = append(sm.secrets, *s)
+func (sm *SecretManager) AddOrChangeSecret(revealedPath string, groups []string) error {
+	accessUsers := sm.State.UserForGroups(groups)
+	sm.secrets = append(sm.secrets, Secret{
+		Mgr:          sm,
+		RevealedPath: revealedPath,
+		Recipients:   sm.Keyring.Recipients(accessUsers),
+	})
 
 	entry := NewAuditEntry(OpSecretChange, sm.WhoAmI, &DetailSecretChange{
-		RevealedPath: s.RevealedPath,
+		RevealedPath: revealedPath,
 		Groups:       groups,
 	})
 
@@ -113,6 +104,10 @@ func (sm *SecretManager) AddOrChangeSecret(s *Secret, groups []string) error {
 
 	if err := sm.State.Update(); err != nil {
 		return fmt.Errorf("failed to verify new entries: %w", err)
+	}
+
+	if err := sm.AuditLog.Store(); err != nil {
+		return fmt.Errorf("storing log failed: %v", err)
 	}
 
 	return nil

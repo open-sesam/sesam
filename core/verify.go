@@ -86,20 +86,25 @@ func (s *VerifiedState) UserHasAccess(user string, groups []string) bool {
 	return false
 }
 
-func (s *VerifiedState) UsersForSecret(revealedPath string) ([]string, error) {
+func groupsToMap(groups []string) map[string]bool {
+	groupMap := make(map[string]bool, len(groups)+1)
+	for _, group := range groups {
+		groupMap[group] = true
+	}
+	groupMap["admin"] = true
+	return groupMap
+}
+
+func (s *VerifiedState) UsersForSecret(revealedPath string) []string {
 	idx := slices.IndexFunc(s.Secrets, func(vs VerifiedSecret) bool {
 		return vs.RevealedPath == revealedPath
 	})
 	if idx < 0 {
-		return nil, fmt.Errorf("secret %s not found", revealedPath)
+		return nil
 	}
 
 	secret := &s.Secrets[idx]
-	groups := make(map[string]bool, len(secret.AccessGroups)+1)
-	for _, g := range secret.AccessGroups {
-		groups[g] = true
-	}
-	groups["admin"] = true
+	groups := groupsToMap(secret.AccessGroups)
 
 	var users []string
 	for _, user := range s.Users {
@@ -111,7 +116,25 @@ func (s *VerifiedState) UsersForSecret(revealedPath string) ([]string, error) {
 		}
 	}
 
-	return users, nil
+	return users
+}
+
+func (s *VerifiedState) UserForGroups(groups []string) []string {
+	users := make([]string, 0)
+	groupMap := groupsToMap(groups)
+
+outer:
+	for _, vuser := range s.Users {
+		for _, vgroup := range vuser.Groups {
+			if groupMap[vgroup] {
+				// user matches one of those groups.
+				users = append(users, vuser.Name)
+				continue outer
+			}
+		}
+	}
+
+	return users
 }
 
 func (s *VerifiedState) RequireAdmin(entry *AuditEntrySigned) (*VerifiedUser, error) {

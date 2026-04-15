@@ -117,10 +117,7 @@ func main() {
 	}
 
 	if isInit {
-		err = sm.AddOrChangeSecret(&core.Secret{
-			RevealedPath: "DESIGN.new",
-			Recipients:   keyring.Recipients([]string{"sahib"}),
-		}, []string{"admin"})
+		err = sm.AddOrChangeSecret("DESIGN.new", []string{"admin"})
 		if err != nil {
 			log.Fatalf("failed to add secret: %v", err)
 		}
