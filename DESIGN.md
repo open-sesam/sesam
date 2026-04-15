@@ -343,6 +343,58 @@ Check out an older secret by commit and restore it.
   - ...that were rotated, but not exchanged.
   - ...that we did not know how to rotate and were not exchanged.
 
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     SecretManager                       │
+│          ties everything together for a session         │
+└────┬──────────┬───────────────┬─────────────────┬───────┘
+     │          │               │                 │
+     ▼          ▼               ▼                 ▼
+┌────────┐ ┌────────┐    ┌──────────┐    ┌───────────────┐
+│Identity│ │ Signer │    │ Keyring  │    │ VerifiedState │
+│ your   │ │ signs  │    │everyone's│    │ "what should  │
+│ private│ │ entries│    │public    │    │  the repo     │
+│ key(s) │ │& secrets│   │keys     │    │  look like?"  │
+└───┬────┘ └───┬────┘    └────┬─────┘    └───────┬───────┘
+    │          │              ▲                   ▲
+    │          │              │ keys added        │ built by
+    │          │              │ during replay     │ replaying
+    │          ▼              │                   │
+    │       ┌─────────────────┴───────────────────┘
+    │       │ AuditLog
+    │       │  append-only, hash-chained, signed entries
+    │       │  each entry is one of:
+    │       │   - Init (+first admin)  - UserTell/Kill
+    │       │   - SecretChange/Remove  - Seal
+    │       └──────────────────────────────────────
+    │
+    ▼
+┌────────────────────────────────────────────────┐
+│ Secret                                         │
+│  Seal():   encrypt + sign ──► .age + .sig.json │
+│  Reveal(): decrypt via identity                │
+│  recipients come from VerifiedState + Keyring  │
+└───────────────────────┬────────────────────────┘
+                        │
+                        ▼
+              ┌───────────────────┐
+              │ SecretSignature   │
+              │  per-file hash    │
+              └────────┬──────────┘
+                       │
+                       ▼
+              BuildRootHash()
+               combined hash of all .sig.json,
+               stored in Seal entries
+
+Verify():
+ 1. check .sesam/audit/init not tampered (git history)
+ 2. replay log: check chain, signatures, authorization
+ 3. compare resulting state against repo on disk
+```
+
 ## Implementation
 
 ### Libraries
