@@ -240,8 +240,6 @@ func (kpp *KeyringPassphraseProvider) ReadPassphrase() ([]byte, error) {
 // - There is no public key for this user.
 // - There are several matching users (techically possible, but disencouraged).
 // - We failed to test the relation by a quick test of encrypt/decrypt.
-//
-// TODO: the map is just a placeholder until we have a config.
 func IdentityToUser(id *Identity, userToPub map[string][]*Recipient) (string, error) {
 	ownPub := id.Public()
 

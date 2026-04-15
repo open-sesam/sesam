@@ -86,9 +86,6 @@ func cachePath(repoDir, url string) string {
 
 // TODO: implement command to check if links and forge-ids are out-dated? Maybe part of verify?
 
-// TODO: Verify needs to inlcude the contents of the users/groups and public keys in the signature.
-//       THIS MEANS WE HAVE TO INCLUDE THE ACTUAL PUBLIC KEY NOT JUST "github:sahib"
-
 // resolveCachedLink will download the specified `url` and write it to a cache under `repoDir`.
 // If the cached response is already available, then it is returned directly.
 func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode CacheMode) (string, error) {

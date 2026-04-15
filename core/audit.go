@@ -218,8 +218,6 @@ type DetailUserTell struct {
 // - ChangedBy user must be an admin.
 // - The user may not be the last "admin" user in the repo.
 // - A seal with different RootHash has to follow after this.
-//
-// TODO: What if changing the only user in the repo? (i.e. add a new pub key)
 type DetailUserKill struct {
 	User string `json:"user"`
 }
@@ -383,8 +381,6 @@ func (al *AuditLog) AddEntry(signer Signer, e *AuditEntry) (*AuditEntrySigned, e
 	}
 
 	al.Entries = append(al.Entries, *entry)
-
-	// TODO: We should automatically verify the new entry to make sure verified-state is up-to-date.
 	return entry, nil
 }
 
@@ -453,8 +449,6 @@ func LoadAuditLog(repoDir string) (*AuditLog, error) {
 // BuildRootHash will produce a combined hash ("Root Hash") out of all
 // hashes of encrypted files. It serves as general integrity protection
 // (a bit similar like a merkle tree, just not with hierarchy)
-//
-// TODO: Pass in all sealed files in here? What about partial seals?
 func BuildRootHash(sigs []*SecretSignature) string {
 	sort.Slice(sigs, func(i, j int) bool {
 		return sigs[i].RevealedPath < sigs[j].RevealedPath

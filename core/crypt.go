@@ -27,7 +27,7 @@ type Secret struct {
 	// TODO: enforce this. Also make sure that path is not a symbolic link and contains no ".." or similar.
 	RevealedPath string
 
-	// TODO: Needs to be parsed from a recipient file or public key list using age.ParseRecipient
+	// Recipients are the people that may reveal this secret.
 	Recipients Recipients
 }
 

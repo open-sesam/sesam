@@ -41,7 +41,6 @@ config:
       # This is the only user that by definition may change user/groups.
       # We recommend to have at least two people here. These users also
       # by definition have access to all files (as adding users require re-encrypting)
-      # TODO: Would it be possible to lock yourself out as admin?
       - cpahl
     deployers:
       - cpahl

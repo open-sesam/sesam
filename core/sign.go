@@ -16,7 +16,6 @@ import (
 )
 
 type ed25519Signer struct {
-	// TODO: That is actually.... wrong? We need to have plenty keys, at least one per user here.
 	pub  ed25519.PublicKey
 	priv ed25519.PrivateKey
 	user string
@@ -71,10 +70,6 @@ func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error
 	if l := len(signPrivKeyRaw); l != 64 {
 		return nil, fmt.Errorf("signing key has an unexpected length (%d) and not 64", l)
 	}
-
-	// TODO: Verify the loaded public key is the same as in the config.
-	// 			 If so we should error out.
-	//       This should also be done as part of verify.
 
 	signPrivKey := ed25519.PrivateKey(signPrivKeyRaw)
 	return &ed25519Signer{
