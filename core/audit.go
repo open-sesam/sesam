@@ -134,17 +134,27 @@ func (aes *AuditEntrySigned) Verify(kr Keyring) (string, error) {
 
 // DetailInit is added on init.
 //
-// It is the base of audit log.
+// It is the base of audit log and establishes the first admin user.
+// The embedded Admin field pins the initial admin's signing pubkey
+// to the trust anchor (.sesam/audit/init), preventing log truncation
+// attacks: Eve cannot forge a new init entry with herself as admin
+// without rewriting git history.
 //
 // Verification:
 //
 // - SeqID must be 1.
-// - The hash at .sesam/audit/init must be the same as the hash of this entry (including signature)
+// - The hash at .sesam/audit/init must be the same as the hash of this entry (including signature).
+// - Admin must have valid keys and include the "admin" group.
+// - ChangedBy must match Admin.User.
 type DetailInit struct {
 	// This is uniquely generated per repo.
 	// It has no specific purpose beyond debugging
 	// and as input for the initial hash.
 	InitUUID string `json:"init_uuid"`
+
+	// Admin is the initial admin user established at repo creation.
+	// This pins the admin's signing pubkey to the trust anchor.
+	Admin DetailUserTell `json:"admin"`
 }
 
 // DetailUserTell describes a newly added user.
@@ -297,19 +307,17 @@ type AuditLog struct {
 }
 
 // EmptyLog initializes an empty audit log on repo init.
-// It creates the first init entry as well.
-func EmptyLog(repoDir string, signer Signer, kr Keyring) (*AuditLog, error) {
+// It creates the first init entry which also establishes the initial admin user.
+func EmptyLog(repoDir string, signer Signer, kr Keyring, admin DetailUserTell) (*AuditLog, error) {
 	al := &AuditLog{
 		RepoDir: repoDir,
 		Signer:  signer,
 		Keyring: kr,
 	}
 
-	// Give the init a specific uuid, so we have a specific uuid for a repo.
-	initUUID := uuid.New().String()
-
 	initEntry := NewAuditEntry(OpInit, signer.UserName(), &DetailInit{
-		InitUUID: initUUID,
+		InitUUID: uuid.New().String(),
+		Admin:    admin,
 	})
 
 	signedEntry, err := al.AddEntry(initEntry)
@@ -403,10 +411,6 @@ func (al *AuditLog) Store() error {
 // It does NOT verify the log yet.
 func LoadAuditLog(repoDir string, signer Signer, kr Keyring) (*AuditLog, error) {
 	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.json")
-	if _, err := os.Stat(logPath); os.IsNotExist(err) {
-		return EmptyLog(repoDir, signer, kr)
-	}
-
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
 	initData, err := os.ReadFile(initPath)
 	if err != nil {

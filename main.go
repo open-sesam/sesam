@@ -68,39 +68,32 @@ func main() {
 	keyring.AddSignPubKey(whoami, signer.PublicKey())
 	keyring.AddRecipient(whoami, recp)
 
-	auditLog, err := core.LoadAuditLog(
-		".",
-		signer,
-		keyring,
-	)
-	if err != nil {
-		log.Fatalf("failed to load audit log: %v", err)
-	}
-
+	var auditLog *core.AuditLog
 	if isInit {
 		signKeyStr := core.MulticodeEncode(signer.PublicKey(), core.MhEd25519Pub)
-		entry := core.NewAuditEntry(core.OpUserTell, whoami, &core.DetailUserTell{
+		auditLog, err = core.EmptyLog(".", signer, keyring, core.DetailUserTell{
 			User:        whoami,
 			Groups:      []string{"admin"},
 			PubKeys:     []string{recp.String()},
 			SignPubKeys: []string{signKeyStr},
 		})
-
-		if _, err := auditLog.AddEntry(entry); err != nil {
-			log.Fatalf("added audit entry: %v", err)
+		if err != nil {
+			log.Fatalf("failed to init audit log: %v", err)
 		}
 
 		_ = auditLog.Store()
+	} else {
+		auditLog, err = core.LoadAuditLog(
+			".",
+			signer,
+			keyring,
+		)
+		if err != nil {
+			log.Fatalf("failed to load audit log: %v", err)
+		}
 	}
 
 	verifyStart := time.Now()
-	if err := core.VerifyInitFileUnchanged("."); err != nil {
-		log.Fatalf("init file was changed")
-	}
-
-	// TODO: We also need to check that audit lo was not truncated:
-	// 			 By checking git history of .sesam/audit/init
-	// NOTE: normally we would do that before much else.
 	vstate, err := core.Verify(auditLog, keyring)
 	if err != nil {
 		log.Fatalf("failed to verify log: %v", err)

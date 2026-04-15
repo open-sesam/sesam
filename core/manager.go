@@ -39,6 +39,7 @@ func BuildSecretManager(
 	log *AuditLog,
 	state *VerifiedState,
 ) (*SecretManager, error) {
+	// TODO: Shouldn't we read the signatures form the vstate?
 	sigs, err := ReadAllSignatures(repoDir)
 	if err != nil {
 		return nil, err

@@ -124,17 +124,30 @@ func (s *VerifiedState) RequireAdmin(entry *AuditEntrySigned) (*VerifiedUser, er
 	return adminUser, nil
 }
 
-func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
+func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
 	if entry.SeqID != 1 {
 		return fmt.Errorf("init at wrong seq_id: %d (!= 1)", entry.SeqID)
 	}
 
-	// compare with .sesam/audit/init; should always be the same.
 	if eh := entry.Hash(); eh != log.InitHash {
 		return fmt.Errorf("audit log has been possibly truncated: %s != %s", eh, log.InitHash)
 	}
 
-	return nil
+	initDetail, err := ParseDetail[DetailInit](entry)
+	if err != nil {
+		return err
+	}
+
+	admin := &initDetail.Admin
+	if entry.ChangedBy != admin.User {
+		return fmt.Errorf("init changed_by (%s) does not match admin user (%s)", entry.ChangedBy, admin.User)
+	}
+
+	if !slices.Contains(admin.Groups, "admin") {
+		return fmt.Errorf("init admin user %s is not in the admin group", admin.User)
+	}
+
+	return registerUser(state, admin, kr)
 }
 
 func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
@@ -143,57 +156,48 @@ func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 		return err
 	}
 
-	if entry.SeqID == 2 {
-		// BOOTSTRAP: After init we create an initial admin user.
-		// TODO: Is it more elegant to give the init detail a user field and keep it there?
-		if len(state.Users) != 0 {
-			return fmt.Errorf("there are already existing users after init: %s", entry)
-		}
-
-		if entry.ChangedBy != tellDetails.User {
-			return fmt.Errorf("bootstrap user has to add himself")
-		}
-	} else {
-		if _, err := state.RequireAdmin(entry); err != nil {
-			return err
-		}
-
-		if entry.ChangedBy == tellDetails.User {
-			return fmt.Errorf("users cannot add themself (seq_id=%d)", entry.SeqID)
-		}
+	if _, err := state.RequireAdmin(entry); err != nil {
+		return err
 	}
 
-	_, exists := state.UserExists(tellDetails.User)
-	if exists {
-		return fmt.Errorf("user %s already existed at seq_id=%d", tellDetails.User, entry.SeqID)
+	if entry.ChangedBy == tellDetails.User {
+		return fmt.Errorf("users cannot add themself (seq_id=%d)", entry.SeqID)
 	}
 
-	// Add signing keys to keyring:
-	for _, signPubKey := range tellDetails.SignPubKeys {
+	state.SealRequiredSeqID = int(entry.SeqID)
+	return registerUser(state, tellDetails, kr)
+}
+
+// registerUser adds a user's keys to the keyring and state.
+// Shared by verifyInit (initial admin) and verifyUserTell.
+func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error {
+	if _, exists := state.UserExists(tell.User); exists {
+		return fmt.Errorf("user %s already exists", tell.User)
+	}
+
+	for _, signPubKey := range tell.SignPubKeys {
 		signPubKeyData, _, err := MulticodeDecode(signPubKey)
 		if err != nil {
 			return fmt.Errorf("bad signing key %v", signPubKey)
 		}
 
-		kr.AddSignPubKey(tellDetails.User, signPubKeyData)
+		kr.AddSignPubKey(tell.User, signPubKeyData)
 	}
 
-	// Add recipients to keyring:
-	for _, pubKey := range tellDetails.PubKeys {
+	for _, pubKey := range tell.PubKeys {
 		recp, err := ParseRecipient(pubKey)
 		if err != nil {
 			return fmt.Errorf("bad public key %v", pubKey)
 		}
 
-		kr.AddRecipient(tellDetails.User, recp)
+		kr.AddRecipient(tell.User, recp)
 	}
 
-	state.SealRequiredSeqID = int(entry.SeqID)
 	state.Users = append(state.Users, VerifiedUser{
-		Name:       tellDetails.User,
-		SignPubKey: tellDetails.SignPubKeys,
-		PubKeys:    tellDetails.PubKeys,
-		Groups:     Deduplicate(tellDetails.Groups),
+		Name:       tell.User,
+		SignPubKey: tell.SignPubKeys,
+		PubKeys:    tell.PubKeys,
+		Groups:     Deduplicate(tell.Groups),
 	})
 
 	return nil
@@ -332,6 +336,10 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) er
 }
 
 func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
+	if err := VerifyInitFileUnchanged(log.RepoDir); err != nil {
+		return nil, fmt.Errorf("init file check: %w", err)
+	}
+
 	// use an fresh empty state:
 	var state VerifiedState
 
@@ -360,12 +368,6 @@ func verify(state *VerifiedState, log *AuditLog, kr Keyring) error {
 			return fmt.Errorf("signature was made by %s, not %s (seq_id=%d)", signatureUser, entry.ChangedBy, entry.SeqID)
 		}
 
-		if entry.SeqID > 2 {
-			if _, exists := state.UserExists(entry.ChangedBy); !exists {
-				return fmt.Errorf("user does not exist %s (seq_id=%d)", entry.ChangedBy, entry.SeqID)
-			}
-		}
-
 		if previousEntry != nil {
 			prevJSON, err := json.Marshal(previousEntry)
 			if err != nil {
@@ -383,25 +385,29 @@ func verify(state *VerifiedState, log *AuditLog, kr Keyring) error {
 			}
 		}
 
-		previousEntry = entry
-		state.VerifiedUntil = int(entry.SeqID) // TODO: move after actual verify.
-
 		switch entry.Operation {
 		case OpInit:
-			return verifyInit(log, state, entry)
+			err = verifyInit(log, state, entry, kr)
 		case OpUserTell:
-			return verifyUserTell(log, state, entry, kr)
+			err = verifyUserTell(log, state, entry, kr)
 		case OpUserKill:
-			return verifyUserKill(log, state, entry, kr)
+			err = verifyUserKill(log, state, entry, kr)
 		case OpSeal:
-			return verifySeal(log, state, entry)
+			err = verifySeal(log, state, entry)
 		case OpSecretChange:
-			return verifySecretChange(log, state, entry)
+			err = verifySecretChange(log, state, entry)
 		case OpSecretRemove:
-			return verifySecretRemove(log, state, entry)
+			err = verifySecretRemove(log, state, entry)
 		default:
-			return fmt.Errorf("unexpected core.Operation: %#v", entry.Operation)
+			err = fmt.Errorf("unexpected core.Operation: %#v", entry.Operation)
 		}
+
+		if err == nil {
+			previousEntry = entry
+			state.VerifiedUntil = int(entry.SeqID)
+		}
+
+		return err
 	})
 	if err != nil {
 		return err
