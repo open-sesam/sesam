@@ -61,13 +61,33 @@ type AuditEntry struct {
 	Time time.Time `json:"time"`
 }
 
-// TODO: Derive `op` from detail type?
+// operationFor returns the operation type for a given detail struct.
+func operationFor(detail any) Operation {
+	switch detail.(type) {
+	case *DetailInit:
+		return OpInit
+	case *DetailUserTell:
+		return OpUserTell
+	case *DetailUserKill:
+		return OpUserKill
+	case *DetailSecretChange:
+		return OpSecretChange
+	case *DetailSecretRemove:
+		return OpSecretRemove
+	case *DetailSeal:
+		return OpSeal
+	default:
+		panic(fmt.Sprintf("unknown detail type: %T", detail))
+	}
+}
+
 // NewAuditEntry creates a new entry with compile-time type safety on the detail.
+// The operation is derived from the detail type.
 // SeqID, PreviousHash and Time are filled by AuditLog.AddEntry().
-func NewAuditEntry[T AuditDetail](op Operation, changedBy string, detail *T) *AuditEntry {
+func NewAuditEntry[T AuditDetail](changedBy string, detail *T) *AuditEntry {
 	detailJSON, _ := json.Marshal(detail)
 	return &AuditEntry{
-		Operation:         op,
+		Operation:         operationFor(detail),
 		ChangedBy:         changedBy,
 		Time:              time.Now().UTC(),
 		Detail:            detailJSON,
@@ -316,7 +336,7 @@ func EmptyLog(repoDir string, signer Signer, kr Keyring, admin DetailUserTell) (
 		Keyring: kr,
 	}
 
-	initEntry := NewAuditEntry(OpInit, signer.UserName(), &DetailInit{
+	initEntry := NewAuditEntry(signer.UserName(), &DetailInit{
 		InitUUID: uuid.New().String(),
 		Admin:    admin,
 	})

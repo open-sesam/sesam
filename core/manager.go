@@ -93,7 +93,7 @@ func (sm *SecretManager) AddOrChangeSecret(revealedPath string, groups []string)
 		Recipients:   sm.Keyring.Recipients(accessUsers),
 	})
 
-	entry := NewAuditEntry(OpSecretChange, sm.WhoAmI, &DetailSecretChange{
+	entry := NewAuditEntry(sm.WhoAmI, &DetailSecretChange{
 		RevealedPath: revealedPath,
 		Groups:       groups,
 	})
@@ -126,7 +126,7 @@ func (sm *SecretManager) SealAll() error {
 		sigs = append(sigs, sig)
 	}
 
-	entry := NewAuditEntry(OpSeal, sm.WhoAmI, &DetailSeal{
+	entry := NewAuditEntry(sm.WhoAmI, &DetailSeal{
 		RootHash:    BuildRootHash(sigs),
 		FilesSealed: len(sigs),
 	})
