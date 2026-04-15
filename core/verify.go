@@ -34,6 +34,9 @@ type VerifiedState struct {
 	// VerifiedUntil tells us until which seq_id we verified.
 	// This is useful to update the state which entries that were added later.
 	VerifiedUntil int
+
+	auditLog *AuditLog
+	keyring  Keyring
 }
 
 func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
@@ -341,16 +344,21 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 	}
 
 	// use an fresh empty state:
-	var state VerifiedState
+	state := VerifiedState{
+		auditLog: log,
+		keyring:  kr,
+	}
 
-	if err := verify(&state, log, kr); err != nil {
+	if err := verify(&state); err != nil {
 		return nil, err
 	}
 
 	return &state, nil
 }
 
-func verify(state *VerifiedState, log *AuditLog, kr Keyring) error {
+func verify(state *VerifiedState) error {
+	log := state.auditLog
+
 	var previousEntry *AuditEntrySigned
 	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
 		if entry.SeqID <= uint64(state.VerifiedUntil) {
@@ -387,11 +395,11 @@ func verify(state *VerifiedState, log *AuditLog, kr Keyring) error {
 
 		switch entry.Operation {
 		case OpInit:
-			err = verifyInit(log, state, entry, kr)
+			err = verifyInit(log, state, entry, state.keyring)
 		case OpUserTell:
-			err = verifyUserTell(log, state, entry, kr)
+			err = verifyUserTell(log, state, entry, state.keyring)
 		case OpUserKill:
-			err = verifyUserKill(log, state, entry, kr)
+			err = verifyUserKill(log, state, entry, state.keyring)
 		case OpSeal:
 			err = verifySeal(log, state, entry)
 		case OpSecretChange:
@@ -425,6 +433,7 @@ func verify(state *VerifiedState, log *AuditLog, kr Keyring) error {
 	return nil
 }
 
-func (s *VerifiedState) Update(log *AuditLog, kr Keyring) error {
-	return verify(s, log, kr)
+// Update verifies entries that have been added at runtime
+func (s *VerifiedState) Update() error {
+	return verify(s)
 }

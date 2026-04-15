@@ -111,7 +111,7 @@ func (sm *SecretManager) AddOrChangeSecret(s *Secret, groups []string) error {
 		return fmt.Errorf("audit add entry: %w", err)
 	}
 
-	if err := sm.State.Update(sm.AuditLog, sm.Keyring); err != nil {
+	if err := sm.State.Update(); err != nil {
 		return fmt.Errorf("failed to verify new entries: %w", err)
 	}
 
@@ -140,7 +140,7 @@ func (sm *SecretManager) SealAll() error {
 		return fmt.Errorf("audit add entry: %w", err)
 	}
 
-	if err := sm.State.Update(sm.AuditLog, sm.Keyring); err != nil {
+	if err := sm.State.Update(); err != nil {
 		return fmt.Errorf("failed to verify new entries: %w", err)
 	}
 
