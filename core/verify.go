@@ -440,7 +440,7 @@ func verify(state *VerifiedState) error {
 		}
 
 		// check the signature
-		signatureUser, err := entry.Verify(log.Keyring)
+		signatureUser, err := entry.Verify(state.keyring)
 		if err != nil {
 			return fmt.Errorf("failed to verify signature on entry %d: %w", entry.SeqID, err)
 		}

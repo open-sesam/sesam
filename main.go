@@ -40,7 +40,7 @@ func initMain(id *core.Identity) *core.SecretManager {
 	keyring := core.NewMemoryKeyring()
 
 	signKeyStr := core.MulticodeEncode(signer.PublicKey(), core.MhEd25519Pub)
-	auditLog, err := core.InitLog(".", signer, keyring, core.DetailUserTell{
+	auditLog, err := core.InitLog(".", signer, core.DetailUserTell{
 		User:        whoami,
 		Groups:      []string{"admin"},
 		PubKeys:     []string{recp.String()},
@@ -83,10 +83,7 @@ func initMain(id *core.Identity) *core.SecretManager {
 func regularMain(id *core.Identity) *core.SecretManager {
 	keyring := core.NewMemoryKeyring()
 
-	auditLog, err := core.LoadAuditLog(
-		".",
-		keyring,
-	)
+	auditLog, err := core.LoadAuditLog(".")
 	if err != nil {
 		log.Fatalf("failed to load audit log: %v", err)
 	}

@@ -319,17 +319,13 @@ type AuditLog struct {
 	// The hash from the .sesam/audit/init file.
 	// It should be the same hash as the prev_hash of the 2nd entry.
 	InitHash string `json:"-"`
-
-	// Keyring contains all known public keys
-	Keyring Keyring `json:"-"`
 }
 
 // InitLog initializes an empty audit log on repo init.
 // It creates the first init entry which also establishes the initial admin user.
-func InitLog(repoDir string, signer Signer, kr Keyring, admin DetailUserTell) (*AuditLog, error) {
+func InitLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, error) {
 	al := &AuditLog{
 		RepoDir: repoDir,
-		Keyring: kr,
 	}
 
 	initEntry := NewAuditEntry(signer.UserName(), &DetailInit{
@@ -426,7 +422,7 @@ func (al *AuditLog) Store() error {
 
 // LoadAuditLog reads the audit log from disk and gives you an handle to operate on it.
 // It does NOT verify the log yet. Call Verify() for that.
-func LoadAuditLog(repoDir string, kr Keyring) (*AuditLog, error) {
+func LoadAuditLog(repoDir string) (*AuditLog, error) {
 	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.json")
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
 	initData, err := os.ReadFile(initPath)
@@ -444,7 +440,6 @@ func LoadAuditLog(repoDir string, kr Keyring) (*AuditLog, error) {
 	al := AuditLog{
 		RepoDir:  repoDir,
 		InitHash: strings.TrimSpace(string(initData)),
-		Keyring:  kr,
 	}
 
 	dec := json.NewDecoder(fd)
