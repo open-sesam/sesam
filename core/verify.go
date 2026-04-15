@@ -165,7 +165,7 @@ func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr
 
 	initDetail, err := ParseDetail[DetailInit](entry)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse init detail: %w", err)
 	}
 
 	admin := &initDetail.Admin
@@ -183,7 +183,7 @@ func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr
 func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
 	tellDetails, err := ParseDetail[DetailUserTell](entry)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse user.tell detail: %w", err)
 	}
 
 	if _, err := state.RequireAdmin(entry); err != nil {
@@ -240,7 +240,7 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 
 	killDetails, err := ParseDetail[DetailUserKill](entry)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse user.kill detail: %w", err)
 	}
 
 	user, exists := state.UserExists(killDetails.User)
@@ -299,7 +299,7 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 
 	if existsIdx >= 0 {
 		// secret exists
-		hasAccess := state.UserHasAccess(entry.ChangedBy, scd.Groups)
+		hasAccess := state.UserHasAccess(entry.ChangedBy, state.Secrets[existsIdx].AccessGroups)
 		if !hasAccess {
 			return fmt.Errorf(
 				"user %s may not change details of %s",
