@@ -53,7 +53,7 @@ func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) {
 	}
 
 	if slices.ContainsFunc(recps, func(other *Recipient) bool {
-		return other.Equal(recp)
+		return other.ComparablePublicKey.Equal(recp.ComparablePublicKey)
 	}) {
 		return
 	}
@@ -86,7 +86,7 @@ func (mk *MemoryKeyring) DeleteUser(user string) bool {
 func (mk *MemoryKeyring) verifySingle(key, data []byte, signature string) error {
 	sigData, code, err := MulticodeDecode(signature)
 	if err != nil {
-		return err
+		return fmt.Errorf("decode signature: %w", err)
 	}
 
 	if code != MhEdDSA {
