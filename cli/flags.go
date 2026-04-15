@@ -28,7 +28,7 @@ var flagsInit = []cli.Flag{
 		Name:  "user",
 		Usage: "Initial admin user name (defaults to current OS user)",
 	},
-	&cli.StringFlag{
+	&cli.StringSliceFlag{
 		Name:  "recipient",
 		Usage: "Initial admin recipient key (optional when derivable from --identity)",
 	},

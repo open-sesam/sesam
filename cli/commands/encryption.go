@@ -66,7 +66,7 @@ func HandleSeal(ctx context.Context, cmd *cli.Command) error {
 		Recipients:   recipients,
 	}
 
-	if err := secret.Seal(); err != nil {
+	if _, err := secret.Seal(); err != nil {
 		return err
 	}
 
@@ -106,7 +106,7 @@ func HandleReveal(_ context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-func loadIdentities(identityPath, user string) ([]age.Identity, error) {
+func loadIdentities(identityPath, user string) (core.Identities, error) {
 	expandedPath, err := expandHomeDir(identityPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve identity path: %w", err)
@@ -117,23 +117,33 @@ func loadIdentities(identityPath, user string) ([]age.Identity, error) {
 		return nil, fmt.Errorf("failed to read identity %s: %w", expandedPath, err)
 	}
 
-	ids, err := core.ParseIdentities(data, &core.KeyringPassphraseProvider{
-		KeyFingerprint: "sesam.id." + user,
-		Fallback:       &core.StdinPassphraseProvider{},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse identity %s: %w", expandedPath, err)
+	var identities core.Identities
+	for line := range strings.SplitSeq(string(data), "\n") {
+		key := strings.TrimSpace(line)
+		if key == "" || strings.HasPrefix(key, "#") {
+			continue
+		}
+
+		identity, err := core.ParseIdentity(key, &core.KeyringPassphraseProvider{
+			KeyFingerprint: "sesam.id." + user,
+			Fallback:       &core.StdinPassphraseProvider{},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse identity %s: %w", expandedPath, err)
+		}
+
+		identities = append(identities, identity)
 	}
 
-	if len(ids) == 0 {
+	if len(identities) == 0 {
 		return nil, fmt.Errorf("identity %s does not contain any usable entries", expandedPath)
 	}
 
-	return ids, nil
+	return identities, nil
 }
 
-func parseRecipients(rawRecipients string) ([]age.Recipient, error) {
-	var recipients []age.Recipient
+func parseRecipients(rawRecipients string) (core.Recipients, error) {
+	var recipients core.Recipients
 	for line := range strings.SplitSeq(rawRecipients, "\n") {
 		key := strings.TrimSpace(line)
 		if key == "" {
@@ -155,7 +165,7 @@ func parseRecipients(rawRecipients string) ([]age.Recipient, error) {
 	return recipients, nil
 }
 
-func matchIdentityRecipient(identities []age.Identity, recipients []age.Recipient) (age.Recipient, error) {
+func matchIdentityRecipient(identities core.Identities, recipients core.Recipients) (*core.Recipient, error) {
 	const probeText = "sesam-signkey-probe"
 
 	for _, recipient := range recipients {
