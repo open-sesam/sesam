@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 )
 
 // validUserName checks that a user name is safe for use in file paths and log entries.
@@ -24,6 +27,32 @@ func validUserName(name string) error {
 		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '_' {
 			return fmt.Errorf("user name contains invalid character: %q", r)
 		}
+	}
+
+	return nil
+}
+
+func validSecretPath(repoDir string, revealedPath string) error {
+	if len(revealedPath) == 0 {
+		return fmt.Errorf("empty file path not allowed: %s", revealedPath)
+	}
+
+	if revealedPath[0] == filepath.Separator {
+		return fmt.Errorf("absolute paths not allowed here: %s", revealedPath)
+	}
+
+	if strings.Contains(revealedPath, "..") {
+		return fmt.Errorf("path may not include '..': %s", revealedPath)
+	}
+
+	revealedPath = filepath.Clean(revealedPath)
+	info, err := os.Stat(revealedPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat %s: %w", revealedPath, err)
+	}
+
+	if m := info.Mode(); !m.IsRegular() {
+		return fmt.Errorf("%s is not a regular file: %v", revealedPath, m)
 	}
 
 	return nil

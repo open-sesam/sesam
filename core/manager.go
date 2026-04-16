@@ -95,6 +95,10 @@ func (sm *SecretManager) tmpDir() string {
 }
 
 func (sm *SecretManager) AddOrChangeSecret(revealedPath string, groups []string) error {
+	if err := validSecretPath(sm.RepoDir, revealedPath); err != nil {
+		return fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
+	}
+
 	accessUsers := sm.State.UserForGroups(groups)
 	sm.secrets = append(sm.secrets, secret{
 		Mgr:          sm,

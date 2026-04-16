@@ -18,8 +18,6 @@ type secret struct {
 	Mgr *SecretManager
 
 	// RevealedPath is relative to Mgr.RepoDir
-	// TODO: enforce this. Also make sure that path is not a symbolic link and contains no ".." or similar.
-	// 			 Should be done in SecretManager as main entry point for new secrets.
 	RevealedPath string
 
 	// Recipients are the people that may reveal this secret.

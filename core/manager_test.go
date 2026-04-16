@@ -18,6 +18,15 @@ func TestAddOrChangeSecret(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	writeSecret(t, mgr.RepoDir, "secrets/new", "new-content")
 
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "secrets"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "secrets", "new"), []byte("blub"), 0600))
+
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { os.Chdir(origDir) })
+
 	require.NoError(t, mgr.AddOrChangeSecret("secrets/new", []string{"admin"}))
 	require.Len(t, mgr.secrets, 2)
 

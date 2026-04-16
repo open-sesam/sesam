@@ -162,25 +162,18 @@ func TestResolveRecipientFile(t *testing.T) {
 	// ResolveRecipient does NOT strip "file://" — it calls os.ReadFile with the literal
 	// "file://..." string. To avoid leaking a "file:" directory into the working directory,
 	// create the literal path structure inside the temp dir and run the test from there.
-	literalDir := filepath.Join(dir, "file:")
+	literalDir := filepath.Join(dir, "sub")
 	require.NoError(t, os.MkdirAll(literalDir, 0o700))
 	literalFile := filepath.Join(literalDir, "key.pub")
 	require.NoError(t, os.WriteFile(literalFile, []byte("age1testkey"), 0o600))
 
-	// The argument to ResolveRecipient: "file://key.pub" which os.ReadFile sees as "file://key.pub"
-	// which is a relative path "file:/key.pub". We need to chdir to make this work.
-	// Alternatively, just test the passthrough case since file:// is a broken TODO anyway.
-
-	// Actually, just write the key at a path and use the full literal path.
-	// Since os.ReadFile("file:///abs/path") interprets "file:" as first dir component,
-	// we place it inside the temp dir and chdir there.
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir(dir))
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	keyArg := "file://key.pub"
-	got, err := ResolveRecipient(context.Background(), dir, keyArg, CacheModeNone)
+	keyArg := "file://sub/key.pub"
+	got, err := ResolveRecipient(t.Context(), dir, keyArg, CacheModeNone)
 	require.NoError(t, err)
 	require.Equal(t, "age1testkey", got)
 }

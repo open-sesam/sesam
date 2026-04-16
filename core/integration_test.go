@@ -47,6 +47,11 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(repoDir))
+	t.Cleanup(func() { os.Chdir(origDir) })
+
 	secretPath := "secrets/db_password"
 	writeSecret(t, repoDir, secretPath, "hunter2")
 	require.NoError(t, sm.AddOrChangeSecret(secretPath, []string{"admin"}))
@@ -232,6 +237,11 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 
 	sm, err := BuildSecretManager(repoDir, "admin", Identities{admin.Identity}, signer, kr, al, vs)
 	require.NoError(t, err)
+
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(repoDir))
+	t.Cleanup(func() { os.Chdir(origDir) })
 
 	// 1. Add secret.
 	writeSecret(t, repoDir, "secrets/token", "tok-abc")

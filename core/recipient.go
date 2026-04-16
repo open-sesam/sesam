@@ -71,13 +71,22 @@ func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode
 	case strings.HasPrefix(arg, "https://"):
 		return resolveCachedLink(ctx, repoDir, arg, cacheMode)
 	case strings.HasPrefix(arg, "file://"):
-		// TODO: Strip "file://" prefix before reading. Also consider restricting
-		// to paths within the repo directory to prevent reading arbitrary files.
-		// TODO: should file:// then not point to the sesam repo only?
+		path := strings.TrimPrefix(arg, "file://")
+		if err := validSecretPath(repoDir, path); err != nil {
+			return "", fmt.Errorf("invalid file:// path (%s): %w", arg, err)
+		}
+
 		//nolint:gosec
-		data, err := os.ReadFile(arg)
+		fd, err := os.Open(path)
 		if err != nil {
-			return "", fmt.Errorf("failed to find %s: %w", arg, err)
+			return "", fmt.Errorf("failed to open %s: %w", arg, err)
+		}
+
+		defer closeLogged(fd)
+
+		data, err := io.ReadAll(io.LimitReader(fd, 4096))
+		if err != nil {
+			return "", fmt.Errorf("failed to read %s: %w", arg, err)
 		}
 
 		return string(data), nil
