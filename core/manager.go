@@ -57,7 +57,7 @@ func BuildSecretManager(
 	// Clear tmp dir before continuing:
 	tmpDir := mgr.tmpDir()
 	_ = os.RemoveAll(tmpDir)
-	_ = os.MkdirAll(tmpDir, 0700)
+	_ = os.MkdirAll(tmpDir, 0o700)
 
 	for _, vsecret := range state.Secrets {
 		accessUsers := state.UsersForSecret(vsecret.RevealedPath)
@@ -81,7 +81,7 @@ func (sm *SecretManager) cryptWriter(path string) (*os.File, string, error) {
 
 	// TODO: Move that to an init module and add a .donotdelete file in it so that git does not kill it.
 	// .sesam/tmp should be also part of gitignore
-	if err := os.MkdirAll(filepath.Dir(cryptPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cryptPath), 0o700); err != nil {
 		return nil, "", err
 	}
 

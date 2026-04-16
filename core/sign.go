@@ -131,7 +131,7 @@ func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer,
 		return nil, fmt.Errorf("failed to close encrypted writer: %w", err)
 	}
 
-	if err := renameio.WriteFile(signKeyPath, ageBuf.Bytes(), 0600); err != nil {
+	if err := renameio.WriteFile(signKeyPath, ageBuf.Bytes(), 0o600); err != nil {
 		return nil, fmt.Errorf("failed to write signing key %s: %w", signKeyPath, err)
 	}
 

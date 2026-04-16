@@ -49,7 +49,7 @@ func TestIntegrityMissingAgeFile(t *testing.T) {
 
 func TestIntegrityCorruptedAgeFile(t *testing.T) {
 	mgr, state := integritySetup(t)
-	require.NoError(t, os.WriteFile(mgr.cryptPath("secrets/db"), []byte("corrupted"), 0600))
+	require.NoError(t, os.WriteFile(mgr.cryptPath("secrets/db"), []byte("corrupted"), 0o600))
 
 	report := VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect hash mismatch")
@@ -59,8 +59,8 @@ func TestIntegrityExtraSigFile(t *testing.T) {
 	mgr, state := integritySetup(t)
 
 	extraSigPath := signaturePath(mgr.RepoDir, "secrets/extra")
-	require.NoError(t, os.MkdirAll(filepath.Dir(extraSigPath), 0700))
-	require.NoError(t, os.WriteFile(extraSigPath, []byte(`{"path":"secrets/extra","hash":"x","signature":"y","sealed_by":"z"}`), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Dir(extraSigPath), 0o700))
+	require.NoError(t, os.WriteFile(extraSigPath, []byte(`{"path":"secrets/extra","hash":"x","signature":"y","sealed_by":"z"}`), 0o600))
 
 	report := VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect extra .sig.json")
@@ -70,8 +70,8 @@ func TestIntegrityExtraAgeFile(t *testing.T) {
 	mgr, state := integritySetup(t)
 
 	extraAgePath := filepath.Join(mgr.RepoDir, ".sesam", "objects", "secrets", "extra.age")
-	require.NoError(t, os.MkdirAll(filepath.Dir(extraAgePath), 0700))
-	require.NoError(t, os.WriteFile(extraAgePath, []byte("extra"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Dir(extraAgePath), 0o700))
+	require.NoError(t, os.WriteFile(extraAgePath, []byte("extra"), 0o600))
 
 	report := VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect extra .age file")
@@ -115,7 +115,7 @@ func TestIntegrityMultipleSecrets(t *testing.T) {
 	require.True(t, report.OK(), "all good with 3 secrets: %s", report.String())
 
 	// Now corrupt one.
-	require.NoError(t, os.WriteFile(mgr.cryptPath("secrets/b"), []byte("bad"), 0600))
+	require.NoError(t, os.WriteFile(mgr.cryptPath("secrets/b"), []byte("bad"), 0o600))
 	report = VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect corruption in one of multiple secrets")
 }

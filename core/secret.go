@@ -92,7 +92,7 @@ func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 
 	// write the signature file along the encrypted file:
 	sigPath := signaturePath(s.Mgr.RepoDir, s.RevealedPath)
-	if err := renameio.WriteFile(sigPath, sigBuf.Bytes(), 0600); err != nil {
+	if err := renameio.WriteFile(sigPath, sigBuf.Bytes(), 0o600); err != nil {
 		_ = os.Remove(wc.Name())
 		return nil, err
 	}
@@ -169,6 +169,6 @@ func (s *secret) Reveal() error {
 	// TODO: Seal and reveal should carry over permissions and other attrs from the original file.
 	// Git can only differentiate between executable and normal files, not between 0600 and 0644.
 	// So default to 0600 to avoid troubles with ssh keys for now?
-	_ = dstFd.Chmod(0600)
+	_ = dstFd.Chmod(0o600)
 	return dstFd.CloseAtomicallyReplace()
 }

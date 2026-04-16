@@ -55,7 +55,7 @@ func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) {
 	}
 
 	if slices.ContainsFunc(recps, func(other *Recipient) bool {
-		return other.comparablePublicKey.Equal(recp.comparablePublicKey)
+		return other.Equal(recp.comparablePublicKey)
 	}) {
 		return
 	}

@@ -32,11 +32,11 @@ type VerifiedState struct {
 
 	// SealRequiredSeqID tells us the entry that required a seal but didn't have one yet.
 	// If a seal was provided, it is set back to 0.
-	SealRequiredSeqID int
+	SealRequiredSeqID uint64
 
 	// VerifiedUntil tells us until which seq_id we verified.
 	// This is useful to update the state which entries that were added later.
-	VerifiedUntil int
+	VerifiedUntil uint64
 
 	// LastSealRootHash is the RootHash from the most recent seal entry.
 	// Compared against disk after replay to detect file substitution.
@@ -203,7 +203,7 @@ func verifyUserTell(log *AuditLog, state *VerifiedState, entry *auditEntrySigned
 		return fmt.Errorf("users cannot add themself (seq_id=%d)", entry.SeqID)
 	}
 
-	state.SealRequiredSeqID = int(entry.SeqID)
+	state.SealRequiredSeqID = entry.SeqID
 	return registerUser(state, tellDetails, kr)
 }
 
@@ -283,7 +283,7 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *auditEntrySigned
 
 	// Looks good, change state:
 	kr.DeleteUser(user.Name)
-	state.SealRequiredSeqID = int(entry.SeqID)
+	state.SealRequiredSeqID = entry.SeqID
 	state.Users = slices.DeleteFunc(state.Users, func(vu VerifiedUser) bool {
 		return vu.Name == killDetails.User
 	})
@@ -333,7 +333,7 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 		})
 	}
 
-	state.SealRequiredSeqID = int(entry.SeqID)
+	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
 
@@ -423,7 +423,7 @@ func verify(state *VerifiedState) error {
 
 	var previousEntry *auditEntrySigned
 	err := log.Iterate(func(idx int, entry *auditEntrySigned) error {
-		if entry.SeqID <= uint64(state.VerifiedUntil) {
+		if entry.SeqID <= state.VerifiedUntil {
 			return nil
 		}
 
@@ -480,7 +480,7 @@ func verify(state *VerifiedState) error {
 		}
 
 		previousEntry = entry
-		state.VerifiedUntil = int(entry.SeqID)
+		state.VerifiedUntil = entry.SeqID
 		return nil
 	})
 	if err != nil {
@@ -490,7 +490,10 @@ func verify(state *VerifiedState) error {
 	// TODO: Is that a hard error? Or should we just warn here?
 	// Could be that sesam was legit interrupted during operation.
 	if srs := state.SealRequiredSeqID; srs > 0 {
-		slog.Warn("verify: entry required a seal, but none was made after", slog.Int("seq_id", srs))
+		slog.Warn(
+			"verify: entry required a seal, but none was made after",
+			slog.Uint64("seq_id", srs),
+		)
 	}
 
 	return nil

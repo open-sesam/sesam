@@ -76,7 +76,7 @@ func testRepo(t *testing.T) string {
 		filepath.Join(repoDir, ".sesam", "tmp"),
 		filepath.Join(repoDir, ".sesam", "audit"),
 	} {
-		if err := os.MkdirAll(dir, 0700); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -116,11 +116,11 @@ func initAuditLog(t *testing.T, repoDir string, admin *testUser) *AuditLog {
 func writeSecret(t *testing.T, repoDir, revealedPath, content string) {
 	t.Helper()
 	fullPath := filepath.Join(repoDir, revealedPath)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(fullPath, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

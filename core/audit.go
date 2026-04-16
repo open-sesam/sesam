@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -342,13 +343,13 @@ func InitLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, er
 	}
 
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
-	_ = os.MkdirAll(filepath.Dir(initPath), 0700)
+	_ = os.MkdirAll(filepath.Dir(initPath), 0o700)
 
 	initHash := signedEntry.Hash()
 	if err := renameio.WriteFile(
 		initPath,
 		[]byte(initHash),
-		0600,
+		0o600,
 	); err != nil {
 		return nil, fmt.Errorf("failed to write init file: %w", err)
 	}
@@ -410,7 +411,11 @@ func (al *AuditLog) Store() error {
 		return fmt.Errorf("create temp file for audit log: %w", err)
 	}
 
-	defer fd.Cleanup()
+	defer func() {
+		if err := fd.Cleanup(); err != nil {
+			slog.Warn("failed to cleanup fd", slog.Any("err", err))
+		}
+	}()
 
 	enc := json.NewEncoder(fd)
 	enc.SetIndent("", "  ")

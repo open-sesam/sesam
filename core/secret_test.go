@@ -120,7 +120,7 @@ func TestRevealDetectsCorruptedCiphertext(t *testing.T) {
 	require.NoError(t, err)
 
 	// Corrupt the .age file contents.
-	os.WriteFile(mgr.cryptPath("secrets/token"), []byte("corrupted-ciphertext"), 0600)
+	os.WriteFile(mgr.cryptPath("secrets/token"), []byte("corrupted-ciphertext"), 0o600)
 
 	err = secret.Reveal()
 	require.Error(t, err, "reveal should detect corrupted ciphertext")
@@ -136,7 +136,7 @@ func TestRevealDetectsTruncatedCiphertext(t *testing.T) {
 	// Truncate the .age file to half its size.
 	agePath := mgr.cryptPath("secrets/trunc")
 	data, _ := os.ReadFile(agePath)
-	os.WriteFile(agePath, data[:len(data)/2], 0600)
+	os.WriteFile(agePath, data[:len(data)/2], 0o600)
 
 	err = secret.Reveal()
 	require.Error(t, err, "reveal should detect truncated ciphertext")

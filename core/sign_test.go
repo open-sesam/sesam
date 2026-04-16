@@ -91,8 +91,8 @@ func TestReadStoredSignatureMissing(t *testing.T) {
 func TestReadStoredSignatureCorrupt(t *testing.T) {
 	repoDir := testRepo(t)
 	sigPath := signaturePath(repoDir, "secrets/corrupt")
-	os.MkdirAll(filepath.Dir(sigPath), 0700)
-	os.WriteFile(sigPath, []byte("not json"), 0600)
+	os.MkdirAll(filepath.Dir(sigPath), 0o700)
+	os.WriteFile(sigPath, []byte("not json"), 0o600)
 
 	_, err := readStoredSignature(repoDir, "secrets/corrupt")
 	require.Error(t, err, "should fail on corrupt sig JSON")

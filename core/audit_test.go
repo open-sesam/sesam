@@ -151,7 +151,7 @@ func TestStoreAndLoad(t *testing.T) {
 func TestLoadMissingInitFile(t *testing.T) {
 	repoDir := testRepo(t)
 	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.json")
-	require.NoError(t, os.WriteFile(logPath, []byte(`{"entries":[]}`), 0600))
+	require.NoError(t, os.WriteFile(logPath, []byte(`{"entries":[]}`), 0o600))
 
 	_, err := LoadAuditLog(repoDir)
 	require.Error(t, err)
@@ -160,7 +160,7 @@ func TestLoadMissingInitFile(t *testing.T) {
 func TestLoadMissingLogFile(t *testing.T) {
 	repoDir := testRepo(t)
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
-	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0600))
+	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0o600))
 
 	_, err := LoadAuditLog(repoDir)
 	require.Error(t, err)
@@ -169,10 +169,10 @@ func TestLoadMissingLogFile(t *testing.T) {
 func TestLoadCorruptLogFile(t *testing.T) {
 	repoDir := testRepo(t)
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
-	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0600))
+	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0o600))
 
 	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.json")
-	require.NoError(t, os.WriteFile(logPath, []byte("not json"), 0600))
+	require.NoError(t, os.WriteFile(logPath, []byte("not json"), 0o600))
 
 	_, err := LoadAuditLog(repoDir)
 	require.Error(t, err, "should fail on corrupt log JSON")

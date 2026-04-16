@@ -24,7 +24,7 @@ tasks:
     cmds:
       - go run gotest.tools/gotestsum@v1.10.1 -- -parallel 20 ./...
 
-  test:coverage:
+  coverage:
     desc: Run go tests with coverage report
     cmds:
       - go test -v ./... -coverprofile=coverage.out
@@ -32,3 +32,8 @@ tasks:
       - go tool cover -html=coverage.out
 
   # TODO: Build an docker image for CI + also for end users.
+
+  lint:
+    desc: Run the linter
+    cmds:
+      - go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run -c linter.yml

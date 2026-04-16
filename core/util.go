@@ -21,7 +21,7 @@ func validUserName(name string) error {
 	}
 
 	for _, r := range name {
-		if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '-' && r != '_' {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '_' {
 			return fmt.Errorf("user name contains invalid character: %q", r)
 		}
 	}

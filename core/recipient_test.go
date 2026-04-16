@@ -107,8 +107,8 @@ func TestResolveRecipientForgeIds(t *testing.T) {
 			// Pre-populate cache with mock response to avoid real network calls.
 			url := fmt.Sprintf("https://%s/%s.keys", tc.forge, "testuser")
 			cp := cachePath(repoDir, url)
-			os.MkdirAll(filepath.Dir(cp), 0700)
-			os.WriteFile(cp, []byte("cached-key-"+tc.name), 0600)
+			os.MkdirAll(filepath.Dir(cp), 0o700)
+			os.WriteFile(cp, []byte("cached-key-"+tc.name), 0o600)
 
 			got, err := ResolveRecipient(context.Background(), repoDir, tc.prefix+"testuser", CacheModeRead)
 			require.NoError(t, err)
@@ -121,8 +121,8 @@ func TestResolveRecipientHTTPS(t *testing.T) {
 	repoDir := testRepo(t)
 	url := "https://example.com/keys"
 	cp := cachePath(repoDir, url)
-	os.MkdirAll(filepath.Dir(cp), 0700)
-	os.WriteFile(cp, []byte("https-cached"), 0600)
+	os.MkdirAll(filepath.Dir(cp), 0o700)
+	os.WriteFile(cp, []byte("https-cached"), 0o600)
 
 	got, err := ResolveRecipient(context.Background(), repoDir, url, CacheModeRead)
 	require.NoError(t, err)
@@ -135,8 +135,8 @@ func TestResolveCachedLinkCacheReadWrite(t *testing.T) {
 	repoDir := testRepo(t)
 	url := "https://example.com/test.keys"
 	cp := cachePath(repoDir, url)
-	os.MkdirAll(filepath.Dir(cp), 0700)
-	os.WriteFile(cp, []byte("cached-value"), 0600)
+	os.MkdirAll(filepath.Dir(cp), 0o700)
+	os.WriteFile(cp, []byte("cached-value"), 0o600)
 
 	got, err := resolveCachedLink(context.Background(), repoDir, url, CacheModeRead)
 	require.NoError(t, err)
@@ -163,9 +163,9 @@ func TestResolveRecipientFile(t *testing.T) {
 	// "file://..." string. To avoid leaking a "file:" directory into the working directory,
 	// create the literal path structure inside the temp dir and run the test from there.
 	literalDir := filepath.Join(dir, "file:")
-	require.NoError(t, os.MkdirAll(literalDir, 0700))
+	require.NoError(t, os.MkdirAll(literalDir, 0o700))
 	literalFile := filepath.Join(literalDir, "key.pub")
-	require.NoError(t, os.WriteFile(literalFile, []byte("age1testkey"), 0600))
+	require.NoError(t, os.WriteFile(literalFile, []byte("age1testkey"), 0o600))
 
 	// The argument to ResolveRecipient: "file://key.pub" which os.ReadFile sees as "file://key.pub"
 	// which is a relative path "file:/key.pub". We need to chdir to make this work.

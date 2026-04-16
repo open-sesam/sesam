@@ -349,7 +349,7 @@ func TestVerifySealResetsRequirement(t *testing.T) {
 	}))
 
 	state := verifyState(t, al, NewMemoryKeyring())
-	require.Equal(t, 0, state.SealRequiredSeqID)
+	require.Equal(t, uint64(0), state.SealRequiredSeqID)
 	require.Equal(t, "some-hash", state.LastSealRootHash)
 }
 
@@ -580,7 +580,7 @@ func TestUpdate(t *testing.T) {
 	al := initAuditLog(t, repoDir, admin)
 
 	state := verifyState(t, al, NewMemoryKeyring())
-	require.Equal(t, 1, state.VerifiedUntil)
+	require.Equal(t, uint64(1), state.VerifiedUntil)
 
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -589,7 +589,7 @@ func TestUpdate(t *testing.T) {
 	}))
 
 	require.NoError(t, state.Update())
-	require.Equal(t, 2, state.VerifiedUntil)
+	require.Equal(t, uint64(2), state.VerifiedUntil)
 	_, exists := state.UserExists("bob")
 	require.True(t, exists)
 }
@@ -729,5 +729,5 @@ func TestFullLifecycle(t *testing.T) {
 	_, exists = state.SecretExists("secrets/api_key")
 	require.True(t, exists)
 	require.Equal(t, "hash2", state.LastSealRootHash)
-	require.Equal(t, 0, state.SealRequiredSeqID)
+	require.Equal(t, uint64(0), state.SealRequiredSeqID)
 }

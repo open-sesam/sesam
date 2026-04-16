@@ -188,7 +188,8 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity
 		return sshKeyToIdentity(rawKey)
 	}
 
-	if _, ok := err.(*ssh.PassphraseMissingError); !ok {
+	targetErr := &ssh.PassphraseMissingError{}
+	if !errors.As(err, &targetErr) {
 		// not a passphrase issue, so report early.
 		return nil, fmt.Errorf("key is not parse-able: %w", err)
 	}

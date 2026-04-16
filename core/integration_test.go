@@ -199,7 +199,7 @@ func TestIntegrationTamperDetection(t *testing.T) {
 
 	// Tamper: rewrite the init file and commit again.
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
-	require.NoError(t, os.WriteFile(initPath, []byte("tampered-hash"), 0600))
+	require.NoError(t, os.WriteFile(initPath, []byte("tampered-hash"), 0o600))
 	gitCommitAll(t, repo, "tamper")
 
 	keyring := NewMemoryKeyring()

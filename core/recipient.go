@@ -125,7 +125,7 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 	if err != nil {
 		return "", fmt.Errorf("failed to download %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer closeLogged(resp.Body)
 
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("%s failed with code %d", url, resp.StatusCode)
@@ -136,7 +136,7 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 
 	tr := io.LimitReader(resp.Body, maxSize)
 	if cacheMode&CacheModeWrite > 0 {
-		_ = os.MkdirAll(filepath.Dir(cachePath), 0700)
+		_ = os.MkdirAll(filepath.Dir(cachePath), 0o700)
 
 		//nolint:gosec
 		cacheFd, err := os.Create(cachePath)
@@ -144,7 +144,7 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 			return "", fmt.Errorf("failed to create cache path: %w", err)
 		}
 
-		defer cacheFd.Close()
+		defer closeLogged(cacheFd)
 		tr = io.TeeReader(tr, cacheFd)
 	}
 
