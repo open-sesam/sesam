@@ -34,8 +34,10 @@ const (
 // AuditDetail is a type constraint covering all valid detail types.
 type AuditDetail interface {
 	DetailInit |
-		DetailUserTell | DetailUserKill |
-		DetailSecretChange | DetailSecretRemove |
+		DetailUserTell |
+		DetailUserKill |
+		DetailSecretChange |
+		DetailSecretRemove |
 		DetailSeal
 }
 
@@ -399,6 +401,10 @@ func (al *AuditLog) Iterate(fn func(idx int, entry *auditEntrySigned) error) err
 
 func (al *AuditLog) Store() error {
 	logPath := filepath.Join(al.RepoDir, ".sesam", "audit", "log.json")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+
 	fd, err := renameio.TempFile(al.RepoDir, logPath)
 	if err != nil {
 		return fmt.Errorf("create temp file for audit log: %w", err)
@@ -410,10 +416,6 @@ func (al *AuditLog) Store() error {
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(al); err != nil {
 		return fmt.Errorf("marshal entries: %w", err)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
-		return fmt.Errorf("mkdir: %w", err)
 	}
 
 	return fd.CloseAtomicallyReplace()
@@ -434,6 +436,18 @@ func LoadAuditLog(repoDir string) (*AuditLog, error) {
 		return nil, err
 	}
 
+	info, err := fd.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	// Reject audit logs bigger than 512M.
+	// In some later release we need to figure a way
+	// to compress such large logs if that ever becomes a problem.
+	if info.Size() > 512*1024*1024 {
+		return nil, fmt.Errorf("audit log too big (> 512M). Please consider opening a bug report")
+	}
+
 	defer closeLogged(fd)
 
 	al := AuditLog{
@@ -452,6 +466,8 @@ func LoadAuditLog(repoDir string) (*AuditLog, error) {
 // BuildRootHash will produce a combined hash ("Root Hash") out of all
 // hashes of encrypted files. It serves as general integrity protection
 // (a bit similar like a merkle tree, just not with hierarchy)
+//
+// Side effect: This will sort `sigs`
 func buildRootHash(sigs []*secretSignature) string {
 	sort.Slice(sigs, func(i, j int) bool {
 		return sigs[i].RevealedPath < sigs[j].RevealedPath

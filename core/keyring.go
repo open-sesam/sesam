@@ -82,6 +82,7 @@ func (mk *MemoryKeyring) AddSignPubKey(user string, key []byte) {
 func (mk *MemoryKeyring) DeleteUser(user string) bool {
 	_, ok := mk.recipients[user]
 	delete(mk.recipients, user)
+	delete(mk.signPubs, user)
 	return ok
 }
 

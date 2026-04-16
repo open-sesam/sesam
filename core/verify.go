@@ -76,18 +76,15 @@ func (s *VerifiedState) SecretExists(revealedPath string) (*VerifiedSecret, bool
 
 // UserHasAccess checks if `user` is in one of `grous` and has therefore access.
 func (s *VerifiedState) UserHasAccess(user string, groups []string) bool {
-	groupMap := make(map[string]bool, len(groups))
-	for _, group := range groups {
-		groupMap[group] = true
-	}
-
-	// admin has implicit access to all, double check it is added.
-	groupMap["admin"] = true
-
 	idx := slices.IndexFunc(s.Users, func(u VerifiedUser) bool {
 		return u.Name == user
 	})
 
+	if idx < 0 {
+		return false
+	}
+
+	groupMap := groupsToMap(groups)
 	for _, group := range s.Users[idx].Groups {
 		if groupMap[group] {
 			return true
@@ -213,6 +210,10 @@ func verifyUserTell(log *AuditLog, state *VerifiedState, entry *auditEntrySigned
 // registerUser adds a user's keys to the keyring and state.
 // Shared by verifyInit (initial admin) and verifyUserTell.
 func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error {
+	if err := validUserName(tell.User); err != nil {
+		return fmt.Errorf("invalid user name %q: %w", tell.User, err)
+	}
+
 	if _, exists := state.UserExists(tell.User); exists {
 		return fmt.Errorf("user %s already exists", tell.User)
 	}
@@ -301,7 +302,7 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 	}
 
 	scd.Groups = deduplicate(scd.Groups)
-	if slices.Contains(scd.Groups, "admin") {
+	if !slices.Contains(scd.Groups, "admin") {
 		scd.Groups = append(scd.Groups, "admin")
 	}
 

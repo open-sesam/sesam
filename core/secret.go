@@ -26,6 +26,7 @@ type secret struct {
 
 	// RevealedPath is relative to Mgr.RepoDir
 	// TODO: enforce this. Also make sure that path is not a symbolic link and contains no ".." or similar.
+	// 			 Should be done in SecretManager as main entry point for new secrets.
 	RevealedPath string
 
 	// Recipients are the people that may reveal this secret.
@@ -58,15 +59,18 @@ func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 
 	encW, err := age.Encrypt(mw, s.Recipients.AgeRecipients()...)
 	if err != nil {
+		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to initiate encryption: %w", err)
 	}
 
 	_, err = io.Copy(encW, rd)
 	if err != nil {
+		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to encrypt secret %s: %w", s.RevealedPath, err)
 	}
 
 	if err := encW.Close(); err != nil {
+		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to close encrypted writer: %w", err)
 	}
 
@@ -76,6 +80,7 @@ func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 
 	sig, err := s.Mgr.Signer.Sign(hashBytes)
 	if err != nil {
+		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to compute signature for %s: %w", encryptedPath, err)
 	}
 
@@ -95,6 +100,7 @@ func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 	// write the signature file along the encrypted file:
 	sigPath := signaturePath(s.Mgr.RepoDir, s.RevealedPath)
 	if err := renameio.WriteFile(sigPath, sigBuf.Bytes(), 0600); err != nil {
+		_ = os.Remove(wc.Name())
 		return nil, err
 	}
 

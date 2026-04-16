@@ -2,10 +2,32 @@ package core
 
 import (
 	"cmp"
+	"fmt"
 	"io"
 	"log/slog"
 	"slices"
 )
+
+// validUserName checks that a user name is safe for use in file paths and log entries.
+// Only lowercase alphanumeric characters, hyphens and underscores are allowed.
+// The name must not be empty and must not exceed 64 characters.
+func validUserName(name string) error {
+	if name == "" {
+		return fmt.Errorf("user name must not be empty")
+	}
+
+	if len(name) > 64 {
+		return fmt.Errorf("user name too long: %d characters (max 64)", len(name))
+	}
+
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '-' && r != '_' {
+			return fmt.Errorf("user name contains invalid character: %q", r)
+		}
+	}
+
+	return nil
+}
 
 // Deduplicate returns a sorted copy of s with duplicates removed.
 func deduplicate[T cmp.Ordered](s []T) []T {

@@ -2,7 +2,6 @@ package core
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 )
@@ -55,6 +54,11 @@ func BuildSecretManager(
 		State:      state,
 	}
 
+	// Clear tmp dir before continuing:
+	tmpDir := mgr.tmpDir()
+	_ = os.RemoveAll(tmpDir)
+	_ = os.MkdirAll(tmpDir, 0700)
+
 	for _, vsecret := range state.Secrets {
 		accessUsers := state.UsersForSecret(vsecret.RevealedPath)
 		recps := keyring.Recipients(accessUsers)
@@ -72,7 +76,7 @@ func (sm *SecretManager) cryptPath(path string) string {
 	return filepath.Join(sm.RepoDir, ".sesam", "objects", path+".age")
 }
 
-func (sm *SecretManager) cryptWriter(path string) (io.WriteCloser, string, error) {
+func (sm *SecretManager) cryptWriter(path string) (*os.File, string, error) {
 	cryptPath := sm.cryptPath(path)
 
 	// TODO: Move that to an init module and add a .donotdelete file in it so that git does not kill it.
@@ -86,9 +90,7 @@ func (sm *SecretManager) cryptWriter(path string) (io.WriteCloser, string, error
 }
 
 func (sm *SecretManager) tmpDir() string {
-	tmpDir := filepath.Join(sm.RepoDir, ".sesam", "tmp")
-	_ = os.MkdirAll(tmpDir, 0700)
-	return tmpDir
+	return filepath.Join(sm.RepoDir, ".sesam", "tmp")
 }
 
 func (sm *SecretManager) AddOrChangeSecret(revealedPath string, groups []string) error {
