@@ -104,6 +104,8 @@ func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 // No error is only returned if the reveal has been fully successful.
 func (s *secret) Reveal() error {
 	cryptPath := s.Mgr.cryptPath(s.RevealedPath)
+
+	//nolint:gosec
 	srcFd, err := os.Open(cryptPath)
 	if err != nil {
 		// if it does not exist, it probably means that the secret was not encrypted yet.

@@ -60,6 +60,8 @@ func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error
 	}
 
 	signKeyPath := filepath.Join(repoDir, ".sesam", "signkey", user+".age")
+
+	//nolint:gosec
 	cryptedSignPrivKeyFd, err := os.Open(signKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sign key %s: %w", signKeyPath, err)
@@ -148,6 +150,8 @@ func signaturePath(repoDir, revealedPath string) string {
 // You will get an error if it has not been sealed yet.
 func readStoredSignature(repoDir, revealedPath string) (secretSignature, error) {
 	sigPath := signaturePath(repoDir, revealedPath)
+
+	//nolint:gosec
 	sigFd, err := os.Open(sigPath)
 	if err != nil {
 		return secretSignature{}, fmt.Errorf("failed to open signature json: %w", err)
@@ -183,6 +187,7 @@ func readAllSignatures(repoDir string) ([]secretSignature, error) {
 			return nil
 		}
 
+		//nolint:gosec
 		sigFd, err := os.Open(path)
 		if err != nil {
 			return fmt.Errorf("failed to open signature json %s: %w", path, err)

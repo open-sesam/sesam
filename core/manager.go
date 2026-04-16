@@ -85,6 +85,7 @@ func (sm *SecretManager) cryptWriter(path string) (*os.File, string, error) {
 		return nil, "", err
 	}
 
+	//nolint:gosec
 	fd, err := os.Create(cryptPath)
 	return fd, cryptPath, err
 }

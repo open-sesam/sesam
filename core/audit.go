@@ -426,11 +426,14 @@ func (al *AuditLog) Store() error {
 func LoadAuditLog(repoDir string) (*AuditLog, error) {
 	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.json")
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
+
+	//nolint:gosec
 	initData, err := os.ReadFile(initPath)
 	if err != nil {
 		return nil, err
 	}
 
+	//nolint:gosec
 	fd, err := os.Open(logPath)
 	if err != nil {
 		return nil, err

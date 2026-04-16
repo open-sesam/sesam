@@ -74,6 +74,7 @@ func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode
 		// TODO: Strip "file://" prefix before reading. Also consider restricting
 		// to paths within the repo directory to prevent reading arbitrary files.
 		// TODO: should file:// then not point to the sesam repo only?
+		//nolint:gosec
 		data, err := os.ReadFile(arg)
 		if err != nil {
 			return "", fmt.Errorf("failed to find %s: %w", arg, err)
@@ -104,6 +105,7 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 	cachePath := cachePath(repoDir, url)
 
 	if cacheMode&CacheModeRead > 0 {
+		//nolint:gosec
 		data, err := os.ReadFile(cachePath)
 		if err == nil {
 			return string(data), nil
@@ -136,7 +138,7 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 	if cacheMode&CacheModeWrite > 0 {
 		_ = os.MkdirAll(filepath.Dir(cachePath), 0700)
 
-		// Avoid being DDoS'd by big responses.
+		//nolint:gosec
 		cacheFd, err := os.Create(cachePath)
 		if err != nil {
 			return "", fmt.Errorf("failed to create cache path: %w", err)

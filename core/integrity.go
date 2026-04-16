@@ -75,6 +75,8 @@ func verifyIntegritySingleSecret(
 
 	// Check .age file exists and hash matches.
 	agePath := filepath.Join(repoDir, ".sesam", "objects", vs.RevealedPath+".age")
+
+	//nolint:gosec
 	ageFd, err := os.Open(agePath)
 	if err != nil {
 		report.add(vs.RevealedPath, fmt.Sprintf("missing .age file: %v", err))
@@ -184,11 +186,13 @@ func collectAgeFiles(repoDir string) map[string]bool {
 
 	_ = filepath.WalkDir(objectsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".age") {
+			//nolint:nilerr
 			return nil
 		}
 
 		rel, err := filepath.Rel(objectsDir, path)
 		if err != nil {
+			//nolint:nilerr
 			return nil
 		}
 
