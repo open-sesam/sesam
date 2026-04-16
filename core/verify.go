@@ -350,14 +350,14 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 			srd.RevealedPath,
 			entry.SeqID,
 		)
-	} else {
-		if !state.UserHasAccess(entry.ChangedBy, s.AccessGroups) {
-			return fmt.Errorf(
-				"user %s has no access, cannot remove (seq_id=%d)",
-				entry.ChangedBy,
-				entry.SeqID,
-			)
-		}
+	}
+
+	if !state.UserHasAccess(entry.ChangedBy, s.AccessGroups) {
+		return fmt.Errorf(
+			"user %s has no access, cannot remove (seq_id=%d)",
+			entry.ChangedBy,
+			entry.SeqID,
+		)
 	}
 
 	state.Secrets = slices.DeleteFunc(state.Secrets, func(s VerifiedSecret) bool {

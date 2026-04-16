@@ -67,14 +67,14 @@ func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error
 
 	dr, err := age.Decrypt(io.LimitReader(cryptedSignPrivKeyFd, 1024), userIdentity)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt header of signing key: %v", err)
+		return nil, fmt.Errorf("failed to decrypt header of signing key: %w", err)
 	}
 
 	defer closeLogged(cryptedSignPrivKeyFd)
 
 	signingKeyEncoded, err := io.ReadAll(dr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt signing key: %v", err)
+		return nil, fmt.Errorf("failed to decrypt signing key: %w", err)
 	}
 
 	signPrivKeyRaw, code, err := multicodeDecode(string(bytes.TrimSpace(signingKeyEncoded)))

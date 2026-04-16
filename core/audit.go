@@ -51,7 +51,7 @@ type auditEntry struct {
 
 	// Detail are operation specific details.
 	Detail            json.RawMessage `json:"detail"`
-	unmarshaledDetail any             `json:"-"`
+	unmarshaledDetail any
 
 	// SeqID is a monontonically increasing. First entry is 1.
 	SeqID uint64 `json:"seq_id"`

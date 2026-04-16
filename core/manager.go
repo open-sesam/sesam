@@ -115,7 +115,7 @@ func (sm *SecretManager) AddOrChangeSecret(revealedPath string, groups []string)
 	}
 
 	if err := sm.AuditLog.Store(); err != nil {
-		return fmt.Errorf("storing log failed: %v", err)
+		return fmt.Errorf("storing log failed: %w", err)
 	}
 
 	return nil
@@ -149,7 +149,7 @@ func (sm *SecretManager) SealAll() error {
 	}
 
 	if err := sm.AuditLog.Store(); err != nil {
-		return fmt.Errorf("storing log failed: %v", err)
+		return fmt.Errorf("storing log failed: %w", err)
 	}
 
 	return nil
