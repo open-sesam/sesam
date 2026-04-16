@@ -321,7 +321,7 @@ func (aes *auditEntrySigned) Verify(kr Keyring) (string, error) {
 		return "", err
 	}
 
-	return kr.Verify(wholeEntryJSON, aes.Signature, aes.ChangedBy)
+	return kr.Verify(SesamDomainSignAuditTag, wholeEntryJSON, aes.Signature, aes.ChangedBy)
 }
 
 // InitLog initializes an empty audit log on repo init.
@@ -380,7 +380,7 @@ func (al *AuditLog) AddEntry(signer Signer, e *auditEntry) (*auditEntrySigned, e
 		return nil, fmt.Errorf("marshal current entry: %w", err)
 	}
 
-	entry.Signature, err = signer.Sign(wholeEntryJSON)
+	entry.Signature, err = signer.Sign(SesamDomainSignAuditTag, wholeEntryJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign entry: %w", err)
 	}

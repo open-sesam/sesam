@@ -14,13 +14,6 @@ import (
 	"filippo.io/age"
 )
 
-// Signer is similar to Identity (private part) but is used for signing only.
-type Signer interface {
-	Sign(data []byte) (string, error)
-	PublicKey() []byte
-	UserName() string
-}
-
 type secret struct {
 	Mgr *SecretManager
 
@@ -78,7 +71,7 @@ func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 	_, _ = h.Write([]byte(s.RevealedPath))
 	hashBytes := h.Sum(nil)
 
-	sig, err := s.Mgr.Signer.Sign(hashBytes)
+	sig, err := s.Mgr.Signer.Sign(SesamDomainSignSecretTag, hashBytes)
 	if err != nil {
 		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to compute signature for %s: %w", encryptedPath, err)
@@ -163,6 +156,7 @@ func (s *secret) Reveal() error {
 	}
 
 	if _, err := s.Mgr.Keyring.Verify(
+		SesamDomainSignSecretTag,
 		sha3HashBytes,
 		sigDesc.Signature,
 		sigDesc.SealedBy,

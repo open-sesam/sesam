@@ -104,7 +104,12 @@ func verifyIntegritySingleSecret(
 		hashBytes, _, err := multicodeDecode(sig.Hash)
 		if err != nil {
 			report.add(vs.RevealedPath, fmt.Sprintf("failed to decode hash: %v", err))
-		} else if _, err := kr.Verify(hashBytes, sig.Signature, sig.SealedBy); err != nil {
+		} else if _, err := kr.Verify(
+			SesamDomainSignSecretTag,
+			hashBytes,
+			sig.Signature,
+			sig.SealedBy,
+		); err != nil {
 			report.add(vs.RevealedPath, fmt.Sprintf("invalid signature: %v", err))
 		}
 	}

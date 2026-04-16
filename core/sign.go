@@ -15,14 +15,29 @@ import (
 	"github.com/google/renameio"
 )
 
+type SignDomain []byte
+
+// Signer is similar to Identity (private part) but is used for signing only.
+type Signer interface {
+	Sign(domain SignDomain, data []byte) (string, error)
+	PublicKey() []byte
+	UserName() string
+}
+
+var (
+	// See: https://en.wikipedia.org/wiki/Domain_separation
+	SesamDomainSignSecretTag = SignDomain("sesam.secret.v1:")
+	SesamDomainSignAuditTag  = SignDomain("sesam.audit.v1:")
+)
+
 type ed25519Signer struct {
 	pub  ed25519.PublicKey
 	priv ed25519.PrivateKey
 	user string
 }
 
-func (es *ed25519Signer) Sign(data []byte) (string, error) {
-	sig, err := es.priv.Sign(rand.Reader, data, &ed25519.Options{})
+func (es *ed25519Signer) Sign(domain SignDomain, data []byte) (string, error) {
+	sig, err := es.priv.Sign(rand.Reader, append(domain, data...), &ed25519.Options{})
 	if err != nil {
 		return "", err
 	}

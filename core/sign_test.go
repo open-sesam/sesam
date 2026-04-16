@@ -22,12 +22,12 @@ func TestGenerateAndLoadSignKey(t *testing.T) {
 
 	// Cross-verify: sign with generated, verify with loaded's pubkey.
 	data := []byte("test data")
-	sig, err := signer.Sign(data)
+	sig, err := signer.Sign(SesamDomainSignSecretTag, data)
 	require.NoError(t, err)
 
 	kr := NewMemoryKeyring()
 	kr.AddSignPubKey("alice", loaded.PublicKey())
-	who, err := kr.Verify(data, sig, "alice")
+	who, err := kr.Verify(SesamDomainSignSecretTag, data, sig, "alice")
 	require.NoError(t, err)
 	require.Equal(t, "alice", who)
 }
@@ -96,4 +96,31 @@ func TestReadStoredSignatureCorrupt(t *testing.T) {
 
 	_, err := readStoredSignature(repoDir, "secrets/corrupt")
 	require.Error(t, err, "should fail on corrupt sig JSON")
+}
+
+func TestSignCrossDomain(t *testing.T) {
+	repoDir := testRepo(t)
+	user := newTestUser(t, "alice")
+
+	signer, err := GenerateSignKey(repoDir, "alice", user.Recipient.Recipient)
+	require.NoError(t, err)
+	require.Equal(t, "alice", signer.UserName())
+
+	loaded, err := LoadSignKey(repoDir, "alice", user.Identity)
+	require.NoError(t, err)
+	require.Equal(t, "alice", loaded.UserName())
+
+	data := []byte("test data")
+	sig, err := signer.Sign(SesamDomainSignSecretTag, data)
+	require.NoError(t, err)
+
+	kr := NewMemoryKeyring()
+	kr.AddSignPubKey("alice", loaded.PublicKey())
+	who, err := kr.Verify(SesamDomainSignSecretTag, data, sig, "alice")
+	require.NoError(t, err)
+	require.Equal(t, "alice", who)
+
+	// Has to fail, different domain.
+	_, err = kr.Verify(SesamDomainSignAuditTag, data, sig, "alice")
+	require.Error(t, err)
 }

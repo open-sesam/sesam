@@ -14,10 +14,10 @@ func TestMemoryKeyringAddAndVerify(t *testing.T) {
 	kr.AddSignPubKey("alice", user.Signer.PublicKey())
 
 	data := []byte("hello world")
-	sig, err := user.Signer.Sign(data)
+	sig, err := user.Signer.Sign(SesamDomainSignSecretTag, data)
 	require.NoError(t, err)
 
-	who, err := kr.Verify(data, sig, "alice")
+	who, err := kr.Verify(SesamDomainSignSecretTag, data, sig, "alice")
 	require.NoError(t, err)
 	require.Equal(t, "alice", who)
 }
@@ -32,29 +32,29 @@ func TestMemoryKeyringVerifyHintVariants(t *testing.T) {
 	data := []byte("test")
 
 	t.Run("correct hint", func(t *testing.T) {
-		sig, _ := alice.Signer.Sign(data)
-		who, err := kr.Verify(data, sig, "alice")
+		sig, _ := alice.Signer.Sign(SesamDomainSignSecretTag, data)
+		who, err := kr.Verify(SesamDomainSignSecretTag, data, sig, "alice")
 		require.NoError(t, err)
 		require.Equal(t, "alice", who)
 	})
 
 	t.Run("wrong hint finds correct user", func(t *testing.T) {
-		sig, _ := bob.Signer.Sign(data)
-		who, err := kr.Verify(data, sig, "alice") // hint says alice, bob signed
+		sig, _ := bob.Signer.Sign(SesamDomainSignSecretTag, data)
+		who, err := kr.Verify(SesamDomainSignSecretTag, data, sig, "alice") // hint says alice, bob signed
 		require.NoError(t, err)
 		require.Equal(t, "bob", who)
 	})
 
 	t.Run("empty hint", func(t *testing.T) {
-		sig, _ := alice.Signer.Sign(data)
-		who, err := kr.Verify(data, sig, "")
+		sig, _ := alice.Signer.Sign(SesamDomainSignSecretTag, data)
+		who, err := kr.Verify(SesamDomainSignSecretTag, data, sig, "")
 		require.NoError(t, err)
 		require.Equal(t, "alice", who)
 	})
 
 	t.Run("nonexistent hint", func(t *testing.T) {
-		sig, _ := alice.Signer.Sign(data)
-		who, err := kr.Verify(data, sig, "ghost")
+		sig, _ := alice.Signer.Sign(SesamDomainSignSecretTag, data)
+		who, err := kr.Verify(SesamDomainSignSecretTag, data, sig, "ghost")
 		require.NoError(t, err)
 		require.Equal(t, "alice", who)
 	})
@@ -68,26 +68,26 @@ func TestMemoryKeyringVerifyNegative(t *testing.T) {
 	t.Run("unknown key", func(t *testing.T) {
 		_, otherPriv, _ := ed25519.GenerateKey(rand.Reader)
 		otherSigner := &ed25519Signer{pub: otherPriv.Public().(ed25519.PublicKey), priv: otherPriv, user: "other"}
-		sig, _ := otherSigner.Sign([]byte("test"))
-		_, err := kr.Verify([]byte("test"), sig, "alice")
+		sig, _ := otherSigner.Sign(SesamDomainSignSecretTag, []byte("test"))
+		_, err := kr.Verify(SesamDomainSignSecretTag, []byte("test"), sig, "alice")
 		require.Error(t, err)
 	})
 
 	t.Run("wrong data", func(t *testing.T) {
-		sig, _ := alice.Signer.Sign([]byte("original"))
-		_, err := kr.Verify([]byte("tampered"), sig, "alice")
+		sig, _ := alice.Signer.Sign(SesamDomainSignSecretTag, []byte("original"))
+		_, err := kr.Verify(SesamDomainSignSecretTag, []byte("tampered"), sig, "alice")
 		require.Error(t, err)
 	})
 
 	t.Run("invalid signature encoding", func(t *testing.T) {
-		_, err := kr.Verify([]byte("data"), "not-valid-multicode", "alice")
+		_, err := kr.Verify(SesamDomainSignSecretTag, []byte("data"), "not-valid-multicode", "alice")
 		require.Error(t, err)
 	})
 
 	t.Run("empty keyring", func(t *testing.T) {
 		emptyKr := NewMemoryKeyring()
-		sig, _ := alice.Signer.Sign([]byte("test"))
-		_, err := emptyKr.Verify([]byte("test"), sig, "alice")
+		sig, _ := alice.Signer.Sign(SesamDomainSignSecretTag, []byte("test"))
+		_, err := emptyKr.Verify(SesamDomainSignSecretTag, []byte("test"), sig, "alice")
 		require.Error(t, err)
 	})
 }
@@ -136,8 +136,8 @@ func TestMemoryKeyringSignKeyDedup(t *testing.T) {
 	kr.AddSignPubKey("alice", user.Signer.PublicKey())
 
 	// Should still work (and not return duplicate matches).
-	sig, _ := user.Signer.Sign([]byte("test"))
-	who, err := kr.Verify([]byte("test"), sig, "alice")
+	sig, _ := user.Signer.Sign(SesamDomainSignSecretTag, []byte("test"))
+	who, err := kr.Verify(SesamDomainSignSecretTag, []byte("test"), sig, "alice")
 	require.NoError(t, err)
 	require.Equal(t, "alice", who)
 }
@@ -153,14 +153,14 @@ func TestMemoryKeyringAddSignPubKeyAppend(t *testing.T) {
 
 	// Both keys should verify.
 	data := []byte("test")
-	sig1, _ := alice.Signer.Sign(data)
-	sig2, _ := alice2.Signer.Sign(data)
+	sig1, _ := alice.Signer.Sign(SesamDomainSignSecretTag, data)
+	sig2, _ := alice2.Signer.Sign(SesamDomainSignSecretTag, data)
 
-	who, err := kr.Verify(data, sig1, "alice")
+	who, err := kr.Verify(SesamDomainSignSecretTag, data, sig1, "alice")
 	require.NoError(t, err)
 	require.Equal(t, "alice", who)
 
-	who, err = kr.Verify(data, sig2, "alice")
+	who, err = kr.Verify(SesamDomainSignSecretTag, data, sig2, "alice")
 	require.NoError(t, err)
 	require.Equal(t, "alice", who)
 }
@@ -188,14 +188,14 @@ func TestMemoryKeyringAddSignPubKeyMultipleUsers(t *testing.T) {
 
 	// Each user's key should verify only their signatures.
 	data := []byte("shared data")
-	aliceSig, _ := alice.Signer.Sign(data)
-	bobSig, _ := bob.Signer.Sign(data)
+	aliceSig, _ := alice.Signer.Sign(SesamDomainSignSecretTag, data)
+	bobSig, _ := bob.Signer.Sign(SesamDomainSignSecretTag, data)
 
-	who, err := kr.Verify(data, aliceSig, "")
+	who, err := kr.Verify(SesamDomainSignSecretTag, data, aliceSig, "")
 	require.NoError(t, err)
 	require.Equal(t, "alice", who)
 
-	who, err = kr.Verify(data, bobSig, "")
+	who, err = kr.Verify(SesamDomainSignSecretTag, data, bobSig, "")
 	require.NoError(t, err)
 	require.Equal(t, "bob", who)
 }
