@@ -7,11 +7,14 @@ import (
 	"path/filepath"
 )
 
+// SecretManager is the high level API to manage secrets,
+// i.e. seal & reveal them and also add/remove/change secrets.
 type SecretManager struct {
 	// RepoDir is the path to sesam repository.
 	// It is the dir the .sesam directory is in.
 	RepoDir string
 
+	// WhoAmI is the user tied to the current Identities.
 	WhoAmI string
 
 	// Identities are the private keys the current user of sesam supplies.
@@ -23,13 +26,16 @@ type SecretManager struct {
 	// Keyring is a collection of public keys
 	Keyring Keyring
 
+	// AuditLog is the log we can write our new entries to.
 	AuditLog *AuditLog
 
+	// State is the state won by replaying the audit log.
 	State *VerifiedState
 
-	secrets []Secret
+	secrets []secret
 }
 
+// BuildSecretManager uses the passed facilities to build a new SecretManager
 func BuildSecretManager(
 	repoDir string,
 	whoami string,
@@ -52,7 +58,7 @@ func BuildSecretManager(
 	for _, vsecret := range state.Secrets {
 		accessUsers := state.UsersForSecret(vsecret.RevealedPath)
 		recps := keyring.Recipients(accessUsers)
-		mgr.secrets = append(mgr.secrets, Secret{
+		mgr.secrets = append(mgr.secrets, secret{
 			Mgr:          mgr,
 			RevealedPath: vsecret.RevealedPath,
 			Recipients:   recps,
@@ -87,13 +93,13 @@ func (sm *SecretManager) tmpDir() string {
 
 func (sm *SecretManager) AddOrChangeSecret(revealedPath string, groups []string) error {
 	accessUsers := sm.State.UserForGroups(groups)
-	sm.secrets = append(sm.secrets, Secret{
+	sm.secrets = append(sm.secrets, secret{
 		Mgr:          sm,
 		RevealedPath: revealedPath,
 		Recipients:   sm.Keyring.Recipients(accessUsers),
 	})
 
-	entry := NewAuditEntry(sm.WhoAmI, &DetailSecretChange{
+	entry := newAuditEntry(sm.WhoAmI, &DetailSecretChange{
 		RevealedPath: revealedPath,
 		Groups:       groups,
 	})
@@ -113,21 +119,22 @@ func (sm *SecretManager) AddOrChangeSecret(revealedPath string, groups []string)
 	return nil
 }
 
+// SealAll seals all kown secrets.
 func (sm *SecretManager) SealAll() error {
-	var sigs []*SecretSignature
+	var sigs []*secretSignature
 
 	for _, secret := range sm.secrets {
 		fmt.Println("SEAL", secret.RevealedPath)
 		sig, err := secret.Seal(sm.WhoAmI)
 		if err != nil {
-			return fmt.Errorf("seal of %s failed: %w", sig.RevealedPath, err)
+			return fmt.Errorf("seal of %s failed: %w", secret.RevealedPath, err)
 		}
 
 		sigs = append(sigs, sig)
 	}
 
-	entry := NewAuditEntry(sm.WhoAmI, &DetailSeal{
-		RootHash:    BuildRootHash(sigs),
+	entry := newAuditEntry(sm.WhoAmI, &DetailSeal{
+		RootHash:    buildRootHash(sigs),
 		FilesSealed: len(sigs),
 	})
 
@@ -146,6 +153,7 @@ func (sm *SecretManager) SealAll() error {
 	return nil
 }
 
+// RevealAll reveals all known secrets.
 func (sm *SecretManager) RevealAll() error {
 	for _, secret := range sm.secrets {
 		fmt.Println("REVEAL", secret.RevealedPath)

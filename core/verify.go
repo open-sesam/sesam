@@ -7,6 +7,7 @@ import (
 	"slices"
 )
 
+// VerifiedUser is a user that has been verified by the audit log.
 type VerifiedUser struct {
 	Name       string
 	Groups     []string
@@ -14,15 +15,17 @@ type VerifiedUser struct {
 	PubKeys    []string
 }
 
-func (vu *VerifiedUser) IsAdmin() bool {
-	return slices.Contains(vu.Groups, "admin")
-}
-
+// VerifiedSecret is a secret verified by the audit log.
 type VerifiedSecret struct {
 	RevealedPath string
 	AccessGroups []string
 }
 
+// VerifiedState is the state of the repo based on the audit log.
+// It might differ from the state defined by the config, which can mean:
+//
+// - Config was edited by user locally (to add new secrets or users declaratively)
+// - Something was tampered with (e.g. Eve added herself as admin)
 type VerifiedState struct {
 	Users   []VerifiedUser
 	Secrets []VerifiedSecret
@@ -41,6 +44,10 @@ type VerifiedState struct {
 
 	auditLog *AuditLog
 	keyring  Keyring
+}
+
+func (vu *VerifiedUser) IsAdmin() bool {
+	return slices.Contains(vu.Groups, "admin")
 }
 
 func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
@@ -90,15 +97,6 @@ func (s *VerifiedState) UserHasAccess(user string, groups []string) bool {
 	return false
 }
 
-func groupsToMap(groups []string) map[string]bool {
-	groupMap := make(map[string]bool, len(groups)+1)
-	for _, group := range groups {
-		groupMap[group] = true
-	}
-	groupMap["admin"] = true
-	return groupMap
-}
-
 func (s *VerifiedState) UsersForSecret(revealedPath string) []string {
 	idx := slices.IndexFunc(s.Secrets, func(vs VerifiedSecret) bool {
 		return vs.RevealedPath == revealedPath
@@ -141,7 +139,7 @@ outer:
 	return users
 }
 
-func (s *VerifiedState) RequireAdmin(entry *AuditEntrySigned) (*VerifiedUser, error) {
+func (s *VerifiedState) RequireAdmin(entry *auditEntrySigned) (*VerifiedUser, error) {
 	adminUser, exists := s.UserExists(entry.ChangedBy)
 	if !exists {
 		return nil, fmt.Errorf("user %s does not exist at seq_id=%d", entry.ChangedBy, entry.SeqID)
@@ -154,7 +152,21 @@ func (s *VerifiedState) RequireAdmin(entry *AuditEntrySigned) (*VerifiedUser, er
 	return adminUser, nil
 }
 
-func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
+// Update verifies entries that have been added at runtime
+func (s *VerifiedState) Update() error {
+	return verify(s)
+}
+
+func groupsToMap(groups []string) map[string]bool {
+	groupMap := make(map[string]bool, len(groups)+1)
+	for _, group := range groups {
+		groupMap[group] = true
+	}
+	groupMap["admin"] = true
+	return groupMap
+}
+
+func verifyInit(log *AuditLog, state *VerifiedState, entry *auditEntrySigned, kr Keyring) error {
 	if entry.SeqID != 1 {
 		return fmt.Errorf("init at wrong seq_id: %d (!= 1)", entry.SeqID)
 	}
@@ -163,7 +175,7 @@ func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr
 		return fmt.Errorf("audit log has been possibly truncated: %s != %s", eh, log.InitHash)
 	}
 
-	initDetail, err := ParseDetail[DetailInit](entry)
+	initDetail, err := parseDetail[DetailInit](entry)
 	if err != nil {
 		return fmt.Errorf("parse init detail: %w", err)
 	}
@@ -180,8 +192,8 @@ func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr
 	return registerUser(state, admin, kr)
 }
 
-func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
-	tellDetails, err := ParseDetail[DetailUserTell](entry)
+func verifyUserTell(log *AuditLog, state *VerifiedState, entry *auditEntrySigned, kr Keyring) error {
+	tellDetails, err := parseDetail[DetailUserTell](entry)
 	if err != nil {
 		return fmt.Errorf("parse user.tell detail: %w", err)
 	}
@@ -206,7 +218,7 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 	}
 
 	for _, signPubKey := range tell.SignPubKeys {
-		signPubKeyData, _, err := MulticodeDecode(signPubKey)
+		signPubKeyData, _, err := multicodeDecode(signPubKey)
 		if err != nil {
 			return fmt.Errorf("bad signing key %v", signPubKey)
 		}
@@ -227,18 +239,18 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		Name:       tell.User,
 		SignPubKey: tell.SignPubKeys,
 		PubKeys:    tell.PubKeys,
-		Groups:     Deduplicate(tell.Groups),
+		Groups:     deduplicate(tell.Groups),
 	})
 
 	return nil
 }
 
-func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
+func verifyUserKill(log *AuditLog, state *VerifiedState, entry *auditEntrySigned, kr Keyring) error {
 	if _, err := state.RequireAdmin(entry); err != nil {
 		return err
 	}
 
-	killDetails, err := ParseDetail[DetailUserKill](entry)
+	killDetails, err := parseDetail[DetailUserKill](entry)
 	if err != nil {
 		return fmt.Errorf("parse user.kill detail: %w", err)
 	}
@@ -278,8 +290,8 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 	return nil
 }
 
-func verifySecretChange(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
-	scd, err := ParseDetail[DetailSecretChange](entry)
+func verifySecretChange(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) error {
+	scd, err := parseDetail[DetailSecretChange](entry)
 	if err != nil {
 		return fmt.Errorf("parse detail: %w", err)
 	}
@@ -288,7 +300,7 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 		return fmt.Errorf("groups may not be empty (%s)", scd.RevealedPath)
 	}
 
-	scd.Groups = Deduplicate(scd.Groups)
+	scd.Groups = deduplicate(scd.Groups)
 	if slices.Contains(scd.Groups, "admin") {
 		scd.Groups = append(scd.Groups, "admin")
 	}
@@ -324,8 +336,8 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 	return nil
 }
 
-func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
-	srd, err := ParseDetail[DetailSecretRemove](entry)
+func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) error {
+	srd, err := parseDetail[DetailSecretRemove](entry)
 	if err != nil {
 		return fmt.Errorf("parse detail: %w", err)
 	}
@@ -354,8 +366,8 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 	return nil
 }
 
-func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
-	sealDetails, err := ParseDetail[DetailSeal](entry)
+func verifySeal(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) error {
+	sealDetails, err := parseDetail[DetailSeal](entry)
 	if err != nil {
 		return fmt.Errorf("parse detail: %w", err)
 	}
@@ -366,7 +378,7 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) er
 }
 
 func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
-	if err := VerifyInitFileUnchanged(log.RepoDir); err != nil {
+	if err := verifyInitFileUnchanged(log.RepoDir); err != nil {
 		return nil, fmt.Errorf("init file check: %w", err)
 	}
 
@@ -382,17 +394,17 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 
 	// Verify that the latest seal's RootHash matches the .sig.json files on disk.
 	if state.LastSealRootHash != "" {
-		sigs, err := ReadAllSignatures(log.RepoDir)
+		sigs, err := readAllSignatures(log.RepoDir)
 		if err != nil {
 			return nil, fmt.Errorf("reading signatures for root hash check: %w", err)
 		}
 
-		sigPtrs := make([]*SecretSignature, len(sigs))
+		sigPtrs := make([]*secretSignature, len(sigs))
 		for i := range sigs {
 			sigPtrs[i] = &sigs[i]
 		}
 
-		diskRootHash := BuildRootHash(sigPtrs)
+		diskRootHash := buildRootHash(sigPtrs)
 		if diskRootHash != state.LastSealRootHash {
 			return nil, fmt.Errorf(
 				"root hash mismatch: log says %s, disk says %s",
@@ -408,8 +420,8 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 func verify(state *VerifiedState) error {
 	log := state.auditLog
 
-	var previousEntry *AuditEntrySigned
-	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
+	var previousEntry *auditEntrySigned
+	err := log.Iterate(func(idx int, entry *auditEntrySigned) error {
 		if entry.SeqID <= uint64(state.VerifiedUntil) {
 			return nil
 		}
@@ -419,17 +431,17 @@ func verify(state *VerifiedState) error {
 		// to verify signatures.
 		var err error
 		switch entry.Operation {
-		case OpInit:
+		case opInit:
 			err = verifyInit(log, state, entry, state.keyring)
-		case OpUserTell:
+		case opUserTell:
 			err = verifyUserTell(log, state, entry, state.keyring)
-		case OpUserKill:
+		case opUserKill:
 			err = verifyUserKill(log, state, entry, state.keyring)
-		case OpSeal:
+		case opSeal:
 			err = verifySeal(log, state, entry)
-		case OpSecretChange:
+		case opSecretChange:
 			err = verifySecretChange(log, state, entry)
-		case OpSecretRemove:
+		case opSecretRemove:
 			err = verifySecretRemove(log, state, entry)
 		default:
 			err = fmt.Errorf("unexpected core.Operation: %#v", entry.Operation)
@@ -455,7 +467,7 @@ func verify(state *VerifiedState) error {
 				return fmt.Errorf("marshal previous entry: %w", err)
 			}
 
-			expectedHash := Hash(prevJSON)
+			expectedHash := hashData(prevJSON)
 			if expectedHash != entry.PreviousHash {
 				return fmt.Errorf(
 					"broken chain at idx %d: %s != %s",
@@ -481,9 +493,4 @@ func verify(state *VerifiedState) error {
 	}
 
 	return nil
-}
-
-// Update verifies entries that have been added at runtime
-func (s *VerifiedState) Update() error {
-	return verify(s)
 }

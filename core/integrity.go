@@ -19,17 +19,17 @@ type IntegrityError struct {
 	Message string
 }
 
+// IntegrityReport collects all issues found during deep verification.
+type IntegrityReport struct {
+	Errors []IntegrityError
+}
+
 func (ie IntegrityError) Error() string {
 	if ie.RevealedPath != "" {
 		return fmt.Sprintf("%s: %s", ie.RevealedPath, ie.Message)
 	}
 
 	return ie.Message
-}
-
-// IntegrityReport collects all issues found during deep verification.
-type IntegrityReport struct {
-	Errors []IntegrityError
 }
 
 func (ir *IntegrityReport) add(path, msg string) {
@@ -61,7 +61,7 @@ func verifyIntegritySingleSecret(
 	vs VerifiedSecret,
 	report *IntegrityReport,
 	diskAgeFiles map[string]bool,
-	diskSigMap map[string]*SecretSignature,
+	diskSigMap map[string]*secretSignature,
 	kr Keyring,
 ) {
 	sig, hasSig := diskSigMap[vs.RevealedPath]
@@ -101,7 +101,7 @@ func verifyIntegritySingleSecret(
 
 	// Verify the signature in .sig.json.
 	if hasSig {
-		hashBytes, _, err := MulticodeDecode(sig.Hash)
+		hashBytes, _, err := multicodeDecode(sig.Hash)
 		if err != nil {
 			report.add(vs.RevealedPath, fmt.Sprintf("failed to decode hash: %v", err))
 		} else if _, err := kr.Verify(hashBytes, sig.Signature, sig.SealedBy); err != nil {
@@ -124,13 +124,13 @@ func VerifyIntegrity(repoDir string, state *VerifiedState, kr Keyring) *Integrit
 	report := &IntegrityReport{}
 
 	// Read all .sig.json files from disk.
-	diskSigs, err := ReadAllSignatures(repoDir)
+	diskSigs, err := readAllSignatures(repoDir)
 	if err != nil {
 		report.add("", fmt.Sprintf("failed to read signatures: %v", err))
 		return report
 	}
 
-	diskSigMap := make(map[string]*SecretSignature, len(diskSigs))
+	diskSigMap := make(map[string]*secretSignature, len(diskSigs))
 	for idx := range diskSigs {
 		diskSigMap[diskSigs[idx].RevealedPath] = &diskSigs[idx]
 	}
@@ -154,12 +154,12 @@ func VerifyIntegrity(repoDir string, state *VerifiedState, kr Keyring) *Integrit
 
 	// RootHash check ties it all together.
 	if state.LastSealRootHash != "" {
-		sigPtrs := make([]*SecretSignature, 0, len(diskSigs))
+		sigPtrs := make([]*secretSignature, 0, len(diskSigs))
 		for idx := range diskSigs {
 			sigPtrs = append(sigPtrs, &diskSigs[idx])
 		}
 
-		diskRootHash := BuildRootHash(sigPtrs)
+		diskRootHash := buildRootHash(sigPtrs)
 		if diskRootHash != state.LastSealRootHash {
 			report.add("", fmt.Sprintf(
 				"root hash mismatch: log says %s, disk says %s",

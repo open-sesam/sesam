@@ -17,12 +17,26 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// Recipient is the public part of an Identity.
+// It is called "Recipient" because it references a person that
+// is later to decrypt a secret.
 type Recipient struct {
 	age.Recipient
-	ComparablePublicKey
+	comparablePublicKey
 }
 
+// Recipients is a helper to manage several recipients
 type Recipients []*Recipient
+
+// CacheMode defines what to do with downloaded public keys.
+type CacheMode int
+
+const (
+	CacheModeNone = CacheMode(1 << iota)
+	CacheModeRead
+	CacheModeWrite
+	CacheModeReadWrite = CacheModeRead | CacheModeWrite
+)
 
 func (rs Recipients) AgeRecipients() []age.Recipient {
 	ageRecps := make([]age.Recipient, 0, len(rs))
@@ -32,15 +46,6 @@ func (rs Recipients) AgeRecipients() []age.Recipient {
 
 	return ageRecps
 }
-
-type CacheMode int
-
-const (
-	CacheModeNone = CacheMode(1 << iota)
-	CacheModeRead
-	CacheModeWrite
-	CacheModeReadWrite = CacheModeRead | CacheModeWrite
-)
 
 func forgeIdToUser(arg string) string {
 	_, user, _ := strings.Cut(arg, ":")
@@ -68,6 +73,7 @@ func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode
 	case strings.HasPrefix(arg, "file://"):
 		// TODO: Strip "file://" prefix before reading. Also consider restricting
 		// to paths within the repo directory to prevent reading arbitrary files.
+		// TODO: should file:// then not point to the sesam repo only?
 		data, err := os.ReadFile(arg)
 		if err != nil {
 			return "", fmt.Errorf("failed to find %s: %w", arg, err)
@@ -190,6 +196,6 @@ func ParseRecipient(arg string) (*Recipient, error) {
 	spk := newStringPubKey(s)
 	return &Recipient{
 		Recipient:           r,
-		ComparablePublicKey: spk,
+		comparablePublicKey: spk,
 	}, err
 }

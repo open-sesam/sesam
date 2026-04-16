@@ -27,7 +27,8 @@ tasks:
   test:coverage:
     desc: Run go tests with coverage report
     cmds:
-      - go test ./... -coverprofile=coverage.out
+      - go test -v ./... -coverprofile=coverage.out
       - go tool cover -func=coverage.out
+      - go tool cover -html=coverage.out
 
   # TODO: Build an docker image for CI + also for end users.

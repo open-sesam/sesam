@@ -20,9 +20,9 @@ import (
 
 // TODO: We might need to think about a way to destroy identities in memory after they are not longer needed.
 
-// ComparablePublicKey is a public key that can be compared with another key safely.
-type ComparablePublicKey interface {
-	Equal(o ComparablePublicKey) bool
+// comparablePublicKey is a public key that can be compared with another key safely.
+type comparablePublicKey interface {
+	Equal(o comparablePublicKey) bool
 	String() string
 }
 
@@ -32,12 +32,45 @@ type ComparablePublicKey interface {
 // sure they are normalized (no comments like user@host)
 type stringPubKey string
 
+// Identity references a private key of a user.
+type Identity struct {
+	age.Identity
+	pub comparablePublicKey
+}
+
+// Identities is a list of Identity.
+// It just exists to allow some common helper types.
+type Identities []*Identity
+
+// PassphraseProvider describes anything that can give you a password.
+type PassphraseProvider interface {
+	ReadPassphrase() ([]byte, error)
+}
+
+// StdinPassphraseProvider is a simple PassphraseProvider that reads a password from stdin.
+type StdinPassphraseProvider struct{}
+
+// KeyringPassphraseProvider tries to read the passphrase from the system
+// keyring (GNOME Keyring, KWallet, macOS Keychain, Windows Credential Manager).
+// If no entry exists, it falls back to prompting via the given fallback provider
+// and caches the passphrase in the keyring on success.
+type KeyringPassphraseProvider struct {
+	// KeyFingerprint identifies which key this passphrase is for.
+	// Used as the keyring item name to support multiple SSH keys.
+	KeyFingerprint string
+
+	// Fallback is used to prompt the user when the keyring has no entry.
+	Fallback PassphraseProvider
+}
+
+const keyringService = "sesam"
+
 func newStringPubKey(s string) stringPubKey {
 	// just make sure we don't have formatting accidents...
 	return stringPubKey(strings.TrimSpace(s))
 }
 
-func (spk stringPubKey) Equal(o ComparablePublicKey) bool {
+func (spk stringPubKey) Equal(o comparablePublicKey) bool {
 	ospk, ok := o.(stringPubKey)
 	if !ok {
 		return false
@@ -50,16 +83,9 @@ func (spk stringPubKey) String() string {
 	return string(spk)
 }
 
-type Identity struct {
-	age.Identity
-	pub ComparablePublicKey
-}
-
-func (gi *Identity) Public() ComparablePublicKey {
+func (gi *Identity) Public() comparablePublicKey {
 	return gi.pub
 }
-
-type Identities []*Identity
 
 func (ids Identities) AgeIdentities() []age.Identity {
 	ageIds := make([]age.Identity, 0, len(ids))
@@ -184,30 +210,9 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity
 	return sshKeyToIdentity(rawKey)
 }
 
-type PassphraseProvider interface {
-	ReadPassphrase() ([]byte, error)
-}
-
-type StdinPassphraseProvider struct{}
-
 func (spp *StdinPassphraseProvider) ReadPassphrase() ([]byte, error) {
 	return readline.Password("Passphrase: ")
 }
-
-// KeyringPassphraseProvider tries to read the passphrase from the system
-// keyring (GNOME Keyring, KWallet, macOS Keychain, Windows Credential Manager).
-// If no entry exists, it falls back to prompting via the given fallback provider
-// and caches the passphrase in the keyring on success.
-type KeyringPassphraseProvider struct {
-	// KeyFingerprint identifies which key this passphrase is for.
-	// Used as the keyring item name to support multiple SSH keys.
-	KeyFingerprint string
-
-	// Fallback is used to prompt the user when the keyring has no entry.
-	Fallback PassphraseProvider
-}
-
-const keyringService = "sesam"
 
 func (kpp *KeyringPassphraseProvider) ReadPassphrase() ([]byte, error) {
 	stored, err := keyring.Get(keyringService, kpp.KeyFingerprint)
@@ -249,7 +254,7 @@ func IdentityToUser(id *Identity, userToPub map[string][]*Recipient) (string, er
 
 	for userName, recps := range userToPub {
 		for _, recp := range recps {
-			if ownPub.Equal(recp.ComparablePublicKey) {
+			if ownPub.Equal(recp.comparablePublicKey) {
 				matchCount++
 				matchedUser = userName
 				matchedRecipient = recp

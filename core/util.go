@@ -8,7 +8,7 @@ import (
 )
 
 // Deduplicate returns a sorted copy of s with duplicates removed.
-func Deduplicate[T cmp.Ordered](s []T) []T {
+func deduplicate[T cmp.Ordered](s []T) []T {
 	c := slices.Clone(s)
 	slices.Sort(c)
 	return slices.Compact(c)

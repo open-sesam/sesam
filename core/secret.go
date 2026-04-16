@@ -14,13 +14,14 @@ import (
 	"filippo.io/age"
 )
 
+// Signer is similar to Identity (private part) but is used for signing only.
 type Signer interface {
 	Sign(data []byte) (string, error)
 	PublicKey() []byte
 	UserName() string
 }
 
-type Secret struct {
+type secret struct {
 	Mgr *SecretManager
 
 	// RevealedPath is relative to Mgr.RepoDir
@@ -31,14 +32,14 @@ type Secret struct {
 	Recipients Recipients
 }
 
-type SecretSignature struct {
+type secretSignature struct {
 	RevealedPath string `json:"path"`
 	Hash         string `json:"hash"`
 	Signature    string `json:"signature"`
 	SealedBy     string `json:"sealed_by"`
 }
 
-func (s *Secret) Seal(sealedByUser string) (*SecretSignature, error) {
+func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 	rd, err := os.Open(filepath.Join(s.Mgr.RepoDir, s.RevealedPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secret: %w", err)
@@ -78,7 +79,7 @@ func (s *Secret) Seal(sealedByUser string) (*SecretSignature, error) {
 		return nil, fmt.Errorf("failed to compute signature for %s: %w", encryptedPath, err)
 	}
 
-	ss := SecretSignature{
+	ss := secretSignature{
 		RevealedPath: s.RevealedPath,
 		Hash:         MulticodeEncode(hashBytes, MhSHA3_256),
 		Signature:    sig,
@@ -92,7 +93,7 @@ func (s *Secret) Seal(sealedByUser string) (*SecretSignature, error) {
 	_ = enc.Encode(ss)
 
 	// write the signature file along the encrypted file:
-	sigPath := SignaturePath(s.Mgr.RepoDir, s.RevealedPath)
+	sigPath := signaturePath(s.Mgr.RepoDir, s.RevealedPath)
 	if err := renameio.WriteFile(sigPath, sigBuf.Bytes(), 0600); err != nil {
 		return nil, err
 	}
@@ -102,7 +103,7 @@ func (s *Secret) Seal(sealedByUser string) (*SecretSignature, error) {
 
 // Reveal decrypts secret `s` and verifies its detached signature.
 // No error is only returned if the reveal has been fully successful.
-func (s *Secret) Reveal() error {
+func (s *secret) Reveal() error {
 	cryptPath := s.Mgr.cryptPath(s.RevealedPath)
 	srcFd, err := os.Open(cryptPath)
 	if err != nil {
@@ -140,7 +141,7 @@ func (s *Secret) Reveal() error {
 		return fmt.Errorf("failed to copy decrypted secret back in place: %w", err)
 	}
 
-	sigDesc, err := ReadStoredSignature(s.Mgr.RepoDir, s.RevealedPath)
+	sigDesc, err := readStoredSignature(s.Mgr.RepoDir, s.RevealedPath)
 	if err != nil {
 		return fmt.Errorf("failed to read signature: %w", err)
 	}

@@ -58,7 +58,7 @@ func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error
 		return nil, fmt.Errorf("failed to decrypt signing key: %v", err)
 	}
 
-	signPrivKeyRaw, code, err := MulticodeDecode(string(bytes.TrimSpace(signingKeyEncoded)))
+	signPrivKeyRaw, code, err := multicodeDecode(string(bytes.TrimSpace(signingKeyEncoded)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode sign key %s: %w", signKeyPath, err)
 	}
@@ -117,35 +117,35 @@ func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer,
 	}, nil
 }
 
-func SignaturePath(repoDir, revealedPath string) string {
+func signaturePath(repoDir, revealedPath string) string {
 	return filepath.Join(repoDir, ".sesam", "objects", revealedPath+".sig.json")
 }
 
 // ReadStoredSignature will open the signature file belonging to `revealedPath`.
 // You will get an error if it has not been sealed yet.
-func ReadStoredSignature(repoDir, revealedPath string) (SecretSignature, error) {
-	sigPath := SignaturePath(repoDir, revealedPath)
+func readStoredSignature(repoDir, revealedPath string) (secretSignature, error) {
+	sigPath := signaturePath(repoDir, revealedPath)
 	sigFd, err := os.Open(sigPath)
 	if err != nil {
-		return SecretSignature{}, fmt.Errorf("failed to open signature json: %w", err)
+		return secretSignature{}, fmt.Errorf("failed to open signature json: %w", err)
 	}
 
 	defer closeLogged(sigFd)
 
-	var sigDesc SecretSignature
+	var sigDesc secretSignature
 	dec := json.NewDecoder(io.LimitReader(sigFd, 1024))
 	if err := dec.Decode(&sigDesc); err != nil {
-		return SecretSignature{}, fmt.Errorf("failed to decode signature json %s: %w", sigPath, err)
+		return secretSignature{}, fmt.Errorf("failed to decode signature json %s: %w", sigPath, err)
 	}
 
 	return sigDesc, nil
 }
 
 // ReadAllSignatures finds all .sig.json files under .sesam/objects/ and parses them.
-func ReadAllSignatures(repoDir string) ([]SecretSignature, error) {
+func readAllSignatures(repoDir string) ([]secretSignature, error) {
 	objectsDir := filepath.Join(repoDir, ".sesam", "objects")
 
-	var sigs []SecretSignature
+	var sigs []secretSignature
 	if _, err := os.Stat(objectsDir); os.IsNotExist(err) {
 		// might happen if we're in the init phase
 		return sigs, nil
@@ -166,7 +166,7 @@ func ReadAllSignatures(repoDir string) ([]SecretSignature, error) {
 		}
 		defer closeLogged(sigFd)
 
-		var sig SecretSignature
+		var sig secretSignature
 		dec := json.NewDecoder(io.LimitReader(sigFd, 2048))
 		if err := dec.Decode(&sig); err != nil {
 			return fmt.Errorf("failed to decode signature json %s: %w", path, err)

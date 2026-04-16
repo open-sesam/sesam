@@ -16,7 +16,7 @@ import (
 // Returns an error describing the problem otherwise.
 // If repoDir is not a git repo a warning-level error is returned
 // (caller decides whether to treat it as fatal).
-func VerifyInitFileUnchanged(repoDir string) error {
+func verifyInitFileUnchanged(repoDir string) error {
 	repo, err := git.PlainOpenWithOptions(repoDir, &git.PlainOpenOptions{
 		DetectDotGit: true,
 	})

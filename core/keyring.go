@@ -7,6 +7,7 @@ import (
 	"slices"
 )
 
+// Keyring is a collection of public keys (both for sign-verify and encryption)
 type Keyring interface {
 	// AddRecipient adds a recipient to `user`. It is the public part of a keypair
 	// the user can use to encrypt files.
@@ -33,6 +34,7 @@ type Keyring interface {
 	ListUsers() map[string][]*Recipient
 }
 
+// MemoryKeyring is a simple Keyring implementation that holds public keys in memory only.
 type MemoryKeyring struct {
 	recipients map[string][]*Recipient
 	signPubs   map[string][][]byte
@@ -53,7 +55,7 @@ func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) {
 	}
 
 	if slices.ContainsFunc(recps, func(other *Recipient) bool {
-		return other.ComparablePublicKey.Equal(recp.ComparablePublicKey)
+		return other.comparablePublicKey.Equal(recp.comparablePublicKey)
 	}) {
 		return
 	}
@@ -84,7 +86,7 @@ func (mk *MemoryKeyring) DeleteUser(user string) bool {
 }
 
 func (mk *MemoryKeyring) verifySingle(key, data []byte, signature string) error {
-	sigData, code, err := MulticodeDecode(signature)
+	sigData, code, err := multicodeDecode(signature)
 	if err != nil {
 		return fmt.Errorf("decode signature: %w", err)
 	}
