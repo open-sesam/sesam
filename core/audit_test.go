@@ -166,16 +166,23 @@ func TestLoadMissingLogFile(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestLoadCorruptLogFile(t *testing.T) {
+func TestLoadCorruptTrailingEntry(t *testing.T) {
 	repoDir := testRepo(t)
-	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
-	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0o600))
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, repoDir, admin)
+	require.NoError(t, al.Close())
 
+	// Append garbage after the valid entry to simulate a crash mid-write.
 	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
-	require.NoError(t, os.WriteFile(logPath, []byte("not json"), 0o600))
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	_, err = f.WriteString(`{"operation":"seal","changed_by":"adm`)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
 
-	_, err := LoadAuditLog(repoDir)
-	require.Error(t, err, "should fail on corrupt log JSON")
+	_, err = LoadAuditLog(repoDir)
+	require.Error(t, err, "should refuse to load corrupt audit log")
+	require.Contains(t, err.Error(), "corrupt audit log")
 }
 
 func TestBuildRootHash(t *testing.T) {

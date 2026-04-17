@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -480,12 +482,32 @@ func LoadAuditLog(repoDir string) (*AuditLog, error) {
 	for dec.More() {
 		var entry auditEntrySigned
 		if err := dec.Decode(&entry); err != nil {
-			closeLogged(al.fd)
-			return nil, fmt.Errorf("failed to decode line: %d", lineNumber)
+			// A partial trailing entry means we were interrupted mid-write.
+			// Truncate back to the last good entry and continue — the incomplete
+			// entry never finished and can be safely discarded.
+			goodOffset := dec.InputOffset()
+			slog.Warn(
+				"audit log has incomplete trailing entry (interrupted write?), truncating",
+				slog.Int("line", lineNumber),
+				slog.Int64("truncate_at", goodOffset),
+			)
+
+			if err := al.fd.Truncate(goodOffset); err != nil {
+				closeLogged(al.fd)
+				return nil, fmt.Errorf("failed to truncate corrupt trailing entry: %w", err)
+			}
+
+			break
 		}
 
 		al.Entries = append(al.Entries, entry)
 		lineNumber++
+	}
+
+	// Seek to end so subsequent writes append after the last good entry.
+	if _, err := al.fd.Seek(0, io.SeekEnd); err != nil {
+		closeLogged(al.fd)
+		return nil, fmt.Errorf("failed to seek to end: %w", err)
 	}
 
 	return &al, nil
