@@ -11,7 +11,6 @@ import (
 )
 
 // initMain shows the setup done during init
-// TODO: Move a lot of this stuff to a proper init module.
 func initMain(id *core.Identity) *core.SecretManager {
 	whoami := "sahib" // given as argument on init
 
@@ -67,7 +66,7 @@ func initMain(id *core.Identity) *core.SecretManager {
 		log.Fatalf("failed to build secret manager: %v", err)
 	}
 
-	err = sm.AddOrChangeSecret("DESIGN.new", []string{"admin"})
+	err = sm.AddSecret("DESIGN.new", []string{"admin"})
 	if err != nil {
 		log.Fatalf("failed to add secret: %v", err)
 	}

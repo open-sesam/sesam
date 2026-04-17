@@ -180,9 +180,11 @@ func TestLoadCorruptTrailingEntry(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	_, err = LoadAuditLog(repoDir)
-	require.Error(t, err, "should refuse to load corrupt audit log")
-	require.Contains(t, err.Error(), "corrupt audit log")
+	// Should recover: truncate the partial entry and load the valid one.
+	loaded, err := LoadAuditLog(repoDir)
+	require.NoError(t, err)
+	require.Len(t, loaded.Entries, 1, "should have the one valid init entry")
+	require.NoError(t, loaded.Close())
 }
 
 func TestBuildRootHash(t *testing.T) {

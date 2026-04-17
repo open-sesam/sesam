@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // SecretManager is the high level API to manage secrets,
@@ -71,6 +72,10 @@ func (sm *SecretManager) cryptPath(path string) string {
 	return filepath.Join(sm.RepoDir, ".sesam", "objects", path+".age")
 }
 
+func (sm *SecretManager) sigPath(path string) string {
+	return filepath.Join(sm.RepoDir, ".sesam", "objects", path+".sig.json")
+}
+
 func (sm *SecretManager) cryptWriter(path string) (*os.File, string, error) {
 	cryptPath := sm.cryptPath(path)
 
@@ -89,17 +94,40 @@ func (sm *SecretManager) tmpDir() string {
 	return filepath.Join(sm.RepoDir, ".sesam", "tmp")
 }
 
-func (sm *SecretManager) AddOrChangeSecret(revealedPath string, groups []string) error {
+// AddSecret adds a new secret to be managed by sesam
+func (sm *SecretManager) AddSecret(revealedPath string, groups []string) error {
+	return sm.addOrChangeSecret(revealedPath, groups)
+}
+
+// ChangeSecretGroups changes the access groups for the secret at `revealedPath`
+// NOTE: It is currently valid to call AddSecret instead.
+func (sm *SecretManager) ChangeSecretGroups(revealedPath string, groups []string) error {
+	return sm.addOrChangeSecret(revealedPath, groups)
+}
+
+// NOTE: right now add/change is the same operation. Later we can do different things on add/change,
+// the API is already split in case we want to go that route.
+func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string) error {
 	if err := validSecretPath(sm.RepoDir, revealedPath); err != nil {
 		return fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
 	}
 
-	accessUsers := sm.State.UserForGroups(groups)
-	sm.secrets = append(sm.secrets, secret{
-		Mgr:          sm,
-		RevealedPath: revealedPath,
-		Recipients:   sm.Keyring.Recipients(accessUsers),
+	idx := slices.IndexFunc(sm.secrets, func(s secret) bool {
+		return s.RevealedPath == revealedPath
 	})
+
+	accessUsers := sm.State.UserForGroups(groups)
+	recps := sm.Keyring.Recipients(accessUsers)
+
+	if idx < 0 {
+		sm.secrets = append(sm.secrets, secret{
+			Mgr:          sm,
+			RevealedPath: revealedPath,
+			Recipients:   recps,
+		})
+	} else {
+		sm.secrets[idx].Recipients = recps
+	}
 
 	return sm.State.FeedEntry(
 		sm.Signer,
@@ -111,7 +139,7 @@ func (sm *SecretManager) AddOrChangeSecret(revealedPath string, groups []string)
 
 // SealAll seals all kown secrets.
 func (sm *SecretManager) SealAll() error {
-	var sigs []*secretSignature
+	sigs := make([]*secretSignature, 0, len(sm.secrets))
 
 	for _, secret := range sm.secrets {
 		fmt.Println("SEAL", secret.RevealedPath)
@@ -141,4 +169,33 @@ func (sm *SecretManager) RevealAll() error {
 		}
 	}
 	return nil
+}
+
+// RemoveSecret removes a secret from sesam's management.
+// The encrypted files (+associated) are deleted, but the original file is not touched.
+func (sm *SecretManager) RemoveSecret(revealedPath string) error {
+	idx := slices.IndexFunc(sm.secrets, func(s secret) bool {
+		return s.RevealedPath == revealedPath
+	})
+
+	if idx < 0 {
+		return fmt.Errorf("no such secret")
+	}
+
+	if err := os.RemoveAll(sm.cryptPath(revealedPath)); err != nil {
+		return err
+	}
+
+	if err := os.RemoveAll(sm.sigPath(revealedPath)); err != nil {
+		return err
+	}
+
+	sm.secrets = slices.Delete(sm.secrets, idx, idx+1)
+
+	return sm.State.FeedEntry(
+		sm.Signer,
+		newAuditEntry(sm.Signer.UserName(), &DetailSecretRemove{
+			RevealedPath: revealedPath,
+		}),
+	)
 }
