@@ -1,0 +1,14 @@
+version: 1
+
+config:
+  users:
+    - name: %s
+      key: %s
+  groups:
+    admin:
+      - %s
+
+secrets:
+  - revealed_path: example.secret
+    groups:
+      - admin

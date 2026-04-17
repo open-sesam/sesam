@@ -2,6 +2,9 @@ package cli
 
 import "github.com/urfave/cli/v3"
 
+// flagsGeneral are shared by most top-level commands.
+//
+// They describe the operator identity and repository/config roots.
 var flagsGeneral = []cli.Flag{
 	&cli.StringFlag{
 		Name:    "identity",
@@ -23,44 +26,20 @@ var flagsGeneral = []cli.Flag{
 	},
 }
 
+// flagsInit are specific to repository bootstrap.
 var flagsInit = []cli.Flag{
 	&cli.StringFlag{
 		Name:  "user",
 		Usage: "Initial admin user name (defaults to current OS user)",
 	},
-	&cli.StringSliceFlag{
+	&cli.StringFlag{
 		Name:  "recipient",
-		Usage: "Initial admin recipient key (optional when derivable from --identity)",
+		Usage: "Initial admin recipient key (single value; optional when derivable from --identity)",
 	},
 }
 
-var flagsSeal = []cli.Flag{
-	&cli.StringFlag{
-		Name:     "secret",
-		Required: true,
-		Usage:    "Path to the secret file to encrypt (relative to repo)",
-	},
-	&cli.StringFlag{
-		Name:     "recipient",
-		Required: true,
-		Usage:    "Recipient key, forge id (github:user), or https:// key URL",
-	},
-	&cli.StringFlag{
-		Name:     "user",
-		Required: true,
-		Usage:    "User name used for the signing key file",
-	},
-}
+// flagsSeal contains optional controls for sealing.
+var flagsSeal = []cli.Flag{}
 
-var flagsReveal = []cli.Flag{
-	&cli.StringFlag{
-		Name:     "secret",
-		Required: true,
-		Usage:    "Path to the secret file to decrypt (relative to repo)",
-	},
-	&cli.StringFlag{
-		Name:     "user",
-		Required: true,
-		Usage:    "User name used for the signing key file",
-	},
-}
+// flagsReveal contains optional controls for reveal.
+var flagsReveal = []cli.Flag{}

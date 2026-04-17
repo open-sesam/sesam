@@ -9,47 +9,51 @@ import (
 	"filippo.io/age"
 )
 
-// Those test are written with AI, I didn't look over them yet
-// TODO: refine the tests to cover our needs
-
-
-func TestMainSealRequiresFlags(t *testing.T) {
-	err := Main([]string{"sesam", "seal"})
-	if err == nil {
-		t.Fatal("expected error when required flags are missing")
-	}
-
-	for _, flagName := range []string{"secret", "recipient", "user"} {
-		if !strings.Contains(err.Error(), flagName) {
-			t.Fatalf("expected error to mention %q, got: %v", flagName, err)
-		}
-	}
-}
-
-func TestMainRevealRequiresFlags(t *testing.T) {
-	err := Main([]string{"sesam", "reveal"})
-	if err == nil {
-		t.Fatal("expected error when required flags are missing")
-	}
-
-	for _, flagName := range []string{"secret", "user"} {
-		if !strings.Contains(err.Error(), flagName) {
-			t.Fatalf("expected error to mention %q, got: %v", flagName, err)
-		}
-	}
-}
-
-func TestMainSealMissingIdentity(t *testing.T) {
-	repoDir := t.TempDir()
-	missingIdentity := filepath.Join(repoDir, "missing-identity.txt")
-	writeSecretFile(t, repoDir, "example.txt")
+func TestMainSealRequiresInitializedRepo(t *testing.T) {
+	repoDir := makeTempDir(t)
+	identityPath := writeIdentityFile(t, repoDir)
 
 	err := Main([]string{
 		"sesam",
 		"seal",
-		"--secret", "example.txt",
-		"--recipient", "not-used-in-this-test",
-		"--user", "alice",
+		"--repo", repoDir,
+		"--identity", identityPath,
+	})
+	if err == nil {
+		t.Fatal("expected seal to fail without audit log")
+	}
+
+	if !strings.Contains(err.Error(), "failed to load audit log") {
+		t.Fatalf("expected audit-log error, got: %v", err)
+	}
+}
+
+func TestMainRevealRequiresInitializedRepo(t *testing.T) {
+	repoDir := makeTempDir(t)
+	identityPath := writeIdentityFile(t, repoDir)
+
+	err := Main([]string{
+		"sesam",
+		"reveal",
+		"--repo", repoDir,
+		"--identity", identityPath,
+	})
+	if err == nil {
+		t.Fatal("expected reveal to fail without audit log")
+	}
+
+	if !strings.Contains(err.Error(), "failed to load audit log") {
+		t.Fatalf("expected audit-log error, got: %v", err)
+	}
+}
+
+func TestMainSealMissingIdentity(t *testing.T) {
+	repoDir := makeTempDir(t)
+	missingIdentity := filepath.Join(repoDir, "missing-identity.txt")
+
+	err := Main([]string{
+		"sesam",
+		"seal",
 		"--repo", repoDir,
 		"--identity", missingIdentity,
 	})
@@ -62,80 +66,7 @@ func TestMainSealMissingIdentity(t *testing.T) {
 	}
 }
 
-func TestMainSealInvalidRecipient(t *testing.T) {
-	repoDir := t.TempDir()
-	identityPath := writeIdentityFile(t, repoDir)
-	writeSecretFile(t, repoDir, "example.txt")
-
-	err := Main([]string{
-		"sesam",
-		"seal",
-		"--secret", "example.txt",
-		"--recipient", "not-a-recipient",
-		"--user", "alice",
-		"--repo", repoDir,
-		"--identity", identityPath,
-	})
-	if err == nil {
-		t.Fatal("expected invalid recipient error")
-	}
-
-	if !strings.Contains(err.Error(), "failed to parse recipient") {
-		t.Fatalf("expected recipient parse error, got: %v", err)
-	}
-}
-
-func TestMainSealMissingSecretFile(t *testing.T) {
-	repoDir := t.TempDir()
-	identityPath, recipient := writeIdentityFileWithRecipient(t, repoDir)
-
-	err := Main([]string{
-		"sesam",
-		"seal",
-		"--secret", "does-not-exist.txt",
-		"--recipient", recipient,
-		"--user", "alice",
-		"--repo", repoDir,
-		"--identity", identityPath,
-	})
-	if err == nil {
-		t.Fatal("expected missing secret error")
-	}
-
-	if !strings.Contains(err.Error(), "secret file") {
-		t.Fatalf("expected missing secret message, got: %v", err)
-	}
-}
-
-func TestMainRevealMissingSignKey(t *testing.T) {
-	repoDir := t.TempDir()
-	identityPath := writeIdentityFile(t, repoDir)
-
-	err := Main([]string{
-		"sesam",
-		"reveal",
-		"--secret", "example.txt",
-		"--user", "alice",
-		"--repo", repoDir,
-		"--identity", identityPath,
-	})
-	if err == nil {
-		t.Fatal("expected missing sign key error")
-	}
-
-	if !strings.Contains(err.Error(), "failed to load signing key") {
-		t.Fatalf("expected signing key error, got: %v", err)
-	}
-}
-
 func writeIdentityFile(t *testing.T, dir string) string {
-	t.Helper()
-
-	identityPath, _ := writeIdentityFileWithRecipient(t, dir)
-	return identityPath
-}
-
-func writeIdentityFileWithRecipient(t *testing.T, dir string) (string, string) {
 	t.Helper()
 
 	id, err := age.GenerateX25519Identity()
@@ -145,18 +76,77 @@ func writeIdentityFileWithRecipient(t *testing.T, dir string) (string, string) {
 
 	identityPath := filepath.Join(dir, "identity.txt")
 	identityData := []byte(id.String() + "\n")
-	if err := os.WriteFile(identityPath, identityData, 0600); err != nil {
+	if err := os.WriteFile(identityPath, identityData, 0o600); err != nil {
 		t.Fatalf("failed to write identity file: %v", err)
 	}
 
-	return identityPath, id.Recipient().String()
+	return identityPath
 }
 
-func writeSecretFile(t *testing.T, dir, relPath string) {
-	t.Helper()
+func TestMainInitSealRevealRoundTrip(t *testing.T) {
+	repoRoot := makeTempDir(t)
+	initGitRepo(t, repoRoot)
 
-	secretPath := filepath.Join(dir, relPath)
-	if err := os.WriteFile(secretPath, []byte("secret-data"), 0600); err != nil {
-		t.Fatalf("failed to write secret file: %v", err)
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatalf("failed to generate identity: %v", err)
+	}
+
+	identityPath := filepath.Join(repoRoot, "identity.txt")
+	if err := os.WriteFile(identityPath, []byte(id.String()+"\n"), 0o600); err != nil {
+		t.Fatalf("failed to write identity: %v", err)
+	}
+
+	err = Main([]string{
+		"sesam",
+		"init",
+		"--repo", repoRoot,
+		"--user", "alice",
+		"--identity", identityPath,
+	})
+	if err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	original := "super-secret\nanother super important secret\n"
+	secretPath := filepath.Join(repoRoot, "example.secret")
+	if err := os.WriteFile(secretPath, []byte(original), 0o600); err != nil {
+		t.Fatalf("failed to write plaintext secret: %v", err)
+	}
+
+	err = Main([]string{
+		"sesam",
+		"seal",
+		"--repo", repoRoot,
+		"--identity", identityPath,
+	})
+	if err != nil {
+		t.Fatalf("seal failed: %v", err)
+	}
+
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "objects", "example.secret.age"))
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "objects", "example.secret.sig.json"))
+
+	if err := os.Remove(secretPath); err != nil {
+		t.Fatalf("failed to remove plaintext secret: %v", err)
+	}
+
+	err = Main([]string{
+		"sesam",
+		"reveal",
+		"--repo", repoRoot,
+		"--identity", identityPath,
+	})
+	if err != nil {
+		t.Fatalf("reveal failed: %v", err)
+	}
+
+	revealed, err := os.ReadFile(secretPath)
+	if err != nil {
+		t.Fatalf("failed to read revealed secret: %v", err)
+	}
+
+	if string(revealed) != original {
+		t.Fatalf("revealed secret mismatch\nwant: %q\n got: %q", original, string(revealed))
 	}
 }
