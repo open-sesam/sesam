@@ -28,7 +28,7 @@ func TestVerifyInitBasic(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, repoDir, admin)
 
-	state := verifyState(t, al, NewMemoryKeyring())
+	state := verifyState(t, al, EmptyKeyring())
 	require.Len(t, state.Users, 1)
 	require.Equal(t, "admin", state.Users[0].Name)
 	require.True(t, state.Users[0].IsAdmin())
@@ -40,7 +40,7 @@ func TestVerifyInitNegative(t *testing.T) {
 		admin := newTestUser(t, "admin")
 		al := initAuditLog(t, repoDir, admin)
 		al.Entries[0].SeqID = 5
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("hash mismatch", func(t *testing.T) {
@@ -48,16 +48,16 @@ func TestVerifyInitNegative(t *testing.T) {
 		admin := newTestUser(t, "admin")
 		al := initAuditLog(t, repoDir, admin)
 		al.InitHash = "bogus-hash"
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("admin not in admin group", func(t *testing.T) {
 		repoDir := testRepo(t)
 		admin := newTestUser(t, "admin")
 		tell := admin.DetailUserTell([]string{"dev"})
-		al, err := InitLog(repoDir, admin.Signer, tell)
+		al, err := InitAuditLog(repoDir, admin.Signer, tell)
 		require.NoError(t, err)
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("changedBy mismatch", func(t *testing.T) {
@@ -65,7 +65,7 @@ func TestVerifyInitNegative(t *testing.T) {
 		admin := newTestUser(t, "admin")
 		al := initAuditLog(t, repoDir, admin)
 		al.Entries[0].ChangedBy = "eve"
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 }
 
@@ -82,7 +82,7 @@ func TestVerifyUserTellBasic(t *testing.T) {
 		PubKeys: []string{bob.Recipient.String()}, SignPubKeys: []string{bob.SignPubKey},
 	}), nil)
 
-	state := verifyState(t, al, NewMemoryKeyring())
+	state := verifyState(t, al, EmptyKeyring())
 	require.Len(t, state.Users, 2)
 	bobUser, exists := state.UserExists("bob")
 	require.True(t, exists)
@@ -107,7 +107,7 @@ func TestVerifyUserTellNegative(t *testing.T) {
 			PubKeys: []string{carol.Recipient.String()}, SignPubKeys: []string{carol.SignPubKey},
 		}), nil)
 
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("self add", func(t *testing.T) {
@@ -120,7 +120,7 @@ func TestVerifyUserTellNegative(t *testing.T) {
 			PubKeys: []string{admin.Recipient.String()}, SignPubKeys: []string{admin.SignPubKey},
 		}), nil)
 
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("duplicate user", func(t *testing.T) {
@@ -136,7 +136,7 @@ func TestVerifyUserTellNegative(t *testing.T) {
 		al.AddEntry(admin.Signer, newAuditEntry("admin", tell), nil)
 		al.AddEntry(admin.Signer, newAuditEntry("admin", tell), nil)
 
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 }
 
@@ -155,7 +155,7 @@ func TestVerifyUserKillBasic(t *testing.T) {
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserKill{User: "bob"}), nil)
 
-	state := verifyState(t, al, NewMemoryKeyring())
+	state := verifyState(t, al, EmptyKeyring())
 	_, exists := state.UserExists("bob")
 	require.False(t, exists)
 	require.Len(t, state.Users, 1)
@@ -167,7 +167,7 @@ func TestVerifyUserKillNegative(t *testing.T) {
 		admin := newTestUser(t, "admin")
 		al := initAuditLog(t, repoDir, admin)
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserKill{User: "admin"}), nil)
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("non-existent user", func(t *testing.T) {
@@ -175,7 +175,7 @@ func TestVerifyUserKillNegative(t *testing.T) {
 		admin := newTestUser(t, "admin")
 		al := initAuditLog(t, repoDir, admin)
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserKill{User: "ghost"}), nil)
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("non-admin signer", func(t *testing.T) {
@@ -190,7 +190,7 @@ func TestVerifyUserKillNegative(t *testing.T) {
 		}), nil)
 
 		al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailUserKill{User: "admin"}), nil)
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 }
 
@@ -207,7 +207,7 @@ func TestVerifyUserKillSecondAdmin(t *testing.T) {
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserKill{User: "bob"}), nil)
 
-	state := verifyState(t, al, NewMemoryKeyring())
+	state := verifyState(t, al, EmptyKeyring())
 	_, exists := state.UserExists("bob")
 	require.False(t, exists)
 }
@@ -223,7 +223,7 @@ func TestVerifySecretChangeBasic(t *testing.T) {
 		RevealedPath: "secrets/db", Groups: []string{"dev"},
 	}), nil)
 
-	state := verifyState(t, al, NewMemoryKeyring())
+	state := verifyState(t, al, EmptyKeyring())
 	s, exists := state.SecretExists("secrets/db")
 	require.True(t, exists)
 	require.Equal(t, "secrets/db", s.RevealedPath)
@@ -237,7 +237,7 @@ func TestVerifySecretChangeNegative(t *testing.T) {
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
 			RevealedPath: "secrets/db", Groups: []string{},
 		}), nil)
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("no access to existing secret", func(t *testing.T) {
@@ -260,7 +260,7 @@ func TestVerifySecretChangeNegative(t *testing.T) {
 			RevealedPath: "secrets/db", Groups: []string{"dev"},
 		}), nil)
 
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 }
 
@@ -277,7 +277,7 @@ func TestVerifySecretChangeUpdate(t *testing.T) {
 		RevealedPath: "secrets/db", Groups: []string{"ops"},
 	}), nil)
 
-	state := verifyState(t, al, NewMemoryKeyring())
+	state := verifyState(t, al, EmptyKeyring())
 	s, _ := state.SecretExists("secrets/db")
 	require.Contains(t, s.AccessGroups, "ops")
 }
@@ -296,7 +296,7 @@ func TestVerifySecretRemoveBasic(t *testing.T) {
 		RevealedPath: "secrets/db",
 	}), nil)
 
-	state := verifyState(t, al, NewMemoryKeyring())
+	state := verifyState(t, al, EmptyKeyring())
 	_, exists := state.SecretExists("secrets/db")
 	require.False(t, exists)
 }
@@ -307,7 +307,7 @@ func TestVerifySecretRemoveNegative(t *testing.T) {
 		admin := newTestUser(t, "admin")
 		al := initAuditLog(t, repoDir, admin)
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRemove{RevealedPath: "ghost"}), nil)
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("no access", func(t *testing.T) {
@@ -326,7 +326,7 @@ func TestVerifySecretRemoveNegative(t *testing.T) {
 		}), nil)
 
 		al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretRemove{RevealedPath: "secrets/db"}), nil)
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 }
 
@@ -347,7 +347,7 @@ func TestVerifySealResetsRequirement(t *testing.T) {
 		RootHash: "some-hash", FilesSealed: 1,
 	}), nil)
 
-	state := verifyState(t, al, NewMemoryKeyring())
+	state := verifyState(t, al, EmptyKeyring())
 	require.Equal(t, uint64(0), state.SealRequiredSeqID)
 	require.Equal(t, "some-hash", state.LastSealRootHash)
 }
@@ -367,7 +367,7 @@ func TestVerifySignatureNegative(t *testing.T) {
 			PubKeys: []string{bob.Recipient.String()}, SignPubKeys: []string{bob.SignPubKey},
 		}), nil)
 
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("tampered signature", func(t *testing.T) {
@@ -375,7 +375,7 @@ func TestVerifySignatureNegative(t *testing.T) {
 		admin := newTestUser(t, "admin")
 		al := initAuditLog(t, repoDir, admin)
 		al.Entries[0].Signature = "bogus"
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 }
 
@@ -394,7 +394,7 @@ func TestVerifyChainIntegrity(t *testing.T) {
 		}), nil)
 
 		al.Entries[1].PreviousHash = "broken"
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("swapped entries", func(t *testing.T) {
@@ -416,7 +416,7 @@ func TestVerifyChainIntegrity(t *testing.T) {
 
 		// Swap entries 1 and 2 — should break chain.
 		al.Entries[1], al.Entries[2] = al.Entries[2], al.Entries[1]
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("deleted middle entry", func(t *testing.T) {
@@ -438,7 +438,7 @@ func TestVerifyChainIntegrity(t *testing.T) {
 
 		// Remove middle entry — chain breaks.
 		al.Entries = append(al.Entries[:1], al.Entries[2:]...)
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("tampered entry content", func(t *testing.T) {
@@ -454,7 +454,7 @@ func TestVerifyChainIntegrity(t *testing.T) {
 
 		// Tamper the init entry's detail (changes its hash, breaking chain for entry 2).
 		al.Entries[0].Detail = []byte(`{"init_uuid":"tampered","admin":{}}`)
-		require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 }
 
@@ -468,7 +468,7 @@ func TestVerifyUnknownOperation(t *testing.T) {
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{RootHash: "x", FilesSealed: 0}), nil)
 	al.Entries[len(al.Entries)-1].Operation = "unknown.op"
 
-	require.Error(t, verifyStateFail(t, al, NewMemoryKeyring()))
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 }
 
 // --- VerifiedState helper tests ---
@@ -578,7 +578,7 @@ func TestUpdate(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, repoDir, admin)
 
-	state := verifyState(t, al, NewMemoryKeyring())
+	state := verifyState(t, al, EmptyKeyring())
 	require.Equal(t, uint64(1), state.VerifiedUntil)
 
 	bob := newTestUser(t, "bob")
@@ -599,7 +599,7 @@ func TestVerifyExportedWithGitRepo(t *testing.T) {
 	al := initAuditLog(t, repoDir, admin)
 	gitCommitAll(t, repo, "init")
 
-	state, err := Verify(al, NewMemoryKeyring())
+	state, err := Verify(al, EmptyKeyring())
 	require.NoError(t, err)
 	require.Len(t, state.Users, 1)
 }
@@ -634,7 +634,7 @@ func TestVerifyExportedRootHashMatch(t *testing.T) {
 
 	gitCommitAll(t, repo, "full setup")
 
-	state, err := Verify(al, NewMemoryKeyring())
+	state, err := Verify(al, EmptyKeyring())
 	require.NoError(t, err)
 	require.Equal(t, rootHash, state.LastSealRootHash)
 }
@@ -650,7 +650,7 @@ func TestVerifyExportedRootHashMismatch(t *testing.T) {
 
 	gitCommitAll(t, repo, "init")
 
-	_, err := Verify(al, NewMemoryKeyring())
+	_, err := Verify(al, EmptyKeyring())
 	require.Error(t, err, "should detect root hash mismatch")
 }
 
@@ -678,7 +678,7 @@ func TestEndToEndStoreLoadVerify(t *testing.T) {
 	loaded, err := LoadAuditLog(repoDir)
 	require.NoError(t, err)
 
-	state := verifyState(t, loaded, NewMemoryKeyring())
+	state := verifyState(t, loaded, EmptyKeyring())
 	require.Len(t, state.Users, 2)
 	require.Len(t, state.Secrets, 1)
 	require.Equal(t, "test-root-hash", state.LastSealRootHash)
@@ -714,7 +714,7 @@ func TestFullLifecycle(t *testing.T) {
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRemove{RevealedPath: "secrets/db_pass"}), nil)
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{RootHash: "hash2", FilesSealed: 1}), nil)
 
-	state := verifyState(t, al, NewMemoryKeyring())
+	state := verifyState(t, al, EmptyKeyring())
 	require.Len(t, state.Users, 2) // admin + carol
 	_, exists := state.UserExists("bob")
 	require.False(t, exists)

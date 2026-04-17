@@ -116,3 +116,46 @@ func (um *UserManager) KillUsers(user string) error {
 
 	return nil
 }
+
+// InitAdminUser has to be called on init to create the initial user.
+func InitAdminUser(
+	ctx context.Context,
+	repoDir, user, pubKeySpec string,
+) (Signer, *AuditLog, error) {
+	rawPubKey, err := ResolveRecipient(
+		ctx,
+		repoDir,
+		pubKeySpec,
+		CacheModeReadWrite,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to resolve recipient %s: %w", pubKeySpec, err)
+	}
+
+	recp, err := ParseRecipient(rawPubKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse recipient %s: %w", rawPubKey, err)
+	}
+
+	signer, err := GenerateSignKey(
+		repoDir,
+		user,
+		recp.Recipient,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate signing key: %w", err)
+	}
+
+	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
+	auditLog, err := InitAuditLog(".", signer, DetailUserTell{
+		User:        signer.UserName(),
+		Groups:      []string{"admin"},
+		PubKeys:     []string{recp.String()},
+		SignPubKeys: []string{signKeyStr},
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to ini audit log: %w", err)
+	}
+
+	return signer, auditLog, nil
+}

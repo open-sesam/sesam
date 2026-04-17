@@ -9,7 +9,7 @@ import (
 )
 
 func TestMemoryKeyringAddAndVerify(t *testing.T) {
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	user := newTestUser(t, "alice")
 	kr.AddSignPubKey("alice", user.Signer.PublicKey())
 
@@ -23,7 +23,7 @@ func TestMemoryKeyringAddAndVerify(t *testing.T) {
 }
 
 func TestMemoryKeyringVerifyHintVariants(t *testing.T) {
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
 	kr.AddSignPubKey("alice", alice.Signer.PublicKey())
@@ -61,7 +61,7 @@ func TestMemoryKeyringVerifyHintVariants(t *testing.T) {
 }
 
 func TestMemoryKeyringVerifyNegative(t *testing.T) {
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	alice := newTestUser(t, "alice")
 	kr.AddSignPubKey("alice", alice.Signer.PublicKey())
 
@@ -85,7 +85,7 @@ func TestMemoryKeyringVerifyNegative(t *testing.T) {
 	})
 
 	t.Run("empty keyring", func(t *testing.T) {
-		emptyKr := NewMemoryKeyring()
+		emptyKr := EmptyKeyring()
 		sig, _ := alice.Signer.Sign(SesamDomainSignSecretTag, []byte("test"))
 		_, err := emptyKr.Verify(SesamDomainSignSecretTag, []byte("test"), sig, "alice")
 		require.Error(t, err)
@@ -93,7 +93,7 @@ func TestMemoryKeyringVerifyNegative(t *testing.T) {
 }
 
 func TestMemoryKeyringDeleteUser(t *testing.T) {
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	user := newTestUser(t, "alice")
 	kr.AddRecipient("alice", user.Recipient)
 	kr.AddSignPubKey("alice", user.Signer.PublicKey())
@@ -107,7 +107,7 @@ func TestMemoryKeyringDeleteUser(t *testing.T) {
 }
 
 func TestMemoryKeyringRecipients(t *testing.T) {
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
 	kr.AddRecipient("alice", alice.Recipient)
@@ -120,7 +120,7 @@ func TestMemoryKeyringRecipients(t *testing.T) {
 }
 
 func TestMemoryKeyringRecipientDedup(t *testing.T) {
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	user := newTestUser(t, "alice")
 
 	kr.AddRecipient("alice", user.Recipient)
@@ -129,7 +129,7 @@ func TestMemoryKeyringRecipientDedup(t *testing.T) {
 }
 
 func TestMemoryKeyringSignKeyDedup(t *testing.T) {
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	user := newTestUser(t, "alice")
 
 	kr.AddSignPubKey("alice", user.Signer.PublicKey())
@@ -144,7 +144,7 @@ func TestMemoryKeyringSignKeyDedup(t *testing.T) {
 
 func TestMemoryKeyringAddSignPubKeyAppend(t *testing.T) {
 	// Exercises the append path: adding a second *different* key for the same user.
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	alice := newTestUser(t, "alice")
 	alice2 := newTestUser(t, "alice") // different key material, same name
 
@@ -167,7 +167,7 @@ func TestMemoryKeyringAddSignPubKeyAppend(t *testing.T) {
 
 func TestMemoryKeyringAddRecipientAppend(t *testing.T) {
 	// Exercises the append path: adding a second *different* recipient for the same user.
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	alice1 := newTestUser(t, "alice")
 	alice2 := newTestUser(t, "alice") // different key material
 
@@ -179,7 +179,7 @@ func TestMemoryKeyringAddRecipientAppend(t *testing.T) {
 }
 
 func TestMemoryKeyringAddSignPubKeyMultipleUsers(t *testing.T) {
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
 
@@ -201,7 +201,7 @@ func TestMemoryKeyringAddSignPubKeyMultipleUsers(t *testing.T) {
 }
 
 func TestMemoryKeyringListUsers(t *testing.T) {
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
 	kr.AddRecipient("alice", alice.Recipient)

@@ -87,7 +87,7 @@ func testRepo(t *testing.T) string {
 // testKeyring creates a keyring populated with the given users.
 func testKeyring(t *testing.T, users ...*testUser) *MemoryKeyring {
 	t.Helper()
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	for _, u := range users {
 		kr.AddSignPubKey(u.Name, u.Signer.PublicKey())
 		kr.AddRecipient(u.Name, u.Recipient)
@@ -100,7 +100,7 @@ func testKeyring(t *testing.T, users ...*testUser) *MemoryKeyring {
 func initAuditLog(t *testing.T, repoDir string, admin *testUser) *AuditLog {
 	t.Helper()
 
-	al, err := InitLog(repoDir, admin.Signer, admin.DetailUserTell([]string{"admin"}))
+	al, err := InitAuditLog(repoDir, admin.Signer, admin.DetailUserTell([]string{"admin"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func testSecretManagerFull(t *testing.T) *SecretManager {
 		FilesSealed: 0,
 	}), nil)
 
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	state := &VerifiedState{auditLog: al, keyring: kr}
 	if err := verify(state); err != nil {
 		t.Fatal(err)

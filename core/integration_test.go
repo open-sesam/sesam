@@ -23,10 +23,10 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	signer, err := GenerateSignKey(repoDir, whoami, admin.Recipient.Recipient)
 	require.NoError(t, err)
 
-	keyring := NewMemoryKeyring()
+	keyring := EmptyKeyring()
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
 
-	auditLog, err := InitLog(repoDir, signer, DetailUserTell{
+	auditLog, err := InitAuditLog(repoDir, signer, DetailUserTell{
 		User:        whoami,
 		Groups:      []string{"admin"},
 		PubKeys:     []string{admin.Recipient.String()},
@@ -66,7 +66,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 
 	// ── Phase 2: regular (simulates opening an existing repo) ────────
 	require.NoError(t, auditLog.Close())
-	keyring2 := NewMemoryKeyring()
+	keyring2 := EmptyKeyring()
 	auditLog2, err := LoadAuditLog(repoDir)
 	require.NoError(t, err)
 
@@ -105,9 +105,9 @@ func TestIntegrationMultiUser(t *testing.T) {
 	signer, err := GenerateSignKey(repoDir, "admin", admin.Recipient.Recipient)
 	require.NoError(t, err)
 
-	keyring := NewMemoryKeyring()
+	keyring := EmptyKeyring()
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitLog(repoDir, signer, DetailUserTell{
+	al, err := InitAuditLog(repoDir, signer, DetailUserTell{
 		User:        "admin",
 		Groups:      []string{"admin"},
 		PubKeys:     []string{admin.Recipient.String()},
@@ -165,7 +165,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	require.Equal(t, "sk-12345", string(got))
 
 	// Full reload + verify from scratch.
-	keyring3 := NewMemoryKeyring()
+	keyring3 := EmptyKeyring()
 	al3, err := LoadAuditLog(repoDir)
 	require.NoError(t, err)
 
@@ -189,7 +189,7 @@ func TestIntegrationTamperDetection(t *testing.T) {
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitLog(repoDir, signer, DetailUserTell{
+	al, err := InitAuditLog(repoDir, signer, DetailUserTell{
 		User:        "admin",
 		Groups:      []string{"admin"},
 		PubKeys:     []string{admin.Recipient.String()},
@@ -203,7 +203,7 @@ func TestIntegrationTamperDetection(t *testing.T) {
 	require.NoError(t, os.WriteFile(initPath, []byte("tampered-hash"), 0o600))
 	gitCommitAll(t, repo, "tamper")
 
-	keyring := NewMemoryKeyring()
+	keyring := EmptyKeyring()
 	_, err = Verify(al, keyring)
 	require.Error(t, err, "should detect init file tampering")
 }
@@ -217,7 +217,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitLog(repoDir, signer, DetailUserTell{
+	al, err := InitAuditLog(repoDir, signer, DetailUserTell{
 		User:        "admin",
 		Groups:      []string{"admin"},
 		PubKeys:     []string{admin.Recipient.String()},
@@ -226,7 +226,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	gitCommitAll(t, repo, "init")
 
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	vs, err := Verify(al, kr)
 	require.NoError(t, err)
 
@@ -294,7 +294,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	gitCommitAll(t, repo, "remove secret")
 
 	// Full re-verify.
-	kr2 := NewMemoryKeyring()
+	kr2 := EmptyKeyring()
 	al2, err := LoadAuditLog(repoDir)
 	require.NoError(t, err)
 

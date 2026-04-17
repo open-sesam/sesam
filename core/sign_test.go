@@ -25,7 +25,7 @@ func TestGenerateAndLoadSignKey(t *testing.T) {
 	sig, err := signer.Sign(SesamDomainSignSecretTag, data)
 	require.NoError(t, err)
 
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	kr.AddSignPubKey("alice", loaded.PublicKey())
 	who, err := kr.Verify(SesamDomainSignSecretTag, data, sig, "alice")
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestSignCrossDomain(t *testing.T) {
 	sig, err := signer.Sign(SesamDomainSignSecretTag, data)
 	require.NoError(t, err)
 
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	kr.AddSignPubKey("alice", loaded.PublicKey())
 	who, err := kr.Verify(SesamDomainSignSecretTag, data, sig, "alice")
 	require.NoError(t, err)

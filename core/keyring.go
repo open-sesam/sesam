@@ -40,7 +40,7 @@ type MemoryKeyring struct {
 	signPubs   map[string][][]byte
 }
 
-func NewMemoryKeyring() *MemoryKeyring {
+func EmptyKeyring() *MemoryKeyring {
 	return &MemoryKeyring{
 		recipients: make(map[string][]*Recipient),
 		signPubs:   make(map[string][][]byte),

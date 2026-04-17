@@ -323,9 +323,9 @@ func (aes *auditEntrySigned) Verify(kr Keyring) (string, error) {
 	return kr.Verify(SesamDomainSignAuditTag, wholeEntryJSON, aes.Signature, aes.ChangedBy)
 }
 
-// InitLog initializes an empty audit log on repo init.
+// InitAuditLog initializes an empty audit log on repo init.
 // It creates the first init entry which also establishes the initial admin user.
-func InitLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, error) {
+func InitAuditLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, error) {
 	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
 

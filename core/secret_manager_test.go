@@ -182,7 +182,7 @@ func TestSealAllMultiple(t *testing.T) {
 		RootHash: "placeholder", FilesSealed: 0,
 	}), nil)
 
-	kr := NewMemoryKeyring()
+	kr := EmptyKeyring()
 	state := &VerifiedState{auditLog: al, keyring: kr}
 	verify(state)
 

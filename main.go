@@ -12,43 +12,17 @@ import (
 
 // initMain shows the setup done during init
 func initMain(id *core.Identity) *core.SecretManager {
-	whoami := "sahib" // given as argument on init
-
-	// core.ResolveRecipient and core.ParseRecipient only has to be done once per user add.
-	// init means adding an initial user, so assume we get the public key here via the config or something.
-	rawPubKey, err := core.ResolveRecipient(
+	signer, auditLog, err := core.InitAdminUser(
 		context.Background(),
 		".",
+		"sahib",
 		"github:sahib",
-		core.CacheModeReadWrite,
 	)
 	if err != nil {
-		log.Fatalf("failed to download recipient: %v", err)
+		log.Fatalf("failed to init admin user: %v", err)
 	}
 
-	recp, err := core.ParseRecipient(rawPubKey)
-	if err != nil {
-		log.Fatalf("failed to parse recipient: %v", err)
-	}
-
-	signer, err := core.GenerateSignKey(".", whoami, recp.Recipient)
-	if err != nil {
-		log.Fatalf("failed to gen signing key: %v", err)
-	}
-
-	keyring := core.NewMemoryKeyring()
-
-	signKeyStr := core.MulticodeEncode(signer.PublicKey(), core.MhEd25519Pub)
-	auditLog, err := core.InitLog(".", signer, core.DetailUserTell{
-		User:        signer.UserName(),
-		Groups:      []string{"admin"},
-		PubKeys:     []string{recp.String()},
-		SignPubKeys: []string{signKeyStr},
-	})
-	if err != nil {
-		log.Fatalf("failed to init audit log: %v", err)
-	}
-
+	keyring := core.EmptyKeyring()
 	vstate, err := core.Verify(auditLog, keyring)
 	if err != nil {
 		log.Fatalf("failed to verify log: %v", err)
@@ -76,8 +50,7 @@ func initMain(id *core.Identity) *core.SecretManager {
 
 // regularMain shows the setup done in all commands after init
 func regularMain(id *core.Identity) *core.SecretManager {
-	keyring := core.NewMemoryKeyring()
-
+	keyring := core.EmptyKeyring()
 	auditLog, err := core.LoadAuditLog(".")
 	if err != nil {
 		log.Fatalf("failed to load audit log: %v", err)

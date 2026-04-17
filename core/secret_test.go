@@ -151,7 +151,7 @@ func TestRevealDetectsBadSignature(t *testing.T) {
 	// Replace keyring with a different signing key.
 	_, otherPriv, _ := ed25519.GenerateKey(rand.Reader)
 	otherPub := otherPriv.Public().(ed25519.PublicKey)
-	mgr.Keyring = NewMemoryKeyring()
+	mgr.Keyring = EmptyKeyring()
 	mgr.Keyring.AddSignPubKey("testuser", otherPub)
 
 	err = secret.Reveal()
@@ -166,7 +166,7 @@ func TestRevealDetectsWrongSigner(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add a second user and remove the original, so sealedBy doesn't match any key.
-	mgr.Keyring = NewMemoryKeyring()
+	mgr.Keyring = EmptyKeyring()
 	other := newTestUser(t, "other")
 	mgr.Keyring.AddSignPubKey("other", other.Signer.PublicKey())
 
