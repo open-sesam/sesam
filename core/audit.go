@@ -333,7 +333,8 @@ func InitLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, er
 		return nil, err
 	}
 
-	fd, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_SYNC|os.O_RDWR, 0600)
+	//nolint:gosec
+	fd, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +447,6 @@ func LoadAuditLog(repoDir string) (*AuditLog, error) {
 	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
 
-	//nolint:gosec
 	initData, err := readFileLimited(initPath, 256)
 	if err != nil {
 		return nil, err
@@ -458,7 +458,7 @@ func LoadAuditLog(repoDir string) (*AuditLog, error) {
 	}
 
 	//nolint:gosec
-	al.fd, err = os.OpenFile(logPath, os.O_APPEND|os.O_SYNC|os.O_RDWR, 0600)
+	al.fd, err = os.OpenFile(logPath, os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}

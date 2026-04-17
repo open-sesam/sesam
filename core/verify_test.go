@@ -675,7 +675,6 @@ func TestEndToEndStoreLoadVerify(t *testing.T) {
 		RootHash: "test-root-hash", FilesSealed: 1,
 	}), nil)
 
-
 	loaded, err := LoadAuditLog(repoDir)
 	require.NoError(t, err)
 

@@ -149,8 +149,6 @@ func main() {
 		sm = regularMain(id)
 	}
 
-	defer sm.AuditLog.Close()
-
 	err = sm.SealAll()
 	if err != nil {
 		log.Fatalf("failed to create audit log: %v", err)
@@ -159,4 +157,6 @@ func main() {
 	if err := sm.RevealAll(); err != nil {
 		log.Fatalf("reveal failed: %v", err)
 	}
+
+	_ = sm.AuditLog.Close()
 }

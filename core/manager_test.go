@@ -19,8 +19,8 @@ func TestAddOrChangeSecret(t *testing.T) {
 	writeSecret(t, mgr.RepoDir, "secrets/new", "new-content")
 
 	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "secrets"), 0700))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "secrets", "new"), []byte("blub"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "secrets"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "secrets", "new"), []byte("blub"), 0o600))
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)

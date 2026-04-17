@@ -45,6 +45,7 @@ linters:
     - misspell
     - nilerr
     - nilnil
+    - nolintlint
     - noctx
     - sqlclosecheck
     - staticcheck

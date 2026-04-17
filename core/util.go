@@ -82,6 +82,7 @@ func readFileLimited(path string, size int64) ([]byte, error) {
 		return nil, err
 	}
 
+	//nolint:errcheck
 	defer fd.Close()
 	return io.ReadAll(io.LimitReader(fd, size))
 }
