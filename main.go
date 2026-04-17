@@ -41,7 +41,7 @@ func initMain(id *core.Identity) *core.SecretManager {
 
 	signKeyStr := core.MulticodeEncode(signer.PublicKey(), core.MhEd25519Pub)
 	auditLog, err := core.InitLog(".", signer, core.DetailUserTell{
-		User:        whoami,
+		User:        signer.UserName(),
 		Groups:      []string{"admin"},
 		PubKeys:     []string{recp.String()},
 		SignPubKeys: []string{signKeyStr},
@@ -59,7 +59,6 @@ func initMain(id *core.Identity) *core.SecretManager {
 
 	sm, err := core.BuildSecretManager(
 		".",
-		whoami,
 		core.Identities{id},
 		signer,
 		keyring,
@@ -110,7 +109,6 @@ func regularMain(id *core.Identity) *core.SecretManager {
 
 	sm, err := core.BuildSecretManager(
 		".",
-		whoami,
 		core.Identities{id},
 		signer,
 		keyring,

@@ -13,9 +13,6 @@ type SecretManager struct {
 	// It is the dir the .sesam directory is in.
 	RepoDir string
 
-	// WhoAmI is the user tied to the current Identities.
-	WhoAmI string
-
 	// Identities are the private keys the current user of sesam supplies.
 	Identities Identities
 
@@ -37,7 +34,6 @@ type SecretManager struct {
 // BuildSecretManager uses the passed facilities to build a new SecretManager
 func BuildSecretManager(
 	repoDir string,
-	whoami string,
 	identities Identities,
 	signer Signer,
 	keyring Keyring,
@@ -46,7 +42,6 @@ func BuildSecretManager(
 ) (*SecretManager, error) {
 	mgr := &SecretManager{
 		RepoDir:    repoDir,
-		WhoAmI:     whoami,
 		Identities: identities,
 		Signer:     signer,
 		Keyring:    keyring,
@@ -106,7 +101,7 @@ func (sm *SecretManager) AddOrChangeSecret(revealedPath string, groups []string)
 		Recipients:   sm.Keyring.Recipients(accessUsers),
 	})
 
-	entry := newAuditEntry(sm.WhoAmI, &DetailSecretChange{
+	entry := newAuditEntry(sm.Signer.UserName(), &DetailSecretChange{
 		RevealedPath: revealedPath,
 		Groups:       groups,
 	})
@@ -132,7 +127,7 @@ func (sm *SecretManager) SealAll() error {
 
 	for _, secret := range sm.secrets {
 		fmt.Println("SEAL", secret.RevealedPath)
-		sig, err := secret.Seal(sm.WhoAmI)
+		sig, err := secret.Seal(sm.Signer.UserName())
 		if err != nil {
 			return fmt.Errorf("seal of %s failed: %w", secret.RevealedPath, err)
 		}
@@ -140,7 +135,7 @@ func (sm *SecretManager) SealAll() error {
 		sigs = append(sigs, sig)
 	}
 
-	entry := newAuditEntry(sm.WhoAmI, &DetailSeal{
+	entry := newAuditEntry(sm.Signer.UserName(), &DetailSeal{
 		RootHash:    buildRootHash(sigs),
 		FilesSealed: len(sigs),
 	})
