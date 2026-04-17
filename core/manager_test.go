@@ -10,7 +10,7 @@ import (
 
 func TestBuildSecretManager(t *testing.T) {
 	mgr := testSecretManagerFull(t)
-	require.Equal(t, "admin", mgr.WhoAmI)
+	require.Equal(t, "admin", mgr.Signer.UserName())
 	require.Len(t, mgr.secrets, 1)
 }
 
@@ -80,18 +80,25 @@ func TestSealAllMultiple(t *testing.T) {
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
 			RevealedPath: p,
 			Groups:       []string{"admin"},
-		}))
+		}), nil)
 	}
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{
 		RootHash: "placeholder", FilesSealed: 0,
-	}))
+	}), nil)
 
 	kr := NewMemoryKeyring()
 	state := &VerifiedState{auditLog: al, keyring: kr}
 	verify(state)
 
-	mgr, _ := BuildSecretManager(repoDir, "admin", Identities{admin.Identity}, admin.Signer, kr, al, state)
+	mgr, _ := BuildSecretManager(
+		repoDir,
+		Identities{admin.Identity},
+		admin.Signer,
+		kr,
+		al,
+		state,
+	)
 
 	writeSecret(t, repoDir, "secrets/a", "aaa")
 	writeSecret(t, repoDir, "secrets/b", "bbb")

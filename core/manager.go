@@ -101,24 +101,12 @@ func (sm *SecretManager) AddOrChangeSecret(revealedPath string, groups []string)
 		Recipients:   sm.Keyring.Recipients(accessUsers),
 	})
 
-	entry := newAuditEntry(sm.Signer.UserName(), &DetailSecretChange{
-		RevealedPath: revealedPath,
-		Groups:       groups,
-	})
-
-	if _, err := sm.AuditLog.AddEntry(sm.Signer, entry); err != nil {
-		return fmt.Errorf("audit add entry: %w", err)
-	}
-
-	if err := sm.State.Update(); err != nil {
-		return fmt.Errorf("failed to verify new entries: %w", err)
-	}
-
-	if err := sm.AuditLog.Store(); err != nil {
-		return fmt.Errorf("storing log failed: %w", err)
-	}
-
-	return nil
+	return sm.State.FeedEntry(
+		sm.Signer,
+		newAuditEntry(sm.Signer.UserName(), &DetailSecretChange{
+			RevealedPath: revealedPath,
+			Groups:       groups,
+		}))
 }
 
 // SealAll seals all kown secrets.
@@ -135,24 +123,13 @@ func (sm *SecretManager) SealAll() error {
 		sigs = append(sigs, sig)
 	}
 
-	entry := newAuditEntry(sm.Signer.UserName(), &DetailSeal{
-		RootHash:    buildRootHash(sigs),
-		FilesSealed: len(sigs),
-	})
-
-	if _, err := sm.AuditLog.AddEntry(sm.Signer, entry); err != nil {
-		return fmt.Errorf("audit add entry: %w", err)
-	}
-
-	if err := sm.State.Update(); err != nil {
-		return fmt.Errorf("failed to verify new entries: %w", err)
-	}
-
-	if err := sm.AuditLog.Store(); err != nil {
-		return fmt.Errorf("storing log failed: %w", err)
-	}
-
-	return nil
+	return sm.State.FeedEntry(
+		sm.Signer,
+		newAuditEntry(sm.Signer.UserName(), &DetailSeal{
+			RootHash:    buildRootHash(sigs),
+			FilesSealed: len(sigs),
+		}),
+	)
 }
 
 // RevealAll reveals all known secrets.

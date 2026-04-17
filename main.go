@@ -50,8 +50,6 @@ func initMain(id *core.Identity) *core.SecretManager {
 		log.Fatalf("failed to init audit log: %v", err)
 	}
 
-	_ = auditLog.Store()
-
 	vstate, err := core.Verify(auditLog, keyring)
 	if err != nil {
 		log.Fatalf("failed to verify log: %v", err)
@@ -74,7 +72,6 @@ func initMain(id *core.Identity) *core.SecretManager {
 		log.Fatalf("failed to add secret: %v", err)
 	}
 
-	_ = auditLog.Store()
 	return sm
 }
 
@@ -119,7 +116,7 @@ func regularMain(id *core.Identity) *core.SecretManager {
 		log.Fatalf("failed to build secret manager: %v", err)
 	}
 
-	// Optional, just a double check:
+	// Optional, just a double check, can be done later on the `verify` command.
 	report := core.VerifyIntegrity(".", vstate, keyring)
 	if !report.OK() {
 		fmt.Println(report.String())
@@ -151,6 +148,8 @@ func main() {
 		fmt.Println("REGULAR")
 		sm = regularMain(id)
 	}
+
+	defer sm.AuditLog.Close()
 
 	err = sm.SealAll()
 	if err != nil {

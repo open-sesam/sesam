@@ -102,7 +102,7 @@ func TestAddEntryChaining(t *testing.T) {
 		SignPubKeys: []string{bob.SignPubKey},
 	})
 
-	_, err := al.AddEntry(admin.Signer, e)
+	_, err := al.AddEntry(admin.Signer, e, nil)
 	require.NoError(t, err)
 	require.Len(t, al.Entries, 2)
 
@@ -133,10 +133,10 @@ func TestStoreAndLoad(t *testing.T) {
 		Groups:      []string{"dev"},
 		PubKeys:     []string{bob.Recipient.String()},
 		SignPubKeys: []string{bob.SignPubKey},
-	}))
+	}), nil)
 	require.NoError(t, err)
-	require.NoError(t, al.Store())
 
+	require.NoError(t, al.Close())
 	loaded, err := LoadAuditLog(repoDir)
 	require.NoError(t, err)
 	require.Len(t, loaded.Entries, len(al.Entries))
@@ -150,7 +150,7 @@ func TestStoreAndLoad(t *testing.T) {
 
 func TestLoadMissingInitFile(t *testing.T) {
 	repoDir := testRepo(t)
-	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.json")
+	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
 	require.NoError(t, os.WriteFile(logPath, []byte(`{"entries":[]}`), 0o600))
 
 	_, err := LoadAuditLog(repoDir)
@@ -171,7 +171,7 @@ func TestLoadCorruptLogFile(t *testing.T) {
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
 	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0o600))
 
-	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.json")
+	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
 	require.NoError(t, os.WriteFile(logPath, []byte("not json"), 0o600))
 
 	_, err := LoadAuditLog(repoDir)
@@ -283,7 +283,7 @@ func TestIterateStopsOnError(t *testing.T) {
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
 		PubKeys: []string{bob.Recipient.String()}, SignPubKeys: []string{bob.SignPubKey},
-	}))
+	}), nil)
 
 	var count int
 	err := al.Iterate(func(idx int, entry *auditEntrySigned) error {

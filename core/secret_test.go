@@ -19,7 +19,6 @@ func testSecretManager(t *testing.T) *SecretManager {
 
 	return &SecretManager{
 		RepoDir:    repoDir,
-		WhoAmI:     user.Name,
 		Identities: Identities{user.Identity},
 		Signer:     user.Signer,
 		Keyring:    kr,
@@ -38,7 +37,7 @@ func testSecret(t *testing.T, mgr *SecretManager, path, content string) *secret 
 	return &secret{
 		Mgr:          mgr,
 		RevealedPath: path,
-		Recipients:   mgr.Keyring.Recipients([]string{mgr.WhoAmI}),
+		Recipients:   mgr.Keyring.Recipients([]string{mgr.Signer.UserName()}),
 	}
 }
 

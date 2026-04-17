@@ -149,9 +149,15 @@ func (s *VerifiedState) RequireAdmin(entry *auditEntrySigned) (*VerifiedUser, er
 	return adminUser, nil
 }
 
-// Update verifies entries that have been added at runtime
-func (s *VerifiedState) Update() error {
-	return verify(s)
+// FeedEntry adds `entry` to audit log, then updates the state by verifying the entry.
+func (s *VerifiedState) FeedEntry(signer Signer, entry *auditEntry) error {
+	if _, err := s.auditLog.AddEntry(signer, entry, func() error {
+		return verify(s)
+	}); err != nil {
+		return fmt.Errorf("audit add entry: %w", err)
+	}
+
+	return nil
 }
 
 func groupsToMap(groups []string) map[string]bool {
@@ -306,13 +312,10 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 		scd.Groups = append(scd.Groups, "admin")
 	}
 
-	existsIdx := slices.IndexFunc(state.Secrets, func(vs VerifiedSecret) bool {
-		return vs.RevealedPath == scd.RevealedPath
-	})
-
-	if existsIdx >= 0 {
+	existingSecret, exists := state.SecretExists(scd.RevealedPath)
+	if exists {
 		// secret exists
-		hasAccess := state.UserHasAccess(entry.ChangedBy, state.Secrets[existsIdx].AccessGroups)
+		hasAccess := state.UserHasAccess(entry.ChangedBy, existingSecret.AccessGroups)
 		if !hasAccess {
 			return fmt.Errorf(
 				"user %s may not change details of %s",
@@ -321,10 +324,7 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 			)
 		}
 
-		state.Secrets[existsIdx] = VerifiedSecret{
-			RevealedPath: scd.RevealedPath,
-			AccessGroups: scd.Groups,
-		}
+		existingSecret.AccessGroups = scd.Groups
 	} else {
 		// secret does not exist
 		state.Secrets = append(state.Secrets, VerifiedSecret{
@@ -487,7 +487,7 @@ func verify(state *VerifiedState) error {
 		return err
 	}
 
-	// TODO: Is that a hard error? Or should we just warn here?
+	// NOTE: Not a hard error for now, there might be valid reasons this happened.
 	// Could be that sesam was legit interrupted during operation.
 	if srs := state.SealRequiredSeqID; srs > 0 {
 		slog.Warn(

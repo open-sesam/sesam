@@ -74,3 +74,14 @@ func closeLogged(fd io.Closer) {
 		)
 	}
 }
+
+func readFileLimited(path string, size int64) ([]byte, error) {
+	//nolint:gosec
+	fd, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	defer fd.Close()
+	return io.ReadAll(io.LimitReader(fd, size))
+}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -233,12 +232,6 @@ type DetailSeal struct {
 //
 // In all cases verify would complain about it and warn an user about Eve.
 type AuditLog struct {
-	// NOTE: We should chunk the log to make life for git easier and avoid loading too big files at once:
-	//
-	// .sesam/audit/
-	// 			00000.log.json
-	// 			00100.log.json // rotate every 100 entries.
-	// 			00200.log.json // rotate every 100 entries.
 	Entries []auditEntrySigned `json:"entries"`
 
 	// RepoDir is the dir in which .sesam resides.
@@ -247,6 +240,9 @@ type AuditLog struct {
 	// The hash from the .sesam/audit/init file.
 	// It should be the same hash as the prev_hash of the 2nd entry.
 	InitHash string `json:"-"`
+
+	// file descriptor for adding new entries.
+	fd *os.File
 }
 
 // operationFor returns the operation type for a given detail struct.
@@ -328,8 +324,21 @@ func (aes *auditEntrySigned) Verify(kr Keyring) (string, error) {
 // InitLog initializes an empty audit log on repo init.
 // It creates the first init entry which also establishes the initial admin user.
 func InitLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, error) {
+	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
+	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
+
+	if err := os.MkdirAll(filepath.Dir(initPath), 0o700); err != nil {
+		return nil, err
+	}
+
+	fd, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_SYNC|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+
 	al := &AuditLog{
 		RepoDir: repoDir,
+		fd:      fd,
 	}
 
 	initEntry := newAuditEntry(signer.UserName(), &DetailInit{
@@ -337,13 +346,11 @@ func InitLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, er
 		Admin:    admin,
 	})
 
-	signedEntry, err := al.AddEntry(signer, initEntry)
+	signedEntry, err := al.AddEntry(signer, initEntry, nil)
 	if err != nil {
+		closeLogged(al.fd)
 		return nil, fmt.Errorf("failed to init log: %w", err)
 	}
-
-	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
-	_ = os.MkdirAll(filepath.Dir(initPath), 0o700)
 
 	initHash := signedEntry.Hash()
 	if err := renameio.WriteFile(
@@ -351,6 +358,7 @@ func InitLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, er
 		[]byte(initHash),
 		0o600,
 	); err != nil {
+		closeLogged(al.fd)
 		return nil, fmt.Errorf("failed to write init file: %w", err)
 	}
 
@@ -358,9 +366,16 @@ func InitLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, er
 	return al, nil
 }
 
+func (al *AuditLog) Close() error {
+	return al.fd.Close()
+}
+
 // AddEntry will add another signed entry to the audit log.
-// This action is non-reversible, not even via code.
-func (al *AuditLog) AddEntry(signer Signer, e *auditEntry) (*auditEntrySigned, error) {
+// This action is non-reversible, not even via code - make sure that the data added is correct!
+//
+// The `verify` function is called before append the log to the file on disk, use this to make
+// sure that the log verifies as correctly by calling state.Update().
+func (al *AuditLog) AddEntry(signer Signer, e *auditEntry, verify func() error) (*auditEntrySigned, error) {
 	entry := &auditEntrySigned{
 		auditEntry: *e,
 	}
@@ -387,6 +402,29 @@ func (al *AuditLog) AddEntry(signer Signer, e *auditEntry) (*auditEntrySigned, e
 	}
 
 	al.Entries = append(al.Entries, *entry)
+
+	if verify != nil {
+		if err := verify(); err != nil {
+			al.Entries = al.Entries[:len(al.Entries)-1] // pop failed entry off.
+			return entry, err
+		}
+	}
+
+	// We encode it twice just for one different entry, which is a bit wastelful...
+	sigJSON, err := json.Marshal(entry)
+	if err != nil {
+		return nil, err
+	}
+
+	sigJSON = append(sigJSON, '\n')
+	if _, err := al.fd.Write(sigJSON); err != nil {
+		return nil, err
+	}
+
+	if err := al.fd.Sync(); err != nil {
+		return nil, err
+	}
+
 	return entry, nil
 }
 
@@ -400,52 +438,32 @@ func (al *AuditLog) Iterate(fn func(idx int, entry *auditEntrySigned) error) err
 	return nil
 }
 
-func (al *AuditLog) Store() error {
-	logPath := filepath.Join(al.RepoDir, ".sesam", "audit", "log.json")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
-		return fmt.Errorf("mkdir: %w", err)
-	}
-
-	fd, err := renameio.TempFile(al.RepoDir, logPath)
-	if err != nil {
-		return fmt.Errorf("create temp file for audit log: %w", err)
-	}
-
-	defer func() {
-		if err := fd.Cleanup(); err != nil {
-			slog.Warn("failed to cleanup fd", slog.Any("err", err))
-		}
-	}()
-
-	enc := json.NewEncoder(fd)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(al); err != nil {
-		return fmt.Errorf("marshal entries: %w", err)
-	}
-
-	return fd.CloseAtomicallyReplace()
-}
-
 // LoadAuditLog reads the audit log from disk and gives you an handle to operate on it.
 // It does NOT verify the log yet. Call Verify() for that.
 func LoadAuditLog(repoDir string) (*AuditLog, error) {
-	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.json")
+	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
 
 	//nolint:gosec
-	initData, err := os.ReadFile(initPath)
+	initData, err := readFileLimited(initPath, 256)
 	if err != nil {
 		return nil, err
+	}
+
+	al := AuditLog{
+		RepoDir:  repoDir,
+		InitHash: strings.TrimSpace(string(initData)),
 	}
 
 	//nolint:gosec
-	fd, err := os.Open(logPath)
+	al.fd, err = os.OpenFile(logPath, os.O_APPEND|os.O_SYNC|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}
 
-	info, err := fd.Stat()
+	info, err := al.fd.Stat()
 	if err != nil {
+		closeLogged(al.fd)
 		return nil, err
 	}
 
@@ -453,19 +471,21 @@ func LoadAuditLog(repoDir string) (*AuditLog, error) {
 	// In some later release we need to figure a way
 	// to compress such large logs if that ever becomes a problem.
 	if info.Size() > 512*1024*1024 {
+		closeLogged(al.fd)
 		return nil, fmt.Errorf("audit log too big (> 512M). Please consider opening a bug report")
 	}
 
-	defer closeLogged(fd)
+	lineNumber := 1
+	dec := json.NewDecoder(al.fd)
+	for dec.More() {
+		var entry auditEntrySigned
+		if err := dec.Decode(&entry); err != nil {
+			closeLogged(al.fd)
+			return nil, fmt.Errorf("failed to decode line: %d", lineNumber)
+		}
 
-	al := AuditLog{
-		RepoDir:  repoDir,
-		InitHash: strings.TrimSpace(string(initData)),
-	}
-
-	dec := json.NewDecoder(fd)
-	if err := dec.Decode(&al); err != nil {
-		return nil, err
+		al.Entries = append(al.Entries, entry)
+		lineNumber++
 	}
 
 	return &al, nil

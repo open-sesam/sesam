@@ -105,10 +105,6 @@ func initAuditLog(t *testing.T, repoDir string, admin *testUser) *AuditLog {
 		t.Fatal(err)
 	}
 
-	if err := al.Store(); err != nil {
-		t.Fatal(err)
-	}
-
 	return al
 }
 
@@ -173,12 +169,12 @@ func testSecretManagerFull(t *testing.T) *SecretManager {
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
 		RevealedPath: "secrets/test",
 		Groups:       []string{"admin"},
-	}))
+	}), nil)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{
 		RootHash:    "placeholder",
 		FilesSealed: 0,
-	}))
+	}), nil)
 
 	kr := NewMemoryKeyring()
 	state := &VerifiedState{auditLog: al, keyring: kr}
@@ -186,7 +182,14 @@ func testSecretManagerFull(t *testing.T) *SecretManager {
 		t.Fatal(err)
 	}
 
-	mgr, err := BuildSecretManager(repoDir, "admin", Identities{admin.Identity}, admin.Signer, kr, al, state)
+	mgr, err := BuildSecretManager(
+		repoDir,
+		Identities{admin.Identity},
+		admin.Signer,
+		kr,
+		al,
+		state,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

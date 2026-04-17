@@ -33,7 +33,6 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 		SignPubKeys: []string{signKeyStr},
 	})
 	require.NoError(t, err)
-	require.NoError(t, auditLog.Store())
 
 	gitCommitAll(t, repo, "sesam init")
 
@@ -41,7 +40,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	require.NoError(t, err, "Verify after init")
 
 	sm, err := BuildSecretManager(
-		repoDir, whoami,
+		repoDir,
 		Identities{admin.Identity},
 		signer, keyring, auditLog, vstate,
 	)
@@ -56,7 +55,6 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	writeSecret(t, repoDir, secretPath, "hunter2")
 	require.NoError(t, sm.AddOrChangeSecret(secretPath, []string{"admin"}))
 	require.NoError(t, sm.SealAll())
-	require.NoError(t, auditLog.Store())
 
 	gitCommitAll(t, repo, "add secret and seal")
 
@@ -67,6 +65,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	os.Remove(filepath.Join(repoDir, secretPath))
 
 	// ── Phase 2: regular (simulates opening an existing repo) ────────
+	require.NoError(t, auditLog.Close())
 	keyring2 := NewMemoryKeyring()
 	auditLog2, err := LoadAuditLog(repoDir)
 	require.NoError(t, err)
@@ -82,7 +81,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	require.NoError(t, err)
 
 	sm2, err := BuildSecretManager(
-		repoDir, resolvedUser,
+		repoDir,
 		Identities{admin.Identity},
 		signer2, keyring2, auditLog2, vstate2,
 	)
@@ -115,7 +114,6 @@ func TestIntegrationMultiUser(t *testing.T) {
 		SignPubKeys: []string{signKeyStr},
 	})
 	require.NoError(t, err)
-	require.NoError(t, al.Store())
 	gitCommitAll(t, repo, "init")
 
 	vstate, err := Verify(al, keyring)
@@ -132,7 +130,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 		Groups:      []string{"dev"},
 		PubKeys:     []string{bob.Recipient.String()},
 		SignPubKeys: []string{bobSignKeyStr},
-	}))
+	}), nil)
 	require.NoError(t, err)
 
 	secretPath := "secrets/api_key"
@@ -141,23 +139,22 @@ func TestIntegrationMultiUser(t *testing.T) {
 	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailSecretChange{
 		RevealedPath: secretPath,
 		Groups:       []string{"dev"},
-	}))
+	}), nil)
 	require.NoError(t, err)
 
-	require.NoError(t, al.Store())
 	gitCommitAll(t, repo, "add bob and secret")
 
-	require.NoError(t, vstate.Update())
+	// Re-verify to pick up the new entries.
+	vstate, err = Verify(al, keyring)
+	require.NoError(t, err)
 
 	smBob, err := BuildSecretManager(
-		repoDir, "bob",
+		repoDir,
 		Identities{bob.Identity},
 		bobSignKey, keyring, al, vstate,
 	)
 	require.NoError(t, err)
 	require.NoError(t, smBob.SealAll())
-
-	require.NoError(t, al.Store())
 	gitCommitAll(t, repo, "seal")
 
 	os.Remove(filepath.Join(repoDir, secretPath))
@@ -199,7 +196,6 @@ func TestIntegrationTamperDetection(t *testing.T) {
 		SignPubKeys: []string{signKeyStr},
 	})
 	require.NoError(t, err)
-	require.NoError(t, al.Store())
 	gitCommitAll(t, repo, "init")
 
 	// Tamper: rewrite the init file and commit again.
@@ -228,14 +224,20 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 		SignPubKeys: []string{signKeyStr},
 	})
 	require.NoError(t, err)
-	require.NoError(t, al.Store())
 	gitCommitAll(t, repo, "init")
 
 	kr := NewMemoryKeyring()
 	vs, err := Verify(al, kr)
 	require.NoError(t, err)
 
-	sm, err := BuildSecretManager(repoDir, "admin", Identities{admin.Identity}, signer, kr, al, vs)
+	sm, err := BuildSecretManager(
+		repoDir,
+		Identities{admin.Identity},
+		signer,
+		kr,
+		al,
+		vs,
+	)
 	require.NoError(t, err)
 
 	origDir, err := os.Getwd()
@@ -249,29 +251,35 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 
 	// 2. Seal.
 	require.NoError(t, sm.SealAll())
-	require.NoError(t, al.Store())
 	gitCommitAll(t, repo, "add and seal")
 
 	// 3. Change groups (add dev).
 	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailSecretChange{
 		RevealedPath: "secrets/token",
 		Groups:       []string{"admin", "dev"},
-	}))
+	}), nil)
 	require.NoError(t, err)
 
 	// 4. Re-seal.
 	writeSecret(t, repoDir, "secrets/token", "tok-abc")
-	require.NoError(t, vs.Update())
-	sm, err = BuildSecretManager(repoDir, "admin", Identities{admin.Identity}, signer, kr, al, vs)
+	vs, err = Verify(al, kr)
+	require.NoError(t, err)
+	sm, err = BuildSecretManager(
+		repoDir,
+		Identities{admin.Identity},
+		signer,
+		kr,
+		al,
+		vs,
+	)
 	require.NoError(t, err)
 	require.NoError(t, sm.SealAll())
-	require.NoError(t, al.Store())
 	gitCommitAll(t, repo, "change groups and reseal")
 
 	// 5. Remove secret and clean up files.
 	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailSecretRemove{
 		RevealedPath: "secrets/token",
-	}))
+	}), nil)
 	require.NoError(t, err)
 
 	os.Remove(filepath.Join(repoDir, ".sesam", "objects", "secrets", "token.age"))
@@ -280,10 +288,9 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailSeal{
 		RootHash:    buildRootHash(nil),
 		FilesSealed: 0,
-	}))
+	}), nil)
 	require.NoError(t, err)
 
-	require.NoError(t, al.Store())
 	gitCommitAll(t, repo, "remove secret")
 
 	// Full re-verify.
