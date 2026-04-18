@@ -258,10 +258,60 @@ Attack scenarios and which check catches them:
 
 #### Branching and merging
 
-The audit log is linear. When branches diverge, each branch appends its own
-entries. On merge, `sesam verify` checks both branches back to their common
-ancestor. Encrypted files are opaque binary that git cannot merge, so
-conflicting secret changes require manual resolution anyway.
+The audit log is linear and hash-chained. When two branches diverge, each
+appends its own entries with valid chains. On merge, git produces conflict
+markers in `log.jsonl`. Sesam detects and resolves these automatically —
+no separate merge tool is needed.
+
+##### Conflict detection
+
+`LoadAuditLog` detects git conflict markers (`<<<<<<<`) in the JSONL file.
+It parses both sides, finds the common prefix (entries shared before the
+fork), and produces two divergent tails: "ours" (HEAD) and "theirs"
+(incoming branch).
+
+##### Replay strategy
+
+The merge is linearized: "ours" entries are kept in place, "theirs" entries
+are replayed on top. Each replayed entry gets a new `seq_id`, `prev_hash`,
+and is re-signed by the merging user. The merging user does not need admin
+privileges — the original authorization is established by the `changed_by`
+field and git history (similar to how the init file's integrity relies on
+git history).
+
+If replay fails (e.g. both branches added the same user, or a replayed
+entry references a user that was removed on "ours"), the merge is aborted
+with a diagnostic. The user must resolve the conflict on one branch first,
+then retry.
+
+##### Secret content conflicts
+
+Encrypted files (`.age`, `.sig.json`) are marked as `binary` in
+`.gitattributes` (set up by `sesam init`), so git does not produce conflict
+markers for them — it keeps "ours" and marks the path as conflicted.
+
+If the same secret was sealed with different content on both branches, the
+replay renames the incoming version:
+
+```
+secrets/db_pass              ← ours (unchanged)
+secrets/db_pass.theirs       ← theirs (renamed during replay)
+```
+
+Both are valid secrets in the audit log with their own access groups. The
+user inspects both, keeps the one they want, and removes the other via
+`sesam rm`. After cleanup, a `sesam seal` produces a consistent state.
+
+##### .gitattributes
+
+`sesam init` should generate:
+
+```
+.sesam/objects/**/*.age binary
+.sesam/objects/**/*.sig.json binary
+```
+
+This prevents git from attempting text merges on encrypted content.
 
 #### Additional checks
 
