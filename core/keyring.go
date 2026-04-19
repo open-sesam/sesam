@@ -7,6 +7,7 @@ import (
 	"slices"
 )
 
+// Keyring is a collection of public keys (both for sign-verify and encryption)
 type Keyring interface {
 	// AddRecipient adds a recipient to `user`. It is the public part of a keypair
 	// the user can use to encrypt files.
@@ -24,7 +25,7 @@ type Keyring interface {
 	// Verify checks if `signature` fits to `data` using any of the signing keys.
 	// `userHint` will test the sign keys of this user first. It may be empty.
 	// The user that matched the signature is returned or an error.
-	Verify(data []byte, signature string, userHint string) (string, error)
+	Verify(domain SignDomain, data []byte, signature string, userHint string) (string, error)
 
 	// Recipients returns all recipients for a specific set of users.
 	Recipients(users []string) Recipients
@@ -33,12 +34,13 @@ type Keyring interface {
 	ListUsers() map[string][]*Recipient
 }
 
+// MemoryKeyring is a simple Keyring implementation that holds public keys in memory only.
 type MemoryKeyring struct {
 	recipients map[string][]*Recipient
 	signPubs   map[string][][]byte
 }
 
-func NewMemoryKeyring() *MemoryKeyring {
+func EmptyKeyring() *MemoryKeyring {
 	return &MemoryKeyring{
 		recipients: make(map[string][]*Recipient),
 		signPubs:   make(map[string][][]byte),
@@ -53,7 +55,7 @@ func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) {
 	}
 
 	if slices.ContainsFunc(recps, func(other *Recipient) bool {
-		return other.Equal(recp)
+		return other.Equal(recp.comparablePublicKey)
 	}) {
 		return
 	}
@@ -80,20 +82,21 @@ func (mk *MemoryKeyring) AddSignPubKey(user string, key []byte) {
 func (mk *MemoryKeyring) DeleteUser(user string) bool {
 	_, ok := mk.recipients[user]
 	delete(mk.recipients, user)
+	delete(mk.signPubs, user)
 	return ok
 }
 
-func (mk *MemoryKeyring) verifySingle(key, data []byte, signature string) error {
-	sigData, code, err := MulticodeDecode(signature)
+func (mk *MemoryKeyring) verifySingle(domain SignDomain, key, data []byte, signature string) error {
+	sigData, code, err := multicodeDecode(signature)
 	if err != nil {
-		return err
+		return fmt.Errorf("decode signature: %w", err)
 	}
 
 	if code != MhEdDSA {
 		return fmt.Errorf("unexpected multihash code %d for signature, expected eddsa", code)
 	}
 
-	ok := ed25519.Verify(key, data, sigData)
+	ok := ed25519.Verify(key, append(domain, data...), sigData)
 	if !ok {
 		return fmt.Errorf("could not validate signature '%s'", signature)
 	}
@@ -101,7 +104,7 @@ func (mk *MemoryKeyring) verifySingle(key, data []byte, signature string) error 
 	return nil
 }
 
-func (mk *MemoryKeyring) Verify(data []byte, signature string, userHint string) (string, error) {
+func (mk *MemoryKeyring) Verify(domain SignDomain, data []byte, signature string, userHint string) (string, error) {
 	// With a large number of users it will be inefficient to iterate over all keys.
 	// In most cases we know which user we expect to have made the signature.
 	// In this case we can just hit this one first.
@@ -109,7 +112,7 @@ func (mk *MemoryKeyring) Verify(data []byte, signature string, userHint string) 
 		signPubKeys, ok := mk.signPubs[userHint]
 		if ok {
 			for _, signPubKey := range signPubKeys {
-				if err := mk.verifySingle(signPubKey, data, signature); err != nil {
+				if err := mk.verifySingle(domain, signPubKey, data, signature); err != nil {
 					continue
 				}
 
@@ -124,7 +127,7 @@ func (mk *MemoryKeyring) Verify(data []byte, signature string, userHint string) 
 		}
 
 		for _, signPubKey := range signPubKeys {
-			if err := mk.verifySingle(signPubKey, data, signature); err != nil {
+			if err := mk.verifySingle(domain, signPubKey, data, signature); err != nil {
 				continue
 			}
 

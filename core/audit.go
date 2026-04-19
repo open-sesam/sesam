@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,36 +20,40 @@ const (
 	sesamInitialHashSeed = "sesam.init"
 )
 
-type Operation string
+// Operation specifies what operation a specific entry describes.
+// It is unlikely you need to use this directly.
+type operation string
 
 const (
-	OpInit         = Operation("init")
-	OpUserTell     = Operation("user.tell")
-	OpUserKill     = Operation("user.kill")
-	OpSecretChange = Operation("secret.change")
-	OpSecretRemove = Operation("secret.remove")
-	OpSeal         = Operation("seal")
+	opInit         = operation("init")
+	opUserTell     = operation("user.tell")
+	opUserKill     = operation("user.kill")
+	opSecretChange = operation("secret.change")
+	opSecretRemove = operation("secret.remove")
+	opSeal         = operation("seal")
 )
 
 // AuditDetail is a type constraint covering all valid detail types.
 type AuditDetail interface {
 	DetailInit |
-		DetailUserTell | DetailUserKill |
-		DetailSecretChange | DetailSecretRemove |
+		DetailUserTell |
+		DetailUserKill |
+		DetailSecretChange |
+		DetailSecretRemove |
 		DetailSeal
 }
 
-type AuditEntry struct {
+type auditEntry struct {
 	// Operation describes the operation that happened.
 	// See above for a full list.
-	Operation Operation `json:"operation"`
+	Operation operation `json:"operation"`
 
 	// ChangedBy is the user that executed the operation.
 	ChangedBy string `json:"changed_by"`
 
 	// Detail are operation specific details.
 	Detail            json.RawMessage `json:"detail"`
-	unmarshaledDetail any             `json:"-"`
+	unmarshaledDetail any
 
 	// SeqID is a monontonically increasing. First entry is 1.
 	SeqID uint64 `json:"seq_id"`
@@ -61,62 +67,9 @@ type AuditEntry struct {
 	Time time.Time `json:"time"`
 }
 
-// operationFor returns the operation type for a given detail struct.
-func operationFor(detail any) Operation {
-	switch detail.(type) {
-	case *DetailInit:
-		return OpInit
-	case *DetailUserTell:
-		return OpUserTell
-	case *DetailUserKill:
-		return OpUserKill
-	case *DetailSecretChange:
-		return OpSecretChange
-	case *DetailSecretRemove:
-		return OpSecretRemove
-	case *DetailSeal:
-		return OpSeal
-	default:
-		panic(fmt.Sprintf("unknown detail type: %T", detail))
-	}
-}
-
-// NewAuditEntry creates a new entry with compile-time type safety on the detail.
-// The operation is derived from the detail type.
-// SeqID, PreviousHash and Time are filled by AuditLog.AddEntry().
-func NewAuditEntry[T AuditDetail](changedBy string, detail *T) *AuditEntry {
-	detailJSON, _ := json.Marshal(detail)
-	return &AuditEntry{
-		Operation:         operationFor(detail),
-		ChangedBy:         changedBy,
-		Time:              time.Now().UTC(),
-		Detail:            detailJSON,
-		unmarshaledDetail: detail,
-	}
-}
-
-// ParseDetail unmarshals the detail into the given type.
-// The result is cached so repeated calls don't re-unmarshal.
-func ParseDetail[T AuditDetail](e *AuditEntrySigned) (*T, error) {
-	if e.unmarshaledDetail != nil {
-		if d, ok := e.unmarshaledDetail.(*T); ok {
-			return d, nil
-		}
-
-		return nil, fmt.Errorf("entry %d: detail is %T, not *%T", e.SeqID, e.unmarshaledDetail, *new(T))
-	}
-
-	var d T
-	if err := json.Unmarshal(e.Detail, &d); err != nil {
-		return nil, fmt.Errorf("unmarshal detail for seq %d: %w", e.SeqID, err)
-	}
-
-	e.unmarshaledDetail = &d
-	return &d, nil
-}
-
-type AuditEntrySigned struct {
-	AuditEntry
+// AuditEntrySigned contains a regular AuditEntry but includes the signature based on it.
+type auditEntrySigned struct {
+	auditEntry
 
 	// Signature is a signature made by the user in `ChangedBy` of this entry.
 	//
@@ -126,28 +79,6 @@ type AuditEntrySigned struct {
 	// Since an entry also contains a link to the previous entry we indirectly also
 	// sign all previous entries.
 	Signature string `json:"signature"`
-}
-
-// Hash computes the current hash of the entry when all fields (including signature) are set.
-func (aes *AuditEntrySigned) Hash() string {
-	// include signature:
-	sigJSON, _ := json.Marshal(aes)
-	return Hash(sigJSON)
-}
-
-func (aes *AuditEntrySigned) String() string {
-	sigJSON, _ := json.MarshalIndent(aes, "", "  ")
-	return string(sigJSON)
-}
-
-func (aes *AuditEntrySigned) Verify(kr Keyring) (string, error) {
-	// do not include signature:
-	wholeEntryJSON, err := json.Marshal(aes.AuditEntry)
-	if err != nil {
-		return "", err
-	}
-
-	return kr.Verify(wholeEntryJSON, aes.Signature, aes.ChangedBy)
 }
 
 ///////// DETAILS /////////////
@@ -303,13 +234,7 @@ type DetailSeal struct {
 //
 // In all cases verify would complain about it and warn an user about Eve.
 type AuditLog struct {
-	// NOTE: We should chunk the log to make life for git easier and avoid loading too big files at once:
-	//
-	// .sesam/audit/
-	// 			00000.log.json
-	// 			00100.log.json // rotate every 100 entries.
-	// 			00200.log.json // rotate every 100 entries.
-	Entries []AuditEntrySigned `json:"entries"`
+	Entries []auditEntrySigned `json:"entries"`
 
 	// RepoDir is the dir in which .sesam resides.
 	RepoDir string `json:"-"`
@@ -317,34 +242,126 @@ type AuditLog struct {
 	// The hash from the .sesam/audit/init file.
 	// It should be the same hash as the prev_hash of the 2nd entry.
 	InitHash string `json:"-"`
+
+	// file descriptor for adding new entries.
+	fd *os.File
 }
 
-// InitLog initializes an empty audit log on repo init.
-// It creates the first init entry which also establishes the initial admin user.
-func InitLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, error) {
-	al := &AuditLog{
-		RepoDir: repoDir,
+// operationFor returns the operation type for a given detail struct.
+func operationFor(detail any) operation {
+	switch detail.(type) {
+	case *DetailInit:
+		return opInit
+	case *DetailUserTell:
+		return opUserTell
+	case *DetailUserKill:
+		return opUserKill
+	case *DetailSecretChange:
+		return opSecretChange
+	case *DetailSecretRemove:
+		return opSecretRemove
+	case *DetailSeal:
+		return opSeal
+	default:
+		panic(fmt.Sprintf("unknown detail type: %T", detail))
+	}
+}
+
+// NewAuditEntry creates a new entry with compile-time type safety on the detail.
+// The operation is derived from the detail type.
+// SeqID, PreviousHash and Time are filled by AuditLog.AddEntry().
+func newAuditEntry[T AuditDetail](changedBy string, detail *T) *auditEntry {
+	detailJSON, _ := json.Marshal(detail)
+	return &auditEntry{
+		Operation:         operationFor(detail),
+		ChangedBy:         changedBy,
+		Time:              time.Now().UTC(),
+		Detail:            detailJSON,
+		unmarshaledDetail: detail,
+	}
+}
+
+// ParseDetail unmarshals the detail into the given type.
+// The result is cached so repeated calls don't re-unmarshal.
+func parseDetail[T AuditDetail](e *auditEntrySigned) (*T, error) {
+	if e.unmarshaledDetail != nil {
+		if d, ok := e.unmarshaledDetail.(*T); ok {
+			return d, nil
+		}
+
+		return nil, fmt.Errorf("entry %d: detail is %T, not *%T", e.SeqID, e.unmarshaledDetail, *new(T))
 	}
 
-	initEntry := NewAuditEntry(signer.UserName(), &DetailInit{
+	var d T
+	if err := json.Unmarshal(e.Detail, &d); err != nil {
+		return nil, fmt.Errorf("unmarshal detail for seq %d: %w", e.SeqID, err)
+	}
+
+	e.unmarshaledDetail = &d
+	return &d, nil
+}
+
+// Hash computes the current hash of the entry when all fields (including signature) are set.
+func (aes *auditEntrySigned) Hash() string {
+	// include signature:
+	sigJSON, _ := json.Marshal(aes)
+	return hashData(sigJSON)
+}
+
+func (aes *auditEntrySigned) String() string {
+	sigJSON, _ := json.MarshalIndent(aes, "", "  ")
+	return string(sigJSON)
+}
+
+func (aes *auditEntrySigned) Verify(kr Keyring) (string, error) {
+	// do not include signature:
+	wholeEntryJSON, err := json.Marshal(aes.auditEntry)
+	if err != nil {
+		return "", err
+	}
+
+	return kr.Verify(SesamDomainSignAuditTag, wholeEntryJSON, aes.Signature, aes.ChangedBy)
+}
+
+// InitAuditLog initializes an empty audit log on repo init.
+// It creates the first init entry which also establishes the initial admin user.
+func InitAuditLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, error) {
+	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
+	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
+
+	if err := os.MkdirAll(filepath.Dir(initPath), 0o700); err != nil {
+		return nil, err
+	}
+
+	//nolint:gosec
+	fd, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+
+	al := &AuditLog{
+		RepoDir: repoDir,
+		fd:      fd,
+	}
+
+	initEntry := newAuditEntry(signer.UserName(), &DetailInit{
 		InitUUID: uuid.New().String(),
 		Admin:    admin,
 	})
 
-	signedEntry, err := al.AddEntry(signer, initEntry)
+	signedEntry, err := al.AddEntry(signer, initEntry, nil)
 	if err != nil {
+		closeLogged(al.fd)
 		return nil, fmt.Errorf("failed to init log: %w", err)
 	}
-
-	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
-	_ = os.MkdirAll(filepath.Dir(initPath), 0700)
 
 	initHash := signedEntry.Hash()
 	if err := renameio.WriteFile(
 		initPath,
 		[]byte(initHash),
-		0600,
+		0o600,
 	); err != nil {
+		closeLogged(al.fd)
 		return nil, fmt.Errorf("failed to write init file: %w", err)
 	}
 
@@ -352,11 +369,18 @@ func InitLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, er
 	return al, nil
 }
 
+func (al *AuditLog) Close() error {
+	return al.fd.Close()
+}
+
 // AddEntry will add another signed entry to the audit log.
-// This action is non-reversible, not even via code.
-func (al *AuditLog) AddEntry(signer Signer, e *AuditEntry) (*AuditEntrySigned, error) {
-	entry := &AuditEntrySigned{
-		AuditEntry: *e,
+// This action is non-reversible, not even via code - make sure that the data added is correct!
+//
+// The `verify` function is called before append the log to the file on disk, use this to make
+// sure that the log verifies as correctly by calling state.Update().
+func (al *AuditLog) AddEntry(signer Signer, e *auditEntry, verify func() error) (*auditEntrySigned, error) {
+	entry := &auditEntrySigned{
+		auditEntry: *e,
 	}
 
 	entry.SeqID = uint64(len(al.Entries)) + 1
@@ -366,25 +390,48 @@ func (al *AuditLog) AddEntry(signer Signer, e *AuditEntry) (*AuditEntrySigned, e
 		entry.PreviousHash = al.Entries[len(al.Entries)-1].Hash()
 	} else {
 		// use a fixed hash, just so we don't have to deal with that value being sometimes empty.
-		entry.PreviousHash = Hash([]byte(sesamInitialHashSeed))
+		entry.PreviousHash = hashData([]byte(sesamInitialHashSeed))
 	}
 
 	// build signature of now complete entry:
-	wholeEntryJSON, err := json.Marshal(entry.AuditEntry)
+	wholeEntryJSON, err := json.Marshal(entry.auditEntry)
 	if err != nil {
 		return nil, fmt.Errorf("marshal current entry: %w", err)
 	}
 
-	entry.Signature, err = signer.Sign(wholeEntryJSON)
+	entry.Signature, err = signer.Sign(SesamDomainSignAuditTag, wholeEntryJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign entry: %w", err)
 	}
 
 	al.Entries = append(al.Entries, *entry)
+
+	if verify != nil {
+		if err := verify(); err != nil {
+			al.Entries = al.Entries[:len(al.Entries)-1] // pop failed entry off.
+			return entry, err
+		}
+	}
+
+	// We encode it twice just for one different entry, which is a bit wastelful...
+	sigJSON, err := json.Marshal(entry)
+	if err != nil {
+		return nil, err
+	}
+
+	sigJSON = append(sigJSON, '\n')
+	if _, err := al.fd.Write(sigJSON); err != nil {
+		return nil, err
+	}
+
+	if err := al.fd.Sync(); err != nil {
+		return nil, err
+	}
+
 	return entry, nil
 }
 
-func (al *AuditLog) Iterate(fn func(idx int, entry *AuditEntrySigned) error) error {
+func (al *AuditLog) Iterate(fn func(idx int, entry *auditEntrySigned) error) error {
 	for idx := 0; idx < len(al.Entries); idx++ {
 		if err := fn(idx, &al.Entries[idx]); err != nil {
 			return err
@@ -394,53 +441,73 @@ func (al *AuditLog) Iterate(fn func(idx int, entry *AuditEntrySigned) error) err
 	return nil
 }
 
-func (al *AuditLog) Store() error {
-	logPath := filepath.Join(al.RepoDir, ".sesam", "audit", "log.json")
-	fd, err := renameio.TempFile(al.RepoDir, logPath)
-	if err != nil {
-		return err
-	}
-
-	defer fd.Cleanup()
-
-	enc := json.NewEncoder(fd)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(al); err != nil {
-		return fmt.Errorf("marshal entries: %w", err)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
-		return fmt.Errorf("mkdir: %w", err)
-	}
-
-	return fd.CloseAtomicallyReplace()
-}
-
 // LoadAuditLog reads the audit log from disk and gives you an handle to operate on it.
 // It does NOT verify the log yet. Call Verify() for that.
 func LoadAuditLog(repoDir string) (*AuditLog, error) {
-	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.json")
+	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
-	initData, err := os.ReadFile(initPath)
+
+	initData, err := readFileLimited(initPath, 256)
 	if err != nil {
 		return nil, err
 	}
-
-	fd, err := os.Open(logPath)
-	if err != nil {
-		return nil, err
-	}
-
-	defer closeLogged(fd)
 
 	al := AuditLog{
 		RepoDir:  repoDir,
 		InitHash: strings.TrimSpace(string(initData)),
 	}
 
-	dec := json.NewDecoder(fd)
-	if err := dec.Decode(&al); err != nil {
+	//nolint:gosec
+	al.fd, err = os.OpenFile(logPath, os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
+	if err != nil {
 		return nil, err
+	}
+
+	info, err := al.fd.Stat()
+	if err != nil {
+		closeLogged(al.fd)
+		return nil, err
+	}
+
+	// Reject audit logs bigger than 512M.
+	// In some later release we need to figure a way
+	// to compress such large logs if that ever becomes a problem.
+	if info.Size() > 512*1024*1024 {
+		closeLogged(al.fd)
+		return nil, fmt.Errorf("audit log too big (> 512M). Please consider opening a bug report")
+	}
+
+	lineNumber := 1
+	dec := json.NewDecoder(al.fd)
+	for dec.More() {
+		var entry auditEntrySigned
+		if err := dec.Decode(&entry); err != nil {
+			// A partial trailing entry means we were interrupted mid-write.
+			// Truncate back to the last good entry and continue — the incomplete
+			// entry never finished and can be safely discarded.
+			goodOffset := dec.InputOffset()
+			slog.Warn(
+				"audit log has incomplete trailing entry (interrupted write?), truncating",
+				slog.Int("line", lineNumber),
+				slog.Int64("truncate_at", goodOffset),
+			)
+
+			if err := al.fd.Truncate(goodOffset); err != nil {
+				closeLogged(al.fd)
+				return nil, fmt.Errorf("failed to truncate corrupt trailing entry: %w", err)
+			}
+
+			break
+		}
+
+		al.Entries = append(al.Entries, entry)
+		lineNumber++
+	}
+
+	// Seek to end so subsequent writes append after the last good entry.
+	if _, err := al.fd.Seek(0, io.SeekEnd); err != nil {
+		closeLogged(al.fd)
+		return nil, fmt.Errorf("failed to seek to end: %w", err)
 	}
 
 	return &al, nil
@@ -449,7 +516,9 @@ func LoadAuditLog(repoDir string) (*AuditLog, error) {
 // BuildRootHash will produce a combined hash ("Root Hash") out of all
 // hashes of encrypted files. It serves as general integrity protection
 // (a bit similar like a merkle tree, just not with hierarchy)
-func BuildRootHash(sigs []*SecretSignature) string {
+//
+// Side effect: This will sort `sigs`
+func buildRootHash(sigs []*secretSignature) string {
 	sort.Slice(sigs, func(i, j int) bool {
 		return sigs[i].RevealedPath < sigs[j].RevealedPath
 	})
@@ -460,5 +529,5 @@ func BuildRootHash(sigs []*SecretSignature) string {
 		b.WriteByte('\n')
 	}
 
-	return Hash(b.Bytes())
+	return hashData(b.Bytes())
 }

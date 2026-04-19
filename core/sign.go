@@ -16,18 +16,29 @@ import (
 	"github.com/google/renameio"
 )
 
+type SignDomain []byte
+
+// Signer is similar to Identity (private part) but is used for signing only.
+type Signer interface {
+	Sign(domain SignDomain, data []byte) (string, error)
+	PublicKey() []byte
+	UserName() string
+}
+
+var (
+	// See: https://en.wikipedia.org/wiki/Domain_separation
+	SesamDomainSignSecretTag = SignDomain("sesam.secret.v1:")
+	SesamDomainSignAuditTag  = SignDomain("sesam.audit.v1:")
+)
+
 type ed25519Signer struct {
 	pub  ed25519.PublicKey
 	priv ed25519.PrivateKey
 	user string
 }
 
-func signKeyPath(repoDir, user string) string {
-	return filepath.Join(repoDir, ".sesam", "signkeys", user+".age")
-}
-
-func (es *ed25519Signer) Sign(data []byte) (string, error) {
-	sig, err := es.priv.Sign(rand.Reader, data, &ed25519.Options{})
+func (es *ed25519Signer) Sign(domain SignDomain, data []byte) (string, error) {
+	sig, err := es.priv.Sign(rand.Reader, append(domain, data...), &ed25519.Options{})
 	if err != nil {
 		return "", err
 	}
@@ -62,25 +73,31 @@ func (es *ed25519Signer) UserName() string {
 
 // LoadSignKey will load a signer specific to a user and decrypt it via `userIdentity`
 func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error) {
-	signPath := signKeyPath(repoDir, user)
-	cryptedSignPrivKeyFd, err := os.Open(signPath)
+	if err := validUserName(user); err != nil {
+		return nil, fmt.Errorf("invalid user name: %w", err)
+	}
+
+	signKeyPath := filepath.Join(repoDir, ".sesam", "signkey", user+".age")
+
+	//nolint:gosec
+	cryptedSignPrivKeyFd, err := os.Open(signKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sign key %s: %w", signPath, err)
 	}
 
 	dr, err := age.Decrypt(io.LimitReader(cryptedSignPrivKeyFd, 1024), userIdentity)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt header of signing key: %v", err)
+		return nil, fmt.Errorf("failed to decrypt header of signing key: %w", err)
 	}
 
 	defer closeLogged(cryptedSignPrivKeyFd)
 
 	signingKeyEncoded, err := io.ReadAll(dr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt signing key: %v", err)
+		return nil, fmt.Errorf("failed to decrypt signing key: %w", err)
 	}
 
-	signPrivKeyRaw, code, err := MulticodeDecode(string(bytes.TrimSpace(signingKeyEncoded)))
+	signPrivKeyRaw, code, err := multicodeDecode(string(bytes.TrimSpace(signingKeyEncoded)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode sign key %s: %w", signPath, err)
 	}
@@ -103,7 +120,11 @@ func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error
 
 // GenerateSignKey will generate a new ed25519 signing key only accessible to `userRecipient`
 func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer, error) {
-	signPath := signKeyPath(repoDir, user)
+	if err := validUserName(user); err != nil {
+		return nil, fmt.Errorf("invalid user name: %w", err)
+	}
+
+	signKeyPath := filepath.Join(repoDir, ".sesam", "signkey", user+".age")
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate signing key %s: %w", signPath, err)
@@ -128,8 +149,8 @@ func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer,
 		return nil, fmt.Errorf("failed to close encrypted writer: %w", err)
 	}
 
-	if err := renameio.WriteFile(signPath, ageBuf.Bytes(), 0o600); err != nil {
-		return nil, fmt.Errorf("failed to write signing key %s: %w", signPath, err)
+	if err := renameio.WriteFile(signKeyPath, ageBuf.Bytes(), 0o600); err != nil {
+		return nil, fmt.Errorf("failed to write signing key %s: %w", signKeyPath, err)
 	}
 
 	slog.Warn(
@@ -144,35 +165,37 @@ func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer,
 	}, nil
 }
 
-func SignaturePath(repoDir, revealedPath string) string {
+func signaturePath(repoDir, revealedPath string) string {
 	return filepath.Join(repoDir, ".sesam", "objects", revealedPath+".sig.json")
 }
 
 // ReadStoredSignature will open the signature file belonging to `revealedPath`.
 // You will get an error if it has not been sealed yet.
-func ReadStoredSignature(repoDir, revealedPath string) (SecretSignature, error) {
-	sigPath := SignaturePath(repoDir, revealedPath)
+func readStoredSignature(repoDir, revealedPath string) (secretSignature, error) {
+	sigPath := signaturePath(repoDir, revealedPath)
+
+	//nolint:gosec
 	sigFd, err := os.Open(sigPath)
 	if err != nil {
-		return SecretSignature{}, fmt.Errorf("failed to open signature json: %w", err)
+		return secretSignature{}, fmt.Errorf("failed to open signature json: %w", err)
 	}
 
 	defer closeLogged(sigFd)
 
-	var sigDesc SecretSignature
+	var sigDesc secretSignature
 	dec := json.NewDecoder(io.LimitReader(sigFd, 1024))
 	if err := dec.Decode(&sigDesc); err != nil {
-		return SecretSignature{}, fmt.Errorf("failed to decode signature json %s: %w", sigPath, err)
+		return secretSignature{}, fmt.Errorf("failed to decode signature json %s: %w", sigPath, err)
 	}
 
 	return sigDesc, nil
 }
 
 // ReadAllSignatures finds all .sig.json files under .sesam/objects/ and parses them.
-func ReadAllSignatures(repoDir string) ([]SecretSignature, error) {
+func readAllSignatures(repoDir string) ([]secretSignature, error) {
 	objectsDir := filepath.Join(repoDir, ".sesam", "objects")
 
-	var sigs []SecretSignature
+	var sigs []secretSignature
 	if _, err := os.Stat(objectsDir); os.IsNotExist(err) {
 		// might happen if we're in the init phase
 		return sigs, nil
@@ -187,13 +210,14 @@ func ReadAllSignatures(repoDir string) ([]SecretSignature, error) {
 			return nil
 		}
 
+		//nolint:gosec
 		sigFd, err := os.Open(path)
 		if err != nil {
 			return fmt.Errorf("failed to open signature json %s: %w", path, err)
 		}
 		defer closeLogged(sigFd)
 
-		var sig SecretSignature
+		var sig secretSignature
 		dec := json.NewDecoder(io.LimitReader(sigFd, 2048))
 		if err := dec.Decode(&sig); err != nil {
 			return fmt.Errorf("failed to decode signature json %s: %w", path, err)

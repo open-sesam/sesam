@@ -17,12 +17,26 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// Recipient is the public part of an Identity.
+// It is called "Recipient" because it references a person that
+// is later to decrypt a secret.
 type Recipient struct {
 	age.Recipient
-	ComparablePublicKey
+	comparablePublicKey
 }
 
+// Recipients is a helper to manage several recipients
 type Recipients []*Recipient
+
+// CacheMode defines what to do with downloaded public keys.
+type CacheMode int
+
+const (
+	CacheModeNone = CacheMode(1 << iota)
+	CacheModeRead
+	CacheModeWrite
+	CacheModeReadWrite = CacheModeRead | CacheModeWrite
+)
 
 func (rs Recipients) AgeRecipients() []age.Recipient {
 	ageRecps := make([]age.Recipient, 0, len(rs))
@@ -32,15 +46,6 @@ func (rs Recipients) AgeRecipients() []age.Recipient {
 
 	return ageRecps
 }
-
-type CacheMode int
-
-const (
-	CacheModeNone = CacheMode(1 << iota)
-	CacheModeRead
-	CacheModeWrite
-	CacheModeReadWrite = CacheModeRead | CacheModeWrite
-)
 
 func forgeIdToUser(arg string) string {
 	_, user, _ := strings.Cut(arg, ":")
@@ -66,11 +71,22 @@ func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode
 	case strings.HasPrefix(arg, "https://"):
 		return resolveCachedLink(ctx, repoDir, arg, cacheMode)
 	case strings.HasPrefix(arg, "file://"):
-		// TODO: Strip "file://" prefix before reading. Also consider restricting
-		// to paths within the repo directory to prevent reading arbitrary files.
-		data, err := os.ReadFile(arg)
+		path := strings.TrimPrefix(arg, "file://")
+		if err := validSecretPath(repoDir, path); err != nil {
+			return "", fmt.Errorf("invalid file:// path (%s): %w", arg, err)
+		}
+
+		//nolint:gosec
+		fd, err := os.Open(path)
 		if err != nil {
-			return "", fmt.Errorf("failed to find %s: %w", arg, err)
+			return "", fmt.Errorf("failed to open %s: %w", arg, err)
+		}
+
+		defer closeLogged(fd)
+
+		data, err := io.ReadAll(io.LimitReader(fd, 4096))
+		if err != nil {
+			return "", fmt.Errorf("failed to read %s: %w", arg, err)
 		}
 
 		return string(data), nil
@@ -98,6 +114,7 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 	cachePath := cachePath(repoDir, url)
 
 	if cacheMode&CacheModeRead > 0 {
+		//nolint:gosec
 		data, err := os.ReadFile(cachePath)
 		if err == nil {
 			return string(data), nil
@@ -117,7 +134,7 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 	if err != nil {
 		return "", fmt.Errorf("failed to download %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer closeLogged(resp.Body)
 
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("%s failed with code %d", url, resp.StatusCode)
@@ -128,15 +145,15 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 
 	tr := io.LimitReader(resp.Body, maxSize)
 	if cacheMode&CacheModeWrite > 0 {
-		_ = os.MkdirAll(filepath.Dir(cachePath), 0700)
+		_ = os.MkdirAll(filepath.Dir(cachePath), 0o700)
 
-		// Avoid being DDoS'd by big responses.
+		//nolint:gosec
 		cacheFd, err := os.Create(cachePath)
 		if err != nil {
 			return "", fmt.Errorf("failed to create cache path: %w", err)
 		}
 
-		defer cacheFd.Close()
+		defer closeLogged(cacheFd)
 		tr = io.TeeReader(tr, cacheFd)
 	}
 
@@ -190,6 +207,6 @@ func ParseRecipient(arg string) (*Recipient, error) {
 	spk := newStringPubKey(s)
 	return &Recipient{
 		Recipient:           r,
-		ComparablePublicKey: spk,
+		comparablePublicKey: spk,
 	}, err
 }

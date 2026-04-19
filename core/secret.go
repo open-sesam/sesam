@@ -14,31 +14,24 @@ import (
 	"filippo.io/age"
 )
 
-type Signer interface {
-	Sign(data []byte) (string, error)
-	PublicKey() []byte
-	UserName() string
-}
-
-type Secret struct {
+type secret struct {
 	Mgr *SecretManager
 
 	// RevealedPath is relative to Mgr.RepoDir
-	// TODO: enforce this. Also make sure that path is not a symbolic link and contains no ".." or similar.
 	RevealedPath string
 
 	// Recipients are the people that may reveal this secret.
 	Recipients Recipients
 }
 
-type SecretSignature struct {
+type secretSignature struct {
 	RevealedPath string `json:"path"`
 	Hash         string `json:"hash"`
 	Signature    string `json:"signature"`
 	SealedBy     string `json:"sealed_by"`
 }
 
-func (s *Secret) Seal(sealedByUser string) (*SecretSignature, error) {
+func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 	rd, err := os.Open(filepath.Join(s.Mgr.RepoDir, s.RevealedPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secret: %w", err)
@@ -57,15 +50,18 @@ func (s *Secret) Seal(sealedByUser string) (*SecretSignature, error) {
 
 	encW, err := age.Encrypt(mw, s.Recipients.AgeRecipients()...)
 	if err != nil {
+		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to initiate encryption: %w", err)
 	}
 
 	_, err = io.Copy(encW, rd)
 	if err != nil {
+		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to encrypt secret %s: %w", s.RevealedPath, err)
 	}
 
 	if err := encW.Close(); err != nil {
+		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to close encrypted writer: %w", err)
 	}
 
@@ -73,12 +69,13 @@ func (s *Secret) Seal(sealedByUser string) (*SecretSignature, error) {
 	_, _ = h.Write([]byte(s.RevealedPath))
 	hashBytes := h.Sum(nil)
 
-	sig, err := s.Mgr.Signer.Sign(hashBytes)
+	sig, err := s.Mgr.Signer.Sign(SesamDomainSignSecretTag, hashBytes)
 	if err != nil {
+		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to compute signature for %s: %w", encryptedPath, err)
 	}
 
-	ss := SecretSignature{
+	ss := secretSignature{
 		RevealedPath: s.RevealedPath,
 		Hash:         MulticodeEncode(hashBytes, MhSHA3_256),
 		Signature:    sig,
@@ -92,8 +89,9 @@ func (s *Secret) Seal(sealedByUser string) (*SecretSignature, error) {
 	_ = enc.Encode(ss)
 
 	// write the signature file along the encrypted file:
-	sigPath := SignaturePath(s.Mgr.RepoDir, s.RevealedPath)
-	if err := renameio.WriteFile(sigPath, sigBuf.Bytes(), 0600); err != nil {
+	sigPath := signaturePath(s.Mgr.RepoDir, s.RevealedPath)
+	if err := renameio.WriteFile(sigPath, sigBuf.Bytes(), 0o600); err != nil {
+		_ = os.Remove(wc.Name())
 		return nil, err
 	}
 
@@ -102,8 +100,10 @@ func (s *Secret) Seal(sealedByUser string) (*SecretSignature, error) {
 
 // Reveal decrypts secret `s` and verifies its detached signature.
 // No error is only returned if the reveal has been fully successful.
-func (s *Secret) Reveal() error {
+func (s *secret) Reveal() error {
 	cryptPath := s.Mgr.cryptPath(s.RevealedPath)
+
+	//nolint:gosec
 	srcFd, err := os.Open(cryptPath)
 	if err != nil {
 		// if it does not exist, it probably means that the secret was not encrypted yet.
@@ -140,7 +140,7 @@ func (s *Secret) Reveal() error {
 		return fmt.Errorf("failed to copy decrypted secret back in place: %w", err)
 	}
 
-	sigDesc, err := ReadStoredSignature(s.Mgr.RepoDir, s.RevealedPath)
+	sigDesc, err := readStoredSignature(s.Mgr.RepoDir, s.RevealedPath)
 	if err != nil {
 		return fmt.Errorf("failed to read signature: %w", err)
 	}
@@ -156,17 +156,17 @@ func (s *Secret) Reveal() error {
 	}
 
 	if _, err := s.Mgr.Keyring.Verify(
+		SesamDomainSignSecretTag,
 		sha3HashBytes,
 		sigDesc.Signature,
 		sigDesc.SealedBy,
 	); err != nil {
-		// verification failed, abort.
-		return err
+		return fmt.Errorf("signature verification failed for %s: %w", s.RevealedPath, err)
 	}
 
 	// TODO: Seal and reveal should carry over permissions and other attrs from the original file.
 	// Git can only differentiate between executable and normal files, not between 0600 and 0644.
 	// So default to 0600 to avoid troubles with ssh keys for now?
-	_ = dstFd.Chmod(0600)
+	_ = dstFd.Chmod(0o600)
 	return dstFd.CloseAtomicallyReplace()
 }

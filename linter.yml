@@ -1,0 +1,63 @@
+# .golangci.yml
+
+# v2 explicitly requires the version to be declared at the top.
+version: "2"
+
+run:
+  concurrency: 4
+  timeout: 5m
+  issues-exit-code: 1
+  tests: false
+
+# Formatters are no longer treated as linters in v2 and have their own dedicated block.
+formatters:
+  disable-all: true
+  enable:
+    - gofumpt
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+  revive:
+    ignore-generated-header: true
+    severity: warning
+  gofumpt:
+    extra-rules: true
+
+linters:
+  disable-all: true
+  enable:
+    # Notice: typecheck and gosimple have been removed as they are no longer
+    # configurable linters in the v2 API (gosimple was absorbed, typecheck is native).
+    - bodyclose
+    - copyloopvar
+    - errcheck
+    - errname
+    - errorlint
+    - goconst
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - makezero
+    - misspell
+    - nilerr
+    - nilnil
+    - nolintlint
+    - noctx
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - unused
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+      text: "G101|G404"

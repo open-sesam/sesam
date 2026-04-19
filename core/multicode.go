@@ -26,7 +26,7 @@ func MulticodeEncode(digest []byte, code uint64) string {
 
 // MulticodeDecode is the inverse of MhEncode: base64-decode, then multihash-decode.
 // It returns the raw digest and the hash code so callers can verify the algorithm.
-func MulticodeDecode(s string) (digest []byte, code uint64, err error) {
+func multicodeDecode(s string) (digest []byte, code uint64, err error) {
 	raw, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
 		return nil, 0, fmt.Errorf("base64 decode: %w", err)
@@ -41,7 +41,7 @@ func MulticodeDecode(s string) (digest []byte, code uint64, err error) {
 }
 
 // Hash builds uses the default hash algorithm for `data` and returns a multicode encoded stirng.
-func Hash(data []byte) string {
+func hashData(data []byte) string {
 	h := sha3.New256()
 	_, _ = h.Write(data)
 	return MulticodeEncode(h.Sum(nil), MhSHA3_256)

@@ -301,7 +301,7 @@ This should be compatible with the Vault HTTP API.
 
 Show audit log:
 
-- When where secrets changed by whom? TODO: Include commit hash?
+- When where secrets changed by whom? 
 - When access list was changed by whom?
 - When config was changed by whom?
 
@@ -356,7 +356,7 @@ Check out an older secret by commit and restore it.
 │Identity│ │ Signer │    │ Keyring  │    │ VerifiedState │
 │ your   │ │ signs  │    │everyone's│    │ "what should  │
 │ private│ │ entries│    │public    │    │  the repo     │
-│ key(s) │ │& secrets│   │keys     │    │  look like?"  │
+│ key(s) │ │&secrets│    │keys      │    │  look like?"  │
 └───┬────┘ └───┬────┘    └────┬─────┘    └───────┬───────┘
     │          │              ▲                   ▲
     │          │              │ keys added        │ built by
