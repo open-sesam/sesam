@@ -1,14 +1,110 @@
+# Optional; always 1 for now.
 version: 1
 
+# This is a demonstration file of Sesam.
+# All kinds of features are listed here, you will likely only need a fraction of them.
 config:
+  general:
+    # encrypt all files, even when no change is needed when true.
+    # This is a security consideration as only re-encrypting the files needed
+    # could tell an attacker which files where changed by whom over time.
+    # On the other hand, it is often rightfully useful to know when secrets were changed by whom.
+    - encrypt_all: false
   users:
-    - name: %s
-      key: %s
+    - name: [[ yaml .InitialUser ]]
+      desc: default admin user
+      # Key is the public key of this user. It will be used to encrypt files.
+      # Decryption is only possible when you possess the fitting private key.
+      #
+      # You can specify the key either...
+      # - ...literally (as ssh key)
+      # - ...as forge id
+      # - ...as link
+      # - ...as local path (can be used for larger keys)
+      #
+      # Forge-ids and links (e.g. to keyservers) are downloaded once by the admin and stored in the repo (under .sesam/keys/).
+      # They are monitored on user or group changes, whenever the link/forge contents change, we will emit
+      # a warning and the admin has to check whether that link is still valid.
+      key: [[ yaml .InitialRecipient ]]
+
   groups:
+    # Initial admin group created by sesam init.
     admin:
-      - %s
+      # This is the only user that by definition may change user/groups.
+      # We recommend to have at least two people here. These users also
+      # by definition have access to all files (as adding users require re-encrypting)
+      - [[ yaml .InitialUser ]]
+    deployers:
+      - example_user
+      - another_user
 
 secrets:
-  - revealed_path: example.secret
-    groups:
+  # Starter example secret created by sesam init.
+  # You can delete this after first successful seal/reveal.
+  - type: password
+    path: example.secret
+    access:
       - admin
+  # You can include more yml files to allow nesting.
+  # It is often clearer to specify secrets per directory.
+  # You may not repeat the "config" key in sub files though.
+  - include: platform/secrets.yml
+  - include: ssh/secrets.yml
+  - type: password
+    name: some_password # optional, for display path is used otherwise.
+    path: some_password.txt
+    # Optional:
+    access:
+      # If not specified, then only admin has access to the file!
+      # Make sure to add your group here if you are not admin and if you are manually editing this file (i.e. not over sesam commands)
+      # If you try to hide it, sesam verify will complain otherwise.
+      - admin
+      - deployers
+    description: Where it used, who owns it, Contact...
+    rotate:
+      - min-score: 3 # measured by zxcvbn
+      - constraint: alphanumeric
+    swap:
+      - cmd: pass insert some/password/local {{ .PASSWORD }}
+  - type: ssh_key
+    path: ssh/blub.key
+    # Optional:
+    access:
+      - admin
+    description: Foo bar
+    rotate:
+      - algorithm: ssh-ed25519
+      - passphrase: name-of-another-secret
+    swap:
+      - host: ubuntu@sesam.io
+  # Templates are kind of a "container" for several other secrets.
+  # They are mostly intented to be used for .env files or .json files
+  # that contain secrets that need to be embedded into a bigger document.
+  - type: template
+    path: platform/secrets.env
+    template: |
+      | # some comment
+      | SECRET_ENV="<<NAME_OF_SECRET>>"
+      |
+      | # other comment - also preserved.
+      | OTHER_ENV="<<OTHER_ENV>>"
+    secrets:
+      # path is optional for those secrets.
+      # They are encoded in to the template above and also read when we have to rotate the secrets.
+      # Therefore we can't do any destructive templating action like `{{ .NAME_OF_SECRET | upper }}`
+      # If we need special encoding, we can use the "encoding" config.
+      - type: password
+        name: NAME_OF_SECRET
+        # Sometimes password might contain things like quotes. In this case
+        # we need to escape them before writing it to the template.
+        # NOTE: Don't like that solution that much... but better than introducing special templating syntax.
+        encoding: shell # json, url, ...
+        access: [deploy]
+      # You can also include other files in here if you want to.
+      - include: other.yml
+
+# NOTE: You can use yaml anchors to re-use config that is often used.
+# allow toplevel keys starting with x-... to store re-usable snippets
+x-password-settings:
+  - min-score: 3
+  - constraint: alphanumeric

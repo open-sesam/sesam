@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"filippo.io/age"
 	"github.com/google/renameio"
@@ -265,12 +267,28 @@ func createInitialConfig(configPath, initialUser, recipientText string) error {
 		return fmt.Errorf("failed to create config directory for %s: %w", configPath, err)
 	}
 
-	quotedUser := quoteYAMLString(initialUser)
-	quotedRecipient := quoteYAMLString(recipientText)
+	tmpl, err := template.
+		New("config.default").
+		Delims("[[", "]]").
+		Funcs(template.FuncMap{"yaml": quoteYAMLString}).
+		Parse(configTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse config template: %w", err)
+	}
 
-	config := fmt.Sprintf(configTemplate, quotedUser, quotedRecipient, quotedUser)
+	var out bytes.Buffer
+	err = tmpl.Execute(&out, struct {
+		InitialUser      string
+		InitialRecipient string
+	}{
+		InitialUser:      initialUser,
+		InitialRecipient: recipientText,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to render config template: %w", err)
+	}
 
-	if err := renameio.WriteFile(configPath, []byte(config), 0o600); err != nil {
+	if err := renameio.WriteFile(configPath, out.Bytes(), 0o600); err != nil {
 		return fmt.Errorf("failed to create sample config %s: %w", configPath, err)
 	}
 
