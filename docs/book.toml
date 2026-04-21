@@ -1,0 +1,37 @@
+[book]
+title = "Sesam - a clever git secrets manager"
+authors = ["Chris Pahl"]
+description = "Documentation for sesam, a git-based secret manager"
+language = "en"
+
+[preprocessor.admonish]
+command = "mdbook-admonish"
+assets_version = "3.1.0"    # do not edit: managed by `mdbook-admonish install`
+
+[preprocessor.gitinfo]
+command = "mdbook-gitinfo"
+
+# choose placement(s)
+header = false # default: false
+footer = true  # default: true
+
+# common formatting
+font-size = "0.9em"
+separator = " • "
+date-format = "%Y-%m-%d"
+time-format = "%H:%M:%S"
+branch = "main"
+hyperlink = true         # make hash/branch clickable when possible
+
+# optional timezone handling
+timezone = "local" # "local" (default) | "utc" | "source" | "fixed:+02:00"
+
+[preprocessor.gitinfo.message]
+footer = "Built {{date}}{{sep}}commit: {{hash}}"
+
+[preprocessor.pagetoc]
+scroll_offset = 10 # pixels added to scroll position for active header detection (default: 10)
+
+[output.html]
+additional-css = ["theme/pagetoc.css", "./mdbook-admonish.css"]
+additional-js = ["theme/pagetoc.js"]
