@@ -1,0 +1,255 @@
+/* ==========================================================================
+   Sesam theme — emerald, clay, gold (inspired by the Ali Baba logo)
+   ========================================================================== */
+
+/* --- Fonts: Amiri (headings) + Lora (body) --- */
+@import url("https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600;700&family=Rubik:ital,wght@0,300..900;1,300..900&display=swap");
+
+/* --- Palette ---
+   Emerald:     #2d6e3f  (leaves)
+   Emerald dk:  #1e4d2c  (hover/active)
+   Clay:        #c4a265  (pod interior)
+   Gold:        #b8963e  (key accents)
+   Gold light:  #d4b56a  (hover)
+   Warm white:  #f8f5ef  (background)
+   Off-white:   #f4f1eb  (code blocks)
+*/
+
+:root {
+    /* Sidebar */
+    --sidebar-bg:             #358a4e;
+    --sidebar-fg:             #f0ede6;
+    --sidebar-non-existant:   #8fbf9c;
+    --sidebar-active:         #d4b56a;
+    --sidebar-spacer:         #4a9e64;
+
+    /* Top search bar */
+    --search-mark-bg:         #d4b56a;
+
+    /* Page background */
+    --bg:                     #f8f5ef;
+    --fg:                     #2c2c2c;
+
+    /* Links */
+    --links:                  #2d6e3f;
+
+    /* Inline code */
+    --inline-code-color:      #2c2c2c;
+
+    /* Table */
+    --table-border-color:     #ddd5c5;
+    --table-header-bg:        #f0ebe0;
+    --table-alternate-bg:     #f8f5ef;
+
+    /* Quote bar */
+    --quote-bg:               #f4f1eb;
+    --quote-border:           #c4a265;
+
+    /* Scrollbar */
+    --scrollbar:              #c4a265;
+
+    /* Theme toggle / icons */
+    --icons:                  #2d6e3f;
+    --icons-hover:            #b8963e;
+}
+
+/* --- Typography --- */
+
+body {
+    font-family: "Rubik", sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: "Josefin Sans", sans-serif;
+}
+
+/* --- Sidebar styling --- */
+
+.sidebar .sidebar-scrollbox {
+    padding-top: 0;
+    font-family: "Josefin Sans", sans-serif;
+    font-size: 1.6rem;
+    font-weight: 700;
+}
+
+/* Logo at top of sidebar — circular frame with geometric fill */
+.sidebar .sidebar-scrollbox::before {
+    content: "";
+    display: block;
+    width: 130px;
+    height: 130px;
+    margin: 1.2rem auto 0.5rem;
+    background:
+        url("../sesam_bg.png") center / 80% no-repeat,
+        url("../arabic-pattern.svg") center / 60px 60px repeat,
+        #f8f5ef;
+    border-radius: 50%;
+    border: 3px solid #b8963e;
+    box-shadow: 0 0 0 4px rgba(184, 150, 62, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Sidebar link hover */
+.sidebar .sidebar-scrollbox a:hover {
+    color: #d4b56a;
+}
+
+/* Active chapter highlight */
+.sidebar .sidebar-scrollbox .chapter li.active > a {
+    color: #d4b56a;
+    font-weight: 600;
+}
+
+/* Chapter headings in sidebar */
+/* Sidebar section headers (Introduction, Basic Usage, etc.) */
+.sidebar .sidebar-scrollbox .chapter li.part-title {
+    font-size: 1.15em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #d4b56a;
+    margin-top: 1.2em;
+}
+
+.sidebar .sidebar-scrollbox .chapter li.chapter-item {
+    border-left: 2px solid transparent;
+    transition: border-color 0.15s ease;
+}
+.sidebar .sidebar-scrollbox .chapter li.chapter-item:hover {
+    border-left-color: #d4b56a;
+}
+
+/* --- Navigation arrows (prev/next chapter) --- */
+
+.nav-chapters {
+    color: #2d6e3f;
+    font-size: 2em;
+    transition: color 0.15s ease;
+}
+.nav-chapters:hover {
+    color: #b8963e !important;
+    background: transparent !important;
+}
+
+/* --- Arabic geometric background pattern (full content area) --- */
+
+.page-wrapper .page {
+    background-image: url("../arabic-pattern.svg");
+    background-repeat: repeat;
+    background-size: 80px 80px;
+}
+
+/* --- Headings --- */
+
+.content main h1 {
+    color: #2d6e3f;
+    border-bottom: 2px solid #b8963e;
+    padding-bottom: 0.3em;
+}
+
+.content main h2 {
+    color: #2d6e3f;
+    border-bottom: 1px solid #ddd5c5;
+    padding-bottom: 0.2em;
+}
+
+.content main h3,
+.content main h4 {
+    color: #3a7d4e;
+}
+
+/* --- Code blocks --- */
+
+code.hljs {
+    background-color: #f4f1eb !important;
+    border: 1px solid #e5dfd2;
+    border-radius: 4px;
+}
+
+:not(pre) > code {
+    background-color: #f0ebe0;
+    border: 1px solid #e5dfd2;
+    border-radius: 3px;
+    padding: 0.1em 0.3em;
+}
+
+/* --- Admonish box accent overrides --- */
+
+/* Tip boxes → gold */
+:is(.admonition.admonish-tip) {
+    border-color: #b8963e;
+}
+:is(.admonition.admonish-tip) > :is(.admonition-title, summary.admonition-title) {
+    background-color: rgba(184, 150, 62, 0.12);
+}
+:is(.admonition.admonish-tip) > :is(.admonition-title, summary.admonition-title)::before {
+    background-color: #b8963e;
+}
+
+/* Info boxes → emerald */
+:is(.admonition.admonish-info) {
+    border-color: #2d6e3f;
+}
+:is(.admonition.admonish-info) > :is(.admonition-title, summary.admonition-title) {
+    background-color: rgba(45, 110, 63, 0.08);
+}
+:is(.admonition.admonish-info) > :is(.admonition-title, summary.admonition-title)::before {
+    background-color: #2d6e3f;
+}
+
+/* Warning boxes → warm orange */
+:is(.admonition.admonish-warning) {
+    border-color: #d4880c;
+}
+:is(.admonition.admonish-warning) > :is(.admonition-title, summary.admonition-title) {
+    background-color: rgba(212, 136, 12, 0.15);
+}
+:is(.admonition.admonish-warning) > :is(.admonition-title, summary.admonition-title)::before {
+    background-color: #d4880c;
+}
+
+/* Note boxes → muted emerald */
+:is(.admonition.admonish-note) {
+    border-color: #5a9e6e;
+}
+:is(.admonition.admonish-note) > :is(.admonition-title, summary.admonition-title) {
+    background-color: rgba(90, 158, 110, 0.08);
+}
+:is(.admonition.admonish-note) > :is(.admonition-title, summary.admonition-title)::before {
+    background-color: #5a9e6e;
+}
+
+/* --- Pagetoc (right-side TOC) accent --- */
+
+.pagetoc a:hover,
+.pagetoc a.active {
+    background: transparent !important;
+    color: #2d6e3f !important;
+    border-left-color: #b8963e !important;
+    font-weight: 600;
+}
+.pagetoc a {
+    border-left: 2px solid #ddd5c5 !important;
+}
+
+/* --- Buttons / theme toggle --- */
+
+#theme-list,
+#theme-toggle {
+    display: none;
+}
+
+/* Search focus ring */
+#searchbar:focus {
+    border-color: #2d6e3f;
+    box-shadow: 0 0 0 2px rgba(45, 110, 63, 0.2);
+}
+
+/* --- Scrollbar on webkit --- */
+
+::-webkit-scrollbar-thumb {
+    background-color: #c4a265;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background-color: #b8963e;
+}

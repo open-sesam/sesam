@@ -1,3 +1,5 @@
+# Sesam
+
 # Introduction
 
 - [What is Sesam?](./whatis.md)
@@ -9,8 +11,8 @@
 # Basic Usage
 
 - [Initializing](./init.md)
-- [Adding users](./user_add.md)
 - [Adding secrets](./secret_add.md)
+- [Adding users](./user_add.md)
 - [Removing users](./user_rm.md)
 - [Removing secrets](./secret_rm.md)
 - [Config Apply](./config_apply.md)

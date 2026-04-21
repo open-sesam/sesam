@@ -20,7 +20,7 @@ font-size = "0.9em"
 separator = " • "
 date-format = "%Y-%m-%d"
 time-format = "%H:%M:%S"
-branch = "main"
+branch = "feat/docs"
 hyperlink = true         # make hash/branch clickable when possible
 
 # optional timezone handling
@@ -33,5 +33,9 @@ footer = "Built {{date}}{{sep}}commit: {{hash}}"
 scroll_offset = 10 # pixels added to scroll position for active header detection (default: 10)
 
 [output.html]
-additional-css = ["theme/pagetoc.css", "./mdbook-admonish.css"]
+additional-css = [
+  "theme/pagetoc.css",
+  "./mdbook-admonish.css",
+  "theme/sesam.css",
+]
 additional-js = ["theme/pagetoc.js"]

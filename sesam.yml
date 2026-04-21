@@ -33,7 +33,7 @@ config:
       desc: Adel Bablees
       key: https://adel.com/key.txt
     - name: m.alice@germanbionic.com
-      desc: Im Evil
+      desc: Im Eve-Ill
       key: file://some/path/key.txt
 
   groups:
@@ -53,7 +53,6 @@ secrets:
   - include: platform/secrets.yml
   - include: ssh/secrets.yml
   - type: password
-    name: some_password # optional, for display path is used otherwise.
     path: some_password.txt
     # Optional:
     access:

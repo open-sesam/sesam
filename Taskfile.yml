@@ -41,7 +41,7 @@ tasks:
   docs:
     desc: Builds docs
     cmds:
-      - cd docs && mdbook server --open
+      - cd docs && mdbook serve --open
 
   setup_docs:
     desc: Setup dependency for docs
