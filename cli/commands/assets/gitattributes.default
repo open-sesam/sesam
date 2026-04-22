@@ -2,4 +2,4 @@
 .sesam/objects/** filter=sesam diff=sesam
 .sesam/objects/**/*.age binary
 .sesam/objects/**/*.sig.json binary
-.sesam/signkeys/**/*.age binary
+.sesam/signkey/**/*.age binary
