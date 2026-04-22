@@ -32,6 +32,11 @@ func validUserName(name string) error {
 	return nil
 }
 
+// ValidUserName checks user name format for external callers.
+func ValidUserName(name string) error {
+	return validUserName(name)
+}
+
 func validSecretPath(repoDir string, revealedPath string) error {
 	if len(revealedPath) == 0 {
 		return fmt.Errorf("empty file path not allowed: %s", revealedPath)

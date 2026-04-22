@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	_ "embed"
@@ -10,12 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"text/template"
 	"time"
 
 	"filippo.io/age"
+	"github.com/go-git/go-git/v5"
 	"github.com/google/renameio"
 	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
@@ -68,17 +67,16 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("failed to determine initial user, please pass --user")
 	}
 
+	if err := core.ValidUserName(initialUser); err != nil {
+		return fmt.Errorf("invalid initial user %q: %w", initialUser, err)
+	}
+
 	identities, err := loadIdentities(cmd.String("identity"), "sesam.id."+initialUser)
 	if err != nil {
 		return err
 	}
 
-	selectedIdentity, err := chooseInitIdentity(identities, cmd.String("identity"), os.Stdin, os.Stdout, isInteractiveInput(os.Stdin))
-	if err != nil {
-		return err
-	}
-
-	_, recipientText, err := resolveInitialRecipient(ctx, cmd.String("recipient"), repoRoot, selectedIdentity)
+	_, recipientText, err := resolveInitialRecipient(ctx, cmd.String("recipient"), repoRoot, identities)
 	if err != nil {
 		return err
 	}
@@ -98,7 +96,7 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 			repoRoot,
 			initialUser,
 			recipientText,
-			selectedIdentity,
+			identities,
 		)
 		if err != nil {
 			return err
@@ -150,27 +148,23 @@ func resolveRepoRoot(repoPath string) (string, error) {
 	if strings.TrimSpace(repoPath) == "" {
 		repoPath = "."
 	}
+	repoPath = filepath.Clean(repoPath)
 
-	absRepoPath, err := filepath.Abs(repoPath)
+	repoInfo, err := os.Stat(repoPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve repo path %q: %w", repoPath, err)
-	}
-
-	repoInfo, err := os.Stat(absRepoPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to access repo path %s: %w", absRepoPath, err)
+		return "", fmt.Errorf("failed to access repo path %s: %w", repoPath, err)
 	}
 
 	if !repoInfo.IsDir() {
-		return "", fmt.Errorf("repo path %s is not a directory", absRepoPath)
+		return "", fmt.Errorf("repo path %s is not a directory", repoPath)
 	}
 
-	_, err = resolveGitDir(absRepoPath)
+	_, err = resolveGitDir(repoPath)
 	if err != nil {
-		return "", fmt.Errorf("no git repository found at %s: %w", absRepoPath, err)
+		return "", fmt.Errorf("no git repository found at %s: %w", repoPath, err)
 	}
 
-	return absRepoPath, nil
+	return repoPath, nil
 }
 
 // ensureNotInitialized rejects re-running init on a configured repository.
@@ -226,7 +220,7 @@ func resolveConfigPath(repoRoot, configPath string, configExplicit bool) string 
 }
 
 // resolveInitialRecipient determines the initial admin recipient key.
-func resolveInitialRecipient(ctx context.Context, recipientArg string, repoRoot string, identity *core.Identity) (age.Recipient, string, error) {
+func resolveInitialRecipient(ctx context.Context, recipientArg string, repoRoot string, identities core.Identities) (age.Recipient, string, error) {
 	recipientArg = strings.TrimSpace(recipientArg)
 
 	var resolved core.Recipients
@@ -244,20 +238,22 @@ func resolveInitialRecipient(ctx context.Context, recipientArg string, repoRoot 
 
 	if len(resolved) > 0 {
 		for _, recipient := range resolved {
-			if identityCanDecryptRecipient(identity, recipient.Recipient) {
-				return recipient.Recipient, recipient.String(), nil
+			for _, identity := range identities {
+				if identityCanDecryptRecipient(identity, recipient.Recipient) {
+					return recipient.Recipient, recipient.String(), nil
+				}
 			}
 		}
 
 		return nil, "", fmt.Errorf("none of the resolved recipients matches the selected identity")
 	}
 
-	recipient, err := core.ParseRecipient(identity.Public().String())
+	recipient, err := core.ParseRecipient(identities[0].Public().String())
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to derive recipient from identity: %w", err)
 	}
 
-	return recipient.Recipient, identity.Public().String(), nil
+	return recipient.Recipient, identities[0].Public().String(), nil
 }
 
 // identityCanDecryptRecipient checks if identity corresponds to recipient.
@@ -338,77 +334,13 @@ func quoteYAMLString(value string) string {
 	return "'" + escaped + "'"
 }
 
-// chooseInitIdentity selects one identity for init operations.
-//
-// With multiple identities we require explicit choice in interactive sessions,
-// and return an error in non-interactive mode.
-func chooseInitIdentity(
-	identities core.Identities,
-	identityPath string,
-	in io.Reader,
-	out io.Writer,
-	interactive bool,
-) (*core.Identity, error) {
-	if len(identities) == 0 {
-		return nil, fmt.Errorf("no identities available")
-	}
-
-	if len(identities) == 1 {
-		return identities[0], nil
-	}
-
-	if !interactive {
-		return nil, fmt.Errorf(
-			"multiple identities found in %s; run init interactively to choose one",
-			identityPath,
-		)
-	}
-
-	fmt.Fprintf(out, "warning: multiple identities found in %s\n", identityPath)
-	fmt.Fprintln(out, "choose identity to use for init:")
-	for idx, identity := range identities {
-		fmt.Fprintf(out, "  [%d] %s\n", idx+1, identity.Public().String())
-	}
-
-	reader := bufio.NewReader(in)
-	for {
-		fmt.Fprint(out, "identity number: ")
-
-		line, err := reader.ReadString('\n')
-		if err != nil && err != io.EOF {
-			return nil, fmt.Errorf("failed to read selection: %w", err)
-		}
-
-		choice := strings.TrimSpace(line)
-		if choice == "" {
-			if err == io.EOF {
-				return nil, fmt.Errorf("no identity selected")
-			}
-
-			fmt.Fprintln(out, "invalid selection: enter a number from the list")
-			continue
-		}
-
-		idx, convErr := strconv.Atoi(choice)
-		if convErr != nil || idx < 1 || idx > len(identities) {
-			fmt.Fprintln(out, "invalid selection: enter a number from the list")
-			if err == io.EOF {
-				return nil, fmt.Errorf("invalid identity selection %q", choice)
-			}
-			continue
-		}
-
-		return identities[idx-1], nil
-	}
-}
-
 // buildInitialSecretManager bootstraps audit/keyring state for init-time actions.
 func buildInitialSecretManager(
 	ctx context.Context,
 	repoRoot string,
 	initialUser string,
 	recipientText string,
-	identity *core.Identity,
+	identities core.Identities,
 ) (*core.SecretManager, error) {
 	signer, auditLog, err := core.InitAdminUser(ctx, repoRoot, initialUser, recipientText)
 	if err != nil {
@@ -423,7 +355,7 @@ func buildInitialSecretManager(
 
 	mgr, err := core.BuildSecretManager(
 		repoRoot,
-		core.Identities{identity},
+		identities,
 		signer,
 		keyring,
 		auditLog,
@@ -451,8 +383,11 @@ func ensureDefaultGitAttributes(repoRoot string) error {
 // appendMissingLines appends only lines not already present in a file.
 func appendMissingLines(path string, content string, mode os.FileMode) error {
 	var existing string
+	fileMissing := false
 	if data, err := os.ReadFile(path); err == nil {
 		existing = string(data)
+	} else if os.IsNotExist(err) {
+		fileMissing = true
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("failed to access %s: %w", path, err)
 	}
@@ -479,6 +414,12 @@ func appendMissingLines(path string, content string, mode os.FileMode) error {
 	}
 
 	if b.String() == existing {
+		if fileMissing {
+			if err := renameio.WriteFile(path, []byte(existing), mode); err != nil {
+				return fmt.Errorf("failed to create %s: %w", path, err)
+			}
+		}
+
 		return nil
 	}
 
@@ -520,14 +461,20 @@ func ensureVerifyHook(repoRoot string) error {
 //
 // It returns the effective git metadata directory path.
 func resolveGitDir(repoRoot string) (string, error) {
-	gitPath := filepath.Join(repoRoot, ".git")
+	repo, err := git.PlainOpenWithOptions(repoRoot, &git.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return "", err
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", fmt.Errorf("failed to access git worktree: %w", err)
+	}
+
+	gitPath := filepath.Join(wt.Filesystem.Root(), ".git")
 
 	info, err := os.Stat(gitPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("missing .git in %s", repoRoot)
-		}
-
 		return "", fmt.Errorf("failed to access git metadata at %s: %w", gitPath, err)
 	}
 
