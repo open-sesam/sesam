@@ -75,10 +75,12 @@ func Main(args []string) error {
 				Usage:  "Apply config differences to audit log and metadata",
 			}, {
 				Name:   "tell",
+				Flags:  flagsTell,
 				Action: commands.HandleTell,
 				Usage:  "Add a person to a group and re-encrypt affected files",
 			}, {
 				Name:   "kill",
+				Flags:  flagsKill,
 				Action: commands.HandleKill,
 				Usage:  "Remove a person from a group",
 			}, {

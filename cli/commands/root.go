@@ -31,16 +31,6 @@ func HandleUndo(_ context.Context, _ *cli.Command) error {
 	return handleStub("undo")
 }
 
-// HandleTell adds a user/group relation and updates access.
-func HandleTell(_ context.Context, _ *cli.Command) error {
-	return handleStub("tell")
-}
-
-// HandleKill removes a user/group relation.
-func HandleKill(_ context.Context, _ *cli.Command) error {
-	return handleStub("kill")
-}
-
 // HandleList lists users, groups, and access bindings.
 func HandleList(_ context.Context, _ *cli.Command) error {
 	return handleStub("list")

@@ -47,3 +47,31 @@ var flagsSeal = []cli.Flag{}
 
 // flagsReveal contains optional controls for reveal.
 var flagsReveal = []cli.Flag{}
+
+// flagsTell contains controls for adding users.
+var flagsTell = []cli.Flag{
+	&cli.StringFlag{
+		Name:     "user",
+		Required: true,
+		Usage:    "User name to add",
+	},
+	&cli.StringFlag{
+		Name:     "recipient",
+		Required: true,
+		Usage:    "Recipient key spec (for example github:alice)",
+	},
+	&cli.StringSliceFlag{
+		Name:     "group",
+		Required: true,
+		Usage:    "Group assignment (repeatable)",
+	},
+}
+
+// flagsKill contains controls for removing users.
+var flagsKill = []cli.Flag{
+	&cli.StringFlag{
+		Name:     "user",
+		Required: true,
+		Usage:    "User name to remove",
+	},
+}
