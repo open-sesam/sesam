@@ -88,7 +88,7 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	return withRepoLock(repoRoot, 5*time.Second, func() error {
-		configPath := resolveConfigPath(repoRoot, cmd.String("config"))
+		configPath := resolveConfigPath(repoRoot, cmd.String("config"), cmd.IsSet("config"))
 		if err := createInitialConfig(configPath, initialUser, recipientText); err != nil {
 			return err
 		}
@@ -212,13 +212,17 @@ func ensureSesamDirs(repoRoot string) error {
 	return nil
 }
 
-// resolveConfigPath resolves the config path relative to repo root when needed.
-func resolveConfigPath(repoRoot, configPath string) string {
-	if !filepath.IsAbs(configPath) {
-		return filepath.Join(repoRoot, configPath)
+// resolveConfigPath preserves explicit user paths and keeps default under repo root.
+func resolveConfigPath(repoRoot, configPath string, configExplicit bool) string {
+	if filepath.IsAbs(configPath) {
+		return configPath
 	}
 
-	return configPath
+	if configExplicit {
+		return configPath
+	}
+
+	return filepath.Join(repoRoot, configPath)
 }
 
 // resolveInitialRecipient determines the initial admin recipient key.
