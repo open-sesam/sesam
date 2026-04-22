@@ -45,3 +45,8 @@ func HandleKill(_ context.Context, _ *cli.Command) error {
 func HandleList(_ context.Context, _ *cli.Command) error {
 	return handleStub("list")
 }
+
+// HandleApply applies config changes to audit and metadata state.
+func HandleApply(_ context.Context, _ *cli.Command) error {
+	return handleStub("apply")
+}

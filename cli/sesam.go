@@ -54,28 +54,25 @@ func Main(args []string) error {
 				Action: commands.HandleUndo,
 				Usage:  "Restore secrets from an earlier revision",
 			}, {
-				Name:   "modify",
-				Action: commands.HandleModify,
-				Usage:  "Modify tracked secrets and metadata",
-				Commands: []*cli.Command{
-					{
-						Name:   "add",
-						Action: commands.HandleModifyAdd,
-						Usage:  "Add a secret file or directory",
-					}, {
-						Name:   "rm",
-						Action: commands.HandleModifyRemove,
-						Usage:  "Remove a secret file or directory",
-					}, {
-						Name:   "mv",
-						Action: commands.HandleModifyMove,
-						Usage:  "Move a secret to a different path",
-					}, {
-						Name:   "ls",
-						Action: commands.HandleModifyList,
-						Usage:  "List known secrets and metadata",
-					},
-				},
+				Name:   "add",
+				Action: commands.HandleModifyAdd,
+				Usage:  "Add a secret file or directory",
+			}, {
+				Name:   "rm",
+				Action: commands.HandleModifyRemove,
+				Usage:  "Remove a secret file or directory",
+			}, {
+				Name:   "mv",
+				Action: commands.HandleModifyMove,
+				Usage:  "Move a secret to a different path",
+			}, {
+				Name:   "ls",
+				Action: commands.HandleModifyList,
+				Usage:  "List known secrets and metadata",
+			}, {
+				Name:   "apply",
+				Action: commands.HandleApply,
+				Usage:  "Apply config differences to audit log and metadata",
 			}, {
 				Name:   "tell",
 				Action: commands.HandleTell,
