@@ -54,7 +54,7 @@ func HandleReveal(_ context.Context, cmd *cli.Command) error {
 
 // buildRegularSecretManager initializes runtime state for non-init operations.
 func buildRegularSecretManager(repoDir, identityPath string) (*core.SecretManager, error) {
-	identity, identities, err := loadPrimaryIdentity(identityPath, "sesam.identity.runtime")
+	identities, err := loadIdentities(identityPath, "sesam.identity.runtime")
 	if err != nil {
 		return nil, err
 	}
@@ -74,14 +74,14 @@ func buildRegularSecretManager(repoDir, identityPath string) (*core.SecretManage
 
 	fmt.Println("verify took", time.Since(verifyStart))
 
-	whoami, err := core.IdentityToUser(identity, keyring.ListUsers())
+	whoami, signIdentity, err := identityToUser(identities, keyring.ListUsers())
 	if err != nil {
 		return nil, fmt.Errorf("failed to map identity to user: %w", err)
 	}
 
 	fmt.Println("Who am I:", whoami)
 
-	signer, err := core.LoadSignKey(repoDir, whoami, identity)
+	signer, err := core.LoadSignKey(repoDir, whoami, signIdentity)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
 	}
@@ -101,14 +101,15 @@ func buildRegularSecretManager(repoDir, identityPath string) (*core.SecretManage
 	return mgr, nil
 }
 
-// loadPrimaryIdentity parses identities from one key file and returns the first.
-func loadPrimaryIdentity(identityPath, keyFingerprint string) (*core.Identity, core.Identities, error) {
-	identities, err := loadIdentities(identityPath, keyFingerprint)
-	if err != nil {
-		return nil, nil, err
+func identityToUser(identities core.Identities, users map[string][]*core.Recipient) (string, *core.Identity, error) {
+	for _, identity := range identities {
+		user, err := core.IdentityToUser(identity, users)
+		if err == nil {
+			return user, identity, nil
+		}
 	}
 
-	return identities[0], identities, nil
+	return "", nil, fmt.Errorf("no loaded identity matches any known user")
 }
 
 // loadIdentities reads one key file and parses all usable identity lines.
