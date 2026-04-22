@@ -416,19 +416,6 @@ func chooseInitIdentity(
 	}
 }
 
-func isInteractiveInput(input *os.File) bool {
-	if input == nil {
-		return false
-	}
-
-	info, err := input.Stat()
-	if err != nil {
-		return false
-	}
-
-	return (info.Mode() & os.ModeCharDevice) != 0
-}
-
 // buildInitialSecretManager bootstraps audit/keyring state for init-time actions.
 func buildInitialSecretManager(
 	ctx context.Context,
