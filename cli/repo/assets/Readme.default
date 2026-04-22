@@ -4,5 +4,5 @@ This repository was initialized with sesam.
 
 Next steps:
 - Review and commit sesam.yml and .sesam/ metadata.
-- Add or change secrets with sesam modify add.
+- Add or change secrets with sesam add.
 - Seal and reveal via sesam seal / sesam reveal.

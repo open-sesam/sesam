@@ -6,13 +6,14 @@ import (
 	"strings"
 	"time"
 
+	clirepo "github.com/open-sesam/sesam/cli/repo"
 	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
 // HandleSeal encrypts and signs tracked secrets via SecretManager.SealAll.
 func HandleSeal(_ context.Context, cmd *cli.Command) error {
-	repoRoot, err := resolveRepoRoot(cmd.String("repo"))
+	repoRoot, err := clirepo.ResolveRepoRoot(cmd.String("repo"))
 	if err != nil {
 		return err
 	}
@@ -33,7 +34,7 @@ func HandleSeal(_ context.Context, cmd *cli.Command) error {
 
 // HandleReveal decrypts and verifies tracked secrets via SecretManager.RevealAll.
 func HandleReveal(_ context.Context, cmd *cli.Command) error {
-	repoRoot, err := resolveRepoRoot(cmd.String("repo"))
+	repoRoot, err := clirepo.ResolveRepoRoot(cmd.String("repo"))
 	if err != nil {
 		return err
 	}
