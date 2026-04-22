@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -73,14 +74,14 @@ func buildRegularSecretManager(repoDir, identityPath string) (*core.SecretManage
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}
 
-	fmt.Println("verify took", time.Since(verifyStart))
+	slog.Info("audit log verified", slog.Duration("duration", time.Since(verifyStart)))
 
 	whoami, signIdentity, err := identityToUser(identities, keyring.ListUsers())
 	if err != nil {
 		return nil, fmt.Errorf("failed to map identity to user: %w", err)
 	}
 
-	fmt.Println("Who am I:", whoami)
+	slog.Info("resolved signer identity", slog.String("user", whoami))
 
 	signer, err := core.LoadSignKey(repoDir, whoami, signIdentity)
 	if err != nil {
