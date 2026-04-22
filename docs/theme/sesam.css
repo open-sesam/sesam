@@ -65,6 +65,12 @@ h1, h2, h3, h4, h5, h6 {
 
 /* --- Sidebar styling --- */
 
+.sidebar {
+    background-image: url("../pod-lattice.svg");
+    background-repeat: repeat;
+    background-size: 24px 28px;
+}
+
 .sidebar .sidebar-scrollbox {
     padding-top: 0;
     font-family: "Josefin Sans", sans-serif;

@@ -43,7 +43,7 @@ tasks:
     cmds:
       - cd docs && mdbook serve --open
 
-  setup_docs:
+  setup-docs:
     desc: Setup dependency for docs
     cmds:
       - cargo install mdbook@0.4.52 mdbook-admonish@1.18.0 mdbook-gitinfo@1.2.0 mdbook-pagetoc@0.2.2
