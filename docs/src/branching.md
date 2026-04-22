@@ -1,3 +1,3 @@
 # Branching
 
-TODO: What to do in branching?
+TODO: Explain how branching works with a linear audit log and how conflicts are handled and merging works.

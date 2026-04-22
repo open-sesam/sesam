@@ -73,8 +73,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Logo at top of sidebar — circular frame with geometric fill */
-.sidebar .sidebar-scrollbox::before {
-    content: "";
+.sidebar-logo {
     display: block;
     width: 130px;
     height: 130px;
@@ -86,6 +85,11 @@ h1, h2, h3, h4, h5, h6 {
     border-radius: 50%;
     border: 3px solid #b8963e;
     box-shadow: 0 0 0 4px rgba(184, 150, 62, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    transition: box-shadow 0.15s ease;
+}
+.sidebar-logo:hover {
+    box-shadow: 0 0 0 4px rgba(184, 150, 62, 0.4), 0 2px 12px rgba(0, 0, 0, 0.25);
 }
 
 /* Sidebar link hover */

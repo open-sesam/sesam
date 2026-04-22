@@ -1,5 +1,10 @@
 # Developer Notes
 
+## Library
+
+`sesam` can also be used as library.
+
+TODO: Link go doc here
 
 ## AI usage
 

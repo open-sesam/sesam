@@ -4,32 +4,29 @@
 
 - [What is Sesam?](./whatis.md)
 - [Installation](./installation.md)
-- [Quickstart](./quickstart.md)
 - [Changelog](./changelog.md)
 - [Roadmap](./roadmap.md)
 
 # Basic Usage
 
 - [Initializing](./init.md)
-- [Adding secrets](./secret_add.md)
-- [Adding users](./user_add.md)
-- [Removing users](./user_rm.md)
-- [Removing secrets](./secret_rm.md)
-- [Config Apply](./config_apply.md)
+- [Managing secrets](./secret.md)
+- [Managing users](./users.md)
+- [Verify](./verify.md)
 - [Tips & Tricks](./tips.md)
 
 # Advanced Usage
 
-- [Branching](./branching.md)
-- [Key exchange](./key_exchange.md)
+- [Template secrets](./template.md)
 - [Rotation](./rotation.md)
+- [Branching](./branching.md)
+- [User identity exchange](./key_exchange.md)
 
 # Reference
 
-- [CLI](./cli_ref.md)
 - [Config Reference](./config_ref.md)
+- [CLI](./cli_ref.md)
 - [Design](./design.md)
   - [Security](./security.md)
 - [Alternatives](./alternatives.md)
 - [Developer Notes](./developer.md)
-  - [Go doc](./godoc.md)
