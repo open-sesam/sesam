@@ -147,14 +147,14 @@ func InitAdminUser(
 	}
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	auditLog, err := InitAuditLog(".", signer, DetailUserTell{
+	auditLog, err := InitAuditLog(repoDir, signer, DetailUserTell{
 		User:        signer.UserName(),
 		Groups:      []string{"admin"},
 		PubKeys:     []string{recp.String()},
 		SignPubKeys: []string{signKeyStr},
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to ini audit log: %w", err)
+		return nil, nil, fmt.Errorf("failed to init audit log: %w", err)
 	}
 
 	return signer, auditLog, nil
