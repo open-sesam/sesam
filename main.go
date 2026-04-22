@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"log"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/open-sesam/sesam/cli"
+	"github.com/open-sesam/sesam/core"
 )
 
 // initMain shows the setup done during init
@@ -100,5 +105,4 @@ func main() {
 		os.Exit(1)
 	}
 
-	_ = sm.AuditLog.Close()
 }

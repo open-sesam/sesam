@@ -9,7 +9,6 @@ var flagsGeneral = []cli.Flag{
 	&cli.StringFlag{
 		Name:    "identity",
 		Aliases: []string{"i"},
-		Value:   "~/.config/sesam/key.txt",
 		Usage:   "Path to the age identity",
 	},
 	&cli.StringFlag{
@@ -29,8 +28,9 @@ var flagsGeneral = []cli.Flag{
 // flagsInit are specific to repository bootstrap.
 var flagsInit = []cli.Flag{
 	&cli.StringFlag{
-		Name:  "user",
-		Usage: "Initial admin user name (defaults to current OS user)",
+		Name:     "user",
+		Required: true,
+		Usage:    "Initial admin user name",
 	},
 	&cli.StringFlag{
 		Name:  "recipient",

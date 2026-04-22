@@ -14,10 +14,9 @@ import (
 // caller can detect feature gaps in scripts and tests.
 func Main(args []string) error {
 	app := &cli.Command{
-		Name:   "sesam",
-		Usage:  "Manage encrypted secrets in git repositories",
-		Flags:  flagsGeneral,
-		Action: commands.HandleRoot,
+		Name:  "sesam",
+		Usage: "Manage encrypted secrets in git repositories",
+		Flags: flagsGeneral,
 		Commands: []*cli.Command{
 			{
 				Name:   "init",

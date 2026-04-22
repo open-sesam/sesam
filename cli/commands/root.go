@@ -2,16 +2,9 @@ package commands
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/urfave/cli/v3"
 )
-
-// HandleRoot is executed when sesam is called without subcommands.
-func HandleRoot(_ context.Context, _ *cli.Command) error {
-	fmt.Println("sesam started. use --help to inspect available commands")
-	return nil
-}
 
 // HandleVerify verifies repository audit and crypt state.
 func HandleVerify(_ context.Context, _ *cli.Command) error {

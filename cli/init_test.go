@@ -37,9 +37,8 @@ func TestMainInitCreatesStructureInGitRoot(t *testing.T) {
 	}
 
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam"))
-	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "signkeys"))
-	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "signkeys", "alice.age"))
-	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "signkeys", "alice.pub"))
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "signkey"))
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "signkey", "alice.age"))
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "tmp"))
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "bin", "git-sesam"))
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "README.md"))
@@ -49,7 +48,7 @@ func TestMainInitCreatesStructureInGitRoot(t *testing.T) {
 	assertPathExists(t, filepath.Join(repoRoot, "example.secret"))
 	assertPathExists(t, filepath.Join(repoRoot, ".git", "hooks", "pre-commit"))
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "audit", "init"))
-	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "audit", "log.json"))
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "audit", "log.jsonl"))
 
 	configData, err := os.ReadFile(filepath.Join(repoRoot, "sesam.yml"))
 	if err != nil {

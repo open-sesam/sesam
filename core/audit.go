@@ -447,7 +447,7 @@ func LoadAuditLog(repoDir string) (*AuditLog, error) {
 	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
 	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
 
-	initData, err := readFileLimited(initPath, 256)
+	initData, err := ReadFileLimited(initPath, 256)
 	if err != nil {
 		return nil, err
 	}
