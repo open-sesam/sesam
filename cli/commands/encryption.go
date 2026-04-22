@@ -3,8 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,30 +12,44 @@ import (
 
 // HandleSeal encrypts and signs tracked secrets via SecretManager.SealAll.
 func HandleSeal(_ context.Context, cmd *cli.Command) error {
-	mgr, err := buildRegularSecretManager(cmd.String("repo"), cmd.String("identity"))
+	repoRoot, err := resolveRepoRoot(cmd.String("repo"))
 	if err != nil {
 		return err
 	}
 
-	if err := mgr.SealAll(); err != nil {
-		return fmt.Errorf("failed to seal secrets: %w", err)
-	}
+	return withRepoLock(repoRoot, 5*time.Second, func() error {
+		mgr, err := buildRegularSecretManager(repoRoot, cmd.String("identity"))
+		if err != nil {
+			return err
+		}
 
-	return nil
+		if err := mgr.SealAll(); err != nil {
+			return fmt.Errorf("failed to seal secrets: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // HandleReveal decrypts and verifies tracked secrets via SecretManager.RevealAll.
 func HandleReveal(_ context.Context, cmd *cli.Command) error {
-	mgr, err := buildRegularSecretManager(cmd.String("repo"), cmd.String("identity"))
+	repoRoot, err := resolveRepoRoot(cmd.String("repo"))
 	if err != nil {
 		return err
 	}
 
-	if err := mgr.RevealAll(); err != nil {
-		return fmt.Errorf("failed to reveal secrets: %w", err)
-	}
+	return withRepoLock(repoRoot, 5*time.Second, func() error {
+		mgr, err := buildRegularSecretManager(repoRoot, cmd.String("identity"))
+		if err != nil {
+			return err
+		}
 
-	return nil
+		if err := mgr.RevealAll(); err != nil {
+			return fmt.Errorf("failed to reveal secrets: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // buildRegularSecretManager initializes runtime state for non-init operations.
@@ -47,7 +59,7 @@ func buildRegularSecretManager(repoDir, identityPath string) (*core.SecretManage
 		return nil, err
 	}
 
-	keyring := core.NewMemoryKeyring()
+	keyring := core.EmptyKeyring()
 
 	auditLog, err := core.LoadAuditLog(repoDir)
 	if err != nil {
@@ -76,7 +88,6 @@ func buildRegularSecretManager(repoDir, identityPath string) (*core.SecretManage
 
 	mgr, err := core.BuildSecretManager(
 		repoDir,
-		whoami,
 		identities,
 		signer,
 		keyring,
@@ -85,11 +96,6 @@ func buildRegularSecretManager(repoDir, identityPath string) (*core.SecretManage
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build secret manager: %w", err)
-	}
-
-	report := core.VerifyIntegrity(repoDir, vstate, keyring)
-	if !report.OK() {
-		fmt.Println(report.String())
 	}
 
 	return mgr, nil
@@ -107,12 +113,18 @@ func loadPrimaryIdentity(identityPath, keyFingerprint string) (*core.Identity, c
 
 // loadIdentities reads one key file and parses all usable identity lines.
 func loadIdentities(identityPath, keyFingerprint string) (core.Identities, error) {
+	if strings.TrimSpace(identityPath) == "" {
+		return nil, fmt.Errorf("missing identity path: pass --identity")
+	}
+
 	expandedPath, err := expandHomeDir(identityPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve identity path: %w", err)
 	}
 
-	data, err := os.ReadFile(expandedPath)
+	const maxIdentityFileBytes = 1024 * 1024
+
+	data, err := core.ReadFileLimited(expandedPath, maxIdentityFileBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read identity %s: %w", expandedPath, err)
 	}
@@ -154,63 +166,4 @@ func loadIdentities(identityPath, keyFingerprint string) (core.Identities, error
 	}
 
 	return identities, nil
-}
-
-// parseRecipients parses one or more recipient lines into typed recipients.
-func parseRecipients(rawRecipients string) (core.Recipients, error) {
-	var recipients core.Recipients
-	for line := range strings.SplitSeq(rawRecipients, "\n") {
-		key := strings.TrimSpace(line)
-		if key == "" {
-			continue
-		}
-
-		recipient, err := core.ParseRecipient(key)
-		if err != nil {
-			return nil, err
-		}
-
-		recipients = append(recipients, recipient)
-	}
-
-	if len(recipients) == 0 {
-		return nil, fmt.Errorf("no recipient key found")
-	}
-
-	return recipients, nil
-}
-
-// matchIdentityRecipient picks the first recipient decryptable by identities.
-func matchIdentityRecipient(identities core.Identities, recipients core.Recipients) (*core.Recipient, error) {
-	for _, recipient := range recipients {
-		for _, identity := range identities {
-			if identity.Public().Equal(recipient.ComparablePublicKey) {
-				return recipient, nil
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("no recipient matches provided identity")
-}
-
-// expandHomeDir expands "~" and "~/..." in CLI path input.
-func expandHomeDir(path string) (string, error) {
-	switch {
-	case path == "~":
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-
-		return homeDir, nil
-	case strings.HasPrefix(path, "~/"):
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-
-		return filepath.Join(homeDir, strings.TrimPrefix(path, "~/")), nil
-	default:
-		return path, nil
-	}
 }

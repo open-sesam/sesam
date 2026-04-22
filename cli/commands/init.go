@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 
 	"filippo.io/age"
 	"github.com/google/renameio"
@@ -86,60 +87,62 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	configPath := resolveConfigPath(repoRoot, cmd.String("config"))
-	if err := createInitialConfig(configPath, initialUser, recipientText); err != nil {
-		return err
-	}
+	return withRepoLock(repoRoot, 5*time.Second, func() error {
+		configPath := resolveConfigPath(repoRoot, cmd.String("config"))
+		if err := createInitialConfig(configPath, initialUser, recipientText); err != nil {
+			return err
+		}
 
-	mgr, err := buildInitialSecretManager(
-		ctx,
-		repoRoot,
-		initialUser,
-		recipientText,
-		selectedIdentity,
-	)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = mgr.AuditLog.Close()
-	}()
+		mgr, err := buildInitialSecretManager(
+			ctx,
+			repoRoot,
+			initialUser,
+			recipientText,
+			selectedIdentity,
+		)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = mgr.AuditLog.Close()
+		}()
 
-	if err := ensureDefaultGitIgnore(repoRoot); err != nil {
-		return err
-	}
+		if err := ensureDefaultGitIgnore(repoRoot); err != nil {
+			return err
+		}
 
-	if err := ensureDefaultGitAttributes(repoRoot); err != nil {
-		return err
-	}
+		if err := ensureDefaultGitAttributes(repoRoot); err != nil {
+			return err
+		}
 
-	if err := ensureVerifyHook(repoRoot); err != nil {
-		return err
-	}
+		if err := ensureVerifyHook(repoRoot); err != nil {
+			return err
+		}
 
-	if err := ensureGitSesamShim(repoRoot); err != nil {
-		return err
-	}
+		if err := ensureGitSesamShim(repoRoot); err != nil {
+			return err
+		}
 
-	if err := ensureExampleSecret(repoRoot); err != nil {
-		return err
-	}
+		if err := ensureExampleSecret(repoRoot); err != nil {
+			return err
+		}
 
-	if err := withWorkingDir(repoRoot, func() error {
-		return mgr.AddSecret("example.secret", []string{"admin"})
-	}); err != nil {
-		return fmt.Errorf("failed to bootstrap example secret: %w", err)
-	}
+		if err := withWorkingDir(repoRoot, func() error {
+			return mgr.AddSecret("example.secret", []string{"admin"})
+		}); err != nil {
+			return fmt.Errorf("failed to bootstrap example secret: %w", err)
+		}
 
-	if err := ensureSesamReadme(repoRoot); err != nil {
-		return err
-	}
+		if err := ensureSesamReadme(repoRoot); err != nil {
+			return err
+		}
 
-	if err := stageInitFiles(repoRoot, configPath); err != nil {
-		return err
-	}
+		if err := stageInitFiles(repoRoot, configPath); err != nil {
+			return err
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // resolveRepoRoot validates the repo input path from the user and requires .git at that path.

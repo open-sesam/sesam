@@ -11,6 +11,7 @@ import (
 
 func TestMainSealRequiresInitializedRepo(t *testing.T) {
 	repoDir := makeTempDir(t)
+	initGitRepo(t, repoDir)
 	identityPath := writeIdentityFile(t, repoDir)
 
 	err := Main([]string{
@@ -30,6 +31,7 @@ func TestMainSealRequiresInitializedRepo(t *testing.T) {
 
 func TestMainRevealRequiresInitializedRepo(t *testing.T) {
 	repoDir := makeTempDir(t)
+	initGitRepo(t, repoDir)
 	identityPath := writeIdentityFile(t, repoDir)
 
 	err := Main([]string{
@@ -49,6 +51,7 @@ func TestMainRevealRequiresInitializedRepo(t *testing.T) {
 
 func TestMainSealMissingIdentity(t *testing.T) {
 	repoDir := makeTempDir(t)
+	initGitRepo(t, repoDir)
 	missingIdentity := filepath.Join(repoDir, "missing-identity.txt")
 
 	err := Main([]string{
