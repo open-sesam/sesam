@@ -34,7 +34,11 @@ var flagsInit = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name:  "recipient",
-		Usage: "Initial admin recipient key (single value; optional when derivable from --identity)",
+		Usage: "Initial admin recipient key (for example github:alice; optional when derivable from --identity)",
+	},
+	&cli.BoolFlag{
+		Name:  "use-root",
+		Usage: "Allow init in a non-empty repository path",
 	},
 }
 

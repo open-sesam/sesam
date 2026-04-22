@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,6 +60,10 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if err := ensureNotInitialized(repoRoot); err != nil {
+		return err
+	}
+
+	if err := ensureInitPathChoice(repoRoot, cmd.Bool("use-root")); err != nil {
 		return err
 	}
 
@@ -135,6 +140,10 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 			return err
 		}
 
+		if err := ensureTmpKeepFile(repoRoot); err != nil {
+			return err
+		}
+
 		if err := stageInitFiles(repoRoot, configPath); err != nil {
 			return err
 		}
@@ -187,6 +196,60 @@ func ensureNotInitialized(repoRoot string) error {
 	return nil
 }
 
+func ensureInitPathChoice(repoRoot string, useRoot bool) error {
+	const maxRecommendedFiles = 25
+
+	fileCount, err := countRepoFiles(repoRoot, maxRecommendedFiles+1)
+	if err != nil {
+		return err
+	}
+
+	if fileCount <= maxRecommendedFiles || useRoot {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"repository path %s already contains many files (%d); prefer a dedicated secrets sub-directory or rerun with --use-root",
+		repoRoot,
+		fileCount,
+	)
+}
+
+func countRepoFiles(repoRoot string, stopAfter int) (int, error) {
+	if stopAfter <= 0 {
+		return 0, nil
+	}
+
+	var count int
+	stopErr := fmt.Errorf("stop")
+	err := filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", ".sesam":
+				return filepath.SkipDir
+			}
+
+			return nil
+		}
+
+		count++
+		if count >= stopAfter {
+			return stopErr
+		}
+
+		return nil
+	})
+	if err != nil && err != stopErr {
+		return 0, fmt.Errorf("failed to inspect repository files: %w", err)
+	}
+
+	return count, nil
+}
+
 // ensureSesamDirs creates required internal sesam directories.
 func ensureSesamDirs(repoRoot string) error {
 	dirs := []string{
@@ -202,7 +265,24 @@ func ensureSesamDirs(repoRoot string) error {
 		}
 	}
 
-	fmt.Printf("initialized sesam directory at %s\n", filepath.Join(repoRoot, ".sesam"))
+	if err := ensureTmpKeepFile(repoRoot); err != nil {
+		return err
+	}
+
+	slog.Info("initialized sesam directory", slog.String("path", filepath.Join(repoRoot, ".sesam")))
+	return nil
+}
+
+func ensureTmpKeepFile(repoRoot string) error {
+	keepPath := filepath.Join(repoRoot, ".sesam", "tmp", ".donotdelete")
+	if _, err := os.Stat(keepPath); os.IsNotExist(err) {
+		if err := renameio.WriteFile(keepPath, []byte("\n"), 0o600); err != nil {
+			return fmt.Errorf("failed to create %s: %w", keepPath, err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to access %s: %w", keepPath, err)
+	}
+
 	return nil
 }
 
@@ -324,7 +404,7 @@ func createInitialConfig(configPath, initialUser, recipientText string) error {
 		return fmt.Errorf("failed to create sample config %s: %w", configPath, err)
 	}
 
-	fmt.Printf("created sample config at %s\n", configPath)
+	slog.Info("created sample config", slog.String("path", configPath))
 	return nil
 }
 
@@ -439,7 +519,7 @@ func ensureVerifyHook(repoRoot string) error {
 
 	hookPath := filepath.Join(gitDir, "hooks", "pre-commit")
 	if _, err := os.Stat(hookPath); err == nil {
-		fmt.Printf("pre-commit hook already exists at %s; leaving unchanged\n", hookPath)
+		slog.Info("pre-commit hook already exists; leaving unchanged", slog.String("path", hookPath))
 		return nil
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("failed to access hook %s: %w", hookPath, err)
@@ -453,7 +533,7 @@ func ensureVerifyHook(repoRoot string) error {
 		return fmt.Errorf("failed to create pre-commit hook at %s: %w", hookPath, err)
 	}
 
-	fmt.Printf("created pre-commit hook at %s\n", hookPath)
+	slog.Info("created pre-commit hook", slog.String("path", hookPath))
 	return nil
 }
 
@@ -512,7 +592,7 @@ func resolveGitDir(repoRoot string) (string, error) {
 func ensureGitSesamShim(repoRoot string) error {
 	shimPath := filepath.Join(repoRoot, ".sesam", "bin", "git-sesam")
 	if _, err := os.Stat(shimPath); err == nil {
-		fmt.Printf("git-sesam shim already exists at %s\n", shimPath)
+		slog.Info("git-sesam shim already exists", slog.String("path", shimPath))
 		return nil
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("failed to access git-sesam shim %s: %w", shimPath, err)
@@ -527,7 +607,7 @@ func ensureGitSesamShim(repoRoot string) error {
 		return fmt.Errorf("failed to create git-sesam shim at %s: %w", shimPath, err)
 	}
 
-	fmt.Printf("created git-sesam shim at %s (add .sesam/bin to your PATH)\n", shimPath)
+	slog.Info("created git-sesam shim", slog.String("path", shimPath), slog.String("hint", "add .sesam/bin to your PATH"))
 	return nil
 }
 
@@ -544,7 +624,7 @@ func ensureExampleSecret(repoRoot string) error {
 		return fmt.Errorf("failed to create example secret %s: %w", examplePath, err)
 	}
 
-	fmt.Printf("created example secret at %s\n", examplePath)
+	slog.Info("created example secret", slog.String("path", examplePath))
 	return nil
 }
 
@@ -561,7 +641,7 @@ func ensureSesamReadme(repoRoot string) error {
 		return fmt.Errorf("failed to create sesam readme %s: %w", readmePath, err)
 	}
 
-	fmt.Printf("created sesam readme at %s\n", readmePath)
+	slog.Info("created sesam readme", slog.String("path", readmePath))
 	return nil
 }
 
@@ -582,7 +662,7 @@ func stageInitFiles(repoRoot, configPath string) error {
 	cmd.Dir = repoRoot
 
 	if output, err := cmd.CombinedOutput(); err != nil {
-		fmt.Printf("warning: failed to stage init files automatically: %v (%s)\n", err, strings.TrimSpace(string(output)))
+		slog.Warn("failed to stage init files automatically", slog.Any("error", err), slog.String("output", strings.TrimSpace(string(output))))
 		return nil
 	}
 

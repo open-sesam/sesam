@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -40,6 +41,7 @@ func TestMainInitCreatesStructureInGitRoot(t *testing.T) {
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "signkey"))
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "signkey", "alice.age"))
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "tmp"))
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "tmp", ".donotdelete"))
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "bin", "git-sesam"))
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "README.md"))
 	assertPathExists(t, filepath.Join(repoRoot, "sesam.yml"))
@@ -133,6 +135,55 @@ func TestMainInitFailsWhenAlreadyInitialized(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "already has sesam config") {
 		t.Fatalf("expected already-initialized error, got: %v", err)
+	}
+}
+
+func TestMainInitRequiresUseRootForBusyRepoPath(t *testing.T) {
+	repoRoot := makeTempDir(t)
+	initGitRepo(t, repoRoot)
+
+	for idx := 0; idx < 30; idx++ {
+		path := filepath.Join(repoRoot, "busy-"+strconv.Itoa(idx)+".txt")
+		if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
+			t.Fatalf("failed to write busy file: %v", err)
+		}
+	}
+
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatalf("failed to generate identity: %v", err)
+	}
+
+	identityPath := filepath.Join(repoRoot, "identity.txt")
+	if err := os.WriteFile(identityPath, []byte(id.String()+"\n"), 0o600); err != nil {
+		t.Fatalf("failed to write identity: %v", err)
+	}
+
+	err = Main([]string{
+		"sesam",
+		"init",
+		"--repo", repoRoot,
+		"--user", "alice",
+		"--identity", identityPath,
+	})
+	if err == nil {
+		t.Fatal("expected init to fail for busy repo path without --use-root")
+	}
+
+	if !strings.Contains(err.Error(), "--use-root") {
+		t.Fatalf("expected use-root guidance, got: %v", err)
+	}
+
+	err = Main([]string{
+		"sesam",
+		"init",
+		"--repo", repoRoot,
+		"--user", "alice",
+		"--identity", identityPath,
+		"--use-root",
+	})
+	if err != nil {
+		t.Fatalf("expected init to succeed with --use-root, got: %v", err)
 	}
 }
 
