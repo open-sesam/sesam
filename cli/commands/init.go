@@ -77,7 +77,7 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	initialRecipient, recipientText, err := resolveInitialRecipient(ctx, cmd.String("recipient"), repoRoot, selectedIdentity)
+	_, recipientText, err := resolveInitialRecipient(ctx, cmd.String("recipient"), repoRoot, selectedIdentity)
 	if err != nil {
 		return err
 	}
@@ -91,11 +91,8 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	if err := ensureInitialSignKey(repoRoot, initialUser, initialRecipient); err != nil {
-		return err
-	}
-
 	mgr, err := buildInitialSecretManager(
+		ctx,
 		repoRoot,
 		initialUser,
 		recipientText,
@@ -104,6 +101,9 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		_ = mgr.AuditLog.Close()
+	}()
 
 	if err := ensureDefaultGitIgnore(repoRoot); err != nil {
 		return err
@@ -125,7 +125,9 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	if err := mgr.AddOrChangeSecret("example.secret", []string{"admin"}); err != nil {
+	if err := withWorkingDir(repoRoot, func() error {
+		return mgr.AddSecret("example.secret", []string{"admin"})
+	}); err != nil {
 		return fmt.Errorf("failed to bootstrap example secret: %w", err)
 	}
 
@@ -192,7 +194,7 @@ func ensureNotInitialized(repoRoot string) error {
 func ensureSesamDirs(repoRoot string) error {
 	dirs := []string{
 		filepath.Join(repoRoot, ".sesam"),
-		filepath.Join(repoRoot, ".sesam", "signkeys"),
+		filepath.Join(repoRoot, ".sesam", "signkey"),
 		filepath.Join(repoRoot, ".sesam", "tmp"),
 		filepath.Join(repoRoot, ".sesam", "bin"),
 	}
@@ -220,27 +222,37 @@ func resolveConfigPath(repoRoot, configPath string) string {
 func resolveInitialRecipient(ctx context.Context, recipientArg string, repoRoot string, identity *core.Identity) (age.Recipient, string, error) {
 	recipientArg = strings.TrimSpace(recipientArg)
 
-	var recipients core.Recipients
+	type resolvedRecipient struct {
+		recipient *core.Recipient
+		text      string
+	}
+
+	var resolved []resolvedRecipient
 	if recipientArg != "" {
 		rawRecipient, err := core.ResolveRecipient(ctx, repoRoot, recipientArg, core.CacheModeReadWrite)
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to resolve recipient %q: %w", recipientArg, err)
 		}
 
-		// A resolved forge id (for example github:user) may return multiple
-		// newline-separated keys. Parse all and then pick one deterministically.
-		parsedRecipients, err := parseRecipients(rawRecipient)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to parse recipient %q: %w", recipientArg, err)
-		}
+		for line := range strings.SplitSeq(rawRecipient, "\n") {
+			key := strings.TrimSpace(line)
+			if key == "" {
+				continue
+			}
 
-		recipients = append(recipients, parsedRecipients...)
+			recp, err := core.ParseRecipient(key)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to parse recipient %q: %w", recipientArg, err)
+			}
+
+			resolved = append(resolved, resolvedRecipient{recipient: recp, text: key})
+		}
 	}
 
-	if len(recipients) > 0 {
-		for _, recipient := range recipients {
-			if identity.Public().Equal(recipient.ComparablePublicKey) {
-				return recipient, recipient.String(), nil
+	if len(resolved) > 0 {
+		for _, item := range resolved {
+			if identityCanDecryptRecipient(identity, item.recipient.Recipient) {
+				return item.recipient.Recipient, item.text, nil
 			}
 		}
 
@@ -252,7 +264,38 @@ func resolveInitialRecipient(ctx context.Context, recipientArg string, repoRoot 
 		return nil, "", fmt.Errorf("failed to derive recipient from identity: %w", err)
 	}
 
-	return recipient, recipient.String(), nil
+	return recipient.Recipient, identity.Public().String(), nil
+}
+
+// identityCanDecryptRecipient checks if identity corresponds to recipient.
+func identityCanDecryptRecipient(identity *core.Identity, recipient age.Recipient) bool {
+	const probe = "sesam-init-match"
+
+	var encrypted bytes.Buffer
+	w, err := age.Encrypt(&encrypted, recipient)
+	if err != nil {
+		return false
+	}
+
+	if _, err := w.Write([]byte(probe)); err != nil {
+		return false
+	}
+
+	if err := w.Close(); err != nil {
+		return false
+	}
+
+	r, err := age.Decrypt(bytes.NewReader(encrypted.Bytes()), identity)
+	if err != nil {
+		return false
+	}
+
+	decrypted, err := io.ReadAll(r)
+	if err != nil {
+		return false
+	}
+
+	return string(decrypted) == probe
 }
 
 // createInitialConfig writes sesam.yml using the embedded template.
@@ -381,32 +424,18 @@ func isInteractiveInput(input *os.File) bool {
 
 // buildInitialSecretManager bootstraps audit/keyring state for init-time actions.
 func buildInitialSecretManager(
+	ctx context.Context,
 	repoRoot string,
 	initialUser string,
 	recipientText string,
 	identity *core.Identity,
 ) (*core.SecretManager, error) {
-	signer, err := core.LoadSignKey(repoRoot, initialUser, identity)
+	signer, auditLog, err := core.InitAdminUser(ctx, repoRoot, initialUser, recipientText)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load sign key for %s: %w", initialUser, err)
+		return nil, fmt.Errorf("failed to initialize admin user: %w", err)
 	}
 
-	signKeyStr := core.MulticodeEncode(signer.PublicKey(), core.MhEd25519Pub)
-	auditLog, err := core.InitLog(repoRoot, signer, core.DetailUserTell{
-		User:        initialUser,
-		Groups:      []string{"admin"},
-		PubKeys:     []string{recipientText},
-		SignPubKeys: []string{signKeyStr},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to init audit log: %w", err)
-	}
-
-	if err := auditLog.Store(); err != nil {
-		return nil, fmt.Errorf("failed to store audit log: %w", err)
-	}
-
-	keyring := core.NewMemoryKeyring()
+	keyring := core.EmptyKeyring()
 	vstate, err := core.Verify(auditLog, keyring)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
@@ -414,7 +443,6 @@ func buildInitialSecretManager(
 
 	mgr, err := core.BuildSecretManager(
 		repoRoot,
-		initialUser,
 		core.Identities{identity},
 		signer,
 		keyring,
@@ -426,50 +454,6 @@ func buildInitialSecretManager(
 	}
 
 	return mgr, nil
-}
-
-// ensureInitialSignKey creates encrypted signing key material for initial user.
-func ensureInitialSignKey(repoRoot, initialUser string, initialRecipient age.Recipient) error {
-	signKeyPath := filepath.Join(repoRoot, ".sesam", "signkeys", initialUser+".age")
-
-	if _, err := os.Stat(signKeyPath); err == nil {
-		fmt.Printf("signing key already exists at %s\n", signKeyPath)
-		return ensurePublicSignKey(repoRoot, initialUser, nil)
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to access signing key %s: %w", signKeyPath, err)
-	}
-
-	signer, err := core.GenerateSignKey(repoRoot, initialUser, initialRecipient)
-	if err != nil {
-		return fmt.Errorf("failed to generate signing key for %q: %w", initialUser, err)
-	}
-
-	fmt.Printf("created encrypted signing key at %s\n", signKeyPath)
-	return ensurePublicSignKey(repoRoot, initialUser, signer)
-}
-
-// ensurePublicSignKey writes the plaintext public signing key.
-func ensurePublicSignKey(repoRoot, initialUser string, signer core.Signer) error {
-	pubPath := filepath.Join(repoRoot, ".sesam", "signkeys", initialUser+".pub")
-
-	if _, err := os.Stat(pubPath); err == nil {
-		fmt.Printf("signing public key already exists at %s\n", pubPath)
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to access signing public key %s: %w", pubPath, err)
-	}
-
-	if signer == nil {
-		return fmt.Errorf("cannot create public signing key at %s without signer", pubPath)
-	}
-
-	encodedPublicKey := core.MulticodeEncode(signer.PublicKey(), core.MhEd25519Pub)
-	if err := renameio.WriteFile(pubPath, []byte(encodedPublicKey+"\n"), 0o600); err != nil {
-		return fmt.Errorf("failed to write signing public key %s: %w", pubPath, err)
-	}
-
-	fmt.Printf("created signing public key at %s\n", pubPath)
-	return nil
 }
 
 // ensureDefaultGitIgnore appends sesam rules to .gitignore.
@@ -676,4 +660,21 @@ func stageInitFiles(repoRoot, configPath string) error {
 	}
 
 	return nil
+}
+
+func withWorkingDir(dir string, fn func() error) error {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to read current directory: %w", err)
+	}
+
+	if err := os.Chdir(dir); err != nil {
+		return fmt.Errorf("failed to switch directory to %s: %w", dir, err)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	return fn()
 }
