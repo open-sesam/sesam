@@ -64,7 +64,7 @@ func TestMainInitCreatesStructureInGitRoot(t *testing.T) {
 	}
 }
 
-func TestMainInitFailsWhenRepoPathIsNotGitRoot(t *testing.T) {
+func TestMainInitAllowsRepoPathInsideGitWorktree(t *testing.T) {
 	repoRoot := makeTempDir(t)
 	initGitRepo(t, repoRoot)
 
@@ -91,13 +91,12 @@ func TestMainInitFailsWhenRepoPathIsNotGitRoot(t *testing.T) {
 		"--recipient", id.Recipient().String(),
 		"--identity", identityPath,
 	})
-	if err == nil {
-		t.Fatal("expected init to fail when --repo is not git root")
+	if err != nil {
+		t.Fatalf("expected init to succeed inside worktree, got: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "no git repository found at") {
-		t.Fatalf("expected git-root error, got: %v", err)
-	}
+	assertPathExists(t, filepath.Join(nestedPath, ".sesam"))
+	assertPathExists(t, filepath.Join(repoRoot, ".git", "hooks", "pre-commit"))
 }
 
 func TestMainInitFailsWhenAlreadyInitialized(t *testing.T) {
