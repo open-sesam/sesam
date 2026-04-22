@@ -210,3 +210,28 @@ func ParseRecipient(arg string) (*Recipient, error) {
 		comparablePublicKey: spk,
 	}, err
 }
+
+// ParseRecipients parses one or more newline-separated recipient keys.
+func ParseRecipients(raw string) (Recipients, error) {
+	var recipients Recipients
+
+	for line := range strings.SplitSeq(raw, "\n") {
+		key := strings.TrimSpace(line)
+		if key == "" {
+			continue
+		}
+
+		recp, err := ParseRecipient(key)
+		if err != nil {
+			return nil, err
+		}
+
+		recipients = append(recipients, recp)
+	}
+
+	if len(recipients) == 0 {
+		return nil, fmt.Errorf("no recipient key found")
+	}
+
+	return recipients, nil
+}

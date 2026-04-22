@@ -229,37 +229,23 @@ func resolveConfigPath(repoRoot, configPath string, configExplicit bool) string 
 func resolveInitialRecipient(ctx context.Context, recipientArg string, repoRoot string, identity *core.Identity) (age.Recipient, string, error) {
 	recipientArg = strings.TrimSpace(recipientArg)
 
-	type resolvedRecipient struct {
-		recipient *core.Recipient
-		text      string
-	}
-
-	var resolved []resolvedRecipient
+	var resolved core.Recipients
 	if recipientArg != "" {
 		rawRecipient, err := core.ResolveRecipient(ctx, repoRoot, recipientArg, core.CacheModeReadWrite)
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to resolve recipient %q: %w", recipientArg, err)
 		}
 
-		for line := range strings.SplitSeq(rawRecipient, "\n") {
-			key := strings.TrimSpace(line)
-			if key == "" {
-				continue
-			}
-
-			recp, err := core.ParseRecipient(key)
-			if err != nil {
-				return nil, "", fmt.Errorf("failed to parse recipient %q: %w", recipientArg, err)
-			}
-
-			resolved = append(resolved, resolvedRecipient{recipient: recp, text: key})
+		resolved, err = core.ParseRecipients(rawRecipient)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to parse recipient %q: %w", recipientArg, err)
 		}
 	}
 
 	if len(resolved) > 0 {
-		for _, item := range resolved {
-			if identityCanDecryptRecipient(identity, item.recipient.Recipient) {
-				return item.recipient.Recipient, item.text, nil
+		for _, recipient := range resolved {
+			if identityCanDecryptRecipient(identity, recipient.Recipient) {
+				return recipient.Recipient, recipient.String(), nil
 			}
 		}
 
