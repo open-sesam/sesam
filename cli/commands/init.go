@@ -9,23 +9,23 @@ import (
 	"time"
 
 	"filippo.io/age"
-	clirepo "github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/cli/repo"
 	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
 // HandleInit bootstraps sesam metadata in a git repository.
 func HandleInit(ctx context.Context, cmd *cli.Command) error {
-	repoRoot, err := clirepo.ResolveRepoRoot(cmd.String("repo"))
+	repoRoot, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}
 
-	if err := clirepo.EnsureNotInitialized(repoRoot); err != nil {
+	if err := repo.IsInitialized(repoRoot); err != nil {
 		return err
 	}
 
-	if err := clirepo.EnsureInitPathChoice(repoRoot, cmd.Bool("use-root")); err != nil {
+	if err := repo.EnsureInitPathChoice(repoRoot, cmd.Bool("use-root")); err != nil {
 		return err
 	}
 
@@ -48,13 +48,13 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	if err := clirepo.EnsureSesamDirs(repoRoot); err != nil {
+	if err := repo.EnsureSesamDirs(repoRoot); err != nil {
 		return err
 	}
 
 	return withRepoLock(repoRoot, 5*time.Second, func() error {
-		configPath := clirepo.ResolveConfigPath(repoRoot, cmd.String("config"), cmd.IsSet("config"))
-		if err := clirepo.CreateInitialConfig(configPath, initialUser, recipientText); err != nil {
+		configPath := repo.ResolveConfigPath(repoRoot, cmd.String("config"), cmd.IsSet("config"))
+		if err := repo.CreateInitialConfig(configPath, initialUser, recipientText); err != nil {
 			return err
 		}
 
@@ -72,41 +72,41 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 			_ = mgr.AuditLog.Close()
 		}()
 
-		if err := clirepo.EnsureDefaultGitIgnore(repoRoot); err != nil {
+		if err := repo.EnsureDefaultGitIgnore(repoRoot); err != nil {
 			return err
 		}
 
-		if err := clirepo.EnsureDefaultGitAttributes(repoRoot); err != nil {
+		if err := repo.EnsureDefaultGitAttributes(repoRoot); err != nil {
 			return err
 		}
 
-		if err := clirepo.EnsureVerifyHook(repoRoot); err != nil {
+		if err := repo.EnsureVerifyHook(repoRoot); err != nil {
 			return err
 		}
 
-		if err := clirepo.EnsureGitSesamShim(repoRoot); err != nil {
+		if err := repo.EnsureGitSesamShim(repoRoot); err != nil {
 			return err
 		}
 
-		if err := clirepo.EnsureExampleSecret(repoRoot); err != nil {
+		if err := repo.EnsureExampleSecret(repoRoot); err != nil {
 			return err
 		}
 
-		if err := clirepo.WithWorkingDir(repoRoot, func() error {
+		if err := repo.WithWorkingDir(repoRoot, func() error {
 			return mgr.AddSecret("example.secret", []string{"admin"})
 		}); err != nil {
 			return fmt.Errorf("failed to bootstrap example secret: %w", err)
 		}
 
-		if err := clirepo.EnsureSesamReadme(repoRoot); err != nil {
+		if err := repo.EnsureSesamReadme(repoRoot); err != nil {
 			return err
 		}
 
-		if err := clirepo.EnsureTmpKeepFile(repoRoot); err != nil {
+		if err := repo.EnsureTmpKeepFile(repoRoot); err != nil {
 			return err
 		}
 
-		if err := clirepo.StageInitFiles(repoRoot, configPath); err != nil {
+		if err := repo.StageInitFiles(repoRoot, configPath); err != nil {
 			return err
 		}
 

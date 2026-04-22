@@ -13,13 +13,13 @@ import (
 
 // HandleSeal encrypts and signs tracked secrets via SecretManager.SealAll.
 func HandleSeal(_ context.Context, cmd *cli.Command) error {
-	repoRoot, err := clirepo.ResolveRepoRoot(cmd.String("repo"))
+	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}
 
-	return withRepoLock(repoRoot, 5*time.Second, func() error {
-		mgr, err := buildRegularSecretManager(repoRoot, cmd.String("identity"))
+	return withRepoLock(sesamDir, 5*time.Second, func() error {
+		mgr, err := buildRegularSecretManager(sesamDir, cmd.String("identity"))
 		if err != nil {
 			return err
 		}
@@ -34,13 +34,13 @@ func HandleSeal(_ context.Context, cmd *cli.Command) error {
 
 // HandleReveal decrypts and verifies tracked secrets via SecretManager.RevealAll.
 func HandleReveal(_ context.Context, cmd *cli.Command) error {
-	repoRoot, err := clirepo.ResolveRepoRoot(cmd.String("repo"))
+	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}
 
-	return withRepoLock(repoRoot, 5*time.Second, func() error {
-		mgr, err := buildRegularSecretManager(repoRoot, cmd.String("identity"))
+	return withRepoLock(sesamDir, 5*time.Second, func() error {
+		mgr, err := buildRegularSecretManager(sesamDir, cmd.String("identity"))
 		if err != nil {
 			return err
 		}

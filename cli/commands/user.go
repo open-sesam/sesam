@@ -13,7 +13,7 @@ import (
 
 // HandleTell adds a user/group relation and updates access.
 func HandleTell(ctx context.Context, cmd *cli.Command) error {
-	repoRoot, err := clirepo.ResolveRepoRoot(cmd.String("repo"))
+	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}
@@ -33,8 +33,8 @@ func HandleTell(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("missing group: pass --group at least once")
 	}
 
-	return withRepoLock(repoRoot, 5*time.Second, func() error {
-		mgr, auditLog, err := buildRegularUserManager(repoRoot, cmd.String("identity"))
+	return withRepoLock(sesamDir, 5*time.Second, func() error {
+		mgr, auditLog, err := buildRegularUserManager(sesamDir, cmd.String("identity"))
 		if err != nil {
 			return err
 		}
@@ -52,7 +52,7 @@ func HandleTell(ctx context.Context, cmd *cli.Command) error {
 
 // HandleKill removes a user/group relation.
 func HandleKill(_ context.Context, cmd *cli.Command) error {
-	repoRoot, err := clirepo.ResolveRepoRoot(cmd.String("repo"))
+	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}
@@ -62,8 +62,8 @@ func HandleKill(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("missing user: pass --user")
 	}
 
-	return withRepoLock(repoRoot, 5*time.Second, func() error {
-		mgr, auditLog, err := buildRegularUserManager(repoRoot, cmd.String("identity"))
+	return withRepoLock(sesamDir, 5*time.Second, func() error {
+		mgr, auditLog, err := buildRegularUserManager(sesamDir, cmd.String("identity"))
 		if err != nil {
 			return err
 		}

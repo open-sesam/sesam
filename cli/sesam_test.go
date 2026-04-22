@@ -17,7 +17,7 @@ func TestMainSealRequiresInitializedRepo(t *testing.T) {
 	err := Main([]string{
 		"sesam",
 		"seal",
-		"--repo", repoDir,
+		"--sesam-dir", repoDir,
 		"--identity", identityPath,
 	})
 	if err == nil {
@@ -37,7 +37,7 @@ func TestMainRevealRequiresInitializedRepo(t *testing.T) {
 	err := Main([]string{
 		"sesam",
 		"reveal",
-		"--repo", repoDir,
+		"--sesam-dir", repoDir,
 		"--identity", identityPath,
 	})
 	if err == nil {
@@ -57,7 +57,7 @@ func TestMainSealMissingIdentity(t *testing.T) {
 	err := Main([]string{
 		"sesam",
 		"seal",
-		"--repo", repoDir,
+		"--sesam-dir", repoDir,
 		"--identity", missingIdentity,
 	})
 	if err == nil {
@@ -103,7 +103,7 @@ func TestMainInitSealRevealRoundTrip(t *testing.T) {
 	err = Main([]string{
 		"sesam",
 		"init",
-		"--repo", repoRoot,
+		"--sesam-dir", repoRoot,
 		"--user", "alice",
 		"--identity", identityPath,
 	})
@@ -120,7 +120,7 @@ func TestMainInitSealRevealRoundTrip(t *testing.T) {
 	err = Main([]string{
 		"sesam",
 		"seal",
-		"--repo", repoRoot,
+		"--sesam-dir", repoRoot,
 		"--identity", identityPath,
 	})
 	if err != nil {
@@ -137,7 +137,7 @@ func TestMainInitSealRevealRoundTrip(t *testing.T) {
 	err = Main([]string{
 		"sesam",
 		"reveal",
-		"--repo", repoRoot,
+		"--sesam-dir", repoRoot,
 		"--identity", identityPath,
 	})
 	if err != nil {

@@ -33,7 +33,11 @@ var exampleSecretContent string
 //go:embed assets/config.default
 var configTemplate string
 
-func ResolveRepoRoot(repoPath string) (string, error) {
+// ResolveSesamDir validates the directory where .sesam will live.
+//
+// The returned path is the sesam target directory, which may be a
+// sub-directory inside a larger git worktree.
+func ResolveSesamDir(repoPath string) (string, error) {
 	if strings.TrimSpace(repoPath) == "" {
 		repoPath = "."
 	}
@@ -56,7 +60,7 @@ func ResolveRepoRoot(repoPath string) (string, error) {
 	return repoPath, nil
 }
 
-func EnsureNotInitialized(repoRoot string) error {
+func IsInitialized(repoRoot string) error {
 	configPath := filepath.Join(repoRoot, "sesam.yml")
 	sesamDir := filepath.Join(repoRoot, ".sesam")
 

@@ -28,7 +28,7 @@ func TestMainInitCreatesStructureInGitRoot(t *testing.T) {
 	err = Main([]string{
 		"sesam",
 		"init",
-		"--repo", repoRoot,
+		"--sesam-dir", repoRoot,
 		"--user", "alice",
 		"--recipient", id.Recipient().String(),
 		"--identity", identityPath,
@@ -88,7 +88,7 @@ func TestMainInitAllowsRepoPathInsideGitWorktree(t *testing.T) {
 	err = Main([]string{
 		"sesam",
 		"init",
-		"--repo", nestedPath,
+		"--sesam-dir", nestedPath,
 		"--user", "alice",
 		"--recipient", id.Recipient().String(),
 		"--identity", identityPath,
@@ -124,7 +124,7 @@ func TestMainInitFailsWhenAlreadyInitialized(t *testing.T) {
 	err = Main([]string{
 		"sesam",
 		"init",
-		"--repo", repoRoot,
+		"--sesam-dir", repoRoot,
 		"--user", "alice",
 		"--recipient", id.Recipient().String(),
 		"--identity", identityPath,
@@ -162,7 +162,7 @@ func TestMainInitRequiresUseRootForBusyRepoPath(t *testing.T) {
 	err = Main([]string{
 		"sesam",
 		"init",
-		"--repo", repoRoot,
+		"--sesam-dir", repoRoot,
 		"--user", "alice",
 		"--identity", identityPath,
 	})
@@ -177,7 +177,7 @@ func TestMainInitRequiresUseRootForBusyRepoPath(t *testing.T) {
 	err = Main([]string{
 		"sesam",
 		"init",
-		"--repo", repoRoot,
+		"--sesam-dir", repoRoot,
 		"--user", "alice",
 		"--identity", identityPath,
 		"--use-root",

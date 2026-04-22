@@ -18,10 +18,10 @@ var flagsGeneral = []cli.Flag{
 		Usage:   "Path to the sesam config file",
 	},
 	&cli.StringFlag{
-		Name:    "repo",
-		Aliases: []string{"r"},
+		Name:    "sesam-dir",
+		Aliases: []string{"r", "repo"},
 		Value:   ".",
-		Usage:   "Path to the git repository",
+		Usage:   "Directory where .sesam lives",
 	},
 }
 
