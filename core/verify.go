@@ -307,6 +307,11 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 		return fmt.Errorf("groups may not be empty (%s)", scd.RevealedPath)
 	}
 
+	// double check nobody inserted ../../ or similar into the revealed path.
+	if err := validSecretPathFormat(log.RepoDir, scd.RevealedPath); err != nil {
+		return err
+	}
+
 	scd.Groups = deduplicate(scd.Groups)
 	if !slices.Contains(scd.Groups, "admin") {
 		scd.Groups = append(scd.Groups, "admin")
@@ -326,6 +331,15 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 
 		existingSecret.AccessGroups = scd.Groups
 	} else {
+		hasAccess := state.UserHasAccess(entry.ChangedBy, scd.Groups)
+		if !hasAccess {
+			return fmt.Errorf(
+				"would add secret that %s has no access to: %s",
+				entry.ChangedBy,
+				scd.RevealedPath,
+			)
+		}
+
 		// secret does not exist
 		state.Secrets = append(state.Secrets, VerifiedSecret{
 			RevealedPath: scd.RevealedPath,
@@ -341,6 +355,11 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 	srd, err := parseDetail[DetailSecretRemove](entry)
 	if err != nil {
 		return fmt.Errorf("parse detail: %w", err)
+	}
+
+	// double check nobody inserted ../../ or similar into the revealed path.
+	if err := validSecretPathFormat(log.RepoDir, srd.RevealedPath); err != nil {
+		return err
 	}
 
 	s, exists := state.SecretExists(srd.RevealedPath)

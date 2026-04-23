@@ -148,6 +148,44 @@ func TestRemoveSecretNotSealed(t *testing.T) {
 	require.False(t, exists, "secret should be removed from verified state")
 }
 
+// Regression: RemoveSecret must call FeedEntry before touching .age/.sig.json.
+// If the audit entry is rejected (caller lacks access), the encrypted files
+// must survive — otherwise any authenticated user could corrupt the repo
+// (audit log still lists the secret while its ciphertext is gone, breaking
+// Verify / VerifyIntegrity for everyone).
+func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
+	mgr := sealedSecretManager(t) // admin manager with secrets/test sealed for "admin"
+
+	agePath := mgr.cryptPath("secrets/test")
+	sigPath := signaturePath(mgr.RepoDir, "secrets/test")
+	require.FileExists(t, agePath)
+	require.FileExists(t, sigPath)
+
+	// Add non-admin bob (in "dev") to the audit log and re-verify.
+	bob := newTestUser(t, "bob")
+	_, err := mgr.AuditLog.AddEntry(mgr.Signer, newAuditEntry("admin", &DetailUserTell{
+		User: "bob", Groups: []string{"dev"},
+		PubKeys: []string{bob.Recipient.String()}, SignPubKeys: []string{bob.SignPubKey},
+	}), nil)
+	require.NoError(t, err)
+	require.NoError(t, verify(mgr.State))
+
+	bobMgr, err := BuildSecretManager(
+		mgr.RepoDir, Identities{bob.Identity}, bob.Signer,
+		mgr.Keyring, mgr.AuditLog, mgr.State,
+	)
+	require.NoError(t, err)
+
+	// Bob has no access to the admin-only secret. FeedEntry must reject,
+	// and the on-disk files must NOT be deleted.
+	require.Error(t, bobMgr.RemoveSecret("secrets/test"))
+
+	require.FileExists(t, agePath, "ciphertext must survive rejected remove")
+	require.FileExists(t, sigPath, "signature must survive rejected remove")
+	_, exists := mgr.State.SecretExists("secrets/test")
+	require.True(t, exists, "secret must remain in verified state")
+}
+
 func TestRemoveSecretThenSealAll(t *testing.T) {
 	mgr := sealedSecretManager(t)
 

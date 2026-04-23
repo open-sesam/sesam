@@ -182,6 +182,15 @@ func (sm *SecretManager) RemoveSecret(revealedPath string) error {
 		return fmt.Errorf("no such secret")
 	}
 
+	if err := sm.State.FeedEntry(
+		sm.Signer,
+		newAuditEntry(sm.Signer.UserName(), &DetailSecretRemove{
+			RevealedPath: revealedPath,
+		}),
+	); err != nil {
+		return fmt.Errorf("failed to add secret remove entry: %w", err)
+	}
+
 	if err := os.RemoveAll(sm.cryptPath(revealedPath)); err != nil {
 		return err
 	}
@@ -191,11 +200,5 @@ func (sm *SecretManager) RemoveSecret(revealedPath string) error {
 	}
 
 	sm.secrets = slices.Delete(sm.secrets, idx, idx+1)
-
-	return sm.State.FeedEntry(
-		sm.Signer,
-		newAuditEntry(sm.Signer.UserName(), &DetailSecretRemove{
-			RevealedPath: revealedPath,
-		}),
-	)
+	return nil
 }

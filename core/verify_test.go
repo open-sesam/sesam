@@ -282,6 +282,48 @@ func TestVerifySecretChangeUpdate(t *testing.T) {
 	require.Contains(t, s.AccessGroups, "ops")
 }
 
+// Regression: the verify layer must reject any RevealedPath that contains
+// path-traversal components. Previously only the high-level API validated
+// the path, so a hand-crafted entry could seed state.Secrets with
+// "../../.ssh/authorized_keys", causing RevealAll to write outside the repo.
+func TestVerifySecretChangeRejectsPathTraversal(t *testing.T) {
+	repoDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, repoDir, admin)
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+		RevealedPath: "../../.ssh/authorized_keys",
+		Groups:       []string{"admin"},
+	}), nil)
+
+	err := verifyStateFail(t, al, EmptyKeyring())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "..")
+}
+
+// Regression: creating a new secret must require the creator to be a member
+// of at least one of the proposed groups. Previously the new-secret branch
+// had no authorization check, letting any user seed state.Secrets with
+// arbitrary AccessGroups (and paths).
+func TestVerifySecretChangeNewSecretRequiresAccess(t *testing.T) {
+	repoDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, repoDir, admin)
+
+	bob := newTestUser(t, "bob")
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+		User: "bob", Groups: []string{"dev"},
+		PubKeys: []string{bob.Recipient.String()}, SignPubKeys: []string{bob.SignPubKey},
+	}), nil)
+
+	// Bob (dev) tries to register a brand-new secret restricted to "ops".
+	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretChange{
+		RevealedPath: "secrets/ops-db", Groups: []string{"ops"},
+	}), nil)
+
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
 // --- verifySecretRemove tests ---
 
 func TestVerifySecretRemoveBasic(t *testing.T) {
