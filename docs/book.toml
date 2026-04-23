@@ -38,4 +38,4 @@ additional-css = [
   "./mdbook-admonish.css",
   "theme/sesam.css",
 ]
-additional-js = ["theme/pagetoc.js", "theme/sidebar-logo.js"]
+additional-js = ["theme/pagetoc.js", "theme/sidebar-logo.js", "theme/theme-switch.js"]
