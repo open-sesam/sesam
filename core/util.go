@@ -32,17 +32,26 @@ func validUserName(name string) error {
 	return nil
 }
 
-func validSecretPath(repoDir string, revealedPath string) error {
+func validSecretPathFormat(repoDir string, revealedPath string) error {
 	if len(revealedPath) == 0 {
 		return fmt.Errorf("empty file path not allowed: %s", revealedPath)
 	}
 
 	if revealedPath[0] == filepath.Separator {
-		return fmt.Errorf("absolute paths not allowed here: %s", revealedPath)
+		return fmt.Errorf("absolute paths not allowed in revealed path: %s", revealedPath)
 	}
 
 	if strings.Contains(revealedPath, "..") {
 		return fmt.Errorf("path may not include '..': %s", revealedPath)
+	}
+
+	revealedPath = filepath.Clean(revealedPath)
+	return nil
+}
+
+func validSecretPath(repoDir string, revealedPath string) error {
+	if err := validSecretPathFormat(repoDir, revealedPath); err != nil {
+		return err
 	}
 
 	revealedPath = filepath.Clean(revealedPath)
