@@ -4,7 +4,7 @@
   <img src="sesam_bg.png" width="400" />
 </div>
 
-`sesam` is a tool to manage secrets.
+**`sesam` is a tool to manage secrets in git.**
 
 When developing and deploying software it is often required to store and load several secrets like database passwords, certificates or other credentials. Those should be stored encrypted and only the users requiring them should have access to them.
 

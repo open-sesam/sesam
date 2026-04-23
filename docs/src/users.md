@@ -2,7 +2,7 @@
 
 ## Managing users via config
 
-As mentioned during [Initialization](/init.md) there is always an admin users.
+As mentioned during [Initialization](/init.md) there is always at least one admin user.
 When you created your admin repo you will see something like this in your config:
 
 ```yaml
@@ -10,6 +10,7 @@ config:
   users:
     - name: bob
       desc: Bob the Builder
+      pub: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
   groups:
     admin:
       - bob

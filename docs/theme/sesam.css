@@ -16,12 +16,12 @@
 */
 
 :root {
-    /* Sidebar */
-    --sidebar-bg:             #358a4e;
-    --sidebar-fg:             #f0ede6;
-    --sidebar-non-existant:   #8fbf9c;
-    --sidebar-active:         #d4b56a;
-    --sidebar-spacer:         #4a9e64;
+    /* Sidebar — warm cream with emerald accents */
+    --sidebar-bg:             #f4f0e8;
+    --sidebar-fg:             #2c2c2c;
+    --sidebar-non-existant:   #9a9a9a;
+    --sidebar-active:         #2d6e3f;
+    --sidebar-spacer:         #e5ddc9;
 
     /* Top search bar */
     --search-mark-bg:         #d4b56a;
@@ -69,13 +69,14 @@ h1, h2, h3, h4, h5, h6 {
     background-image: url("../pod-lattice.svg");
     background-repeat: repeat;
     background-size: 24px 28px;
+    border-right: 3px solid #2d6e3f;
 }
 
 .sidebar .sidebar-scrollbox {
     padding-top: 0;
     font-family: "Josefin Sans", sans-serif;
     font-size: 1.6rem;
-    font-weight: 700;
+    font-weight: 600;
 }
 
 /* Logo at top of sidebar — circular frame with geometric fill */
@@ -89,24 +90,30 @@ h1, h2, h3, h4, h5, h6 {
         url("../arabic-pattern.svg") center / 60px 60px repeat,
         #f8f5ef;
     border-radius: 50%;
-    border: 3px solid #b8963e;
-    box-shadow: 0 0 0 4px rgba(184, 150, 62, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15);
+    border: 4px solid #2d6e3f;
+    box-shadow:
+        0 0 0 2px #b8963e,
+        0 0 0 8px rgba(45, 110, 63, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15);
     cursor: pointer;
     transition: box-shadow 0.15s ease;
 }
 .sidebar-logo:hover {
-    box-shadow: 0 0 0 4px rgba(184, 150, 62, 0.4), 0 2px 12px rgba(0, 0, 0, 0.25);
+    box-shadow:
+        0 0 0 2px #b8963e,
+        0 0 0 8px rgba(45, 110, 63, 0.35),
+        0 2px 12px rgba(0, 0, 0, 0.25);
 }
 
 /* Sidebar link hover */
 .sidebar .sidebar-scrollbox a:hover {
-    color: #d4b56a;
+    color: #2d6e3f;
 }
 
 /* Active chapter highlight */
 .sidebar .sidebar-scrollbox .chapter li.active > a {
-    color: #d4b56a;
-    font-weight: 600;
+    color: #2d6e3f;
+    font-weight: 700;
 }
 
 /* Chapter headings in sidebar */
@@ -116,8 +123,10 @@ h1, h2, h3, h4, h5, h6 {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #d4b56a;
+    color: #2d6e3f;
     margin-top: 1.2em;
+    border-bottom: 1px solid rgba(45, 110, 63, 0.25);
+    padding-bottom: 0.25em;
 }
 
 .sidebar .sidebar-scrollbox .chapter li.chapter-item {
@@ -125,7 +134,10 @@ h1, h2, h3, h4, h5, h6 {
     transition: border-color 0.15s ease;
 }
 .sidebar .sidebar-scrollbox .chapter li.chapter-item:hover {
-    border-left-color: #d4b56a;
+    border-left-color: #b8963e;
+}
+.sidebar .sidebar-scrollbox .chapter li.active {
+    border-left-color: #2d6e3f;
 }
 
 /* --- Navigation arrows (prev/next chapter) --- */
