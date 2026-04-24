@@ -55,19 +55,19 @@ func Main(args []string) error {
 				Usage:  "Restore secrets from an earlier revision",
 			}, {
 				Name:   "add",
-				Action: commands.HandleModifyAdd,
+				Action: commands.HandleAdd,
 				Usage:  "Add a secret file or directory",
 			}, {
 				Name:   "rm",
-				Action: commands.HandleModifyRemove,
+				Action: commands.HandleRemove,
 				Usage:  "Remove a secret file or directory",
 			}, {
 				Name:   "mv",
-				Action: commands.HandleModifyMove,
+				Action: commands.HandleMove,
 				Usage:  "Move a secret to a different path",
 			}, {
-				Name:   "ls",
-				Action: commands.HandleModifyList,
+				Name:   "list",
+				Action: commands.HandleList,
 				Usage:  "List known secrets and metadata",
 			}, {
 				Name:   "apply",
@@ -84,8 +84,8 @@ func Main(args []string) error {
 				Action: commands.HandleKill,
 				Usage:  "Remove a person from a group",
 			}, {
-				Name:   "list",
-				Action: commands.HandleList,
+				Name:   "list-users",
+				Action: commands.HandleListUsers,
 				Usage:  "List persons, groups, and access",
 			}, {
 				Name:   "rotate",

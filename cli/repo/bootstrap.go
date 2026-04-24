@@ -15,6 +15,8 @@ import (
 	"github.com/google/renameio"
 )
 
+const initRootFileThreshold = 25
+
 //go:embed assets/gitignore.default
 var gitignoreTemplate string
 
@@ -27,9 +29,6 @@ var preCommitHookTemplate string
 //go:embed assets/Readme.default
 var sesamReadmeTemplate string
 
-//go:embed assets/secret.example
-var exampleSecretContent string
-
 //go:embed assets/config.default
 var configTemplate string
 
@@ -37,32 +36,32 @@ var configTemplate string
 //
 // The returned path is the sesam target directory, which may be a
 // sub-directory inside a larger git worktree.
-func ResolveSesamDir(repoPath string) (string, error) {
-	if strings.TrimSpace(repoPath) == "" {
-		repoPath = "."
+func ResolveSesamDir(sesamPath string) (string, error) {
+	if strings.TrimSpace(sesamPath) == "" {
+		sesamPath = "."
 	}
-	repoPath = filepath.Clean(repoPath)
+	sesamPath = filepath.Clean(sesamPath)
 
-	repoInfo, err := os.Stat(repoPath)
+	repoInfo, err := os.Stat(sesamPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to access repo path %s: %w", repoPath, err)
+		return "", fmt.Errorf("failed to access repo path %s: %w", sesamPath, err)
 	}
 
 	if !repoInfo.IsDir() {
-		return "", fmt.Errorf("repo path %s is not a directory", repoPath)
+		return "", fmt.Errorf("repo path %s is not a directory", sesamPath)
 	}
 
-	_, err = resolveGitDir(repoPath)
+	_, err = resolveGitDir(sesamPath)
 	if err != nil {
-		return "", fmt.Errorf("no git repository found at %s: %w", repoPath, err)
+		return "", fmt.Errorf("no git repository found at %s: %w", sesamPath, err)
 	}
 
-	return repoPath, nil
+	return sesamPath, nil
 }
 
-func IsInitialized(repoRoot string) error {
-	configPath := filepath.Join(repoRoot, "sesam.yml")
-	sesamDir := filepath.Join(repoRoot, ".sesam")
+func IsInitialized(sesamRoot string) error {
+	configPath := filepath.Join(sesamRoot, "sesam.yml")
+	sesamDir := filepath.Join(sesamRoot, ".sesam")
 
 	if _, err := os.Stat(configPath); err == nil {
 		return fmt.Errorf("repository already has sesam config at %s", configPath)
@@ -79,66 +78,58 @@ func IsInitialized(repoRoot string) error {
 	return nil
 }
 
-func EnsureInitPathChoice(repoRoot string, useRoot bool) error {
-	const maxRecommendedFiles = 25
+func EnsureInitPathChoice(sesamRoot string, useRoot bool) error {
+	if useRoot {
+		return nil
+	}
 
-	fileCount, err := countRepoFiles(repoRoot, maxRecommendedFiles+1)
+	fileCount, err := countRepoFiles(sesamRoot)
 	if err != nil {
 		return err
 	}
 
-	if fileCount <= maxRecommendedFiles || useRoot {
-		return nil
+	if fileCount > initRootFileThreshold {
+		return fmt.Errorf("refusing to initialize in %s: found %d files; use a sub-directory with --sesam-dir or pass --use-root to proceed", sesamRoot, fileCount)
 	}
 
-	return fmt.Errorf(
-		"repository path %s already contains many files (%d); prefer a dedicated secrets sub-directory or rerun with --use-root",
-		repoRoot,
-		fileCount,
-	)
+	return nil
 }
 
-func countRepoFiles(repoRoot string, stopAfter int) (int, error) {
-	if stopAfter <= 0 {
-		return 0, nil
-	}
+func countRepoFiles(root string) (int, error) {
+	count := 0
 
-	var count int
-	stopErr := fmt.Errorf("stop")
-	err := filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", ".sesam":
+			name := d.Name()
+			if name == ".git" || name == ".sesam" {
 				return filepath.SkipDir
 			}
-
 			return nil
 		}
 
-		count++
-		if count >= stopAfter {
-			return stopErr
+		if d.Type().IsRegular() {
+			count++
 		}
 
 		return nil
 	})
-	if err != nil && err != stopErr {
-		return 0, fmt.Errorf("failed to inspect repository files: %w", err)
+	if err != nil {
+		return 0, fmt.Errorf("failed to scan %s: %w", root, err)
 	}
 
 	return count, nil
 }
 
-func EnsureSesamDirs(repoRoot string) error {
+func EnsureSesamDirs(sesamDir string) error {
 	dirs := []string{
-		filepath.Join(repoRoot, ".sesam"),
-		filepath.Join(repoRoot, ".sesam", "signkey"),
-		filepath.Join(repoRoot, ".sesam", "tmp"),
-		filepath.Join(repoRoot, ".sesam", "bin"),
+		filepath.Join(sesamDir, ".sesam"),
+		filepath.Join(sesamDir, ".sesam", "signkey"),
+		filepath.Join(sesamDir, ".sesam", "tmp"),
+		filepath.Join(sesamDir, ".sesam", "bin"),
 	}
 
 	for _, dir := range dirs {
@@ -147,16 +138,16 @@ func EnsureSesamDirs(repoRoot string) error {
 		}
 	}
 
-	if err := EnsureTmpKeepFile(repoRoot); err != nil {
+	if err := EnsureTmpKeepFile(sesamDir); err != nil {
 		return err
 	}
 
-	slog.Info("initialized sesam directory", slog.String("path", filepath.Join(repoRoot, ".sesam")))
+	slog.Info("initialized sesam directory", slog.String("path", filepath.Join(sesamDir, ".sesam")))
 	return nil
 }
 
-func EnsureTmpKeepFile(repoRoot string) error {
-	keepPath := filepath.Join(repoRoot, ".sesam", "tmp", ".donotdelete")
+func EnsureTmpKeepFile(sesamDir string) error {
+	keepPath := filepath.Join(sesamDir, ".sesam", "tmp", ".donotdelete")
 	if _, err := os.Stat(keepPath); os.IsNotExist(err) {
 		if err := renameio.WriteFile(keepPath, []byte("\n"), 0o600); err != nil {
 			return fmt.Errorf("failed to create %s: %w", keepPath, err)
@@ -168,7 +159,7 @@ func EnsureTmpKeepFile(repoRoot string) error {
 	return nil
 }
 
-func ResolveConfigPath(repoRoot, configPath string, configExplicit bool) string {
+func ResolveConfigPath(sesamDir, configPath string, configExplicit bool) string {
 	if filepath.IsAbs(configPath) {
 		return configPath
 	}
@@ -177,7 +168,7 @@ func ResolveConfigPath(repoRoot, configPath string, configExplicit bool) string 
 		return configPath
 	}
 
-	return filepath.Join(repoRoot, configPath)
+	return filepath.Join(sesamDir, configPath)
 }
 
 func CreateInitialConfig(configPath, initialUser, recipientText string) error {
@@ -225,13 +216,13 @@ func quoteYAMLString(value string) string {
 	return "'" + escaped + "'"
 }
 
-func EnsureDefaultGitIgnore(repoRoot string) error {
-	gitignorePath := filepath.Join(repoRoot, ".gitignore")
+func EnsureDefaultGitIgnore(sesamDir string) error {
+	gitignorePath := filepath.Join(sesamDir, ".gitignore")
 	return appendMissingLines(gitignorePath, gitignoreTemplate, 0o600)
 }
 
-func EnsureDefaultGitAttributes(repoRoot string) error {
-	gitAttributesPath := filepath.Join(repoRoot, ".gitattributes")
+func EnsureDefaultGitAttributes(sesamDir string) error {
+	gitAttributesPath := filepath.Join(sesamDir, ".gitattributes")
 	return appendMissingLines(gitAttributesPath, gitattributesTemplate, 0o644)
 }
 
@@ -284,10 +275,10 @@ func appendMissingLines(path string, content string, mode os.FileMode) error {
 	return nil
 }
 
-func EnsureVerifyHook(repoRoot string) error {
-	gitDir, err := resolveGitDir(repoRoot)
+func EnsureVerifyHook(sesamDir string) error {
+	gitDir, err := resolveGitDir(sesamDir)
 	if err != nil {
-		return fmt.Errorf("no git repository detected at %s: %w", repoRoot, err)
+		return fmt.Errorf("no git repository detected at %s: %w", sesamDir, err)
 	}
 
 	hookPath := filepath.Join(gitDir, "hooks", "pre-commit")
@@ -310,8 +301,8 @@ func EnsureVerifyHook(repoRoot string) error {
 	return nil
 }
 
-func resolveGitDir(repoRoot string) (string, error) {
-	repo, err := git.PlainOpenWithOptions(repoRoot, &git.PlainOpenOptions{DetectDotGit: true})
+func resolveGitDir(sesamDir string) (string, error) {
+	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return "", err
 	}
@@ -352,11 +343,11 @@ func resolveGitDir(repoRoot string) (string, error) {
 		return resolvedPath, nil
 	}
 
-	return filepath.Clean(filepath.Join(repoRoot, resolvedPath)), nil
+	return filepath.Clean(filepath.Join(sesamDir, resolvedPath)), nil
 }
 
-func EnsureGitSesamShim(repoRoot string) error {
-	shimPath := filepath.Join(repoRoot, ".sesam", "bin", "git-sesam")
+func EnsureGitSesamShim(sesamDir string) error {
+	shimPath := filepath.Join(sesamDir, ".sesam", "bin", "git-sesam")
 	if _, err := os.Stat(shimPath); err == nil {
 		slog.Info("git-sesam shim already exists", slog.String("path", shimPath))
 		return nil
@@ -377,24 +368,8 @@ func EnsureGitSesamShim(repoRoot string) error {
 	return nil
 }
 
-func EnsureExampleSecret(repoRoot string) error {
-	examplePath := filepath.Join(repoRoot, "example.secret")
-	if _, err := os.Stat(examplePath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to access %s: %w", examplePath, err)
-	}
-
-	if err := renameio.WriteFile(examplePath, []byte(exampleSecretContent), 0o600); err != nil {
-		return fmt.Errorf("failed to create example secret %s: %w", examplePath, err)
-	}
-
-	slog.Info("created example secret", slog.String("path", examplePath))
-	return nil
-}
-
-func EnsureSesamReadme(repoRoot string) error {
-	readmePath := filepath.Join(repoRoot, ".sesam", "README.md")
+func EnsureSesamReadme(sesamDir string) error {
+	readmePath := filepath.Join(sesamDir, ".sesam", "README.md")
 	if _, err := os.Stat(readmePath); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
@@ -409,18 +384,17 @@ func EnsureSesamReadme(repoRoot string) error {
 	return nil
 }
 
-func StageInitFiles(repoRoot, configPath string) error {
+func StageInitFiles(sesamDir, configPath string) error {
 	files := []string{
-		filepath.Join(repoRoot, ".sesam"),
+		filepath.Join(sesamDir, ".sesam"),
 		configPath,
-		filepath.Join(repoRoot, ".gitignore"),
-		filepath.Join(repoRoot, ".gitattributes"),
-		filepath.Join(repoRoot, "example.secret"),
+		filepath.Join(sesamDir, ".gitignore"),
+		filepath.Join(sesamDir, ".gitattributes"),
 	}
 
 	args := append([]string{"add"}, files...)
 	cmd := exec.Command("git", args...)
-	cmd.Dir = repoRoot
+	cmd.Dir = sesamDir
 
 	if output, err := cmd.CombinedOutput(); err != nil {
 		slog.Warn("failed to stage init files automatically", slog.Any("error", err), slog.String("output", strings.TrimSpace(string(output))))

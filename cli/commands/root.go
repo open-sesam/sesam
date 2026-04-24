@@ -31,8 +31,8 @@ func HandleUndo(_ context.Context, _ *cli.Command) error {
 	return handleStub("undo")
 }
 
-// HandleList lists users, groups, and access bindings.
-func HandleList(_ context.Context, _ *cli.Command) error {
+// HandleListUsers lists users, groups, and access bindings.
+func HandleListUsers(_ context.Context, _ *cli.Command) error {
 	return handleStub("list")
 }
 

@@ -16,16 +16,16 @@ import (
 
 // HandleInit bootstraps sesam metadata in a git repository.
 func HandleInit(ctx context.Context, cmd *cli.Command) error {
-	repoRoot, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}
 
-	if err := repo.IsInitialized(repoRoot); err != nil {
+	if err := repo.IsInitialized(sesamDir); err != nil {
 		return err
 	}
 
-	if err := repo.EnsureInitPathChoice(repoRoot, cmd.Bool("use-root")); err != nil {
+	if err := repo.EnsureInitPathChoice(sesamDir, cmd.Bool("use-root")); err != nil {
 		return err
 	}
 
@@ -43,24 +43,24 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	_, recipientText, err := resolveInitialRecipient(ctx, cmd.String("recipient"), repoRoot, identities)
+	_, recipientText, err := resolveInitialRecipient(ctx, cmd.String("recipient"), sesamDir, identities)
 	if err != nil {
 		return err
 	}
 
-	if err := repo.EnsureSesamDirs(repoRoot); err != nil {
+	if err := repo.EnsureSesamDirs(sesamDir); err != nil {
 		return err
 	}
 
-	return withRepoLock(repoRoot, 5*time.Second, func() error {
-		configPath := repo.ResolveConfigPath(repoRoot, cmd.String("config"), cmd.IsSet("config"))
+	return withRepoLock(sesamDir, 5*time.Second, func() error {
+		configPath := repo.ResolveConfigPath(sesamDir, cmd.String("config"), cmd.IsSet("config"))
 		if err := repo.CreateInitialConfig(configPath, initialUser, recipientText); err != nil {
 			return err
 		}
 
 		mgr, err := buildInitialSecretManager(
 			ctx,
-			repoRoot,
+			sesamDir,
 			initialUser,
 			recipientText,
 			identities,
@@ -72,41 +72,37 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 			_ = mgr.AuditLog.Close()
 		}()
 
-		if err := repo.EnsureDefaultGitIgnore(repoRoot); err != nil {
+		if err := repo.EnsureDefaultGitIgnore(sesamDir); err != nil {
 			return err
 		}
 
-		if err := repo.EnsureDefaultGitAttributes(repoRoot); err != nil {
+		if err := repo.EnsureDefaultGitAttributes(sesamDir); err != nil {
 			return err
 		}
 
-		if err := repo.EnsureVerifyHook(repoRoot); err != nil {
+		if err := repo.EnsureVerifyHook(sesamDir); err != nil {
 			return err
 		}
 
-		if err := repo.EnsureGitSesamShim(repoRoot); err != nil {
+		if err := repo.EnsureGitSesamShim(sesamDir); err != nil {
 			return err
 		}
 
-		if err := repo.EnsureExampleSecret(repoRoot); err != nil {
+		if err := repo.EnsureSesamReadme(sesamDir); err != nil {
 			return err
 		}
 
-		if err := repo.WithWorkingDir(repoRoot, func() error {
-			return mgr.AddSecret("example.secret", []string{"admin"})
+		if err := repo.WithWorkingDir(sesamDir, func() error {
+			return mgr.AddSecret(".sesam/README.md", []string{"admin"})
 		}); err != nil {
-			return fmt.Errorf("failed to bootstrap example secret: %w", err)
+			return fmt.Errorf("failed to bootstrap readme secret: %w", err)
 		}
 
-		if err := repo.EnsureSesamReadme(repoRoot); err != nil {
+		if err := repo.EnsureTmpKeepFile(sesamDir); err != nil {
 			return err
 		}
 
-		if err := repo.EnsureTmpKeepFile(repoRoot); err != nil {
-			return err
-		}
-
-		if err := repo.StageInitFiles(repoRoot, configPath); err != nil {
+		if err := repo.StageInitFiles(sesamDir, configPath); err != nil {
 			return err
 		}
 
@@ -115,12 +111,12 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 }
 
 // resolveInitialRecipient determines the initial admin recipient key.
-func resolveInitialRecipient(ctx context.Context, recipientArg string, repoRoot string, identities core.Identities) (age.Recipient, string, error) {
+func resolveInitialRecipient(ctx context.Context, recipientArg string, sesamDir string, identities core.Identities) (age.Recipient, string, error) {
 	recipientArg = strings.TrimSpace(recipientArg)
 
 	var resolved core.Recipients
 	if recipientArg != "" {
-		rawRecipient, err := core.ResolveRecipient(ctx, repoRoot, recipientArg, core.CacheModeReadWrite)
+		rawRecipient, err := core.ResolveRecipient(ctx, sesamDir, recipientArg, core.CacheModeReadWrite)
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to resolve recipient %q: %w", recipientArg, err)
 		}
@@ -185,12 +181,12 @@ func identityCanDecryptRecipient(identity *core.Identity, recipient age.Recipien
 // buildInitialSecretManager bootstraps audit/keyring state for init-time actions.
 func buildInitialSecretManager(
 	ctx context.Context,
-	repoRoot string,
+	sesamDir string,
 	initialUser string,
 	recipientText string,
 	identities core.Identities,
 ) (*core.SecretManager, error) {
-	signer, auditLog, err := core.InitAdminUser(ctx, repoRoot, initialUser, recipientText)
+	signer, auditLog, err := core.InitAdminUser(ctx, sesamDir, initialUser, recipientText)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize admin user: %w", err)
 	}
@@ -202,7 +198,7 @@ func buildInitialSecretManager(
 	}
 
 	mgr, err := core.BuildSecretManager(
-		repoRoot,
+		sesamDir,
 		identities,
 		signer,
 		keyring,

@@ -39,12 +39,13 @@ config:
       - another_user
 
 secrets:
-  # Starter example secret created by sesam init.
-  # You can delete this after first successful seal/reveal.
+  # Starter secret created by sesam init.
+  # This ensures audit/config state starts in sync.
   - type: password
-    path: example.secret
+    path: .sesam/README.md
     access:
       - admin
+  # Add your own secret entries below.
   # You can include more yml files to allow nesting.
   # It is often clearer to specify secrets per directory.
   # You may not repeat the "config" key in sub files though.

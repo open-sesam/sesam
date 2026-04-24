@@ -86,7 +86,7 @@ func writeIdentityFile(t *testing.T, dir string) string {
 	return identityPath
 }
 
-func TestMainInitSealRevealRoundTrip(t *testing.T) {
+func TestMainInitSealRevealWithoutTrackedSecrets(t *testing.T) {
 	repoRoot := makeTempDir(t)
 	initGitRepo(t, repoRoot)
 
@@ -111,12 +111,6 @@ func TestMainInitSealRevealRoundTrip(t *testing.T) {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	original := "super-secret\nanother super important secret\n"
-	secretPath := filepath.Join(repoRoot, "example.secret")
-	if err := os.WriteFile(secretPath, []byte(original), 0o600); err != nil {
-		t.Fatalf("failed to write plaintext secret: %v", err)
-	}
-
 	err = Main([]string{
 		"sesam",
 		"seal",
@@ -125,13 +119,6 @@ func TestMainInitSealRevealRoundTrip(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("seal failed: %v", err)
-	}
-
-	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "objects", "example.secret.age"))
-	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "objects", "example.secret.sig.json"))
-
-	if err := os.Remove(secretPath); err != nil {
-		t.Fatalf("failed to remove plaintext secret: %v", err)
 	}
 
 	err = Main([]string{
@@ -144,12 +131,5 @@ func TestMainInitSealRevealRoundTrip(t *testing.T) {
 		t.Fatalf("reveal failed: %v", err)
 	}
 
-	revealed, err := os.ReadFile(secretPath)
-	if err != nil {
-		t.Fatalf("failed to read revealed secret: %v", err)
-	}
-
-	if string(revealed) != original {
-		t.Fatalf("revealed secret mismatch\nwant: %q\n got: %q", original, string(revealed))
-	}
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "README.md"))
 }

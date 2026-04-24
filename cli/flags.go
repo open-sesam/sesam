@@ -38,7 +38,7 @@ var flagsInit = []cli.Flag{
 	},
 	&cli.BoolFlag{
 		Name:  "use-root",
-		Usage: "Allow init in a non-empty repository path",
+		Usage: "Initialize in the selected directory even when it already contains many files",
 	},
 }
 

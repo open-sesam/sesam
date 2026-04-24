@@ -1,10 +1,10 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -47,7 +47,6 @@ func TestMainInitCreatesStructureInGitRoot(t *testing.T) {
 	assertPathExists(t, filepath.Join(repoRoot, "sesam.yml"))
 	assertPathExists(t, filepath.Join(repoRoot, ".gitignore"))
 	assertPathExists(t, filepath.Join(repoRoot, ".gitattributes"))
-	assertPathExists(t, filepath.Join(repoRoot, "example.secret"))
 	assertPathExists(t, filepath.Join(repoRoot, ".git", "hooks", "pre-commit"))
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "audit", "init"))
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "audit", "log.jsonl"))
@@ -138,16 +137,11 @@ func TestMainInitFailsWhenAlreadyInitialized(t *testing.T) {
 	}
 }
 
-func TestMainInitRequiresUseRootForBusyRepoPath(t *testing.T) {
+func TestMainInitFailsForBusyRepoWithoutUseRoot(t *testing.T) {
 	repoRoot := makeTempDir(t)
 	initGitRepo(t, repoRoot)
 
-	for idx := 0; idx < 30; idx++ {
-		path := filepath.Join(repoRoot, "busy-"+strconv.Itoa(idx)+".txt")
-		if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
-			t.Fatalf("failed to write busy file: %v", err)
-		}
-	}
+	createFiles(t, repoRoot, 30)
 
 	id, err := age.GenerateX25519Identity()
 	if err != nil {
@@ -164,27 +158,48 @@ func TestMainInitRequiresUseRootForBusyRepoPath(t *testing.T) {
 		"init",
 		"--sesam-dir", repoRoot,
 		"--user", "alice",
+		"--recipient", id.Recipient().String(),
 		"--identity", identityPath,
 	})
 	if err == nil {
-		t.Fatal("expected init to fail for busy repo path without --use-root")
+		t.Fatal("expected init to fail for busy repository")
 	}
 
 	if !strings.Contains(err.Error(), "--use-root") {
-		t.Fatalf("expected use-root guidance, got: %v", err)
+		t.Fatalf("expected error to suggest --use-root, got: %v", err)
+	}
+}
+
+func TestMainInitAllowsBusyRepoWithUseRoot(t *testing.T) {
+	repoRoot := makeTempDir(t)
+	initGitRepo(t, repoRoot)
+
+	createFiles(t, repoRoot, 30)
+
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatalf("failed to generate identity: %v", err)
+	}
+
+	identityPath := filepath.Join(repoRoot, "identity.txt")
+	if err := os.WriteFile(identityPath, []byte(id.String()+"\n"), 0o600); err != nil {
+		t.Fatalf("failed to write identity: %v", err)
 	}
 
 	err = Main([]string{
 		"sesam",
 		"init",
 		"--sesam-dir", repoRoot,
-		"--user", "alice",
-		"--identity", identityPath,
 		"--use-root",
+		"--user", "alice",
+		"--recipient", id.Recipient().String(),
+		"--identity", identityPath,
 	})
 	if err != nil {
 		t.Fatalf("expected init to succeed with --use-root, got: %v", err)
 	}
+
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam"))
 }
 
 func assertPathExists(t *testing.T, path string) {
@@ -234,4 +249,19 @@ func makeTempDir(t *testing.T) string {
 	})
 
 	return dir
+}
+
+func createFiles(t *testing.T, root string, count int) {
+	t.Helper()
+
+	for i := 0; i < count; i++ {
+		path := filepath.Join(root, "busy", "dir", fmt.Sprintf("file-%02d.txt", i))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatalf("failed to create busy repo dir: %v", err)
+		}
+
+		if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
+			t.Fatalf("failed to create busy repo file %s: %v", path, err)
+		}
+	}
 }

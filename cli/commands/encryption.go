@@ -55,7 +55,7 @@ func HandleReveal(_ context.Context, cmd *cli.Command) error {
 }
 
 // buildRegularSecretManager initializes runtime state for non-init operations.
-func buildRegularSecretManager(repoDir, identityPath string) (*core.SecretManager, error) {
+func buildRegularSecretManager(sesamDir, identityPath string) (*core.SecretManager, error) {
 	identities, err := loadIdentities(identityPath, "sesam.identity.runtime")
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func buildRegularSecretManager(repoDir, identityPath string) (*core.SecretManage
 
 	keyring := core.EmptyKeyring()
 
-	auditLog, err := core.LoadAuditLog(repoDir)
+	auditLog, err := core.LoadAuditLog(sesamDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load audit log: %w", err)
 	}
@@ -83,13 +83,13 @@ func buildRegularSecretManager(repoDir, identityPath string) (*core.SecretManage
 
 	slog.Info("resolved signer identity", slog.String("user", whoami))
 
-	signer, err := core.LoadSignKey(repoDir, whoami, signIdentity)
+	signer, err := core.LoadSignKey(sesamDir, whoami, signIdentity)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
 	}
 
 	mgr, err := core.BuildSecretManager(
-		repoDir,
+		sesamDir,
 		identities,
 		signer,
 		keyring,

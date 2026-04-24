@@ -31,6 +31,8 @@ func verifyInitFileUnchanged(repoDir string) error {
 		return fmt.Errorf("failed to open worktree: %w", err)
 	}
 
+	// Keep this absolute so filepath.Rel() below behaves consistently when
+	// repoDir was passed as a relative path (for example ".").
 	absRepoDir, err := filepath.Abs(repoDir)
 	if err != nil {
 		return fmt.Errorf("failed to resolve repoDir: %w", err)

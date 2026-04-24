@@ -79,14 +79,14 @@ func HandleKill(_ context.Context, cmd *cli.Command) error {
 	})
 }
 
-func buildRegularUserManager(repoDir, identityPath string) (*core.UserManager, *core.AuditLog, error) {
+func buildRegularUserManager(sesamDir, identityPath string) (*core.UserManager, *core.AuditLog, error) {
 	identities, err := loadIdentities(identityPath, "sesam.identity.runtime")
 	if err != nil {
 		return nil, nil, err
 	}
 
 	keyring := core.EmptyKeyring()
-	auditLog, err := core.LoadAuditLog(repoDir)
+	auditLog, err := core.LoadAuditLog(sesamDir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load audit log: %w", err)
 	}
@@ -103,13 +103,13 @@ func buildRegularUserManager(repoDir, identityPath string) (*core.UserManager, *
 		return nil, nil, fmt.Errorf("failed to map identity to user: %w", err)
 	}
 
-	signer, err := core.LoadSignKey(repoDir, whoami, signIdentity)
+	signer, err := core.LoadSignKey(sesamDir, whoami, signIdentity)
 	if err != nil {
 		_ = auditLog.Close()
 		return nil, nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
 	}
 
-	mgr, err := core.BuildUserManager(repoDir, signer, auditLog, vstate)
+	mgr, err := core.BuildUserManager(sesamDir, signer, auditLog, vstate)
 	if err != nil {
 		_ = auditLog.Close()
 		return nil, nil, fmt.Errorf("failed to build user manager: %w", err)

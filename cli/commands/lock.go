@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-func withRepoLock(repoRoot string, timeout time.Duration, fn func() error) error {
-	lockPath := filepath.Join(repoRoot, ".sesam", "lock")
+func withRepoLock(sesamDir string, timeout time.Duration, fn func() error) error {
+	lockPath := filepath.Join(sesamDir, ".sesam", "lock")
 	lockDir := filepath.Dir(lockPath)
 
 	if _, err := os.Stat(lockDir); err != nil {
