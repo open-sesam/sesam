@@ -25,16 +25,16 @@ config:
       # Forge-ids and links (e.g. to keyservers) are downloaded once by the admin and stored in the repo (under .sesam/keys/).
       # They are monitored on user or group changes, whenever the link/forge contents change, we will emit
       # a warning and the admin has to check whether that link is still valid.
-      key: github:sahib
+      pub: github:sahib
     - name: s.gruenewald@germanbionic.com
       desc: Sören Grünewald
-      key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN5VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj sören@dahoam
+      pub: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN5VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj sören@dahoam
     - name: a.bablees@germanbionic.com
       desc: Adel Bablees
-      key: https://adel.com/key.txt
+      pub: https://adel.com/key.txt
     - name: m.alice@germanbionic.com
-      desc: Im Evil
-      key: file://some/path/key.txt
+      desc: Im Eve-Ill
+      pub: file://some/path/key.txt
 
   groups:
     admin:
@@ -53,7 +53,6 @@ secrets:
   - include: platform/secrets.yml
   - include: ssh/secrets.yml
   - type: password
-    name: some_password # optional, for display path is used otherwise.
     path: some_password.txt
     # Optional:
     access:

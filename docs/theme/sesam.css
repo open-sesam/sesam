@@ -1,0 +1,383 @@
+/* ==========================================================================
+   Sesam theme — emerald, clay, gold (inspired by the Ali Baba logo)
+   ========================================================================== */
+
+/* --- Fonts --- */
+@import url("https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600;700&family=Rubik:ital,wght@0,300..900;1,300..900&display=swap");
+
+/* --- Palette tokens ---
+   Declare both light and dark tokens, then set active tokens to the light
+   variants by default. Selectors target all mdBook theme classes so our
+   tokens always win over the stock stylesheet. */
+:root,
+html.light,
+html.rust,
+html.navy,
+html.coal,
+html.ayu {
+    /* Light palette */
+    --l-emerald:       #2d6e3f;
+    --l-emerald-hover: #3a7d4e;
+    --l-emerald-muted: #5a9e6e;
+    --l-gold:          #b8963e;
+    --l-gold-light:    #d4b56a;
+    --l-clay:          #c4a265;
+    --l-orange:        #d4880c;
+    --l-page-bg:       #f8f5ef;
+    --l-sidebar-bg:    #f4f0e8;
+    --l-surface:       #f4f1eb;
+    --l-surface-alt:   #f0ebe0;
+    --l-border-subtle: #ddd5c5;
+    --l-border-faint:  #e5dfd2;
+    --l-divider:       #e5ddc9;
+    --l-text:          #2c2c2c;
+    --l-text-muted:    #9a9a9a;
+    --l-pod-lattice:   url("../pod-lattice.svg");
+    --l-arabic:        url("../arabic-pattern.svg");
+    --l-logo-inner:    #f8f5ef;
+
+    /* Dark palette */
+    --d-emerald:       #6fc088;
+    --d-emerald-hover: #8cd4a3;
+    --d-emerald-muted: #4a9566;
+    --d-gold:          #d4b56a;
+    --d-gold-light:    #e8cd88;
+    --d-clay:          #b8955c;
+    --d-orange:        #e8a040;
+    --d-page-bg:       #1e1c17;
+    --d-sidebar-bg:    #16140f;
+    --d-surface:       #272319;
+    --d-surface-alt:   #2c2820;
+    --d-border-subtle: #3d3628;
+    --d-border-faint:  #332d22;
+    --d-divider:       #2e2a20;
+    --d-text:          #e8e3d8;
+    --d-text-muted:    #8a8476;
+    --d-pod-lattice:   url("../pod-lattice-dark.svg");
+    --d-arabic:        url("../arabic-pattern-dark.svg");
+    --d-logo-inner:    #1e1c17;
+
+    /* Active tokens (default = light) */
+    --sesam-emerald:       var(--l-emerald);
+    --sesam-emerald-hover: var(--l-emerald-hover);
+    --sesam-emerald-muted: var(--l-emerald-muted);
+    --sesam-gold:          var(--l-gold);
+    --sesam-gold-light:    var(--l-gold-light);
+    --sesam-clay:          var(--l-clay);
+    --sesam-orange:        var(--l-orange);
+    --sesam-page-bg:       var(--l-page-bg);
+    --sesam-sidebar-bg:    var(--l-sidebar-bg);
+    --sesam-surface:       var(--l-surface);
+    --sesam-surface-alt:   var(--l-surface-alt);
+    --sesam-border-subtle: var(--l-border-subtle);
+    --sesam-border-faint:  var(--l-border-faint);
+    --sesam-divider:       var(--l-divider);
+    --sesam-text:          var(--l-text);
+    --sesam-text-muted:    var(--l-text-muted);
+    --pod-lattice:         var(--l-pod-lattice);
+    --arabic-pattern:      var(--l-arabic);
+    --logo-inner-bg:       var(--l-logo-inner);
+
+    /* mdBook variable mappings */
+    --sidebar-bg:             var(--sesam-sidebar-bg);
+    --sidebar-fg:             var(--sesam-text);
+    --sidebar-non-existant:   var(--sesam-text-muted);
+    --sidebar-active:         var(--sesam-emerald);
+    --sidebar-spacer:         var(--sesam-divider);
+    --search-mark-bg:         var(--sesam-gold-light);
+    --bg:                     var(--sesam-page-bg);
+    --fg:                     var(--sesam-text);
+    --links:                  var(--sesam-emerald);
+    --inline-code-color:      var(--sesam-text);
+    --table-border-color:     var(--sesam-border-subtle);
+    --table-header-bg:        var(--sesam-surface-alt);
+    --table-alternate-bg:     var(--sesam-page-bg);
+    --quote-bg:               var(--sesam-surface);
+    --quote-border:           var(--sesam-clay);
+    --scrollbar:              var(--sesam-clay);
+    --icons:                  var(--sesam-emerald);
+    --icons-hover:            var(--sesam-gold);
+    --theme-popup-bg:         var(--sesam-sidebar-bg);
+    --theme-popup-border:     var(--sesam-border-subtle);
+    --theme-hover:            var(--sesam-surface-alt);
+}
+
+/* --- Activate dark palette ---
+   Triggered by:
+   - Explicit user choice via html[data-theme="dark"] (set by theme-switch.js)
+   - System preference when no explicit choice has been made
+   The :not([data-theme="light"]) guard prevents the media query from
+   overriding a user who explicitly picked light. */
+html[data-theme="dark"],
+html[data-theme="dark"].light,
+html[data-theme="dark"].rust,
+html[data-theme="dark"].navy,
+html[data-theme="dark"].coal,
+html[data-theme="dark"].ayu {
+    --sesam-emerald:       var(--d-emerald);
+    --sesam-emerald-hover: var(--d-emerald-hover);
+    --sesam-emerald-muted: var(--d-emerald-muted);
+    --sesam-gold:          var(--d-gold);
+    --sesam-gold-light:    var(--d-gold-light);
+    --sesam-clay:          var(--d-clay);
+    --sesam-orange:        var(--d-orange);
+    --sesam-page-bg:       var(--d-page-bg);
+    --sesam-sidebar-bg:    var(--d-sidebar-bg);
+    --sesam-surface:       var(--d-surface);
+    --sesam-surface-alt:   var(--d-surface-alt);
+    --sesam-border-subtle: var(--d-border-subtle);
+    --sesam-border-faint:  var(--d-border-faint);
+    --sesam-divider:       var(--d-divider);
+    --sesam-text:          var(--d-text);
+    --sesam-text-muted:    var(--d-text-muted);
+    --pod-lattice:         var(--d-pod-lattice);
+    --arabic-pattern:      var(--d-arabic);
+    --logo-inner-bg:       var(--d-logo-inner);
+}
+
+@media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]):not([data-theme="dark"]),
+    html.light:not([data-theme="light"]):not([data-theme="dark"]),
+    html.rust:not([data-theme="light"]):not([data-theme="dark"]),
+    html.navy:not([data-theme="light"]):not([data-theme="dark"]),
+    html.coal:not([data-theme="light"]):not([data-theme="dark"]),
+    html.ayu:not([data-theme="light"]):not([data-theme="dark"]) {
+        --sesam-emerald:       var(--d-emerald);
+        --sesam-emerald-hover: var(--d-emerald-hover);
+        --sesam-emerald-muted: var(--d-emerald-muted);
+        --sesam-gold:          var(--d-gold);
+        --sesam-gold-light:    var(--d-gold-light);
+        --sesam-clay:          var(--d-clay);
+        --sesam-orange:        var(--d-orange);
+        --sesam-page-bg:       var(--d-page-bg);
+        --sesam-sidebar-bg:    var(--d-sidebar-bg);
+        --sesam-surface:       var(--d-surface);
+        --sesam-surface-alt:   var(--d-surface-alt);
+        --sesam-border-subtle: var(--d-border-subtle);
+        --sesam-border-faint:  var(--d-border-faint);
+        --sesam-divider:       var(--d-divider);
+        --sesam-text:          var(--d-text);
+        --sesam-text-muted:    var(--d-text-muted);
+        --pod-lattice:         var(--d-pod-lattice);
+        --arabic-pattern:      var(--d-arabic);
+        --logo-inner-bg:       var(--d-logo-inner);
+    }
+}
+
+/* --- Typography --- */
+
+body {
+    font-family: "Rubik", sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: "Josefin Sans", sans-serif;
+}
+
+/* --- Sidebar --- */
+
+.sidebar {
+    background-image: var(--pod-lattice);
+    background-repeat: repeat;
+    background-size: 24px 28px;
+    border-right: 3px solid var(--sesam-emerald);
+}
+
+.sidebar .sidebar-scrollbox {
+    padding-top: 0;
+    font-family: "Josefin Sans", sans-serif;
+    font-size: 1.6rem;
+    font-weight: 600;
+}
+
+.sidebar-logo {
+    display: block;
+    width: 130px;
+    height: 130px;
+    margin: 1.2rem auto 0.5rem;
+    background:
+        url("../sesam_bg.png") center / 80% no-repeat,
+        url("../arabic-pattern.svg") center / 60px 60px repeat,
+        var(--logo-inner-bg);
+    border-radius: 50%;
+    border: 4px solid var(--sesam-emerald);
+    box-shadow:
+        0 0 0 2px var(--sesam-gold),
+        0 0 0 8px rgba(45, 110, 63, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    transition: box-shadow 0.15s ease;
+}
+.sidebar-logo:hover {
+    box-shadow:
+        0 0 0 2px var(--sesam-gold),
+        0 0 0 8px rgba(45, 110, 63, 0.35),
+        0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+.sidebar .sidebar-scrollbox a:hover {
+    color: var(--sesam-emerald);
+}
+
+.sidebar .sidebar-scrollbox .chapter li.active > a {
+    color: var(--sesam-emerald);
+    font-weight: 700;
+}
+
+.sidebar .sidebar-scrollbox .chapter li.part-title {
+    font-size: 1.15em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--sesam-emerald);
+    margin-top: 1.2em;
+    border-bottom: 1px solid color-mix(in srgb, var(--sesam-emerald) 25%, transparent);
+    padding-bottom: 0.25em;
+}
+
+.sidebar .sidebar-scrollbox .chapter li.chapter-item {
+    border-left: 2px solid transparent;
+    transition: border-color 0.15s ease;
+}
+.sidebar .sidebar-scrollbox .chapter li.chapter-item:hover {
+    border-left-color: var(--sesam-gold);
+}
+.sidebar .sidebar-scrollbox .chapter li.active {
+    border-left-color: var(--sesam-emerald);
+}
+
+/* --- Navigation arrows --- */
+
+.nav-chapters {
+    color: var(--sesam-emerald);
+    font-size: 2em;
+    transition: color 0.15s ease;
+}
+.nav-chapters:hover {
+    color: var(--sesam-gold) !important;
+    background: transparent !important;
+}
+
+/* --- Arabic geometric background pattern --- */
+
+.page-wrapper .page {
+    background-image: var(--arabic-pattern);
+    background-repeat: repeat;
+    background-size: 80px 80px;
+}
+
+/* --- Headings --- */
+
+.content main h1 {
+    color: var(--sesam-emerald);
+    border-bottom: 2px solid var(--sesam-gold);
+    padding-bottom: 0.3em;
+}
+
+.content main h2 {
+    color: var(--sesam-emerald);
+    border-bottom: 1px solid var(--sesam-border-subtle);
+    padding-bottom: 0.2em;
+}
+
+.content main h3,
+.content main h4 {
+    color: var(--sesam-emerald-hover);
+}
+
+/* --- Code blocks --- */
+
+code.hljs {
+    background-color: var(--sesam-surface) !important;
+    border: 1px solid var(--sesam-border-faint);
+    border-radius: 4px;
+}
+
+:not(pre) > code {
+    background-color: var(--sesam-surface-alt);
+    border: 1px solid var(--sesam-border-faint);
+    border-radius: 3px;
+    padding: 0.1em 0.3em;
+}
+
+/* --- Admonish box accents --- */
+
+:is(.admonition.admonish-tip) {
+    border-color: var(--sesam-gold);
+}
+:is(.admonition.admonish-tip) > :is(.admonition-title, summary.admonition-title) {
+    background-color: color-mix(in srgb, var(--sesam-gold) 15%, transparent);
+}
+:is(.admonition.admonish-tip) > :is(.admonition-title, summary.admonition-title)::before {
+    background-color: var(--sesam-gold);
+}
+
+:is(.admonition.admonish-info) {
+    border-color: var(--sesam-emerald);
+}
+:is(.admonition.admonish-info) > :is(.admonition-title, summary.admonition-title) {
+    background-color: color-mix(in srgb, var(--sesam-emerald) 12%, transparent);
+}
+:is(.admonition.admonish-info) > :is(.admonition-title, summary.admonition-title)::before {
+    background-color: var(--sesam-emerald);
+}
+
+:is(.admonition.admonish-warning) {
+    border-color: var(--sesam-orange);
+}
+:is(.admonition.admonish-warning) > :is(.admonition-title, summary.admonition-title) {
+    background-color: color-mix(in srgb, var(--sesam-orange) 15%, transparent);
+}
+:is(.admonition.admonish-warning) > :is(.admonition-title, summary.admonition-title)::before {
+    background-color: var(--sesam-orange);
+}
+
+:is(.admonition.admonish-note) {
+    border-color: var(--sesam-emerald-muted);
+}
+:is(.admonition.admonish-note) > :is(.admonition-title, summary.admonition-title) {
+    background-color: color-mix(in srgb, var(--sesam-emerald-muted) 12%, transparent);
+}
+:is(.admonition.admonish-note) > :is(.admonition-title, summary.admonition-title)::before {
+    background-color: var(--sesam-emerald-muted);
+}
+
+/* --- Pagetoc --- */
+
+.pagetoc a:hover,
+.pagetoc a.active {
+    background: transparent !important;
+    color: var(--sesam-emerald) !important;
+    border-left-color: var(--sesam-gold) !important;
+    font-weight: 600;
+}
+.pagetoc a {
+    border-left: 2px solid var(--sesam-border-subtle) !important;
+}
+
+/* --- Theme picker (Auto/Light/Dark) --- */
+
+#theme-list .theme-active {
+    color: var(--sesam-emerald);
+    font-weight: 700;
+}
+#theme-list .theme-active::before {
+    content: "✓ ";
+}
+
+/* --- Search focus --- */
+
+#searchbar:focus {
+    border-color: var(--sesam-emerald);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--sesam-emerald) 25%, transparent);
+}
+
+/* --- Scrollbar --- */
+
+::-webkit-scrollbar-thumb {
+    background-color: var(--sesam-clay);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background-color: var(--sesam-gold);
+}
