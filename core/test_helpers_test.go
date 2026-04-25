@@ -69,19 +69,19 @@ func (tu *testUser) DetailUserTell(groups []string) DetailUserTell {
 // testRepo creates a temp dir with all required .sesam subdirectories.
 func testRepo(t *testing.T) string {
 	t.Helper()
-	repoDir := t.TempDir()
+	sesamDir := t.TempDir()
 
 	for _, dir := range []string{
-		filepath.Join(repoDir, ".sesam", "objects"),
-		filepath.Join(repoDir, ".sesam", "tmp"),
-		filepath.Join(repoDir, ".sesam", "audit"),
+		filepath.Join(sesamDir, ".sesam", "objects"),
+		filepath.Join(sesamDir, ".sesam", "tmp"),
+		filepath.Join(sesamDir, ".sesam", "audit"),
 	} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	return repoDir
+	return sesamDir
 }
 
 // testKeyring creates a keyring populated with the given users.
@@ -97,10 +97,10 @@ func testKeyring(t *testing.T, users ...*testUser) *MemoryKeyring {
 }
 
 // initAuditLog creates a fresh audit log with the given user as admin.
-func initAuditLog(t *testing.T, repoDir string, admin *testUser) *AuditLog {
+func initAuditLog(t *testing.T, sesamDir string, admin *testUser) *AuditLog {
 	t.Helper()
 
-	al, err := InitAuditLog(repoDir, admin.Signer, admin.DetailUserTell([]string{"admin"}))
+	al, err := InitAuditLog(sesamDir, admin.Signer, admin.DetailUserTell([]string{"admin"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,9 +109,9 @@ func initAuditLog(t *testing.T, repoDir string, admin *testUser) *AuditLog {
 }
 
 // writeSecret creates a plaintext file at revealedPath inside the repo.
-func writeSecret(t *testing.T, repoDir, revealedPath, content string) {
+func writeSecret(t *testing.T, sesamDir, revealedPath, content string) {
 	t.Helper()
-	fullPath := filepath.Join(repoDir, revealedPath)
+	fullPath := filepath.Join(sesamDir, revealedPath)
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -124,14 +124,14 @@ func writeSecret(t *testing.T, repoDir, revealedPath, content string) {
 // testGitRepo creates a temp dir initialized as a git repo with .sesam subdirs.
 func testGitRepo(t *testing.T) (string, *git.Repository) {
 	t.Helper()
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 
-	repo, err := git.PlainInit(repoDir, false)
+	repo, err := git.PlainInit(sesamDir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	return repoDir, repo
+	return sesamDir, repo
 }
 
 // gitCommitAll stages all files and commits them.
@@ -161,9 +161,9 @@ func gitCommitAll(t *testing.T, repo *git.Repository, msg string) {
 // testSecretManagerFull creates a SecretManager backed by a full audit log and verified state.
 func testSecretManagerFull(t *testing.T) *SecretManager {
 	t.Helper()
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	// Add a secret to the audit log.
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
@@ -183,7 +183,7 @@ func testSecretManagerFull(t *testing.T) *SecretManager {
 	}
 
 	mgr, err := BuildSecretManager(
-		repoDir,
+		sesamDir,
 		Identities{admin.Identity},
 		admin.Signer,
 		kr,

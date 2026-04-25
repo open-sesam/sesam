@@ -90,9 +90,9 @@ func TestParseDetailCorruptJSON(t *testing.T) {
 }
 
 func TestAddEntryChaining(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	bob := newTestUser(t, "bob")
 	e := newAuditEntry("admin", &DetailUserTell{
@@ -114,18 +114,18 @@ func TestAddEntryChaining(t *testing.T) {
 }
 
 func TestAddEntryFirstPrevHash(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	expected := hashData([]byte(sesamInitialHashSeed))
 	require.Equal(t, expected, al.Entries[0].PreviousHash)
 }
 
 func TestStoreAndLoad(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	bob := newTestUser(t, "bob")
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -137,7 +137,7 @@ func TestStoreAndLoad(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, al.Close())
-	loaded, err := LoadAuditLog(repoDir)
+	loaded, err := LoadAuditLog(sesamDir)
 	require.NoError(t, err)
 	require.Len(t, loaded.Entries, len(al.Entries))
 	require.Equal(t, al.InitHash, loaded.InitHash)
@@ -149,31 +149,31 @@ func TestStoreAndLoad(t *testing.T) {
 }
 
 func TestLoadMissingInitFile(t *testing.T) {
-	repoDir := testRepo(t)
-	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
+	sesamDir := testRepo(t)
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
 	require.NoError(t, os.WriteFile(logPath, []byte(`{"entries":[]}`), 0o600))
 
-	_, err := LoadAuditLog(repoDir)
+	_, err := LoadAuditLog(sesamDir)
 	require.Error(t, err)
 }
 
 func TestLoadMissingLogFile(t *testing.T) {
-	repoDir := testRepo(t)
-	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
+	sesamDir := testRepo(t)
+	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0o600))
 
-	_, err := LoadAuditLog(repoDir)
+	_, err := LoadAuditLog(sesamDir)
 	require.Error(t, err)
 }
 
 func TestLoadCorruptTrailingEntry(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 	require.NoError(t, al.Close())
 
 	// Append garbage after the valid entry to simulate a crash mid-write.
-	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o600)
 	require.NoError(t, err)
 	_, err = f.WriteString(`{"operation":"seal","changed_by":"adm`)
@@ -181,7 +181,7 @@ func TestLoadCorruptTrailingEntry(t *testing.T) {
 	require.NoError(t, f.Close())
 
 	// Should recover: truncate the partial entry and load the valid one.
-	loaded, err := LoadAuditLog(repoDir)
+	loaded, err := LoadAuditLog(sesamDir)
 	require.NoError(t, err)
 	require.Len(t, loaded.Entries, 1, "should have the one valid init entry")
 	require.NoError(t, loaded.Close())
@@ -222,11 +222,11 @@ func TestBuildRootHash(t *testing.T) {
 }
 
 func TestInitLogCreatesFiles(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
-	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
+	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 	data, err := os.ReadFile(initPath)
 	require.NoError(t, err)
 	require.Equal(t, al.InitHash, string(data))
@@ -236,9 +236,9 @@ func TestInitLogCreatesFiles(t *testing.T) {
 }
 
 func TestAuditEntrySignedHash(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	h1 := al.Entries[0].Hash()
 	h2 := al.Entries[0].Hash()
@@ -247,9 +247,9 @@ func TestAuditEntrySignedHash(t *testing.T) {
 }
 
 func TestAuditEntrySignedVerify(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 	kr := testKeyring(t, admin)
 
 	who, err := al.Entries[0].Verify(kr)
@@ -258,9 +258,9 @@ func TestAuditEntrySignedVerify(t *testing.T) {
 }
 
 func TestAuditEntrySignedVerifyTampered(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 	kr := testKeyring(t, admin)
 
 	// Tamper with the entry after signing.
@@ -270,9 +270,9 @@ func TestAuditEntrySignedVerifyTampered(t *testing.T) {
 }
 
 func TestIterate(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	var count int
 	err := al.Iterate(func(idx int, entry *auditEntrySigned) error {
@@ -284,9 +284,9 @@ func TestIterate(t *testing.T) {
 }
 
 func TestIterateStopsOnError(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{

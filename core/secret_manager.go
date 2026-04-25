@@ -10,9 +10,9 @@ import (
 // SecretManager is the high level API to manage secrets,
 // i.e. seal & reveal them and also add/remove/change secrets.
 type SecretManager struct {
-	// RepoDir is the path to sesam repository.
+	// SesamDir is the path to sesam repository.
 	// It is the dir the .sesam directory is in.
-	RepoDir string
+	SesamDir string
 
 	// Identities are the private keys the current user of sesam supplies.
 	Identities Identities
@@ -34,7 +34,7 @@ type SecretManager struct {
 
 // BuildSecretManager uses the passed facilities to build a new SecretManager
 func BuildSecretManager(
-	repoDir string,
+	sesamDir string,
 	identities Identities,
 	signer Signer,
 	keyring Keyring,
@@ -42,7 +42,7 @@ func BuildSecretManager(
 	state *VerifiedState,
 ) (*SecretManager, error) {
 	mgr := &SecretManager{
-		RepoDir:    repoDir,
+		SesamDir:   sesamDir,
 		Identities: identities,
 		Signer:     signer,
 		Keyring:    keyring,
@@ -69,11 +69,11 @@ func BuildSecretManager(
 }
 
 func (sm *SecretManager) cryptPath(path string) string {
-	return filepath.Join(sm.RepoDir, ".sesam", "objects", path+".age")
+	return filepath.Join(sm.SesamDir, ".sesam", "objects", path+".age")
 }
 
 func (sm *SecretManager) sigPath(path string) string {
-	return filepath.Join(sm.RepoDir, ".sesam", "objects", path+".sig.json")
+	return filepath.Join(sm.SesamDir, ".sesam", "objects", path+".sig.json")
 }
 
 func (sm *SecretManager) cryptWriter(path string) (*os.File, string, error) {
@@ -91,7 +91,7 @@ func (sm *SecretManager) cryptWriter(path string) (*os.File, string, error) {
 }
 
 func (sm *SecretManager) tmpDir() string {
-	return filepath.Join(sm.RepoDir, ".sesam", "tmp")
+	return filepath.Join(sm.SesamDir, ".sesam", "tmp")
 }
 
 // AddSecret adds a new secret to be managed by sesam
@@ -108,7 +108,7 @@ func (sm *SecretManager) ChangeSecretGroups(revealedPath string, groups []string
 // NOTE: right now add/change is the same operation. Later we can do different things on add/change,
 // the API is already split in case we want to go that route.
 func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string) error {
-	if err := validSecretPath(sm.RepoDir, revealedPath); err != nil {
+	if err := validSecretPath(sm.SesamDir, revealedPath); err != nil {
 		return fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
 	}
 

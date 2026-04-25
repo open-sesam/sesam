@@ -60,7 +60,7 @@ Types and interfaces go first, then implementations grouped by type.
 
 Tests in `core/` use helpers from `test_helpers_test.go`:
 - `newTestUser(t, name)` — generates all key material for a test user
-- `initAuditLog(t, repoDir, admin)` — creates a fresh audit log with one admin
+- `initAuditLog(t, sesamDir, admin)` — creates a fresh audit log with one admin
 - `testSecretManagerFull(t)` — full manager with one secret, ready for seal/reveal tests
 - `sealedSecretManager(t)` — like above but the secret is already sealed on disk
 

@@ -54,12 +54,12 @@ func (es *ed25519Signer) UserName() string {
 }
 
 // LoadSignKey will load a signer specific to a user and decrypt it via `userIdentity`
-func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error) {
+func LoadSignKey(sesamDir, user string, userIdentity age.Identity) (Signer, error) {
 	if err := validUserName(user); err != nil {
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
 
-	signKeyPath := filepath.Join(repoDir, ".sesam", "signkey", user+".age")
+	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkey", user+".age")
 
 	//nolint:gosec
 	cryptedSignPrivKeyFd, err := os.Open(signKeyPath)
@@ -101,12 +101,12 @@ func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error
 }
 
 // GenerateSignKey will generate a new ed25519 signing key only accessible to `userRecipient`
-func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer, error) {
+func GenerateSignKey(sesamDir, user string, userRecipient age.Recipient) (Signer, error) {
 	if err := validUserName(user); err != nil {
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
 
-	signKeyPath := filepath.Join(repoDir, ".sesam", "signkey", user+".age")
+	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkey", user+".age")
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate signing key %s: %w", signKeyPath, err)
@@ -142,14 +142,14 @@ func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer,
 	}, nil
 }
 
-func signaturePath(repoDir, revealedPath string) string {
-	return filepath.Join(repoDir, ".sesam", "objects", revealedPath+".sig.json")
+func signaturePath(sesamDir, revealedPath string) string {
+	return filepath.Join(sesamDir, ".sesam", "objects", revealedPath+".sig.json")
 }
 
 // ReadStoredSignature will open the signature file belonging to `revealedPath`.
 // You will get an error if it has not been sealed yet.
-func readStoredSignature(repoDir, revealedPath string) (secretSignature, error) {
-	sigPath := signaturePath(repoDir, revealedPath)
+func readStoredSignature(sesamDir, revealedPath string) (secretSignature, error) {
+	sigPath := signaturePath(sesamDir, revealedPath)
 
 	//nolint:gosec
 	sigFd, err := os.Open(sigPath)
@@ -169,8 +169,8 @@ func readStoredSignature(repoDir, revealedPath string) (secretSignature, error) 
 }
 
 // ReadAllSignatures finds all .sig.json files under .sesam/objects/ and parses them.
-func readAllSignatures(repoDir string) ([]secretSignature, error) {
-	objectsDir := filepath.Join(repoDir, ".sesam", "objects")
+func readAllSignatures(sesamDir string) ([]secretSignature, error) {
+	objectsDir := filepath.Join(sesamDir, ".sesam", "objects")
 
 	var sigs []secretSignature
 	if _, err := os.Stat(objectsDir); os.IsNotExist(err) {
