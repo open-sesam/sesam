@@ -59,7 +59,7 @@ func LoadSignKey(sesamDir, user string, userIdentity age.Identity) (Signer, erro
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
 
-	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkey", user+".age")
+	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkeys", user+".age")
 
 	//nolint:gosec
 	cryptedSignPrivKeyFd, err := os.Open(signKeyPath)
@@ -106,7 +106,7 @@ func GenerateSignKey(sesamDir, user string, userRecipient age.Recipient) (Signer
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
 
-	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkey", user+".age")
+	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkeys", user+".age")
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate signing key %s: %w", signKeyPath, err)

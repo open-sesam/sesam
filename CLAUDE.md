@@ -47,7 +47,7 @@ Ed25519 signatures use domain-tagged messages (prefix before signing/verifying):
 
 ## Key types
 
-- `Signer` / `Keyring` — signing (ed25519). One signing keypair per user, stored encrypted with their age key in `.sesam/signkey/<user>.age`.
+- `Signer` / `Keyring` — signing (ed25519). One signing keypair per user, stored encrypted with their age key in `.sesam/signkeys/<user>.age`.
 - `Identity` / `Recipient` — encryption (age/X25519). Users bring their own age keys (or SSH keys converted to age).
 - `SecretManager` — high-level seal/reveal/add/remove for secrets.
 - `UserManager` — high-level tell/kill for users.
