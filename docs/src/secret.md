@@ -87,7 +87,7 @@ config:
     - path: another_file
 ```
 
-Once done you can also add descriptions to the files in the config or do more fine-tuning with the available [config keys](/config.md).
+Once done you can also add descriptions to the files in the config or do more fine-tuning with the available [config keys](/config-ref.md).
 
 ```admonish note
 If you ever create new files in the sub directories they do not automatically get added.
