@@ -1,0 +1,55 @@
+name: Deploy docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed for mdbook-gitinfo
+
+      - name: Cache cargo binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: mdbook-${{ runner.os }}-mdbook0.4.44-admonish-pagetoc-gitinfo
+
+      - name: Install mdBook and preprocessors
+        run: |
+          command -v mdbook || cargo install mdbook@0.4.44
+          command -v mdbook-admonish || cargo install mdbook-admonish
+          command -v mdbook-pagetoc || cargo install mdbook-pagetoc
+          command -v mdbook-gitinfo || cargo install mdbook-gitinfo
+
+      - name: Build docs
+        run: |
+          cd docs
+          mdbook build
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/book
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
