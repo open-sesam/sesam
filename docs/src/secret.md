@@ -95,7 +95,7 @@ Instead you need to run `sesam add` again. This will also remove secrets that ar
 In that sense, it works a bit like `git add`.
 ```
 
-## Modifiying secrets
+## Modifying secrets
 
 Running `sesam add` will work too though, adding them is idempotent.
 It is enough to run `sesam seal` if you only modified existing secrets though.
