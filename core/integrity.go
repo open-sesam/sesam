@@ -57,7 +57,7 @@ func (ir *IntegrityReport) String() string {
 }
 
 func verifyIntegritySingleSecret(
-	repoDir string,
+	sesamDir string,
 	vs VerifiedSecret,
 	report *IntegrityReport,
 	diskAgeFiles map[string]bool,
@@ -74,7 +74,7 @@ func verifyIntegritySingleSecret(
 	defer delete(diskAgeFiles, vs.RevealedPath)
 
 	// Check .age file exists and hash matches.
-	agePath := filepath.Join(repoDir, ".sesam", "objects", vs.RevealedPath+".age")
+	agePath := filepath.Join(sesamDir, ".sesam", "objects", vs.RevealedPath+".age")
 
 	//nolint:gosec
 	ageFd, err := os.Open(agePath)
@@ -127,11 +127,11 @@ func verifyIntegritySingleSecret(
 //   - The RootHash from the latest seal matches.
 //
 // All errors are collected, not returned early.
-func VerifyIntegrity(repoDir string, state *VerifiedState, kr Keyring) *IntegrityReport {
+func VerifyIntegrity(sesamDir string, state *VerifiedState, kr Keyring) *IntegrityReport {
 	report := &IntegrityReport{}
 
 	// Read all .sig.json files from disk.
-	diskSigs, err := readAllSignatures(repoDir)
+	diskSigs, err := readAllSignatures(sesamDir)
 	if err != nil {
 		report.add("", fmt.Sprintf("failed to read signatures: %v", err))
 		return report
@@ -143,11 +143,11 @@ func VerifyIntegrity(repoDir string, state *VerifiedState, kr Keyring) *Integrit
 	}
 
 	// Collect all .age files on disk to detect extras.
-	diskAgeFiles := collectAgeFiles(repoDir)
+	diskAgeFiles := collectAgeFiles(sesamDir)
 
 	// Check every secret in the verified state.
 	for _, vs := range state.Secrets {
-		verifyIntegritySingleSecret(repoDir, vs, report, diskAgeFiles, diskSigMap, kr)
+		verifyIntegritySingleSecret(sesamDir, vs, report, diskAgeFiles, diskSigMap, kr)
 	}
 
 	// Any remaining entries are files not tracked in the state.
@@ -180,8 +180,8 @@ func VerifyIntegrity(repoDir string, state *VerifiedState, kr Keyring) *Integrit
 
 // collectAgeFiles walks .sesam/objects/ and returns a map of revealedPath -> true
 // for every .age file found.
-func collectAgeFiles(repoDir string) map[string]bool {
-	objectsDir := filepath.Join(repoDir, ".sesam", "objects")
+func collectAgeFiles(sesamDir string) map[string]bool {
+	objectsDir := filepath.Join(sesamDir, ".sesam", "objects")
 	result := make(map[string]bool)
 
 	_ = filepath.WalkDir(objectsDir, func(path string, d os.DirEntry, err error) error {

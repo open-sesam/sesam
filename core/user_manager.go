@@ -9,7 +9,7 @@ import (
 )
 
 type UserManager struct {
-	repoDir  string
+	sesamDir string
 	signer   Signer
 	log      *AuditLog
 	state    *VerifiedState
@@ -17,7 +17,7 @@ type UserManager struct {
 }
 
 func BuildUserManager(
-	repoDir string,
+	sesamDir string,
 	signer Signer,
 	log *AuditLog,
 	state *VerifiedState,
@@ -29,7 +29,7 @@ func BuildUserManager(
 	}
 
 	return &UserManager{
-		repoDir:  repoDir,
+		sesamDir: sesamDir,
 		signer:   signer,
 		log:      log,
 		state:    state,
@@ -54,13 +54,13 @@ func (um *UserManager) TellUser(
 		return fmt.Errorf("re-adding user not yet supported")
 	}
 
-	recps, err := ParseAndResolveRecipients(ctx, um.repoDir, pubKeySpecs)
+	recps, err := ParseAndResolveRecipients(ctx, um.sesamDir, pubKeySpecs)
 	if err != nil {
 		return err
 	}
 
 	newUserSigner, err := GenerateSignKey(
-		um.repoDir,
+		um.sesamDir,
 		user,
 		recps.AgeRecipients(),
 	)
@@ -97,7 +97,7 @@ func (um *UserManager) KillUsers(user string) error {
 		return err
 	}
 
-	signKeyPath := filepath.Join(um.repoDir, ".sesam", "signkey", user+".age")
+	signKeyPath := filepath.Join(um.sesamDir, ".sesam", "signkeys", user+".age")
 	if err := os.RemoveAll(signKeyPath); err != nil {
 		return err
 	}

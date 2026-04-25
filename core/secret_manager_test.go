@@ -16,7 +16,7 @@ func TestBuildSecretManager(t *testing.T) {
 
 func TestAddSecret(t *testing.T) {
 	mgr := testSecretManagerFull(t)
-	writeSecret(t, mgr.RepoDir, "secrets/new", "new-content")
+	writeSecret(t, mgr.SesamDir, "secrets/new", "new-content")
 
 	dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "secrets"), 0o700))
@@ -55,7 +55,7 @@ func TestChangeSecretGroups(t *testing.T) {
 
 func TestAddSecretEmptyGroups(t *testing.T) {
 	mgr := testSecretManagerFull(t)
-	writeSecret(t, mgr.RepoDir, "secrets/bad", "data")
+	writeSecret(t, mgr.SesamDir, "secrets/bad", "data")
 
 	err := mgr.AddSecret("secrets/bad", []string{})
 	require.Error(t, err, "empty groups should fail verification")
@@ -63,16 +63,16 @@ func TestAddSecretEmptyGroups(t *testing.T) {
 
 func TestSealAllAndRevealAll(t *testing.T) {
 	mgr := testSecretManagerFull(t)
-	writeSecret(t, mgr.RepoDir, "secrets/test", "secret-content")
+	writeSecret(t, mgr.SesamDir, "secrets/test", "secret-content")
 
 	require.NoError(t, mgr.SealAll())
 	require.FileExists(t, mgr.cryptPath("secrets/test"))
 
 	// Remove plaintext, then reveal.
-	os.Remove(filepath.Join(mgr.RepoDir, "secrets/test"))
+	os.Remove(filepath.Join(mgr.SesamDir, "secrets/test"))
 	require.NoError(t, mgr.RevealAll())
 
-	got, _ := os.ReadFile(filepath.Join(mgr.RepoDir, "secrets/test"))
+	got, _ := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/test"))
 	require.Equal(t, "secret-content", string(got))
 }
 
@@ -98,10 +98,10 @@ func sealedSecretManager(t *testing.T) *SecretManager {
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	require.NoError(t, os.Chdir(mgr.RepoDir))
+	require.NoError(t, os.Chdir(mgr.SesamDir))
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	writeSecret(t, mgr.RepoDir, "secrets/test", "secret-content")
+	writeSecret(t, mgr.SesamDir, "secrets/test", "secret-content")
 	require.NoError(t, mgr.SealAll())
 	return mgr
 }
@@ -110,7 +110,7 @@ func TestRemoveSecret(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
 	agePath := mgr.cryptPath("secrets/test")
-	sigPath := signaturePath(mgr.RepoDir, "secrets/test")
+	sigPath := signaturePath(mgr.SesamDir, "secrets/test")
 	require.FileExists(t, agePath)
 	require.FileExists(t, sigPath)
 
@@ -125,7 +125,7 @@ func TestRemoveSecret(t *testing.T) {
 	require.False(t, exists, "secret should be removed from verified state")
 
 	// Original plaintext should still exist.
-	plaintext, err := os.ReadFile(filepath.Join(mgr.RepoDir, "secrets/test"))
+	plaintext, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/test"))
 	require.NoError(t, err)
 	require.Equal(t, "secret-content", string(plaintext))
 }
@@ -148,18 +148,56 @@ func TestRemoveSecretNotSealed(t *testing.T) {
 	require.False(t, exists, "secret should be removed from verified state")
 }
 
+// Regression: RemoveSecret must call FeedEntry before touching .age/.sig.json.
+// If the audit entry is rejected (caller lacks access), the encrypted files
+// must survive — otherwise any authenticated user could corrupt the repo
+// (audit log still lists the secret while its ciphertext is gone, breaking
+// Verify / VerifyIntegrity for everyone).
+func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
+	mgr := sealedSecretManager(t) // admin manager with secrets/test sealed for "admin"
+
+	agePath := mgr.cryptPath("secrets/test")
+	sigPath := signaturePath(mgr.SesamDir, "secrets/test")
+	require.FileExists(t, agePath)
+	require.FileExists(t, sigPath)
+
+	// Add non-admin bob (in "dev") to the audit log and re-verify.
+	bob := newTestUser(t, "bob")
+	_, err := mgr.AuditLog.AddEntry(mgr.Signer, newAuditEntry("admin", &DetailUserTell{
+		User: "bob", Groups: []string{"dev"},
+		PubKeys: []string{bob.Recipient.String()}, SignPubKeys: []string{bob.SignPubKey},
+	}), nil)
+	require.NoError(t, err)
+	require.NoError(t, verify(mgr.State))
+
+	bobMgr, err := BuildSecretManager(
+		mgr.SesamDir, Identities{bob.Identity}, bob.Signer,
+		mgr.Keyring, mgr.AuditLog, mgr.State,
+	)
+	require.NoError(t, err)
+
+	// Bob has no access to the admin-only secret. FeedEntry must reject,
+	// and the on-disk files must NOT be deleted.
+	require.Error(t, bobMgr.RemoveSecret("secrets/test"))
+
+	require.FileExists(t, agePath, "ciphertext must survive rejected remove")
+	require.FileExists(t, sigPath, "signature must survive rejected remove")
+	_, exists := mgr.State.SecretExists("secrets/test")
+	require.True(t, exists, "secret must remain in verified state")
+}
+
 func TestRemoveSecretThenSealAll(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
 	// Add a second secret so SealAll still has work to do.
-	writeSecret(t, mgr.RepoDir, "secrets/other", "other-content")
+	writeSecret(t, mgr.SesamDir, "secrets/other", "other-content")
 	require.NoError(t, mgr.AddSecret("secrets/other", []string{"admin"}))
 	require.NoError(t, mgr.SealAll())
 
 	require.NoError(t, mgr.RemoveSecret("secrets/test"))
 
 	// SealAll after removal should only seal the remaining secret.
-	writeSecret(t, mgr.RepoDir, "secrets/other", "other-content")
+	writeSecret(t, mgr.SesamDir, "secrets/other", "other-content")
 	require.NoError(t, mgr.SealAll())
 
 	require.NoFileExists(t, mgr.cryptPath("secrets/test"))
@@ -167,9 +205,9 @@ func TestRemoveSecretThenSealAll(t *testing.T) {
 }
 
 func TestSealAllMultiple(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	for _, p := range []string{"secrets/a", "secrets/b"} {
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
@@ -187,7 +225,7 @@ func TestSealAllMultiple(t *testing.T) {
 	verify(state)
 
 	mgr, _ := BuildSecretManager(
-		repoDir,
+		sesamDir,
 		Identities{admin.Identity},
 		admin.Signer,
 		kr,
@@ -195,8 +233,8 @@ func TestSealAllMultiple(t *testing.T) {
 		state,
 	)
 
-	writeSecret(t, repoDir, "secrets/a", "aaa")
-	writeSecret(t, repoDir, "secrets/b", "bbb")
+	writeSecret(t, sesamDir, "secrets/a", "aaa")
+	writeSecret(t, sesamDir, "secrets/b", "bbb")
 
 	require.NoError(t, mgr.SealAll())
 

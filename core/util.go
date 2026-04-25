@@ -37,21 +37,29 @@ func ValidUserName(name string) error {
 	return validUserName(name)
 }
 
-func validSecretPath(repoDir string, revealedPath string) error {
+func validSecretPathFormat(sesamDir string, revealedPath string) error {
 	if len(revealedPath) == 0 {
 		return fmt.Errorf("empty file path not allowed: %s", revealedPath)
 	}
 
 	if revealedPath[0] == filepath.Separator {
-		return fmt.Errorf("absolute paths not allowed here: %s", revealedPath)
+		return fmt.Errorf("absolute paths not allowed in revealed path: %s", revealedPath)
 	}
 
 	if strings.Contains(revealedPath, "..") {
 		return fmt.Errorf("path may not include '..': %s", revealedPath)
 	}
 
-	if strings.HasPrefix(revealedPath, filepath.Join(repoDir, ".sesam")) {
+	if strings.HasPrefix(revealedPath, filepath.Join(sesamDir, ".sesam")) {
 		return fmt.Errorf("secret path may not live in .sesam: %s", revealedPath)
+	}
+
+	return nil
+}
+
+func validSecretPath(sesamDir string, revealedPath string) error {
+	if err := validSecretPathFormat(sesamDir, revealedPath); err != nil {
+		return err
 	}
 
 	revealedPath = filepath.Clean(revealedPath)

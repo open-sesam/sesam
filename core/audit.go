@@ -236,8 +236,8 @@ type DetailSeal struct {
 type AuditLog struct {
 	Entries []auditEntrySigned `json:"entries"`
 
-	// RepoDir is the dir in which .sesam resides.
-	RepoDir string `json:"-"`
+	// SesamDir is the dir in which .sesam resides.
+	SesamDir string `json:"-"`
 
 	// The hash from the .sesam/audit/init file.
 	// It should be the same hash as the prev_hash of the 2nd entry.
@@ -325,9 +325,9 @@ func (aes *auditEntrySigned) Verify(kr Keyring) (string, error) {
 
 // InitAuditLog initializes an empty audit log on repo init.
 // It creates the first init entry which also establishes the initial admin user.
-func InitAuditLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLog, error) {
-	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
-	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
+func InitAuditLog(sesamDir string, signer Signer, admin DetailUserTell) (*AuditLog, error) {
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
+	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 
 	if err := os.MkdirAll(filepath.Dir(initPath), 0o700); err != nil {
 		return nil, err
@@ -340,8 +340,8 @@ func InitAuditLog(repoDir string, signer Signer, admin DetailUserTell) (*AuditLo
 	}
 
 	al := &AuditLog{
-		RepoDir: repoDir,
-		fd:      fd,
+		SesamDir: sesamDir,
+		fd:       fd,
 	}
 
 	initEntry := newAuditEntry(signer.UserName(), &DetailInit{
@@ -444,9 +444,9 @@ func (al *AuditLog) Iterate(fn func(idx int, entry *auditEntrySigned) error) err
 
 // LoadAuditLog reads the audit log from disk and gives you an handle to operate on it.
 // It does NOT verify the log yet. Call Verify() for that.
-func LoadAuditLog(repoDir string) (*AuditLog, error) {
-	logPath := filepath.Join(repoDir, ".sesam", "audit", "log.jsonl")
-	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
+func LoadAuditLog(sesamDir string) (*AuditLog, error) {
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
+	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 
 	initData, err := ReadFileLimited(initPath, 256)
 	if err != nil {
@@ -454,7 +454,7 @@ func LoadAuditLog(repoDir string) (*AuditLog, error) {
 	}
 
 	al := AuditLog{
-		RepoDir:  repoDir,
+		SesamDir: sesamDir,
 		InitHash: strings.TrimSpace(string(initData)),
 	}
 

@@ -21,3 +21,17 @@
 - Research encryption (Key derivation function)
 - How will this work with user management
 - Gather ideas on how to achieve the requirements
+
+## TODOs
+
+Things this README should contain at some point:
+
+- Quick summary what is sesam is and what it is used for (and what not)
+- Installation/packaging options (link is enough)
+- Explanation on how AI was/is used (to prevent being wrongfully called ai slop)
+- Screencast/Termcast of how sesam is used as teaser.
+- Differentiation between other tools (central like Infiscal and decentral like git-secret)
+- Link to website/documentation
+- Badges for CI, go doc, etc.
+- Contributing
+- Link design

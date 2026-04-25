@@ -24,9 +24,9 @@ func verifyStateFail(t *testing.T, al *AuditLog, kr Keyring) error {
 // --- verifyInit tests ---
 
 func TestVerifyInitBasic(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	state := verifyState(t, al, EmptyKeyring())
 	require.Len(t, state.Users, 1)
@@ -36,34 +36,34 @@ func TestVerifyInitBasic(t *testing.T) {
 
 func TestVerifyInitNegative(t *testing.T) {
 	t.Run("wrong seq_id", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 		al.Entries[0].SeqID = 5
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("hash mismatch", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 		al.InitHash = "bogus-hash"
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("admin not in admin group", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
 		tell := admin.DetailUserTell([]string{"dev"})
-		al, err := InitAuditLog(repoDir, admin.Signer, tell)
+		al, err := InitAuditLog(sesamDir, admin.Signer, tell)
 		require.NoError(t, err)
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("changedBy mismatch", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 		al.Entries[0].ChangedBy = "eve"
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
@@ -72,9 +72,9 @@ func TestVerifyInitNegative(t *testing.T) {
 // --- verifyUserTell tests ---
 
 func TestVerifyUserTellBasic(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -91,9 +91,9 @@ func TestVerifyUserTellBasic(t *testing.T) {
 
 func TestVerifyUserTellNegative(t *testing.T) {
 	t.Run("non-admin signer", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -111,9 +111,9 @@ func TestVerifyUserTellNegative(t *testing.T) {
 	})
 
 	t.Run("self add", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "admin", Groups: []string{"admin"},
@@ -124,9 +124,9 @@ func TestVerifyUserTellNegative(t *testing.T) {
 	})
 
 	t.Run("duplicate user", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 
 		bob := newTestUser(t, "bob")
 		tell := &DetailUserTell{
@@ -143,9 +143,9 @@ func TestVerifyUserTellNegative(t *testing.T) {
 // --- verifyUserKill tests ---
 
 func TestVerifyUserKillBasic(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -163,25 +163,25 @@ func TestVerifyUserKillBasic(t *testing.T) {
 
 func TestVerifyUserKillNegative(t *testing.T) {
 	t.Run("last admin", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserKill{User: "admin"}), nil)
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("non-existent user", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserKill{User: "ghost"}), nil)
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("non-admin signer", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -195,9 +195,9 @@ func TestVerifyUserKillNegative(t *testing.T) {
 }
 
 func TestVerifyUserKillSecondAdmin(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -215,9 +215,9 @@ func TestVerifyUserKillSecondAdmin(t *testing.T) {
 // --- verifySecretChange tests ---
 
 func TestVerifySecretChangeBasic(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
 		RevealedPath: "secrets/db", Groups: []string{"dev"},
@@ -231,9 +231,9 @@ func TestVerifySecretChangeBasic(t *testing.T) {
 
 func TestVerifySecretChangeNegative(t *testing.T) {
 	t.Run("empty groups", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
 			RevealedPath: "secrets/db", Groups: []string{},
 		}), nil)
@@ -241,9 +241,9 @@ func TestVerifySecretChangeNegative(t *testing.T) {
 	})
 
 	t.Run("no access to existing secret", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -265,9 +265,9 @@ func TestVerifySecretChangeNegative(t *testing.T) {
 }
 
 func TestVerifySecretChangeUpdate(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
 		RevealedPath: "secrets/db", Groups: []string{"dev"},
@@ -282,12 +282,54 @@ func TestVerifySecretChangeUpdate(t *testing.T) {
 	require.Contains(t, s.AccessGroups, "ops")
 }
 
+// Regression: the verify layer must reject any RevealedPath that contains
+// path-traversal components. Previously only the high-level API validated
+// the path, so a hand-crafted entry could seed state.Secrets with
+// "../../.ssh/authorized_keys", causing RevealAll to write outside the repo.
+func TestVerifySecretChangeRejectsPathTraversal(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+		RevealedPath: "../../.ssh/authorized_keys",
+		Groups:       []string{"admin"},
+	}), nil)
+
+	err := verifyStateFail(t, al, EmptyKeyring())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "..")
+}
+
+// Regression: creating a new secret must require the creator to be a member
+// of at least one of the proposed groups. Previously the new-secret branch
+// had no authorization check, letting any user seed state.Secrets with
+// arbitrary AccessGroups (and paths).
+func TestVerifySecretChangeNewSecretRequiresAccess(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	bob := newTestUser(t, "bob")
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+		User: "bob", Groups: []string{"dev"},
+		PubKeys: []string{bob.Recipient.String()}, SignPubKeys: []string{bob.SignPubKey},
+	}), nil)
+
+	// Bob (dev) tries to register a brand-new secret restricted to "ops".
+	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretChange{
+		RevealedPath: "secrets/ops-db", Groups: []string{"ops"},
+	}), nil)
+
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
 // --- verifySecretRemove tests ---
 
 func TestVerifySecretRemoveBasic(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
 		RevealedPath: "secrets/db", Groups: []string{"dev"},
@@ -303,17 +345,17 @@ func TestVerifySecretRemoveBasic(t *testing.T) {
 
 func TestVerifySecretRemoveNegative(t *testing.T) {
 	t.Run("non-existent", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRemove{RevealedPath: "ghost"}), nil)
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
 	t.Run("no access", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -333,9 +375,9 @@ func TestVerifySecretRemoveNegative(t *testing.T) {
 // --- verifySeal tests ---
 
 func TestVerifySealResetsRequirement(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -356,9 +398,9 @@ func TestVerifySealResetsRequirement(t *testing.T) {
 
 func TestVerifySignatureNegative(t *testing.T) {
 	t.Run("wrong signer", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 
 		bob := newTestUser(t, "bob")
 		// Entry says admin but bob signs it.
@@ -371,9 +413,9 @@ func TestVerifySignatureNegative(t *testing.T) {
 	})
 
 	t.Run("tampered signature", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 		al.Entries[0].Signature = "bogus"
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
@@ -383,9 +425,9 @@ func TestVerifySignatureNegative(t *testing.T) {
 
 func TestVerifyChainIntegrity(t *testing.T) {
 	t.Run("tampered previous hash", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -398,9 +440,9 @@ func TestVerifyChainIntegrity(t *testing.T) {
 	})
 
 	t.Run("swapped entries", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -420,9 +462,9 @@ func TestVerifyChainIntegrity(t *testing.T) {
 	})
 
 	t.Run("deleted middle entry", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -442,9 +484,9 @@ func TestVerifyChainIntegrity(t *testing.T) {
 	})
 
 	t.Run("tampered entry content", func(t *testing.T) {
-		repoDir := testRepo(t)
+		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, repoDir, admin)
+		al := initAuditLog(t, sesamDir, admin)
 
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -461,9 +503,9 @@ func TestVerifyChainIntegrity(t *testing.T) {
 // --- Unknown operation ---
 
 func TestVerifyUnknownOperation(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{RootHash: "x", FilesSealed: 0}), nil)
 	al.Entries[len(al.Entries)-1].Operation = "unknown.op"
@@ -574,9 +616,9 @@ func TestRequireAdmin(t *testing.T) {
 // --- Update (incremental verify) tests ---
 
 func TestUpdate(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	state := verifyState(t, al, EmptyKeyring())
 	require.Equal(t, uint64(1), state.VerifiedUntil)
@@ -594,9 +636,9 @@ func TestUpdate(t *testing.T) {
 // --- Exported Verify (with git) ---
 
 func TestVerifyExportedWithGitRepo(t *testing.T) {
-	repoDir, repo := testGitRepo(t)
+	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 	gitCommitAll(t, repo, "init")
 
 	state, err := Verify(al, EmptyKeyring())
@@ -605,19 +647,19 @@ func TestVerifyExportedWithGitRepo(t *testing.T) {
 }
 
 func TestVerifyExportedRootHashMatch(t *testing.T) {
-	repoDir, repo := testGitRepo(t)
+	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
 		RevealedPath: "secrets/test", Groups: []string{"admin"},
 	}), nil)
 
-	writeSecret(t, repoDir, "secrets/test", "content")
+	writeSecret(t, sesamDir, "secrets/test", "content")
 	kr2 := testKeyring(t, admin)
 	s := &secret{
 		Mgr: &SecretManager{
-			RepoDir: repoDir, Identities: Identities{admin.Identity},
+			SesamDir: sesamDir, Identities: Identities{admin.Identity},
 			Signer: admin.Signer, Keyring: kr2,
 		},
 		RevealedPath: "secrets/test",
@@ -640,9 +682,9 @@ func TestVerifyExportedRootHashMatch(t *testing.T) {
 }
 
 func TestVerifyExportedRootHashMismatch(t *testing.T) {
-	repoDir, repo := testGitRepo(t)
+	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{
 		RootHash: "wrong-hash", FilesSealed: 0,
@@ -657,9 +699,9 @@ func TestVerifyExportedRootHashMismatch(t *testing.T) {
 // --- End-to-end ---
 
 func TestEndToEndStoreLoadVerify(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
@@ -675,7 +717,7 @@ func TestEndToEndStoreLoadVerify(t *testing.T) {
 		RootHash: "test-root-hash", FilesSealed: 1,
 	}), nil)
 
-	loaded, err := LoadAuditLog(repoDir)
+	loaded, err := LoadAuditLog(sesamDir)
 	require.NoError(t, err)
 
 	state := verifyState(t, loaded, EmptyKeyring())
@@ -685,9 +727,9 @@ func TestEndToEndStoreLoadVerify(t *testing.T) {
 }
 
 func TestFullLifecycle(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, repoDir, admin)
+	al := initAuditLog(t, sesamDir, admin)
 
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{

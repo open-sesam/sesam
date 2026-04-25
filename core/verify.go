@@ -224,6 +224,14 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s already exists", tell.User)
 	}
 
+	if len(tell.SignPubKeys) == 0 {
+		return fmt.Errorf("user %s needs at least one signing pub key", tell.User)
+	}
+
+	if len(tell.SignPubKeys) > 10 {
+		return fmt.Errorf("user %s may not have more than 10 signing keys", tell.User)
+	}
+
 	for _, signPubKey := range tell.SignPubKeys {
 		signPubKeyData, _, err := multicodeDecode(signPubKey)
 		if err != nil {
@@ -231,6 +239,14 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		}
 
 		kr.AddSignPubKey(tell.User, signPubKeyData)
+	}
+
+	if len(tell.PubKeys) == 0 {
+		return fmt.Errorf("user %s needs at least one public key", tell.User)
+	}
+
+	if len(tell.PubKeys) > 10 {
+		return fmt.Errorf("user %s may not have more than 10 public keys", tell.User)
 	}
 
 	for _, pubKey := range tell.PubKeys {
@@ -307,6 +323,11 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 		return fmt.Errorf("groups may not be empty (%s)", scd.RevealedPath)
 	}
 
+	// double check nobody inserted ../../ or similar into the revealed path.
+	if err := validSecretPathFormat(log.SesamDir, scd.RevealedPath); err != nil {
+		return err
+	}
+
 	scd.Groups = deduplicate(scd.Groups)
 	if !slices.Contains(scd.Groups, "admin") {
 		scd.Groups = append(scd.Groups, "admin")
@@ -326,6 +347,15 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 
 		existingSecret.AccessGroups = scd.Groups
 	} else {
+		hasAccess := state.UserHasAccess(entry.ChangedBy, scd.Groups)
+		if !hasAccess {
+			return fmt.Errorf(
+				"would add secret that %s has no access to: %s",
+				entry.ChangedBy,
+				scd.RevealedPath,
+			)
+		}
+
 		// secret does not exist
 		state.Secrets = append(state.Secrets, VerifiedSecret{
 			RevealedPath: scd.RevealedPath,
@@ -341,6 +371,11 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 	srd, err := parseDetail[DetailSecretRemove](entry)
 	if err != nil {
 		return fmt.Errorf("parse detail: %w", err)
+	}
+
+	// double check nobody inserted ../../ or similar into the revealed path.
+	if err := validSecretPathFormat(log.SesamDir, srd.RevealedPath); err != nil {
+		return err
 	}
 
 	s, exists := state.SecretExists(srd.RevealedPath)
@@ -379,7 +414,7 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) er
 }
 
 func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
-	if err := verifyInitFileUnchanged(log.RepoDir); err != nil {
+	if err := verifyInitFileUnchanged(log.SesamDir); err != nil {
 		return nil, fmt.Errorf("init file check: %w", err)
 	}
 
@@ -395,7 +430,7 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 
 	// Verify that the latest seal's RootHash matches the .sig.json files on disk.
 	if state.LastSealRootHash != "" {
-		sigs, err := readAllSignatures(log.RepoDir)
+		sigs, err := readAllSignatures(log.SesamDir)
 		if err != nil {
 			return nil, fmt.Errorf("reading signatures for root hash check: %w", err)
 		}
@@ -420,10 +455,12 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 
 func verify(state *VerifiedState) error {
 	log := state.auditLog
+	kr := state.keyring
+	newState := *state
 
 	var previousEntry *auditEntrySigned
 	err := log.Iterate(func(idx int, entry *auditEntrySigned) error {
-		if entry.SeqID <= state.VerifiedUntil {
+		if entry.SeqID <= newState.VerifiedUntil {
 			return nil
 		}
 
@@ -433,17 +470,17 @@ func verify(state *VerifiedState) error {
 		var err error
 		switch entry.Operation {
 		case opInit:
-			err = verifyInit(log, state, entry, state.keyring)
+			err = verifyInit(log, &newState, entry, kr)
 		case opUserTell:
-			err = verifyUserTell(log, state, entry, state.keyring)
+			err = verifyUserTell(log, &newState, entry, kr)
 		case opUserKill:
-			err = verifyUserKill(log, state, entry, state.keyring)
+			err = verifyUserKill(log, &newState, entry, kr)
 		case opSeal:
-			err = verifySeal(log, state, entry)
+			err = verifySeal(log, &newState, entry)
 		case opSecretChange:
-			err = verifySecretChange(log, state, entry)
+			err = verifySecretChange(log, &newState, entry)
 		case opSecretRemove:
-			err = verifySecretRemove(log, state, entry)
+			err = verifySecretRemove(log, &newState, entry)
 		default:
 			err = fmt.Errorf("unexpected core.Operation: %#v", entry.Operation)
 		}
@@ -453,7 +490,7 @@ func verify(state *VerifiedState) error {
 		}
 
 		// check the signature
-		signatureUser, err := entry.Verify(state.keyring)
+		signatureUser, err := entry.Verify(kr)
 		if err != nil {
 			return fmt.Errorf("failed to verify signature on entry %d: %w", entry.SeqID, err)
 		}
@@ -480,7 +517,7 @@ func verify(state *VerifiedState) error {
 		}
 
 		previousEntry = entry
-		state.VerifiedUntil = entry.SeqID
+		newState.VerifiedUntil = entry.SeqID
 		return nil
 	})
 	if err != nil {
@@ -496,5 +533,6 @@ func verify(state *VerifiedState) error {
 		)
 	}
 
+	*state = newState
 	return nil
 }

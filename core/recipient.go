@@ -65,24 +65,24 @@ func forgeIdToUser(arg string) string {
 // (github:user, ...), links and paths. All other recipients are passed through.
 //
 // It will return the cleaned version that can be given to ParseRecipient().
-// Links and forge-id will be cached in `repoDir`.
-func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode CacheMode) ([]string, error) {
+// Links and forge-id will be cached in `sesamDir`.
+func ResolveRecipient(ctx context.Context, sesamDir string, arg string, cacheMode CacheMode) ([]string, error) {
 	switch {
 	case strings.HasPrefix(arg, "github:"):
 		url := fmt.Sprintf("https://github.com/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
-		return resolveCachedLink(ctx, repoDir, url, cacheMode)
-	// TODO: gitlab uses json
+		return resolveCachedLink(ctx, sesamDir, url, cacheMode)
+	// TODO: gitlab uses json; fix
 	// case strings.HasPrefix(arg, "gitlab:"):
 	// 	url := fmt.Sprintf("https://gitlab.com/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
-	// 	return resolveCachedLink(ctx, repoDir, url, cacheMode)
+	// 	return resolveCachedLink(ctx, sesamDir, url, cacheMode)
 	case strings.HasPrefix(arg, "codeberg:"):
 		url := fmt.Sprintf("https://codeberg.org/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
-		return resolveCachedLink(ctx, repoDir, url, cacheMode)
+		return resolveCachedLink(ctx, sesamDir, url, cacheMode)
 	case strings.HasPrefix(arg, "https://"):
-		return resolveCachedLink(ctx, repoDir, arg, cacheMode)
+		return resolveCachedLink(ctx, sesamDir, arg, cacheMode)
 	case strings.HasPrefix(arg, "file://"):
 		path := strings.TrimPrefix(arg, "file://")
-		if err := validSecretPath(repoDir, path); err != nil {
+		if err := validSecretPath(sesamDir, path); err != nil {
 			return nil, fmt.Errorf("invalid file:// path (%s): %w", arg, err)
 		}
 
@@ -106,8 +106,8 @@ func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode
 	}
 }
 
-func cachePath(repoDir, url string) string {
-	return filepath.Join(repoDir, ".sesam", "links", strings.ReplaceAll(url, "/", "_"))
+func cachePath(sesamDir, url string) string {
+	return filepath.Join(sesamDir, ".sesam", "links", strings.ReplaceAll(url, "/", "_"))
 }
 
 // TODO: implement command to check if links and forge-ids are out-dated? Maybe part of verify?
@@ -125,16 +125,16 @@ func splitByLine(s string) []string {
 	return lines
 }
 
-// resolveCachedLink will download the specified `url` and write it to a cache under `repoDir`.
+// resolveCachedLink will download the specified `url` and write it to a cache under `sesamDir`.
 // If the cached response is already available, then it is returned directly.
-func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode CacheMode) ([]string, error) {
+func resolveCachedLink(ctx context.Context, sesamDir, url string, cacheMode CacheMode) ([]string, error) {
 	if !strings.HasPrefix(url, "https://") {
 		// we should not download public keys over http:// or whatever.
 		// https is not ideal either, so links should be noted in the docs to be difficult from a security perspective.
 		return nil, fmt.Errorf("unsupported protocol scheme: %s", url)
 	}
 
-	cachePath := cachePath(repoDir, url)
+	cachePath := cachePath(sesamDir, url)
 
 	if cacheMode&CacheModeRead > 0 {
 		//nolint:gosec
@@ -250,12 +250,12 @@ func ParseRecipients(recps []string) (Recipients, error) {
 	return recipients, nil
 }
 
-func ParseAndResolveRecipients(ctx context.Context, repoDir string, pubKeySpecs []string) (Recipients, error) {
+func ParseAndResolveRecipients(ctx context.Context, sesamDir string, pubKeySpecs []string) (Recipients, error) {
 	recps := make(Recipients, 0, len(pubKeySpecs))
 	for idx, pubKeySpec := range pubKeySpecs {
 		rawPubKeys, err := ResolveRecipient(
 			ctx,
-			repoDir,
+			sesamDir,
 			pubKeySpec,
 			CacheModeReadWrite,
 		)
