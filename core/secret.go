@@ -17,7 +17,7 @@ import (
 type secret struct {
 	Mgr *SecretManager
 
-	// RevealedPath is relative to Mgr.RepoDir
+	// RevealedPath is relative to Mgr.SesamDir
 	RevealedPath string
 
 	// Recipients are the people that may reveal this secret.
@@ -32,7 +32,7 @@ type secretSignature struct {
 }
 
 func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
-	rd, err := os.Open(filepath.Join(s.Mgr.RepoDir, s.RevealedPath))
+	rd, err := os.Open(filepath.Join(s.Mgr.SesamDir, s.RevealedPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secret: %w", err)
 	}
@@ -89,7 +89,7 @@ func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 	_ = enc.Encode(ss)
 
 	// write the signature file along the encrypted file:
-	sigPath := signaturePath(s.Mgr.RepoDir, s.RevealedPath)
+	sigPath := signaturePath(s.Mgr.SesamDir, s.RevealedPath)
 	if err := renameio.WriteFile(sigPath, sigBuf.Bytes(), 0o600); err != nil {
 		_ = os.Remove(wc.Name())
 		return nil, err
@@ -123,7 +123,7 @@ func (s *secret) Reveal() error {
 	}
 
 	// Write revealed file to a temp file first, so we can get rid of it later easily:
-	dstPath := filepath.Join(s.Mgr.RepoDir, s.RevealedPath)
+	dstPath := filepath.Join(s.Mgr.SesamDir, s.RevealedPath)
 	dstFd, err := renameio.TempFile(s.Mgr.tmpDir(), dstPath)
 	if err != nil {
 		return fmt.Errorf("failed to create revealed file: %w", err)
@@ -140,7 +140,7 @@ func (s *secret) Reveal() error {
 		return fmt.Errorf("failed to copy decrypted secret back in place: %w", err)
 	}
 
-	sigDesc, err := readStoredSignature(s.Mgr.RepoDir, s.RevealedPath)
+	sigDesc, err := readStoredSignature(s.Mgr.SesamDir, s.RevealedPath)
 	if err != nil {
 		return fmt.Errorf("failed to read signature: %w", err)
 	}

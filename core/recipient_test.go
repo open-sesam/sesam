@@ -102,15 +102,15 @@ func TestResolveRecipientForgeIds(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			repoDir := testRepo(t)
+			sesamDir := testRepo(t)
 
 			// Pre-populate cache with mock response to avoid real network calls.
 			url := fmt.Sprintf("https://%s/%s.keys", tc.forge, "testuser")
-			cp := cachePath(repoDir, url)
+			cp := cachePath(sesamDir, url)
 			os.MkdirAll(filepath.Dir(cp), 0o700)
 			os.WriteFile(cp, []byte("cached-key-"+tc.name), 0o600)
 
-			got, err := ResolveRecipient(context.Background(), repoDir, tc.prefix+"testuser", CacheModeRead)
+			got, err := ResolveRecipient(context.Background(), sesamDir, tc.prefix+"testuser", CacheModeRead)
 			require.NoError(t, err)
 			require.Equal(t, "cached-key-"+tc.name, got)
 		})
@@ -118,13 +118,13 @@ func TestResolveRecipientForgeIds(t *testing.T) {
 }
 
 func TestResolveRecipientHTTPS(t *testing.T) {
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	url := "https://example.com/keys"
-	cp := cachePath(repoDir, url)
+	cp := cachePath(sesamDir, url)
 	os.MkdirAll(filepath.Dir(cp), 0o700)
 	os.WriteFile(cp, []byte("https-cached"), 0o600)
 
-	got, err := ResolveRecipient(context.Background(), repoDir, url, CacheModeRead)
+	got, err := ResolveRecipient(context.Background(), sesamDir, url, CacheModeRead)
 	require.NoError(t, err)
 	require.Equal(t, "https-cached", got)
 }
@@ -132,13 +132,13 @@ func TestResolveRecipientHTTPS(t *testing.T) {
 func TestResolveCachedLinkCacheReadWrite(t *testing.T) {
 	// Use httptest with plain HTTP won't work because resolveCachedLink rejects non-https.
 	// Test cache read path.
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	url := "https://example.com/test.keys"
-	cp := cachePath(repoDir, url)
+	cp := cachePath(sesamDir, url)
 	os.MkdirAll(filepath.Dir(cp), 0o700)
 	os.WriteFile(cp, []byte("cached-value"), 0o600)
 
-	got, err := resolveCachedLink(context.Background(), repoDir, url, CacheModeRead)
+	got, err := resolveCachedLink(context.Background(), sesamDir, url, CacheModeRead)
 	require.NoError(t, err)
 	require.Equal(t, "cached-value", got)
 }
@@ -151,8 +151,8 @@ func TestResolveCachedLinkNonHTTPS(t *testing.T) {
 
 func TestResolveCachedLinkCacheMiss(t *testing.T) {
 	// No cache, no network — should try to download and fail (no real server).
-	repoDir := testRepo(t)
-	_, err := resolveCachedLink(context.Background(), repoDir, "https://192.0.2.1/nonexistent", CacheModeNone)
+	sesamDir := testRepo(t)
+	_, err := resolveCachedLink(context.Background(), sesamDir, "https://192.0.2.1/nonexistent", CacheModeNone)
 	require.Error(t, err, "should fail when cache misses and download fails")
 }
 

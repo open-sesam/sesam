@@ -15,18 +15,18 @@ import (
 //  2. "regular" — load audit log, verify, resolve identity → user, load sign
 //     key, build manager, run integrity check, seal + reveal.
 func TestIntegrationInitAndRegular(t *testing.T) {
-	repoDir, repo := testGitRepo(t)
+	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 	whoami := admin.Name
 
 	// ── Phase 1: init ────────────────────────────────────────────────
-	signer, err := GenerateSignKey(repoDir, whoami, admin.Recipient.Recipient)
+	signer, err := GenerateSignKey(sesamDir, whoami, admin.Recipient.Recipient)
 	require.NoError(t, err)
 
 	keyring := EmptyKeyring()
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
 
-	auditLog, err := InitAuditLog(repoDir, signer, DetailUserTell{
+	auditLog, err := InitAuditLog(sesamDir, signer, DetailUserTell{
 		User:        whoami,
 		Groups:      []string{"admin"},
 		PubKeys:     []string{admin.Recipient.String()},
@@ -40,7 +40,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	require.NoError(t, err, "Verify after init")
 
 	sm, err := BuildSecretManager(
-		repoDir,
+		sesamDir,
 		Identities{admin.Identity},
 		signer, keyring, auditLog, vstate,
 	)
@@ -48,26 +48,26 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	require.NoError(t, os.Chdir(repoDir))
+	require.NoError(t, os.Chdir(sesamDir))
 	t.Cleanup(func() { os.Chdir(origDir) })
 
 	secretPath := "secrets/db_password"
-	writeSecret(t, repoDir, secretPath, "hunter2")
+	writeSecret(t, sesamDir, secretPath, "hunter2")
 	require.NoError(t, sm.AddSecret(secretPath, []string{"admin"}))
 	require.NoError(t, sm.SealAll())
 
 	gitCommitAll(t, repo, "add secret and seal")
 
-	agePath := filepath.Join(repoDir, ".sesam", "objects", secretPath+".age")
+	agePath := filepath.Join(sesamDir, ".sesam", "objects", secretPath+".age")
 	require.FileExists(t, agePath)
 
 	// Remove plaintext to simulate a fresh clone.
-	os.Remove(filepath.Join(repoDir, secretPath))
+	os.Remove(filepath.Join(sesamDir, secretPath))
 
 	// ── Phase 2: regular (simulates opening an existing repo) ────────
 	require.NoError(t, auditLog.Close())
 	keyring2 := EmptyKeyring()
-	auditLog2, err := LoadAuditLog(repoDir)
+	auditLog2, err := LoadAuditLog(sesamDir)
 	require.NoError(t, err)
 
 	vstate2, err := Verify(auditLog2, keyring2)
@@ -77,21 +77,21 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, whoami, resolvedUser)
 
-	signer2, err := LoadSignKey(repoDir, resolvedUser, admin.Identity)
+	signer2, err := LoadSignKey(sesamDir, resolvedUser, admin.Identity)
 	require.NoError(t, err)
 
 	sm2, err := BuildSecretManager(
-		repoDir,
+		sesamDir,
 		Identities{admin.Identity},
 		signer2, keyring2, auditLog2, vstate2,
 	)
 	require.NoError(t, err)
 
-	report := VerifyIntegrity(repoDir, vstate2, keyring2)
+	report := VerifyIntegrity(sesamDir, vstate2, keyring2)
 	require.True(t, report.OK(), "integrity check failed: %s", report.String())
 
 	require.NoError(t, sm2.RevealAll())
-	got, err := os.ReadFile(filepath.Join(repoDir, secretPath))
+	got, err := os.ReadFile(filepath.Join(sesamDir, secretPath))
 	require.NoError(t, err)
 	require.Equal(t, "hunter2", string(got))
 }
@@ -99,15 +99,15 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 // TestIntegrationMultiUser exercises adding a second user and verifying
 // they can seal/reveal secrets assigned to their group.
 func TestIntegrationMultiUser(t *testing.T) {
-	repoDir, repo := testGitRepo(t)
+	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(repoDir, "admin", admin.Recipient.Recipient)
+	signer, err := GenerateSignKey(sesamDir, "admin", admin.Recipient.Recipient)
 	require.NoError(t, err)
 
 	keyring := EmptyKeyring()
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitAuditLog(repoDir, signer, DetailUserTell{
+	al, err := InitAuditLog(sesamDir, signer, DetailUserTell{
 		User:        "admin",
 		Groups:      []string{"admin"},
 		PubKeys:     []string{admin.Recipient.String()},
@@ -121,7 +121,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 
 	// ── Admin adds bob ──
 	bob := newTestUser(t, "bob")
-	bobSignKey, err := GenerateSignKey(repoDir, "bob", bob.Recipient.Recipient)
+	bobSignKey, err := GenerateSignKey(sesamDir, "bob", bob.Recipient.Recipient)
 	require.NoError(t, err)
 
 	bobSignKeyStr := MulticodeEncode(bobSignKey.PublicKey(), MhEd25519Pub)
@@ -134,7 +134,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	require.NoError(t, err)
 
 	secretPath := "secrets/api_key"
-	writeSecret(t, repoDir, secretPath, "sk-12345")
+	writeSecret(t, sesamDir, secretPath, "sk-12345")
 
 	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailSecretChange{
 		RevealedPath: secretPath,
@@ -149,7 +149,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	require.NoError(t, err)
 
 	smBob, err := BuildSecretManager(
-		repoDir,
+		sesamDir,
 		Identities{bob.Identity},
 		bobSignKey, keyring, al, vstate,
 	)
@@ -157,16 +157,16 @@ func TestIntegrationMultiUser(t *testing.T) {
 	require.NoError(t, smBob.SealAll())
 	gitCommitAll(t, repo, "seal")
 
-	os.Remove(filepath.Join(repoDir, secretPath))
+	os.Remove(filepath.Join(sesamDir, secretPath))
 	require.NoError(t, smBob.RevealAll())
 
-	got, err := os.ReadFile(filepath.Join(repoDir, secretPath))
+	got, err := os.ReadFile(filepath.Join(sesamDir, secretPath))
 	require.NoError(t, err)
 	require.Equal(t, "sk-12345", string(got))
 
 	// Full reload + verify from scratch.
 	keyring3 := EmptyKeyring()
-	al3, err := LoadAuditLog(repoDir)
+	al3, err := LoadAuditLog(sesamDir)
 	require.NoError(t, err)
 
 	vstate3, err := Verify(al3, keyring3)
@@ -175,21 +175,21 @@ func TestIntegrationMultiUser(t *testing.T) {
 	require.Len(t, vstate3.Users, 2)
 	require.Len(t, vstate3.Secrets, 1)
 
-	report := VerifyIntegrity(repoDir, vstate3, keyring3)
+	report := VerifyIntegrity(sesamDir, vstate3, keyring3)
 	require.True(t, report.OK(), "integrity failed: %s", report.String())
 }
 
 // TestIntegrationTamperDetection verifies that modifying the init file
 // after two commits is detected by the exported Verify() path.
 func TestIntegrationTamperDetection(t *testing.T) {
-	repoDir, repo := testGitRepo(t)
+	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(repoDir, "admin", admin.Recipient.Recipient)
+	signer, err := GenerateSignKey(sesamDir, "admin", admin.Recipient.Recipient)
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitAuditLog(repoDir, signer, DetailUserTell{
+	al, err := InitAuditLog(sesamDir, signer, DetailUserTell{
 		User:        "admin",
 		Groups:      []string{"admin"},
 		PubKeys:     []string{admin.Recipient.String()},
@@ -199,7 +199,7 @@ func TestIntegrationTamperDetection(t *testing.T) {
 	gitCommitAll(t, repo, "init")
 
 	// Tamper: rewrite the init file and commit again.
-	initPath := filepath.Join(repoDir, ".sesam", "audit", "init")
+	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 	require.NoError(t, os.WriteFile(initPath, []byte("tampered-hash"), 0o600))
 	gitCommitAll(t, repo, "tamper")
 
@@ -210,14 +210,14 @@ func TestIntegrationTamperDetection(t *testing.T) {
 
 // TestIntegrationSecretLifecycle runs through add → seal → change groups → re-seal → remove → seal.
 func TestIntegrationSecretLifecycle(t *testing.T) {
-	repoDir, repo := testGitRepo(t)
+	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(repoDir, "admin", admin.Recipient.Recipient)
+	signer, err := GenerateSignKey(sesamDir, "admin", admin.Recipient.Recipient)
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitAuditLog(repoDir, signer, DetailUserTell{
+	al, err := InitAuditLog(sesamDir, signer, DetailUserTell{
 		User:        "admin",
 		Groups:      []string{"admin"},
 		PubKeys:     []string{admin.Recipient.String()},
@@ -231,7 +231,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	sm, err := BuildSecretManager(
-		repoDir,
+		sesamDir,
 		Identities{admin.Identity},
 		signer,
 		kr,
@@ -242,11 +242,11 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	require.NoError(t, os.Chdir(repoDir))
+	require.NoError(t, os.Chdir(sesamDir))
 	t.Cleanup(func() { os.Chdir(origDir) })
 
 	// 1. Add secret.
-	writeSecret(t, repoDir, "secrets/token", "tok-abc")
+	writeSecret(t, sesamDir, "secrets/token", "tok-abc")
 	require.NoError(t, sm.AddSecret("secrets/token", []string{"admin"}))
 
 	// 2. Seal.
@@ -261,11 +261,11 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	// 4. Re-seal.
-	writeSecret(t, repoDir, "secrets/token", "tok-abc")
+	writeSecret(t, sesamDir, "secrets/token", "tok-abc")
 	vs, err = Verify(al, kr)
 	require.NoError(t, err)
 	sm, err = BuildSecretManager(
-		repoDir,
+		sesamDir,
 		Identities{admin.Identity},
 		signer,
 		kr,
@@ -282,8 +282,8 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	}), nil)
 	require.NoError(t, err)
 
-	os.Remove(filepath.Join(repoDir, ".sesam", "objects", "secrets", "token.age"))
-	os.Remove(signaturePath(repoDir, "secrets/token"))
+	os.Remove(filepath.Join(sesamDir, ".sesam", "objects", "secrets", "token.age"))
+	os.Remove(signaturePath(sesamDir, "secrets/token"))
 
 	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailSeal{
 		RootHash:    buildRootHash(nil),
@@ -295,7 +295,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 
 	// Full re-verify.
 	kr2 := EmptyKeyring()
-	al2, err := LoadAuditLog(repoDir)
+	al2, err := LoadAuditLog(sesamDir)
 	require.NoError(t, err)
 
 	vs2, err := Verify(al2, kr2)

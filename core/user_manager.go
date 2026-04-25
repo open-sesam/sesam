@@ -9,7 +9,7 @@ import (
 )
 
 type UserManager struct {
-	repoDir  string
+	sesamDir string
 	signer   Signer
 	log      *AuditLog
 	state    *VerifiedState
@@ -17,7 +17,7 @@ type UserManager struct {
 }
 
 func BuildUserManager(
-	repoDir string,
+	sesamDir string,
 	signer Signer,
 	log *AuditLog,
 	state *VerifiedState,
@@ -29,7 +29,7 @@ func BuildUserManager(
 	}
 
 	return &UserManager{
-		repoDir:  repoDir,
+		sesamDir: sesamDir,
 		signer:   signer,
 		log:      log,
 		state:    state,
@@ -58,7 +58,7 @@ func (um *UserManager) TellUser(
 	// init means adding an initial user, so assume we get the public key here via the config or something.
 	rawPubKey, err := ResolveRecipient(
 		ctx,
-		um.repoDir,
+		um.sesamDir,
 		pubKeySpec,
 		CacheModeReadWrite,
 	)
@@ -72,7 +72,7 @@ func (um *UserManager) TellUser(
 	}
 
 	newUserSigner, err := GenerateSignKey(
-		um.repoDir,
+		um.sesamDir,
 		user,
 		recp.Recipient,
 	)
@@ -109,7 +109,7 @@ func (um *UserManager) KillUsers(user string) error {
 		return err
 	}
 
-	signKeyPath := filepath.Join(um.repoDir, ".sesam", "signkey", user+".age")
+	signKeyPath := filepath.Join(um.sesamDir, ".sesam", "signkey", user+".age")
 	if err := os.RemoveAll(signKeyPath); err != nil {
 		return err
 	}
@@ -120,11 +120,11 @@ func (um *UserManager) KillUsers(user string) error {
 // InitAdminUser has to be called on init to create the initial user.
 func InitAdminUser(
 	ctx context.Context,
-	repoDir, user, pubKeySpec string,
+	sesamDir, user, pubKeySpec string,
 ) (Signer, *AuditLog, error) {
 	rawPubKey, err := ResolveRecipient(
 		ctx,
-		repoDir,
+		sesamDir,
 		pubKeySpec,
 		CacheModeReadWrite,
 	)
@@ -138,7 +138,7 @@ func InitAdminUser(
 	}
 
 	signer, err := GenerateSignKey(
-		repoDir,
+		sesamDir,
 		user,
 		recp.Recipient,
 	)

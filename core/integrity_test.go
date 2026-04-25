@@ -27,15 +27,15 @@ func integritySetup(t *testing.T) (*SecretManager, *VerifiedState) {
 
 func TestIntegrityAllGood(t *testing.T) {
 	mgr, state := integritySetup(t)
-	report := VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
 	require.True(t, report.OK(), "expected no errors, got: %s", report.String())
 }
 
 func TestIntegrityMissingSigFile(t *testing.T) {
 	mgr, state := integritySetup(t)
-	os.Remove(signaturePath(mgr.RepoDir, "secrets/db"))
+	os.Remove(signaturePath(mgr.SesamDir, "secrets/db"))
 
-	report := VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect missing .sig.json")
 }
 
@@ -43,7 +43,7 @@ func TestIntegrityMissingAgeFile(t *testing.T) {
 	mgr, state := integritySetup(t)
 	os.Remove(mgr.cryptPath("secrets/db"))
 
-	report := VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect missing .age file")
 }
 
@@ -51,29 +51,29 @@ func TestIntegrityCorruptedAgeFile(t *testing.T) {
 	mgr, state := integritySetup(t)
 	require.NoError(t, os.WriteFile(mgr.cryptPath("secrets/db"), []byte("corrupted"), 0o600))
 
-	report := VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect hash mismatch")
 }
 
 func TestIntegrityExtraSigFile(t *testing.T) {
 	mgr, state := integritySetup(t)
 
-	extraSigPath := signaturePath(mgr.RepoDir, "secrets/extra")
+	extraSigPath := signaturePath(mgr.SesamDir, "secrets/extra")
 	require.NoError(t, os.MkdirAll(filepath.Dir(extraSigPath), 0o700))
 	require.NoError(t, os.WriteFile(extraSigPath, []byte(`{"path":"secrets/extra","hash":"x","signature":"y","sealed_by":"z"}`), 0o600))
 
-	report := VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect extra .sig.json")
 }
 
 func TestIntegrityExtraAgeFile(t *testing.T) {
 	mgr, state := integritySetup(t)
 
-	extraAgePath := filepath.Join(mgr.RepoDir, ".sesam", "objects", "secrets", "extra.age")
+	extraAgePath := filepath.Join(mgr.SesamDir, ".sesam", "objects", "secrets", "extra.age")
 	require.NoError(t, os.MkdirAll(filepath.Dir(extraAgePath), 0o700))
 	require.NoError(t, os.WriteFile(extraAgePath, []byte("extra"), 0o600))
 
-	report := VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect extra .age file")
 }
 
@@ -81,7 +81,7 @@ func TestIntegrityRootHashMismatch(t *testing.T) {
 	mgr, state := integritySetup(t)
 	state.LastSealRootHash = "wrong-hash"
 
-	report := VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect root hash mismatch")
 }
 
@@ -89,7 +89,7 @@ func TestIntegrityNoSeal(t *testing.T) {
 	mgr, state := integritySetup(t)
 	state.LastSealRootHash = ""
 
-	report := VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
 	require.True(t, report.OK(), "should pass when no seal, got: %s", report.String())
 }
 
@@ -111,12 +111,12 @@ func TestIntegrityMultipleSecrets(t *testing.T) {
 		LastSealRootHash: buildRootHash(sigs),
 	}
 
-	report := VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
 	require.True(t, report.OK(), "all good with 3 secrets: %s", report.String())
 
 	// Now corrupt one.
 	require.NoError(t, os.WriteFile(mgr.cryptPath("secrets/b"), []byte("bad"), 0o600))
-	report = VerifyIntegrity(mgr.RepoDir, state, mgr.Keyring)
+	report = VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect corruption in one of multiple secrets")
 }
 

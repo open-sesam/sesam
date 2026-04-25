@@ -13,12 +13,12 @@ import (
 
 func testSecretManager(t *testing.T) *SecretManager {
 	t.Helper()
-	repoDir := testRepo(t)
+	sesamDir := testRepo(t)
 	user := newTestUser(t, "testuser")
 	kr := testKeyring(t, user)
 
 	return &SecretManager{
-		RepoDir:    repoDir,
+		SesamDir:   sesamDir,
 		Identities: Identities{user.Identity},
 		Signer:     user.Signer,
 		Keyring:    kr,
@@ -33,7 +33,7 @@ func testSecretManager(t *testing.T) *SecretManager {
 
 func testSecret(t *testing.T, mgr *SecretManager, path, content string) *secret {
 	t.Helper()
-	writeSecret(t, mgr.RepoDir, path, content)
+	writeSecret(t, mgr.SesamDir, path, content)
 	return &secret{
 		Mgr:          mgr,
 		RevealedPath: path,
@@ -54,10 +54,10 @@ func TestSealAndReveal(t *testing.T) {
 
 	// Check files were created.
 	require.FileExists(t, mgr.cryptPath("secrets/db_password"))
-	require.FileExists(t, signaturePath(mgr.RepoDir, "secrets/db_password"))
+	require.FileExists(t, signaturePath(mgr.SesamDir, "secrets/db_password"))
 
 	// Remove plaintext, then reveal and compare.
-	plainPath := filepath.Join(mgr.RepoDir, "secrets/db_password")
+	plainPath := filepath.Join(mgr.SesamDir, "secrets/db_password")
 	os.Remove(plainPath)
 
 	require.NoError(t, secret.Reveal())
@@ -88,11 +88,11 @@ func TestSealRevealTableDriven(t *testing.T) {
 			_, err := secret.Seal("testuser")
 			require.NoError(t, err)
 
-			os.Remove(filepath.Join(mgr.RepoDir, tc.path))
+			os.Remove(filepath.Join(mgr.SesamDir, tc.path))
 
 			require.NoError(t, secret.Reveal())
 
-			got, _ := os.ReadFile(filepath.Join(mgr.RepoDir, tc.path))
+			got, _ := os.ReadFile(filepath.Join(mgr.SesamDir, tc.path))
 			require.Equal(t, tc.content, string(got))
 		})
 	}
@@ -105,7 +105,7 @@ func TestSealCreatesSignatureFile(t *testing.T) {
 	_, err := secret.Seal("testuser")
 	require.NoError(t, err)
 
-	sigDesc, err := readStoredSignature(mgr.RepoDir, "config/api_key")
+	sigDesc, err := readStoredSignature(mgr.SesamDir, "config/api_key")
 	require.NoError(t, err)
 	require.Equal(t, "config/api_key", sigDesc.RevealedPath)
 	require.Equal(t, "testuser", sigDesc.SealedBy)
@@ -206,7 +206,7 @@ func TestRevealMissingSigFile(t *testing.T) {
 	require.NoError(t, err)
 
 	// Remove only the .sig.json, keep the .age.
-	os.Remove(signaturePath(mgr.RepoDir, "secrets/nosig"))
+	os.Remove(signaturePath(mgr.SesamDir, "secrets/nosig"))
 
 	err = secret.Reveal()
 	require.Error(t, err, "reveal should fail when .sig.json is missing")
@@ -224,10 +224,10 @@ func TestSealRevealLargeFile(t *testing.T) {
 	_, err := secret.Seal("testuser")
 	require.NoError(t, err)
 
-	os.Remove(filepath.Join(mgr.RepoDir, "secrets/large"))
+	os.Remove(filepath.Join(mgr.SesamDir, "secrets/large"))
 	require.NoError(t, secret.Reveal())
 
-	got, _ := os.ReadFile(filepath.Join(mgr.RepoDir, "secrets/large"))
+	got, _ := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/large"))
 	require.Equal(t, data, got)
 }
 
@@ -286,7 +286,7 @@ func TestReadStoredSignatureRoundtrip(t *testing.T) {
 	expected, err := secret.Seal("testuser")
 	require.NoError(t, err)
 
-	got, err := readStoredSignature(mgr.RepoDir, "secrets/roundtrip")
+	got, err := readStoredSignature(mgr.SesamDir, "secrets/roundtrip")
 	require.NoError(t, err)
 	require.Equal(t, expected.RevealedPath, got.RevealedPath)
 	require.Equal(t, expected.Hash, got.Hash)

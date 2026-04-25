@@ -14,29 +14,29 @@ import (
 //
 // Returns nil if the file was committed exactly once and has no pending changes.
 // Returns an error describing the problem otherwise.
-// If repoDir is not a git repo a warning-level error is returned
+// If sesamDir is not a git repo a warning-level error is returned
 // (caller decides whether to treat it as fatal).
-func verifyInitFileUnchanged(repoDir string) error {
-	repo, err := git.PlainOpenWithOptions(repoDir, &git.PlainOpenOptions{
+func verifyInitFileUnchanged(sesamDir string) error {
+	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{
 		DetectDotGit: true,
 	})
 	if err != nil {
 		return fmt.Errorf("not a git repository (skipping init-file history check): %w", err)
 	}
 
-	// .sesam/ lives in repoDir, but .git/ may be in a parent directory.
+	// .sesam/ lives in sesamDir, but .git/ may be in a parent directory.
 	// Git paths are relative to the worktree root, so compute accordingly.
 	wt, err := repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("failed to open worktree: %w", err)
 	}
 
-	absRepoDir, err := filepath.Abs(repoDir)
+	absSesamDir, err := filepath.Abs(sesamDir)
 	if err != nil {
-		return fmt.Errorf("failed to resolve repoDir: %w", err)
+		return fmt.Errorf("failed to resolve sesamDir: %w", err)
 	}
 
-	initAbs := filepath.Join(absRepoDir, ".sesam", "audit", "init")
+	initAbs := filepath.Join(absSesamDir, ".sesam", "audit", "init")
 	initRel, err := filepath.Rel(wt.Filesystem.Root(), initAbs)
 	if err != nil {
 		return fmt.Errorf("failed to compute relative path: %w", err)

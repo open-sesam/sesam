@@ -308,7 +308,7 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 	}
 
 	// double check nobody inserted ../../ or similar into the revealed path.
-	if err := validSecretPathFormat(log.RepoDir, scd.RevealedPath); err != nil {
+	if err := validSecretPathFormat(log.SesamDir, scd.RevealedPath); err != nil {
 		return err
 	}
 
@@ -358,7 +358,7 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 	}
 
 	// double check nobody inserted ../../ or similar into the revealed path.
-	if err := validSecretPathFormat(log.RepoDir, srd.RevealedPath); err != nil {
+	if err := validSecretPathFormat(log.SesamDir, srd.RevealedPath); err != nil {
 		return err
 	}
 
@@ -398,7 +398,7 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) er
 }
 
 func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
-	if err := verifyInitFileUnchanged(log.RepoDir); err != nil {
+	if err := verifyInitFileUnchanged(log.SesamDir); err != nil {
 		return nil, fmt.Errorf("init file check: %w", err)
 	}
 
@@ -414,7 +414,7 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 
 	// Verify that the latest seal's RootHash matches the .sig.json files on disk.
 	if state.LastSealRootHash != "" {
-		sigs, err := readAllSignatures(log.RepoDir)
+		sigs, err := readAllSignatures(log.SesamDir)
 		if err != nil {
 			return nil, fmt.Errorf("reading signatures for root hash check: %w", err)
 		}
