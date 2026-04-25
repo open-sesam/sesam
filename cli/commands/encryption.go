@@ -129,6 +129,10 @@ func identityToUser(identities core.Identities, users map[string][]*core.Recipie
 
 // loadIdentities reads one key file and parses all usable identity lines.
 func loadIdentities(identityPaths []string, keyFingerprint string) (core.Identities, error) {
+	if len(identityPaths) == 0 {
+		return nil, fmt.Errorf("at least one --identity or SESAM_ID env var required")
+	}
+
 	identities := make(core.Identities, 0, len(identityPaths))
 	for _, identityPath := range identityPaths {
 		if strings.TrimSpace(identityPath) == "" {

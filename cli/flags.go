@@ -7,11 +7,10 @@ import "github.com/urfave/cli/v3"
 // They describe the operator identity and repository/config roots.
 var flagsGeneral = []cli.Flag{
 	&cli.StringSliceFlag{
-		Name:     "identity",
-		Aliases:  []string{"i"},
-		Usage:    "Path to the age identity (can be given several times)",
-		Required: true,
-		Sources:  cli.EnvVars("SESAM_ID", "SESAM_IDENTITY"),
+		Name:    "identity",
+		Aliases: []string{"i"},
+		Usage:   "Path to the age identity (can be given several times)",
+		Sources: cli.EnvVars("SESAM_ID", "SESAM_IDENTITY"),
 	},
 	&cli.StringFlag{
 		Name:    "config",

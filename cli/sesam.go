@@ -88,6 +88,11 @@ func Main(args []string) error {
 				Action: commands.HandleListUsers,
 				Usage:  "List persons, groups, and access",
 			}, {
+				Name:   "docgen",
+				Hidden: true,
+				Action: commands.HandleDocGen,
+				Usage:  "Write a markdown command reference to stdout",
+			}, {
 				Name:   "rotate",
 				Action: commands.HandleRotate,
 				Usage:  "Plan and execute secret rotation",
