@@ -104,7 +104,7 @@ func TestMainInitFailsWhenAlreadyInitialized(t *testing.T) {
 
 	originalConfig := "version: 1\ncustom: true\n"
 	configPath := filepath.Join(repoRoot, "sesam.yml")
-	if err := os.WriteFile(configPath, []byte(originalConfig), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte(originalConfig), 0o600); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
 	}
 
