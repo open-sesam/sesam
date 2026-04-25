@@ -35,7 +35,7 @@ config:
 
 If you did not run the `add` command above, then you can also add the entry manually and then run:
 
-```yaml
+```bash
 $ sesam apply
 ```
 
