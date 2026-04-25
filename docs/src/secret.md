@@ -99,7 +99,7 @@ In that sense, it works a bit like `git add`.
 
 Running `sesam add` will work too though, adding them is idempotent.
 It is enough to run `sesam seal` if you only modified existing secrets though.
-This simple encrypts ("seals") all known secrets. As per usual, it also has a ``--commit`` option.
+This simply encrypts ("seals") all known secrets. As per usual, it also has a ``--commit`` option.
 
 ## Removing secrets
 
