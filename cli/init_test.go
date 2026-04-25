@@ -30,7 +30,6 @@ func TestMainInitCreatesStructureInGitRoot(t *testing.T) {
 		"init",
 		"--sesam-dir", repoRoot,
 		"--user", "alice",
-		"--recipient", id.Recipient().String(),
 		"--identity", identityPath,
 	})
 	if err != nil {
@@ -38,12 +37,12 @@ func TestMainInitCreatesStructureInGitRoot(t *testing.T) {
 	}
 
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam"))
-	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "signkey"))
-	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "signkey", "alice.age"))
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "signkeys"))
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "signkeys", "alice.age"))
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "tmp"))
-	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "tmp", ".donotdelete"))
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "tmp", ".gitkeep"))
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "bin", "git-sesam"))
-	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "README.md"))
+	assertPathExists(t, filepath.Join(repoRoot, "README.md"))
 	assertPathExists(t, filepath.Join(repoRoot, "sesam.yml"))
 	assertPathExists(t, filepath.Join(repoRoot, ".gitignore"))
 	assertPathExists(t, filepath.Join(repoRoot, ".gitattributes"))
@@ -89,7 +88,6 @@ func TestMainInitAllowsRepoPathInsideGitWorktree(t *testing.T) {
 		"init",
 		"--sesam-dir", nestedPath,
 		"--user", "alice",
-		"--recipient", id.Recipient().String(),
 		"--identity", identityPath,
 	})
 	if err != nil {
@@ -125,7 +123,6 @@ func TestMainInitFailsWhenAlreadyInitialized(t *testing.T) {
 		"init",
 		"--sesam-dir", repoRoot,
 		"--user", "alice",
-		"--recipient", id.Recipient().String(),
 		"--identity", identityPath,
 	})
 	if err == nil {
@@ -158,7 +155,6 @@ func TestMainInitFailsForBusyRepoWithoutUseRoot(t *testing.T) {
 		"init",
 		"--sesam-dir", repoRoot,
 		"--user", "alice",
-		"--recipient", id.Recipient().String(),
 		"--identity", identityPath,
 	})
 	if err == nil {
@@ -192,7 +188,6 @@ func TestMainInitAllowsBusyRepoWithUseRoot(t *testing.T) {
 		"--sesam-dir", repoRoot,
 		"--use-root",
 		"--user", "alice",
-		"--recipient", id.Recipient().String(),
 		"--identity", identityPath,
 	})
 	if err != nil {

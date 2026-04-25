@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -81,6 +82,17 @@ type failCloser struct{}
 
 func (fc failCloser) Close() error {
 	return errors.New("close failed")
+}
+
+func TestValidSecretPathFormatSesamSubdir(t *testing.T) {
+	// A relative path that points inside .sesam/ must be rejected.
+	err := validSecretPathFormat(".", filepath.Join(".sesam", "signkeys", "admin.age"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), ".sesam")
+}
+
+func TestValidSecretPathFormatNormalPath(t *testing.T) {
+	require.NoError(t, validSecretPathFormat(".", "secrets/db_password"))
 }
 
 func TestCloseLoggedNoError(t *testing.T) {

@@ -147,7 +147,7 @@ func loadIdentities(identityPaths []string, keyFingerprint string) (core.Identit
 			return nil, fmt.Errorf("failed to read identity %s: %w", expandedPath, err)
 		}
 
-		identity, err := core.ParseIdentity(string(data), &core.KeyringPassphraseProvider{
+		identity, err := core.ParseIdentity(strings.TrimSpace(string(data)), &core.KeyringPassphraseProvider{
 			KeyFingerprint: keyFingerprint,
 			Fallback:       &core.StdinPassphraseProvider{},
 		})

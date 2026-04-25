@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"filippo.io/age"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,7 +21,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	whoami := admin.Name
 
 	// ── Phase 1: init ────────────────────────────────────────────────
-	signer, err := GenerateSignKey(sesamDir, whoami, admin.Recipient.Recipient)
+	signer, err := GenerateSignKey(sesamDir, whoami, []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	keyring := EmptyKeyring()
@@ -102,7 +103,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(sesamDir, "admin", admin.Recipient.Recipient)
+	signer, err := GenerateSignKey(sesamDir, "admin", []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	keyring := EmptyKeyring()
@@ -121,7 +122,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 
 	// ── Admin adds bob ──
 	bob := newTestUser(t, "bob")
-	bobSignKey, err := GenerateSignKey(sesamDir, "bob", bob.Recipient.Recipient)
+	bobSignKey, err := GenerateSignKey(sesamDir, "bob", []age.Recipient{bob.Recipient.Recipient})
 	require.NoError(t, err)
 
 	bobSignKeyStr := MulticodeEncode(bobSignKey.PublicKey(), MhEd25519Pub)
@@ -185,7 +186,7 @@ func TestIntegrationTamperDetection(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(sesamDir, "admin", admin.Recipient.Recipient)
+	signer, err := GenerateSignKey(sesamDir, "admin", []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
@@ -213,7 +214,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(sesamDir, "admin", admin.Recipient.Recipient)
+	signer, err := GenerateSignKey(sesamDir, "admin", []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)

@@ -131,5 +131,5 @@ func TestMainInitSealRevealWithoutTrackedSecrets(t *testing.T) {
 		t.Fatalf("reveal failed: %v", err)
 	}
 
-	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "README.md"))
+	assertPathExists(t, filepath.Join(repoRoot, "README.md"))
 }

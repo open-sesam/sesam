@@ -127,7 +127,7 @@ func countRepoFiles(root string) (int, error) {
 func EnsureSesamDirs(sesamDir string) error {
 	dirs := []string{
 		filepath.Join(sesamDir, ".sesam"),
-		filepath.Join(sesamDir, ".sesam", "signkey"),
+		filepath.Join(sesamDir, ".sesam", "signkeys"),
 		filepath.Join(sesamDir, ".sesam", "tmp"),
 		filepath.Join(sesamDir, ".sesam", "bin"),
 	}
