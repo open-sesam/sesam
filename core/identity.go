@@ -1,11 +1,13 @@
 package core
 
 import (
-	"crypto"
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/subtle"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 
@@ -18,16 +20,57 @@ import (
 
 // TODO: We might need to think about a way to destroy identities in memory after they are not longer needed.
 
-// ComparablePublicKey is a public key that can be compared with another key safely.
-type ComparablePublicKey interface {
-	Equal(o ComparablePublicKey) bool
+// comparablePublicKey is a public key that can be compared with another key safely.
+type comparablePublicKey interface {
+	Equal(o comparablePublicKey) bool
+	String() string
 }
 
 // age public keys are only available as string in the api.
 // Good enough for comparing them, albeit a bit awkward.
+// We can do something similar for ssh keys, just need to make
+// sure they are normalized (no comments like user@host)
 type stringPubKey string
 
-func (spk stringPubKey) Equal(o ComparablePublicKey) bool {
+// Identity references a private key of a user.
+type Identity struct {
+	age.Identity
+	pub comparablePublicKey
+}
+
+// Identities is a list of Identity.
+// It just exists to allow some common helper types.
+type Identities []*Identity
+
+// PassphraseProvider describes anything that can give you a password.
+type PassphraseProvider interface {
+	ReadPassphrase() ([]byte, error)
+}
+
+// StdinPassphraseProvider is a simple PassphraseProvider that reads a password from stdin.
+type StdinPassphraseProvider struct{}
+
+// KeyringPassphraseProvider tries to read the passphrase from the system
+// keyring (GNOME Keyring, KWallet, macOS Keychain, Windows Credential Manager).
+// If no entry exists, it falls back to prompting via the given fallback provider
+// and caches the passphrase in the keyring on success.
+type KeyringPassphraseProvider struct {
+	// KeyFingerprint identifies which key this passphrase is for.
+	// Used as the keyring item name to support multiple SSH keys.
+	KeyFingerprint string
+
+	// Fallback is used to prompt the user when the keyring has no entry.
+	Fallback PassphraseProvider
+}
+
+const keyringService = "sesam"
+
+func newStringPubKey(s string) stringPubKey {
+	// just make sure we don't have formatting accidents...
+	return stringPubKey(strings.TrimSpace(s))
+}
+
+func (spk stringPubKey) Equal(o comparablePublicKey) bool {
 	ospk, ok := o.(stringPubKey)
 	if !ok {
 		return false
@@ -36,33 +79,13 @@ func (spk stringPubKey) Equal(o ComparablePublicKey) bool {
 	return subtle.ConstantTimeCompare([]byte(spk), []byte(ospk)) == 1
 }
 
-type cryptoPubKey struct {
-	equalPubKey interface {
-		// normal crypto.PublicKey type has no Equal method,
-		// but all types implement it nevertheless.
-		Equal(x crypto.PublicKey) bool
-	}
+func (spk stringPubKey) String() string {
+	return string(spk)
 }
 
-func (cpk cryptoPubKey) Equal(o ComparablePublicKey) bool {
-	ocpk, ok := o.(cryptoPubKey)
-	if !ok {
-		return false
-	}
-
-	return cpk.equalPubKey.Equal(ocpk.equalPubKey)
-}
-
-type Identity struct {
-	age.Identity
-	pub ComparablePublicKey
-}
-
-func (gi *Identity) Public() ComparablePublicKey {
+func (gi *Identity) Public() comparablePublicKey {
 	return gi.pub
 }
-
-type Identities []*Identity
 
 func (ids Identities) AgeIdentities() []age.Identity {
 	ageIds := make([]age.Identity, 0, len(ids))
@@ -83,9 +106,15 @@ func sshKeyToIdentity(rawKey any) (*Identity, error) {
 			return nil, err
 		}
 
+		pub := k.Public().(ed25519.PublicKey)
+		sshPub, err := ssh.NewPublicKey(pub)
+		if err != nil {
+			return nil, err
+		}
+
 		return &Identity{
 			Identity: id,
-			pub:      cryptoPubKey{k.Public().(ed25519.PublicKey)},
+			pub:      newStringPubKey(string(ssh.MarshalAuthorizedKey(sshPub))),
 		}, nil
 	case ed25519.PrivateKey:
 		id, err := agessh.NewEd25519Identity(k)
@@ -93,9 +122,15 @@ func sshKeyToIdentity(rawKey any) (*Identity, error) {
 			return nil, err
 		}
 
+		pub := k.Public().(ed25519.PublicKey)
+		sshPub, err := ssh.NewPublicKey(pub)
+		if err != nil {
+			return nil, err
+		}
+
 		return &Identity{
 			Identity: id,
-			pub:      cryptoPubKey{k.Public().(ed25519.PublicKey)},
+			pub:      newStringPubKey(string(ssh.MarshalAuthorizedKey(sshPub))),
 		}, nil
 	case *rsa.PrivateKey:
 		id, err := agessh.NewRSAIdentity(k)
@@ -103,9 +138,15 @@ func sshKeyToIdentity(rawKey any) (*Identity, error) {
 			return nil, err
 		}
 
+		pub := k.Public().(*rsa.PublicKey)
+		sshPub, err := ssh.NewPublicKey(pub)
+		if err != nil {
+			return nil, err
+		}
+
 		return &Identity{
 			Identity: id,
-			pub:      cryptoPubKey{k.Public().(*rsa.PublicKey)},
+			pub:      newStringPubKey(string(ssh.MarshalAuthorizedKey(sshPub))),
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported ssh key type: %T", k)
@@ -126,7 +167,7 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity
 
 		return &Identity{
 			Identity: x25519id,
-			pub:      stringPubKey(x25519id.Recipient().String()),
+			pub:      newStringPubKey(x25519id.Recipient().String()),
 		}, nil
 	case strings.HasPrefix(key, "AGE-SECRET-KEY-PQ-1"):
 		hybridID, err := age.ParseHybridIdentity(key)
@@ -136,7 +177,7 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity
 
 		return &Identity{
 			Identity: hybridID,
-			pub:      stringPubKey(hybridID.Recipient().String()),
+			pub:      newStringPubKey(hybridID.Recipient().String()),
 		}, nil
 	}
 
@@ -147,7 +188,8 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity
 		return sshKeyToIdentity(rawKey)
 	}
 
-	if _, ok := err.(*ssh.PassphraseMissingError); !ok {
+	targetErr := &ssh.PassphraseMissingError{}
+	if !errors.As(err, &targetErr) {
 		// not a passphrase issue, so report early.
 		return nil, fmt.Errorf("key is not parse-able: %w", err)
 	}
@@ -169,30 +211,9 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity
 	return sshKeyToIdentity(rawKey)
 }
 
-type PassphraseProvider interface {
-	ReadPassphrase() ([]byte, error)
-}
-
-type StdinPassphraseProvider struct{}
-
 func (spp *StdinPassphraseProvider) ReadPassphrase() ([]byte, error) {
 	return readline.Password("Passphrase: ")
 }
-
-// KeyringPassphraseProvider tries to read the passphrase from the system
-// keyring (GNOME Keyring, KWallet, macOS Keychain, Windows Credential Manager).
-// If no entry exists, it falls back to prompting via the given fallback provider
-// and caches the passphrase in the keyring on success.
-type KeyringPassphraseProvider struct {
-	// KeyFingerprint identifies which key this passphrase is for.
-	// Used as the keyring item name to support multiple SSH keys.
-	KeyFingerprint string
-
-	// Fallback is used to prompt the user when the keyring has no entry.
-	Fallback PassphraseProvider
-}
-
-const keyringService = "sesam"
 
 func (kpp *KeyringPassphraseProvider) ReadPassphrase() ([]byte, error) {
 	stored, err := keyring.Get(keyringService, kpp.KeyFingerprint)
@@ -216,4 +237,61 @@ func (kpp *KeyringPassphraseProvider) ReadPassphrase() ([]byte, error) {
 	}
 
 	return passphrase, nil
+}
+
+// IdentityToUser checks which public key corresponds to which recipient public key.
+// This function returns the mapped user or an error.
+//
+// It will fail when:
+// - There is no public key for this user.
+// - There are several matching users (techically possible, but disencouraged).
+// - We failed to test the relation by a quick test of encrypt/decrypt.
+func IdentityToUser(id *Identity, userToPub map[string][]*Recipient) (string, error) {
+	ownPub := id.Public()
+
+	var matchCount int
+	var matchedUser string
+	var matchedRecipient *Recipient
+
+	for userName, recps := range userToPub {
+		for _, recp := range recps {
+			if ownPub.Equal(recp.comparablePublicKey) {
+				matchCount++
+				matchedUser = userName
+				matchedRecipient = recp
+			}
+		}
+	}
+
+	if matchCount == 0 {
+		return "", errors.New("no matching users found")
+	}
+
+	if matchCount > 1 {
+		return "", errors.New("too many matching users found")
+	}
+
+	// encrypt a dummy text with the matched recipient:
+	const dummyText = "sesam open"
+	buf := &bytes.Buffer{}
+	w, _ := age.Encrypt(buf, matchedRecipient)
+	_, _ = w.Write([]byte(dummyText))
+	_ = w.Close()
+
+	// decrypt it with the supplied identity to check if both are really linked:
+	r, err := age.Decrypt(buf, id)
+	if err != nil {
+		return "", fmt.Errorf("mismatch between recipient and id: %w", err)
+	}
+	resp, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("mismatch between recipient and id: %w", err)
+	}
+
+	if sr := string(resp); sr != dummyText {
+		return "", fmt.Errorf("encrypt+decrypt test worked but different outcome: %s", sr)
+	}
+
+	// all good, we can return.
+	return matchedUser, nil
 }

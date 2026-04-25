@@ -3,3 +3,6 @@ sesam
 /.sesam
 /.task
 /DESIGN.crypt
+/DESIGN.new
+/core/file:/tmp
+/coverage.out

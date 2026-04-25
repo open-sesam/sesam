@@ -1,11 +1,14 @@
 # Sesam Design
 
-I want to develop an application in Go that manages secret files (think: passwords, ssh keys, certificates) used during development.
-The target audience are developers.
+Sesam is a tool for storing encrypted secrets (think: passwords, ssh keys,
+certs, ...) and giving access to parts to it to a number of people. It is
+supposed to be friendly for DevOps/GitOps and should be able to be used by
+professional software teams during development.
 
 ## Hard Requirements
 
-- Ease of use (commonly used technology liked YAML) / Safe to use (hard to accidentally push secrets)
+- Ease of use (commonly used technology liked YAML).
+- Safe to use (hard to accidentally push secrets)
 - Secure. Minimal information about the managed secrets should be leaked.
 - Versioned, works with/wraps git ideally.
 - Can easily rotate secrets (e.g. ssh keys, i.e. knows the type of common secrets and how they are generated)
@@ -17,45 +20,69 @@ The target audience are developers.
 - Leveled Access. Some secrets should only be accessible by a certain subset of users that is pre-defined.
 - Retain permissions (so ssh stops complaining after decrypt)
 
-## Ideas
+## Alternatives
 
-### Security
+There are roughly two concepts in this problem space:
 
-Use 'age' as encrypt/decrypt tool. Advantages:
+1. Central tools: Store secrets in a central place, allow access to them via clients:
 
-- We don't need to implement it ourself.
-- Supports Hybrid Encryption really easily.
-- Has support for Postquantum crypto even (when not using ssh keys and only age keys)
-- age's plugin system (see <https://github.com/FiloSottile/awesome-age#plugins>) enables
-  support for Yubikeys (age-plugin-yubikey via PIV), TPMs, Secure Enclave, etc. without
-  sesam needing to know about any of them.
-- SSH keys are supported as age identities via the agessh package, so users with existing
-  SSH keys do not need to generate a separate age key.
-- Forges have a way to download user public keys as sort of key registry:
-  - <https://github.com/USER>.<key>
-  - <https://bitbucket.org/api/1.0/users/><accountname>/ssh-keys
-  - <https://gitlab.com/USER.keys>
-- Users could be specified as forge-username (e.g. github:sahib) or age public keys are transmitted separately.
+- Infiscal
+- Doppler
+- Hashicorp Vault
+- Ansible Vault
+- sops (can be central or decentral, it's a bit of an odd-ball)
+- ...
 
-#### Key Architecture
+2. Decentral tools: Often using a VCS, keep secrets in a:
 
-age identities are the primary key source. They handle all encryption and decryption.
-Sesam does not implement any crypto itself — it delegates entirely to age.
+- [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets)
+- [git-secret](https://github.com/sobolevn/git-secret)
+- [Keyringer](https://keyringer.pw/)
+- [Transcrypt](https://github.com/elasticdog/transcrypt )
+- [git-crypt](https://www.agwa.name/projects/git-crypt/)
+- [agebox](<https://github.com/slok/agebox>)
 
-Supported identity types (transparent to sesam):
+### Why another tool?
 
-- Native age key files (X25519)
-- SSH keys via agessh (Ed25519, RSA — age converts internally)
-- Hardware tokens via age plugins (Yubikey/PIV, TPM, Secure Enclave, ...)
+- We like to have a decentralized tool that works well together with git.
+- We need a tool that is easy to understand and reason about.
+- None of the above decentralized tools support leveled access.
+- Central tools are targeting really large organisations.
 
-Signing is handled by a separate Ed25519 keypair that sesam generates per user.
-The signing private key is encrypted with the user's age public key and stored in the
-repo at `.sesam/signkeys/$user.age`. The signing public key is stored in plaintext
-alongside it. This means:
+In general, our background is with `git-secret`. It was working kinda,
+but had way too much bugs, pitfalls, inconveniences and missing features
+to keep it for any longer.
 
-- Only the user (who can decrypt with their age identity) can sign.
-- Anyone can verify signatures using the plaintext public key.
-- Sesam never touches the user's age private key directly — age handles that.
+## Architecture
+
+- We use [age](https://github.com/FiloSottile/age) for hybrid encryption/decryption.
+  - `age` supports its own key format as well common ssh keys.
+  - It also supports Postquantum crypto already.
+  - age's [plugin system](https://github.com/FiloSottile/awesome-age#plugins) allows integration of Yubikeys and much more.
+  - We don't roll our own crypto, which is always a good thing.
+- The handling of elaborate private key setups is to be done by the user to allow flexibility.
+  - Exception: We support passphrase protected ssh keys as common use case.
+- Users have a public key they are referenced by.
+  - Supported keys: age native (X25519) or SSH keys.
+  - Users can also use forge-usernames (e.g. github:sahib)
+  - All users know the public key of all other users through the config.
+  - User are identified by private key ("identity").
+  - Users are put into groups.
+  - Only the pre-existing admin group may add new users/groups.
+  - Every secret has a list of groups it may be accessed by.
+  - Only users having access to a secret can change this access list.
+- Age keys support no signing, we therefore generate a ed25519 signing key for each user.
+  - Keys are stored as `.sesam/signkeys/$user.age`.
+- All encrypted files and repository state are stored in a `.sesam` directory.
+- The `sesam.yml` file (see example in this repo) is declarative, i.e.
+- All operations that are changing the repository state are logged in an audit log.
+  - All entries in the audit log are signed and reference the previous entry via hash.
+  - This makes the log append-only and verifiable.
+  - We also can re-construct the supposed state from the log.
+  - This state could be also diffed to the existing `sesam.yml` to find diffs.
+  - Diffs can be therefore detected in case of verify (i.e. malicious changes).
+  - Diffs can also be applied in case of local changes before push (`sesam apply`)
+  - Verification is run before any important operation.
 
 | Operation       | Needs                          | Source                                          |
 |-----------------|--------------------------------|-------------------------------------------------|
@@ -64,19 +91,14 @@ alongside it. This means:
 | Sign            | Ed25519 signing private key    | Decrypt `.sesam/signkeys/$user.age` via age     |
 | Verify          | Ed25519 signing public key     | Repo (plaintext)                                |
 
-### Configuration
+## Configuration
 
-- Yaml config hierarchy
-  - sub directories can be included
-  - Config specifies what secrets are there, what they do and how they can be rotated.
-  - User/Groups define who has access to what.
+See sesam.yml for an annotated example file.
 
-- Separate recipients file defines who has access and groups:
-  - Groups of users that are assigned to specific secrets (or wildcards of secrets)
-  - Pre-defined "admin" group that can change the recipients file.
-  - Only people in admin group are allowed to sign recipients file. Otherwise sesam errors out.
+### Rotation
 
-Secret types:
+We want it to make it possible to rotate and exchange existing secrets easily.
+Supported types would be for example:
 
 - Ssh key:
   - Generate: ssh-keygen (take settings over from existing?)
@@ -88,78 +110,35 @@ Secret types:
   - Config: zxcvbn min score, alterantively length and other pwgen settings.
 - Template:
   - Meta secret type that allows generation inside an existing file.
-  - Something like: {{ pwgen zxcvbn=3 usage=3  }}
-  - Or rather something that dynamically collects secrets from such files?
-- AWS/Github/... keys. Needs per-service integration if possible.
+  - Basically a "container" for one or several other secrets.
+- AWS/Github/[...] keys. Needs per-service integration if possible.
+  - Integration should be optional and not baked into the main binary.
 - Custom
   - Generate: script
   - Exchange: script
 
-### Misc
+The steps of a rotation would be:
 
-- Git pull as sanity check
-- Work with whole dirs
-- Parallel working should be possible -> only encrypt files that are changed.
-- Signed commits when pushing something with sesam
-- Use git attributes with smudge/clean filters to show git diffs locally.
-  - Fully integrate into git (i.e. as "git sesam")
-  - Filters could help having issues where dir content differs from what is checked out.
-  - Auto configure git accordingly?
-- Store encrypted files in .sesam, not alongside actual files.
+- plan: Show which secrets are rotated, which are exchanged.
+- exec: Execute the plan above.
+- todo: keep track of manual work that could not be automated with command to mark items done.
+
+### Other notes
+
+- We should have some git integration:
+  - do an automatic git pull to check for changes
+  - allow use of gitattributes to show local diffs between encrypted files. (smudge/clean filters)
+  - Integrate as git command (`git sesam`)
+  - Encourage using signed commits when pushing something with sesam
+- We should be able to reveal/seal whole directories where it makes sense.
+- Force pushes should be disabled for the repo and users should be made aware.
+- We should allow working in parallel where possible (e.g. encrypt only files that changed).
 - Implement command to view ownership of files easily.
-- Note: Adding/Removing persons require re-encryption of all files.
-- sesam should support several .sesam dirs per git repo
-- Make rotation command with multiple stages:
-
-  - plan: Show which secrets are rotated, which are exchanged.
-  - exec: Execute the plan above.
-  - todo: keep track of manual work that could not be automated with command to mark items done.
-
-- Logo idea: Sesame pod, but seeds replaced with small golden keys => Done
+- Adding/Removing persons require re-encryption of all files.
+- sesam should support several .sesam dirs per git repo, `.git` and `.sesam` don't need to be in the same folder.
 - README: Make clear that this is not vibe coded. Also mention that we think about rewriting in Rust after 1.0
-- We should not encourage use of `git push --force` - recommend in the README that it should be disabled to avoid
-  overwriting history.
-
 - We should use multicode to encode hashes, priv/pub keys and signatures: <https://github.com/sj14/multicode>
   This way we can figure out if a byte blob is a signature, hash or something else.
-
-### Use cases
-
-- Admin adds person to user list and groups. Individual secrets are updated as well possibly.
-  -> config.users, config.group and secrets.*.access has to be extracted.
-  -> This gets written to a normalized JSON document where spaces and so on do not matter.
-  -> Document gets hashed by private key(s?) to create a signature value above.
-  -> Existing secrets need to be re-encrypted.
-  -> Push to Github, other pull.
-  -> If signature checks out, sesam will reveal things.
-     If not, user is alerted so wrong entry is detected.
-     Attacker cannot re-encrypt existing files.
-     Side-effect: Using age directly without sesam is therefore not encouraged.
-
-- User changes his/her key.
-  - Same case as removing+adding this user (just needs to re-encrypt once)
-- Admin changes his/her key.
-  - There must be at least one valid admin.
-  - Otherwise like normal user.
-- Adding a new admin.
-- Removing an admin.
-  - There must be at least one valid admin.
-  - When degrading an admin to user and making an existing user an admin it has too happen in two transactions (because otherwise the signature is wrong)
-- Removing an user.
-  - remove from config.
-  - re-encrypt
-- New secrets are added.
-  - encrypt them.
-- Existing secrets are changed.
-- Secrets are modified.
-- Access list to secrets are modified.
-  -> Only users having already access (i.e. can decrypt file) may edit the access list. (Or should we only allow admins? Maybe config value?)
-  -> How do we notice if someone did not just add himself to the list of access users?
-  -> We know which public keys encrypted a file
-
-## YAML Example
-
-See sesam.yml  for an example file
 
 ## Commands
 
@@ -168,9 +147,12 @@ The binary can also be called as `git sesam`.
 
 ### CLI Global options
 
+Those options should be possible to specific for all commands (also via ENV variable):
+
 - age identity path (default: `~/.config/sesam/key.txt`, or SSH key path, or plugin)
 - config file path
 - repo path
+- verbose/quiet flags
 
 ### init
 
@@ -186,25 +168,161 @@ The binary can also be called as `git sesam`.
 
 ### verify
 
-- Check signature in sesam.yml
-- For each secret:
-  - Check that the configured access list is the same as the people that are able to decrypt the file.
-  - This is to protect against an attacker that would add himself to the access list.
-  - Since the attacker is not able to decrypt files we can use that as a way to verify the integrity
-  - For every encrypted file we need to store a hash of the encrypted file, hash of the decrypted file and a signature.
-  - This way we can detect if an attacker substituted a file with a version he controls.
-  - If it was freshly added: Complain if the user that added it has no access to it.
-- For each user:
-  - Check which public keys belong to his configured identity. There should be at least one.
-  - Check if the private key belongs to the signing public key in the config.
-- Verify is implicitly called after a pull, reveal or hide.
-- Ideally this is also run as part of a CI pipeline.
+Checks the integrity of the entire repository without revealing secrets.
+Implicitly called after pull, reveal or seal. Should also run in CI.
 
-Signature algorithm: Ed25519
+#### Audit log
+
+Append-only, hash-chained log of all state-changing operations.
+Stored under `.sesam/audit/log.json` (chunking planned for later).
+
+Entry structure:
+
+| Field        | Description                                              |
+|--------------|----------------------------------------------------------|
+| `seq_id`     | Monotonic sequence number (starting at 1)                |
+| `prev_hash`  | SHA3-256 (multihash-encoded) of the previous entry       |
+| `operation`  | Operation type (see below)                               |
+| `time`       | ISO8601 UTC timestamp                                    |
+| `changed_by` | User that executed the operation                         |
+| `detail`     | Operation-specific data (see below)                      |
+| `signature`  | Ed25519 signature over all other fields (canonical JSON) |
+
+Operation types:
+
+| Operation        | Detail fields                                  | Notes                                           |
+|------------------|------------------------------------------------|-------------------------------------------------|
+| `init`           | InitUUID, Admin (embedded UserTell)            | Trust root. Pins first admin. See below.        |
+| `user.tell`      | User, PubKeys, SignPubKeys, Groups             | Must be signed by an admin.                     |
+| `user.kill`      | User                                           | Must not remove last user or last admin.        |
+| `secret.change`  | RevealedPath, Groups                           | Add or update a secret and its access list.     |
+| `secret.remove`  | RevealedPath                                   | Only users with access may remove.              |
+| `seal`           | RootHash, FilesSealed                          | Hash over all sorted `.sig.json` files.         |
+
+Group membership is part of the `user.tell` detail. There are no separate
+group operations. Changing a user's groups means `user.kill` + `user.tell`.
+Admin status is determined by membership in the "admin" group.
+
+Key rotation is also handled as `user.kill` + `user.tell`. The log doubles as
+key archive: past `user.tell` entries record which signing and encryption keys
+were valid at which point, so old signatures stay verifiable.
+
+#### Authorization
+
+Every entry that modifies users or secrets must be signed by an admin. The
+entry's `signature` field proves who wrote it. During verification we check
+that the signer was a member of the "admin" group at that point in the log.
+
+The first admin is established by the `init` entry itself (embedded `Admin`
+field). There is no separate bootstrap `user.tell`.
+
+#### Trust anchor (`.sesam/audit/init`)
+
+`sesam init` writes the SHA3-256 hash of the init entry (seq 1) to
+`.sesam/audit/init`. This file is created once and must never change.
+
+During verification, the hash of the current seq 1 entry is compared to this
+file. If they differ, the log was rebuilt from scratch. CI can additionally
+check that `git log -- .sesam/audit/init` has exactly one commit.
+
+Does not protect against `git push --force` (Eve can rewrite the first commit
+and make everything consistent). Force push protection is outside sesam's
+threat model and should be enforced at the forge level.
+
+#### Tamper detection
+
+Three checks work together:
+
+1. **Chain integrity**: `prev_hash` of each entry must equal the SHA3-256 of
+   the previous entry. Any modification, insertion or deletion breaks the chain.
+
+2. **Trust anchor**: The hash of the seq 1 entry must match `.sesam/audit/init`.
+   If not, the entire log was replaced.
+
+3. **State-vs-log consistency**: Replaying the log must produce a model that
+   matches the actual state on disk:
+   - Users and their groups must match `sesam.yml`.
+   - Secrets and their access lists must match `sesam.yml`.
+   - The `RootHash` in the latest `seal` entry must match the hash computed
+     from the `.sig.json` files on disk.
+
+Attack scenarios and which check catches them:
+
+- Eve modifies the config but skips the log: state-vs-log fails (replayed
+  model does not match `sesam.yml`).
+- Eve adds forged log entries: signature check fails (signer is not an admin).
+- Eve replaces the entire log: trust anchor check fails (init hash does not
+  match `.sesam/audit/init`).
+- Eve replaces encrypted files: the `RootHash` in the seal entry no longer
+  matches the `.sig.json` files.
+
+#### Branching and merging
+
+The audit log is linear and hash-chained. When two branches diverge, each
+appends its own entries with valid chains. On merge, git produces conflict
+markers in `log.jsonl`. Sesam detects and resolves these automatically —
+no separate merge tool is needed.
+
+##### Conflict detection
+
+`LoadAuditLog` detects git conflict markers (`<<<<<<<`) in the JSONL file.
+It parses both sides, finds the common prefix (entries shared before the
+fork), and produces two divergent tails: "ours" (HEAD) and "theirs"
+(incoming branch).
+
+##### Replay strategy
+
+The merge is linearized: "ours" entries are kept in place, "theirs" entries
+are replayed on top. Each replayed entry gets a new `seq_id`, `prev_hash`,
+and is re-signed by the merging user. The merging user does not need admin
+privileges — the original authorization is established by the `changed_by`
+field and git history (similar to how the init file's integrity relies on
+git history).
+
+If replay fails (e.g. both branches added the same user, or a replayed
+entry references a user that was removed on "ours"), the merge is aborted
+with a diagnostic. The user must resolve the conflict on one branch first,
+then retry.
+
+##### Secret content conflicts
+
+Encrypted files (`.age`, `.sig.json`) are marked as `binary` in
+`.gitattributes` (set up by `sesam init`), so git does not produce conflict
+markers for them — it keeps "ours" and marks the path as conflicted.
+
+If the same secret was sealed with different content on both branches, the
+replay renames the incoming version:
+
+```
+secrets/db_pass              ← ours (unchanged)
+secrets/db_pass.theirs       ← theirs (renamed during replay)
+```
+
+Both are valid secrets in the audit log with their own access groups. The
+user inspects both, keeps the one they want, and removes the other via
+`sesam rm`. After cleanup, a `sesam seal` produces a consistent state.
+
+##### .gitattributes
+
+`sesam init` should generate:
+
+```
+.sesam/objects/**/*.age binary
+.sesam/objects/**/*.sig.json binary
+```
+
+This prevents git from attempting text merges on encrypted content.
+
+#### Additional checks
+
+- For each secret: `.sig.json` signature and ciphertext hash must be valid.
+- For each user: at least one public key must match the configured identity.
+- Freshly added secrets: warn if the adding user has no access to them.
 
 ### id
 
 Identifies user based on their age identity (age key, SSH key, or plugin).
+Just prints the user name and exits.
 
 ### seal
 
@@ -212,11 +330,15 @@ Encrypt and sign files that were changed.
 
 NOTE: Only seals the files that were changed by default.
 
+A `--push` option should be allowed to commit and push the secrets in one big step.
+
 ### reveal
 
 Reveals all secret files the user (identified by age identity) has access to.
 
 NOTE: Only the files that you can access are visible in the git working dir.
+
+A `--pull` option should be allowed to pull in changes before reveal.
 
 ### server
 
@@ -229,17 +351,23 @@ This should be compatible with the Vault HTTP API.
 
 Show audit log:
 
-- When where secrets changed by whom? Also includes the commit hash.
+- When where secrets changed by whom? 
 - When access list was changed by whom?
 - When config was changed by whom?
 
-Allow filtering by specific secrets or directories.
+Should also be able to show git version for a specific secret.
 
-### undo
+### config
 
-Check out an older secret by commit and restore it.
+#### diff
 
-### modify
+Show diffs between audit log and sesam.yml
+
+#### apply
+
+Apply the changes made to sesam.yml so they will appear in the audit log.
+
+#### modify commands
 
 - add: Add a new file or folder to the config and encrypt it.
 - rm:  Remove a file or folder from the config and remove it from disk.
@@ -252,6 +380,10 @@ Commands only work when you are in the admin group.
 - kill: Removes a person to a specified group and
 - list: List all persons that have acess along with their group (optionally as parse-able JSON)
 
+### undo
+
+Check out an older secret by commit and restore it.
+
 ### rotate
 
 - plan: Show a plan of secrets that we can rotated and exchange.
@@ -261,35 +393,59 @@ Commands only work when you are in the admin group.
   - ...that were rotated, but not exchanged.
   - ...that we did not know how to rotate and were not exchanged.
 
-## Alternatives
+## Architecture Overview
 
-- [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets)
-- [git-secret](https://github.com/sobolevn/git-secret)
-- [Keyringer](https://keyringer.pw/)
-- [Transcrypt](https://github.com/elasticdog/transcrypt )
-- [git-crypt](https://www.agwa.name/projects/git-crypt/)
-- [agebox](<https://github.com/slok/agebox>)
+```
+┌─────────────────────────────────────────────────────────┐
+│                     SecretManager                       │
+│          ties everything together for a session         │
+└────┬──────────┬───────────────┬─────────────────┬───────┘
+     │          │               │                 │
+     ▼          ▼               ▼                 ▼
+┌────────┐ ┌────────┐    ┌──────────┐    ┌───────────────┐
+│Identity│ │ Signer │    │ Keyring  │    │ VerifiedState │
+│ your   │ │ signs  │    │everyone's│    │ "what should  │
+│ private│ │ entries│    │public    │    │  the repo     │
+│ key(s) │ │&secrets│    │keys      │    │  look like?"  │
+└───┬────┘ └───┬────┘    └────┬─────┘    └───────┬───────┘
+    │          │              ▲                   ▲
+    │          │              │ keys added        │ built by
+    │          │              │ during replay     │ replaying
+    │          ▼              │                   │
+    │       ┌─────────────────┴───────────────────┘
+    │       │ AuditLog
+    │       │  append-only, hash-chained, signed entries
+    │       │  each entry is one of:
+    │       │   - Init (+first admin)  - UserTell/Kill
+    │       │   - SecretChange/Remove  - Seal
+    │       └──────────────────────────────────────
+    │
+    ▼
+┌────────────────────────────────────────────────┐
+│ Secret                                         │
+│  Seal():   encrypt + sign ──► .age + .sig.json │
+│  Reveal(): decrypt via identity                │
+│  recipients come from VerifiedState + Keyring  │
+└───────────────────────┬────────────────────────┘
+                        │
+                        ▼
+              ┌───────────────────┐
+              │ SecretSignature   │
+              │  per-file hash    │
+              └────────┬──────────┘
+                       │
+                       ▼
+              BuildRootHash()
+               combined hash of all .sig.json,
+               stored in Seal entries
 
-None of them supports leveled access though.
-
-There are more enterpris-y tools that run on server side:
-
-- Infiscal
-- Doppler
-- Vault (hashicorp or ansible)
-- ...
-
-They are kinda an alternative if you are a large organisation.
-But they run a less decentralized model and are only partly self-hosted.
-What's good: They also integrate with the applications using the secrets.
+Verify():
+ 1. check .sesam/audit/init not tampered (git history)
+ 2. replay log: check chain, signatures, authorization
+ 3. compare resulting state against repo on disk
+```
 
 ## Implementation
-
-Private key handling is delegated entirely to age and its plugin ecosystem.
-Sesam never reads or manages private keys directly. Users provide an age identity
-which can be a native age key file, an SSH private key (loaded via agessh), or a
-hardware token via an age plugin. Passphrase handling for SSH keys is done by age
-internally.
 
 ### Libraries
 
@@ -334,9 +490,9 @@ Things like exchanging aws keys or generating github api keys should not be done
 For security reasons, this binary should stay as small as possible with only the core features in it.
 Everything else should be a downloadable plugin, which means:
 
-- We need a plugion architecture - go supports this using plugin: <https://pkg.go.dev/plugin>
+- We need a plugin architecture - go supports this using plugin: <https://pkg.go.dev/plugin>
 - Plugins should be downloadable using an URL and the main sesam tool should come with a list of officially tested plugins
   with their URL, correct hash and maybe even signature using a key pair of the maintainers.
 - A specific sesam version points to specific plugin versions. The versions are curated to avoid sneaking in malicious plugins xz-style (aka supply chain attack).
 
-Other things like a TUI should be a separate tool.
+Other things like a TUI should be a separate tool to keep attach surface small.
