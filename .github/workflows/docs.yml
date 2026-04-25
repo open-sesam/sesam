@@ -41,13 +41,27 @@ jobs:
       - name: Cache cargo binaries
         uses: actions/cache@v4
         with:
-          path: ~/.cargo/bin
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
           key: mdbook-${{ runner.os }}-${{ hashFiles('Taskfile.yml') }}
 
       - name: Install mdBook and preprocessors
         run: task setup-docs
 
+      - name: Cache mdbook build
+        id: book-cache
+        uses: actions/cache@v4
+        with:
+          path: docs/book
+          key: book-${{ runner.os }}-${{ hashFiles('docs/src/**', 'docs/book.toml', 'docs/theme/**') }}-${{ github.sha }}
+          restore-keys: |
+            book-${{ runner.os }}-${{ hashFiles('docs/src/**', 'docs/book.toml', 'docs/theme/**') }}-
+
       - name: Build docs
+        if: steps.book-cache.outputs.cache-hit != 'true'
         run: cd docs && mdbook build
 
       - name: Upload artifact
