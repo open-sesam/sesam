@@ -118,7 +118,7 @@ will not find them anymore.
 
 ## Listing secrets
 
-```yaml
+```bash
 $ sesam list secrets
 ├── README.sesam
 └── dir
