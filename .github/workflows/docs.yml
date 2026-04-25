@@ -4,13 +4,18 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docs/**'
-      - '.github/workflows/docs.yml'
+      - "docs/**"
+      - "cli/**"
+      - "Taskfile.yml"
+      - ".github/workflows/docs.yml"
 
 permissions:
   contents: read
   pages: write
   id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
   group: pages
@@ -27,23 +32,26 @@ jobs:
         with:
           fetch-depth: 0 # needed for mdbook-gitinfo
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: arduino/setup-task@v2
+
       - name: Cache cargo binaries
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin
-          key: mdbook-${{ runner.os }}-mdbook0.4.44-admonish-pagetoc-gitinfo
+          key: mdbook-${{ runner.os }}-${{ hashFiles('Taskfile.yml') }}
 
       - name: Install mdBook and preprocessors
-        run: |
-          command -v mdbook || cargo install mdbook@0.4.44
-          command -v mdbook-admonish || cargo install mdbook-admonish
-          command -v mdbook-pagetoc || cargo install mdbook-pagetoc
-          command -v mdbook-gitinfo || cargo install mdbook-gitinfo
+        run: task setup-docs
+
+      - name: Generate CLI reference
+        run: task docgen
 
       - name: Build docs
-        run: |
-          cd docs
-          mdbook build
+        run: cd docs && mdbook build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
