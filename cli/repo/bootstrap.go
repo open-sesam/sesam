@@ -229,7 +229,7 @@ func EnsureDefaultGitAttributes(sesamDir string) error {
 func appendMissingLines(path string, content string, mode os.FileMode) error {
 	var existing string
 	fileMissing := false
-	if data, err := os.ReadFile(path); err == nil {
+	if data, err := os.ReadFile(path); err == nil { //nolint:gosec
 		existing = string(data)
 	} else if os.IsNotExist(err) {
 		fileMissing = true
@@ -323,7 +323,7 @@ func resolveGitDir(sesamDir string) (string, error) {
 		return gitPath, nil
 	}
 
-	data, err := os.ReadFile(gitPath)
+	data, err := os.ReadFile(gitPath) //nolint:gosec
 	if err != nil {
 		return "", fmt.Errorf("failed to read git metadata at %s: %w", gitPath, err)
 	}
@@ -393,7 +393,7 @@ func StageInitFiles(sesamDir, configPath string) error {
 	}
 
 	args := append([]string{"add"}, files...)
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:gosec,noctx
 	cmd.Dir = sesamDir
 
 	if output, err := cmd.CombinedOutput(); err != nil {

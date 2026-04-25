@@ -6,7 +6,6 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-
 // HandleAdd adds a secret path to sesam metadata.
 func HandleAdd(_ context.Context, _ *cli.Command) error {
 	return handleStub("modify add")
