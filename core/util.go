@@ -45,7 +45,6 @@ func validSecretPathFormat(sesamDir string, revealedPath string) error {
 		return fmt.Errorf("path may not include '..': %s", revealedPath)
 	}
 
-	revealedPath = filepath.Clean(revealedPath)
 	return nil
 }
 
