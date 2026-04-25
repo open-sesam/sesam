@@ -46,4 +46,5 @@ tasks:
   setup-docs:
     desc: Setup dependency for docs
     cmds:
-      - cargo install mdbook@0.4.52 mdbook-admonish@1.18.0 mdbook-gitinfo@1.2.0 mdbook-pagetoc@0.2.2
+      - command -v cargo-binstall || cargo install cargo-binstall
+      - cargo binstall --no-confirm mdbook@0.4.52 mdbook-admonish@1.18.0 mdbook-gitinfo@1.2.0 mdbook-pagetoc@0.2.2
