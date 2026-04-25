@@ -96,6 +96,15 @@ func (ids Identities) AgeIdentities() []age.Identity {
 	return ageIds
 }
 
+func (ids Identities) RecipientStrings() []string {
+	strs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		strs = append(strs, id.pub.String())
+	}
+
+	return strs
+}
+
 func sshKeyToIdentity(rawKey any) (*Identity, error) {
 	// NOTE: This is the same as agessh.ParseIdentities(), but without the parsing..
 	// If age ever extends the list of supported ssh keys we have to intervene here.

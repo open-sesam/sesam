@@ -147,7 +147,7 @@ func EnsureSesamDirs(sesamDir string) error {
 }
 
 func EnsureTmpKeepFile(sesamDir string) error {
-	keepPath := filepath.Join(sesamDir, ".sesam", "tmp", ".donotdelete")
+	keepPath := filepath.Join(sesamDir, ".sesam", "tmp", ".gitkeep")
 	if _, err := os.Stat(keepPath); os.IsNotExist(err) {
 		if err := renameio.WriteFile(keepPath, []byte("\n"), 0o600); err != nil {
 			return fmt.Errorf("failed to create %s: %w", keepPath, err)
@@ -171,7 +171,7 @@ func ResolveConfigPath(sesamDir, configPath string, configExplicit bool) string 
 	return filepath.Join(sesamDir, configPath)
 }
 
-func CreateInitialConfig(configPath, initialUser, recipientText string) error {
+func CreateInitialConfig(configPath, initialUser string, initialRecipients []string) error {
 	if _, err := os.Stat(configPath); err == nil {
 		return fmt.Errorf("config already exists at %s", configPath)
 	} else if !os.IsNotExist(err) {
@@ -193,11 +193,11 @@ func CreateInitialConfig(configPath, initialUser, recipientText string) error {
 
 	var out bytes.Buffer
 	err = tmpl.Execute(&out, struct {
-		InitialUser      string
-		InitialRecipient string
+		InitialUser       string
+		InitialRecipients []string
 	}{
-		InitialUser:      initialUser,
-		InitialRecipient: recipientText,
+		InitialUser:       initialUser,
+		InitialRecipients: initialRecipients,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to render config template: %w", err)
@@ -369,7 +369,7 @@ func EnsureGitSesamShim(sesamDir string) error {
 }
 
 func EnsureSesamReadme(sesamDir string) error {
-	readmePath := filepath.Join(sesamDir, ".sesam", "README.md")
+	readmePath := filepath.Join(sesamDir, "README.md")
 	if _, err := os.Stat(readmePath); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {

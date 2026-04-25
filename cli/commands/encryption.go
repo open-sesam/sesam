@@ -20,7 +20,7 @@ func HandleSeal(_ context.Context, cmd *cli.Command) error {
 	}
 
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
-		mgr, err := buildRegularSecretManager(sesamDir, cmd.String("identity"))
+		mgr, _, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
 		if err != nil {
 			return err
 		}
@@ -41,7 +41,7 @@ func HandleReveal(_ context.Context, cmd *cli.Command) error {
 	}
 
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
-		mgr, err := buildRegularSecretManager(sesamDir, cmd.String("identity"))
+		mgr, _, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
 		if err != nil {
 			return err
 		}
@@ -54,41 +54,44 @@ func HandleReveal(_ context.Context, cmd *cli.Command) error {
 	})
 }
 
-// buildRegularSecretManager initializes runtime state for non-init operations.
-func buildRegularSecretManager(sesamDir, identityPath string) (*core.SecretManager, error) {
-	identities, err := loadIdentities(identityPath, "sesam.identity.runtime")
+// buildManagers initializes runtime state for non-init operations.
+func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager, *core.UserManager, error) {
+	identities, err := loadIdentities(
+		identityPath,
+		"sesam.identity.runtime",
+	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	keyring := core.EmptyKeyring()
 
 	auditLog, err := core.LoadAuditLog(sesamDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load audit log: %w", err)
+		return nil, nil, fmt.Errorf("failed to load audit log: %w", err)
 	}
 
 	verifyStart := time.Now()
 	vstate, err := core.Verify(auditLog, keyring)
 	if err != nil {
-		return nil, fmt.Errorf("failed to verify audit log: %w", err)
+		return nil, nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}
 
 	slog.Info("audit log verified", slog.Duration("duration", time.Since(verifyStart)))
 
 	whoami, signIdentity, err := identityToUser(identities, keyring.ListUsers())
 	if err != nil {
-		return nil, fmt.Errorf("failed to map identity to user: %w", err)
+		return nil, nil, fmt.Errorf("failed to map identity to user: %w", err)
 	}
 
 	slog.Info("resolved signer identity", slog.String("user", whoami))
 
 	signer, err := core.LoadSignKey(sesamDir, whoami, signIdentity)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
+		return nil, nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
 	}
 
-	mgr, err := core.BuildSecretManager(
+	secMgr, err := core.BuildSecretManager(
 		sesamDir,
 		identities,
 		signer,
@@ -97,10 +100,20 @@ func buildRegularSecretManager(sesamDir, identityPath string) (*core.SecretManag
 		vstate,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build secret manager: %w", err)
+		return nil, nil, fmt.Errorf("failed to build secret manager: %w", err)
 	}
 
-	return mgr, nil
+	usrMgr, err := core.BuildUserManager(
+		sesamDir,
+		signer,
+		auditLog,
+		vstate,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to build user manager: %w", err)
+	}
+
+	return secMgr, usrMgr, nil
 }
 
 func identityToUser(identities core.Identities, users map[string][]*core.Recipient) (string, *core.Identity, error) {
@@ -115,57 +128,34 @@ func identityToUser(identities core.Identities, users map[string][]*core.Recipie
 }
 
 // loadIdentities reads one key file and parses all usable identity lines.
-func loadIdentities(identityPath, keyFingerprint string) (core.Identities, error) {
-	if strings.TrimSpace(identityPath) == "" {
-		return nil, fmt.Errorf("missing identity path: pass --identity")
-	}
-
-	expandedPath, err := expandHomeDir(identityPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve identity path: %w", err)
-	}
-
-	const maxIdentityFileBytes = 1024 * 1024
-
-	data, err := core.ReadFileLimited(expandedPath, maxIdentityFileBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read identity %s: %w", expandedPath, err)
-	}
-
-	rawKey := strings.TrimSpace(string(data))
-	if rawKey != "" {
-		identity, err := core.ParseIdentity(rawKey, &core.KeyringPassphraseProvider{
-			KeyFingerprint: keyFingerprint,
-			Fallback:       &core.StdinPassphraseProvider{},
-		})
-		if err == nil {
-			return core.Identities{identity}, nil
-		}
-	}
-
-	// We allow multiple identities in one file because users may keep several
-	// keys (for example key rotation or multiple devices) in age/ssh key files.
-	// Command flows can then select the matching identity/recipient pair.
-	var identities core.Identities
-	for line := range strings.SplitSeq(string(data), "\n") {
-		key := strings.TrimSpace(line)
-		if key == "" || strings.HasPrefix(key, "#") {
-			continue
+func loadIdentities(identityPaths []string, keyFingerprint string) (core.Identities, error) {
+	identities := make(core.Identities, 0, len(identityPaths))
+	for _, identityPath := range identityPaths {
+		if strings.TrimSpace(identityPath) == "" {
+			return nil, fmt.Errorf("missing identity path: pass --identity")
 		}
 
-		identity, err := core.ParseIdentity(key, &core.KeyringPassphraseProvider{
+		expandedPath, err := expandHomeDir(identityPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve identity path: %w", err)
+		}
+
+		const maxIdentityFileBytes = 1024 * 1024
+
+		data, err := core.ReadFileLimited(expandedPath, maxIdentityFileBytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read identity %s: %w", expandedPath, err)
+		}
+
+		identity, err := core.ParseIdentity(string(data), &core.KeyringPassphraseProvider{
 			KeyFingerprint: keyFingerprint,
 			Fallback:       &core.StdinPassphraseProvider{},
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse identity %s: %w", expandedPath, err)
+			return nil, err
 		}
 
 		identities = append(identities, identity)
-	}
-
-	if len(identities) == 0 {
-		return nil, fmt.Errorf("identity %s does not contain any usable entries", expandedPath)
 	}
 
 	return identities, nil

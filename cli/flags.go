@@ -6,22 +6,26 @@ import "github.com/urfave/cli/v3"
 //
 // They describe the operator identity and repository/config roots.
 var flagsGeneral = []cli.Flag{
-	&cli.StringFlag{
-		Name:    "identity",
-		Aliases: []string{"i"},
-		Usage:   "Path to the age identity",
+	&cli.StringSliceFlag{
+		Name:     "identity",
+		Aliases:  []string{"i"},
+		Usage:    "Path to the age identity (can be given several times)",
+		Required: true,
+		Sources:  cli.EnvVars("SESAM_ID", "SESAM_IDENTITY"),
 	},
 	&cli.StringFlag{
 		Name:    "config",
 		Aliases: []string{"c"},
 		Value:   "sesam.yml",
 		Usage:   "Path to the sesam config file",
+		Sources: cli.EnvVars("SESAM_CONFIG"),
 	},
 	&cli.StringFlag{
 		Name:    "sesam-dir",
 		Aliases: []string{"r", "repo"},
 		Value:   ".",
 		Usage:   "Directory where .sesam lives",
+		Sources: cli.EnvVars("SESAM_DIR"),
 	},
 }
 
@@ -31,10 +35,6 @@ var flagsInit = []cli.Flag{
 		Name:     "user",
 		Required: true,
 		Usage:    "Initial admin user name",
-	},
-	&cli.StringFlag{
-		Name:  "recipient",
-		Usage: "Initial admin recipient key (for example github:alice; optional when derivable from --identity)",
 	},
 	&cli.BoolFlag{
 		Name:  "use-root",
@@ -55,10 +55,10 @@ var flagsTell = []cli.Flag{
 		Required: true,
 		Usage:    "User name to add",
 	},
-	&cli.StringFlag{
+	&cli.StringSliceFlag{
 		Name:     "recipient",
 		Required: true,
-		Usage:    "Recipient key spec (for example github:alice)",
+		Usage:    "Recipient key spec (e.g. github:alice) - can be given several times",
 	},
 	&cli.StringSliceFlag{
 		Name:     "group",

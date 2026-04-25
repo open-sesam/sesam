@@ -11,7 +11,7 @@ config:
     # On the other hand, it is often rightfully useful to know when secrets were changed by whom.
     - encrypt_all: false
   users:
-    - name: [[ yaml .InitialUser ]]
+    - name: 'schorsch'
       desc: default admin user
       # Key is the public key of this user. It will be used to encrypt files.
       # Decryption is only possible when you possess the fitting private key.
@@ -25,9 +25,11 @@ config:
       # Forge-ids and links (e.g. to keyservers) are downloaded once by the admin and stored in the repo (under .sesam/keys/).
       # They are monitored on user or group changes, whenever the link/forge contents change, we will emit
       # a warning and the admin has to check whether that link is still valid.
-      key: [[ range .InitialRecipients ]]
-        - [[ . ]]
-      [[ end ]]
+      key: 
+        - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC3e+D4QF/TxV9qO8D2ByOBsibBVANmRJXc4dVxfY7EJyCOrGY/vLTD7QFYd5peQd/ZtSBrxBem8SfCkHJ8m9iO+wkrGguMSkzuN/MQNKPC7PKM+A+2JqWBK1v6Kg/wgvA9eJkRf0XNGoZiMl379sYN9J5ft4EkFliP5muR7YGfT+X9v7G+BxgM9WGZmb/L3i/qOWX83qVPjgZ25EeS85kLtiYL+koNtW5FU55yOxMWuVNiGCuKCQoAtMOAw+sbFOguUNH83i/7wLsqsnNfhlDgZylnnyMil9lDg6WShK8unNT+wQC8MoqLiB0tqc95XsODXaIADPdCZtNpIl0XgsuRXBYHg9Q0hKEW28+qm12ylHLwW7LhDCsGLgz3kzfEdC8T0z93f3d6ugXL79vDsJv+frs0nhLLCdYqtVUMR0mW4uhmtl/eUxMpZGml3SSaMYbolCVgB/QoHhokVP3J3jdVr+1Y4ApF6RCmXzZl/UOV5thLgSrR4MEmidVlbi2VNXs=
+      
+        - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC3e+D4QF/TxV9qO8D2ByOBsibBVANmRJXc4dVxfY7EJyCOrGY/vLTD7QFYd5peQd/ZtSBrxBem8SfCkHJ8m9iO+wkrGguMSkzuN/MQNKPC7PKM+A+2JqWBK1v6Kg/wgvA9eJkRf0XNGoZiMl379sYN9J5ft4EkFliP5muR7YGfT+X9v7G+BxgM9WGZmb/L3i/qOWX83qVPjgZ25EeS85kLtiYL+koNtW5FU55yOxMWuVNiGCuKCQoAtMOAw+sbFOguUNH83i/7wLsqsnNfhlDgZylnnyMil9lDg6WShK8unNT+wQC8MoqLiB0tqc95XsODXaIADPdCZtNpIl0XgsuRXBYHg9Q0hKEW28+qm12ylHLwW7LhDCsGLgz3kzfEdC8T0z93f3d6ugXL79vDsJv+frs0nhLLCdYqtVUMR0mW4uhmtl/eUxMpZGml3SSaMYbolCVgB/QoHhokVP3J3jdVr+1Y4ApF6RCmXzZl/UOV5thLgSrR4MEmidVlbi2VNXs=
+      
 
   groups:
     # Initial admin group created by sesam init.
@@ -35,7 +37,7 @@ config:
       # This is the only user that by definition may change user/groups.
       # We recommend to have at least two people here. These users also
       # by definition have access to all files (as adding users require re-encrypting)
-      - [[ yaml .InitialUser ]]
+      - 'schorsch'
 
 secrets:
   # Starter secret created by sesam init.

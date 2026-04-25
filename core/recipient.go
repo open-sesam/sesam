@@ -47,6 +47,15 @@ func (rs Recipients) AgeRecipients() []age.Recipient {
 	return ageRecps
 }
 
+func (rs Recipients) Strings() []string {
+	strs := make([]string, 0, len(rs))
+	for _, recp := range rs {
+		strs = append(strs, recp.String())
+	}
+
+	return strs
+}
+
 func forgeIdToUser(arg string) string {
 	_, user, _ := strings.Cut(arg, ":")
 	return strings.TrimSpace(user)
@@ -57,14 +66,15 @@ func forgeIdToUser(arg string) string {
 //
 // It will return the cleaned version that can be given to ParseRecipient().
 // Links and forge-id will be cached in `repoDir`.
-func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode CacheMode) (string, error) {
+func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode CacheMode) ([]string, error) {
 	switch {
 	case strings.HasPrefix(arg, "github:"):
 		url := fmt.Sprintf("https://github.com/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
 		return resolveCachedLink(ctx, repoDir, url, cacheMode)
-	case strings.HasPrefix(arg, "gitlab:"):
-		url := fmt.Sprintf("https://gitlab.com/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
-		return resolveCachedLink(ctx, repoDir, url, cacheMode)
+	// TODO: gitlab uses json
+	// case strings.HasPrefix(arg, "gitlab:"):
+	// 	url := fmt.Sprintf("https://gitlab.com/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
+	// 	return resolveCachedLink(ctx, repoDir, url, cacheMode)
 	case strings.HasPrefix(arg, "codeberg:"):
 		url := fmt.Sprintf("https://codeberg.org/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
 		return resolveCachedLink(ctx, repoDir, url, cacheMode)
@@ -73,26 +83,26 @@ func ResolveRecipient(ctx context.Context, repoDir string, arg string, cacheMode
 	case strings.HasPrefix(arg, "file://"):
 		path := strings.TrimPrefix(arg, "file://")
 		if err := validSecretPath(repoDir, path); err != nil {
-			return "", fmt.Errorf("invalid file:// path (%s): %w", arg, err)
+			return nil, fmt.Errorf("invalid file:// path (%s): %w", arg, err)
 		}
 
 		//nolint:gosec
 		fd, err := os.Open(path)
 		if err != nil {
-			return "", fmt.Errorf("failed to open %s: %w", arg, err)
+			return nil, fmt.Errorf("failed to open %s: %w", arg, err)
 		}
 
 		defer closeLogged(fd)
 
 		data, err := io.ReadAll(io.LimitReader(fd, 4096))
 		if err != nil {
-			return "", fmt.Errorf("failed to read %s: %w", arg, err)
+			return nil, fmt.Errorf("failed to read %s: %w", arg, err)
 		}
 
-		return string(data), nil
+		return []string{string(data)}, nil
 	default:
 		// pass through:
-		return arg, nil
+		return []string{arg}, nil
 	}
 }
 
@@ -102,13 +112,26 @@ func cachePath(repoDir, url string) string {
 
 // TODO: implement command to check if links and forge-ids are out-dated? Maybe part of verify?
 
+func splitByLine(s string) []string {
+	lines := []string{}
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		lines = append(lines, line)
+	}
+
+	return lines
+}
+
 // resolveCachedLink will download the specified `url` and write it to a cache under `repoDir`.
 // If the cached response is already available, then it is returned directly.
-func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode CacheMode) (string, error) {
+func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode CacheMode) ([]string, error) {
 	if !strings.HasPrefix(url, "https://") {
 		// we should not download public keys over http:// or whatever.
 		// https is not ideal either, so links should be noted in the docs to be difficult from a security perspective.
-		return "", fmt.Errorf("unsupported protocol scheme: %s", url)
+		return nil, fmt.Errorf("unsupported protocol scheme: %s", url)
 	}
 
 	cachePath := cachePath(repoDir, url)
@@ -117,13 +140,13 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 		//nolint:gosec
 		data, err := os.ReadFile(cachePath)
 		if err == nil {
-			return string(data), nil
+			return splitByLine(string(data)), nil
 		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to build request: %w", err)
+		return nil, fmt.Errorf("failed to build request: %w", err)
 	}
 
 	client := &http.Client{
@@ -132,12 +155,12 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to download %s: %w", url, err)
+		return nil, fmt.Errorf("failed to download %s: %w", url, err)
 	}
 	defer closeLogged(resp.Body)
 
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("%s failed with code %d", url, resp.StatusCode)
+		return nil, fmt.Errorf("%s failed with code %d", url, resp.StatusCode)
 	}
 
 	// Limit response size so cannot be DoS'd by large responses:
@@ -150,7 +173,7 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 		//nolint:gosec
 		cacheFd, err := os.Create(cachePath)
 		if err != nil {
-			return "", fmt.Errorf("failed to create cache path: %w", err)
+			return nil, fmt.Errorf("failed to create cache path: %w", err)
 		}
 
 		defer closeLogged(cacheFd)
@@ -159,7 +182,7 @@ func resolveCachedLink(ctx context.Context, repoDir, url string, cacheMode Cache
 
 	buf := bytes.Buffer{}
 	_, err = io.Copy(&buf, tr)
-	return buf.String(), err
+	return splitByLine(buf.String()), err
 }
 
 // ParseRecipient will turn a public key to a recipient that age can understand.
@@ -212,16 +235,11 @@ func ParseRecipient(arg string) (*Recipient, error) {
 }
 
 // ParseRecipients parses one or more newline-separated recipient keys.
-func ParseRecipients(raw string) (Recipients, error) {
+func ParseRecipients(recps []string) (Recipients, error) {
 	var recipients Recipients
 
-	for line := range strings.SplitSeq(raw, "\n") {
-		key := strings.TrimSpace(line)
-		if key == "" {
-			continue
-		}
-
-		recp, err := ParseRecipient(key)
+	for _, recp := range recps {
+		recp, err := ParseRecipient(recp)
 		if err != nil {
 			return nil, err
 		}
@@ -229,9 +247,29 @@ func ParseRecipients(raw string) (Recipients, error) {
 		recipients = append(recipients, recp)
 	}
 
-	if len(recipients) == 0 {
-		return nil, fmt.Errorf("no recipient key found")
+	return recipients, nil
+}
+
+func ParseAndResolveRecipients(ctx context.Context, repoDir string, pubKeySpecs []string) (Recipients, error) {
+	recps := make(Recipients, 0, len(pubKeySpecs))
+	for idx, pubKeySpec := range pubKeySpecs {
+		rawPubKeys, err := ResolveRecipient(
+			ctx,
+			repoDir,
+			pubKeySpec,
+			CacheModeReadWrite,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve recipient %s (#%d): %w", pubKeySpec, idx, err)
+		}
+
+		subRecps, err := ParseRecipients(rawPubKeys)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse recipient %s (#%d): %w", rawPubKeys, idx, err)
+		}
+
+		recps = append(recps, subRecps...)
 	}
 
-	return recipients, nil
+	return recps, nil
 }

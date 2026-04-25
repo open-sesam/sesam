@@ -67,7 +67,7 @@ func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error
 		return nil, fmt.Errorf("failed to load sign key %s: %w", signKeyPath, err)
 	}
 
-	dr, err := age.Decrypt(io.LimitReader(cryptedSignPrivKeyFd, 1024), userIdentity)
+	dr, err := age.Decrypt(io.LimitReader(cryptedSignPrivKeyFd, 16*1024), userIdentity)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt header of signing key: %w", err)
 	}
@@ -101,12 +101,12 @@ func LoadSignKey(repoDir, user string, userIdentity age.Identity) (Signer, error
 }
 
 // GenerateSignKey will generate a new ed25519 signing key only accessible to `userRecipient`
-func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer, error) {
+func GenerateSignKey(sesamDir, user string, userRecipient []age.Recipient) (Signer, error) {
 	if err := validUserName(user); err != nil {
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
 
-	signKeyPath := filepath.Join(repoDir, ".sesam", "signkey", user+".age")
+	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkey", user+".age")
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate signing key %s: %w", signKeyPath, err)
@@ -117,7 +117,7 @@ func GenerateSignKey(repoDir, user string, userRecipient age.Recipient) (Signer,
 	}
 
 	ageBuf := &bytes.Buffer{}
-	wc, err := age.Encrypt(ageBuf, userRecipient)
+	wc, err := age.Encrypt(ageBuf, userRecipient...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt signing key: %w", err)
 	}

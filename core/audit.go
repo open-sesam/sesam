@@ -408,6 +408,7 @@ func (al *AuditLog) AddEntry(signer Signer, e *auditEntry, verify func() error) 
 
 	if verify != nil {
 		if err := verify(); err != nil {
+			slog.Warn("verify failed - revert last entry", slog.Any("entry", entry), slog.Any("err", err))
 			al.Entries = al.Entries[:len(al.Entries)-1] // pop failed entry off.
 			return entry, err
 		}

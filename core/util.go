@@ -50,6 +50,10 @@ func validSecretPath(repoDir string, revealedPath string) error {
 		return fmt.Errorf("path may not include '..': %s", revealedPath)
 	}
 
+	if strings.HasPrefix(revealedPath, filepath.Join(repoDir, ".sesam")) {
+		return fmt.Errorf("secret path may not live in .sesam: %s", revealedPath)
+	}
+
 	revealedPath = filepath.Clean(revealedPath)
 	info, err := os.Stat(revealedPath)
 	if err != nil {

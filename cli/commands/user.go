@@ -7,7 +7,6 @@ import (
 	"time"
 
 	clirepo "github.com/open-sesam/sesam/cli/repo"
-	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
@@ -18,13 +17,13 @@ func HandleTell(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	user := strings.TrimSpace(cmd.String("user"))
+	user := cmd.String("user")
 	if user == "" {
 		return fmt.Errorf("missing user: pass --user")
 	}
 
-	recipient := strings.TrimSpace(cmd.String("recipient"))
-	if recipient == "" {
+	recipients := cmd.StringSlice("recipient")
+	if len(recipients) == 0 {
 		return fmt.Errorf("missing recipient: pass --recipient")
 	}
 
@@ -34,19 +33,18 @@ func HandleTell(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
-		mgr, auditLog, err := buildRegularUserManager(sesamDir, cmd.String("identity"))
+		identityPaths := cmd.StringSlice("identity")
+		// TODO: close audit log
+		secMgr, usrMgr, err := buildManagers(sesamDir, identityPaths)
 		if err != nil {
-			return err
+			return fmt.Errorf(" failed to load secret manager: %w", err)
 		}
-		defer func() {
-			_ = auditLog.Close()
-		}()
 
-		if err := mgr.TellUser(ctx, user, recipient, groups); err != nil {
+		if err := usrMgr.TellUser(ctx, user, recipients, groups); err != nil {
 			return fmt.Errorf("failed to add user: %w", err)
 		}
 
-		return nil
+		return secMgr.SealAll()
 	})
 }
 
@@ -63,57 +61,15 @@ func HandleKill(_ context.Context, cmd *cli.Command) error {
 	}
 
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
-		mgr, auditLog, err := buildRegularUserManager(sesamDir, cmd.String("identity"))
+		secMgr, usrMgr, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
 		if err != nil {
 			return err
 		}
-		defer func() {
-			_ = auditLog.Close()
-		}()
 
-		if err := mgr.KillUsers(user); err != nil {
+		if err := usrMgr.KillUsers(user); err != nil {
 			return fmt.Errorf("failed to remove user: %w", err)
 		}
 
-		return nil
+		return secMgr.SealAll()
 	})
-}
-
-func buildRegularUserManager(sesamDir, identityPath string) (*core.UserManager, *core.AuditLog, error) {
-	identities, err := loadIdentities(identityPath, "sesam.identity.runtime")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	keyring := core.EmptyKeyring()
-	auditLog, err := core.LoadAuditLog(sesamDir)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load audit log: %w", err)
-	}
-
-	vstate, err := core.Verify(auditLog, keyring)
-	if err != nil {
-		_ = auditLog.Close()
-		return nil, nil, fmt.Errorf("failed to verify audit log: %w", err)
-	}
-
-	whoami, signIdentity, err := identityToUser(identities, keyring.ListUsers())
-	if err != nil {
-		_ = auditLog.Close()
-		return nil, nil, fmt.Errorf("failed to map identity to user: %w", err)
-	}
-
-	signer, err := core.LoadSignKey(sesamDir, whoami, signIdentity)
-	if err != nil {
-		_ = auditLog.Close()
-		return nil, nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
-	}
-
-	mgr, err := core.BuildUserManager(sesamDir, signer, auditLog, vstate)
-	if err != nil {
-		_ = auditLog.Close()
-		return nil, nil, fmt.Errorf("failed to build user manager: %w", err)
-	}
-
-	return mgr, auditLog, nil
 }
