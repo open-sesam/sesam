@@ -47,9 +47,6 @@ jobs:
       - name: Install mdBook and preprocessors
         run: task setup-docs
 
-      - name: Generate CLI reference
-        run: task docgen
-
       - name: Build docs
         run: cd docs && mdbook build
 
