@@ -111,7 +111,7 @@ func (um *UserManager) KillUsers(user string) error {
 		return err
 	}
 
-	signKeyPath := filepath.Join(um.sesamDir, ".sesam", "signkey", user+".age")
+	signKeyPath := filepath.Join(um.sesamDir, ".sesam", "signkeys", user+".age")
 	if err := os.RemoveAll(signKeyPath); err != nil {
 		return err
 	}
