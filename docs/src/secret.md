@@ -105,7 +105,7 @@ This simple encrypts ("seals") all known secrets. As per usual, it also has a ``
 
 If you have deleted files you can run this:
 
-```yaml
+```bash
 $ sesam add --deleted files/ dir/
 
 ```
