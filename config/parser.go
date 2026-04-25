@@ -2,29 +2,44 @@ package config
 
 import (
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/goccy/go-yaml"
 )
 
-type Config struct {
-	General General `yaml:"general"`
-	Secrets Secrets `yaml:"secrets"`
+// ConfParser holds additional information about the
+// config file like comments (TODO: find a way to preserve newlines)
+type ConfParser struct {
+	Decoder    *yaml.Decoder
+	CommentMap map[string][]*yaml.Comment
 }
 
-type General struct {
-	EncryptAll bool `yaml:"encrypt_all"`
+func NewConfParser(reader io.Reader) *ConfParser {
+	commentMap := map[string][]*yaml.Comment{}
+	decoder := yaml.NewDecoder(reader, yaml.CommentToMap(commentMap))
+
+	return &ConfParser{
+		Decoder:    decoder,
+		CommentMap: commentMap,
+	}
 }
 
-type Secrets struct {
-	SecretType string `yaml:"type"`
-	Path       string `yaml:"path"`
-}
-
-func Parse(data []byte) (*Config, error) {
-	conf := &Config{}
-	if err := yaml.Unmarshal(data, conf); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal yaml conf: %w", err)
+// Parse parses the given file into the SesamConf struct
+func (c *ConfParser) Parse() (*SesamConf, error) {
+	conf := &SesamConf{}
+	if err := c.Decoder.Decode(conf); err != nil {
+		return nil, fmt.Errorf("failed to decode file: %w", err)
 	}
 
 	return conf, nil
+}
+
+func (c *ConfParser) Write(conf *SesamConf) error {
+	b, err := yaml.MarshalWithOptions(conf, yaml.WithComment(c.CommentMap))
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	return os.WriteFile("/home/johnny/repos/sesam/mini-conf-parsed.yaml", b, 0o644)
 }
