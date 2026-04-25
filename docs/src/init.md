@@ -30,7 +30,7 @@ Some things to note here:
   - Create a `.gitignore` that ignores everything but `.sesam/` and `.sesam.yml`. This is to protect revealed secret so they never get accidentally added to git.
   - It will also create a first secret: `README.sesam`. Read it for a condensed version of this tutorial.
 - The `--commit` will add commit directly. Remove it if you don't want that.
-- You need to specify an initial user. This user will be the fist admin. `sesam` has the concept of users with different access levels. As admin, `bob` has access to all secrets and can also create new users.
+- You need to specify an initial user. This user will be the first admin. `sesam` has the concept of users with different access levels. As admin, `bob` has access to all secrets and can also create new users.
 - Every user needs an **identity** - a cryptographic way to prove he is this specific user.
   In the example above we used an ssh key.
 
