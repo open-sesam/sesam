@@ -86,7 +86,7 @@ func verifyInitFileUnchanged(sesamDir string) error {
 		return fmt.Errorf("failed to get worktree status: %w", err)
 	}
 
-	if fs, ok := status[initRel]; ok && fs.Worktree != git.Unmodified && fs.Staging != git.Unmodified {
+	if fs, ok := status[initRel]; ok && (fs.Worktree != git.Unmodified || fs.Staging != git.Unmodified) {
 		return fmt.Errorf(".sesam/audit/init has uncommitted changes")
 	}
 

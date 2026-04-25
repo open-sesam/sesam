@@ -224,6 +224,14 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s already exists", tell.User)
 	}
 
+	if len(tell.SignPubKeys) == 0 {
+		return fmt.Errorf("user %s needs at least one signing pub key", tell.User)
+	}
+
+	if len(tell.SignPubKeys) > 10 {
+		return fmt.Errorf("user %s may not have more than 10 signing keys", tell.User)
+	}
+
 	for _, signPubKey := range tell.SignPubKeys {
 		signPubKeyData, _, err := multicodeDecode(signPubKey)
 		if err != nil {
@@ -231,6 +239,14 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		}
 
 		kr.AddSignPubKey(tell.User, signPubKeyData)
+	}
+
+	if len(tell.PubKeys) == 0 {
+		return fmt.Errorf("user %s needs at least one public key", tell.User)
+	}
+
+	if len(tell.PubKeys) > 10 {
+		return fmt.Errorf("user %s may not have more than 10 public keys", tell.User)
 	}
 
 	for _, pubKey := range tell.PubKeys {
@@ -439,10 +455,12 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 
 func verify(state *VerifiedState) error {
 	log := state.auditLog
+	kr := state.keyring
+	newState := *state
 
 	var previousEntry *auditEntrySigned
 	err := log.Iterate(func(idx int, entry *auditEntrySigned) error {
-		if entry.SeqID <= state.VerifiedUntil {
+		if entry.SeqID <= newState.VerifiedUntil {
 			return nil
 		}
 
@@ -452,17 +470,17 @@ func verify(state *VerifiedState) error {
 		var err error
 		switch entry.Operation {
 		case opInit:
-			err = verifyInit(log, state, entry, state.keyring)
+			err = verifyInit(log, &newState, entry, kr)
 		case opUserTell:
-			err = verifyUserTell(log, state, entry, state.keyring)
+			err = verifyUserTell(log, &newState, entry, kr)
 		case opUserKill:
-			err = verifyUserKill(log, state, entry, state.keyring)
+			err = verifyUserKill(log, &newState, entry, kr)
 		case opSeal:
-			err = verifySeal(log, state, entry)
+			err = verifySeal(log, &newState, entry)
 		case opSecretChange:
-			err = verifySecretChange(log, state, entry)
+			err = verifySecretChange(log, &newState, entry)
 		case opSecretRemove:
-			err = verifySecretRemove(log, state, entry)
+			err = verifySecretRemove(log, &newState, entry)
 		default:
 			err = fmt.Errorf("unexpected core.Operation: %#v", entry.Operation)
 		}
@@ -472,7 +490,7 @@ func verify(state *VerifiedState) error {
 		}
 
 		// check the signature
-		signatureUser, err := entry.Verify(state.keyring)
+		signatureUser, err := entry.Verify(kr)
 		if err != nil {
 			return fmt.Errorf("failed to verify signature on entry %d: %w", entry.SeqID, err)
 		}
@@ -499,7 +517,7 @@ func verify(state *VerifiedState) error {
 		}
 
 		previousEntry = entry
-		state.VerifiedUntil = entry.SeqID
+		newState.VerifiedUntil = entry.SeqID
 		return nil
 	})
 	if err != nil {
@@ -515,5 +533,6 @@ func verify(state *VerifiedState) error {
 		)
 	}
 
+	*state = newState
 	return nil
 }

@@ -54,6 +54,8 @@ func (um *UserManager) TellUser(
 		return fmt.Errorf("re-adding user not yet supported")
 	}
 
+	// TODO: We should allow more than one public key here.
+
 	// core.ResolveRecipient and core.ParseRecipient only has to be done once per user add.
 	// init means adding an initial user, so assume we get the public key here via the config or something.
 	rawPubKey, err := ResolveRecipient(
