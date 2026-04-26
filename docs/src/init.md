@@ -11,6 +11,7 @@ Sesam relies on git history to be linear. You should therefore disable `git push
 in your repository. Most git forges allow this in their settings (example: [GitHub](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#allow-force-pushes))
 
 If force pushes are possible, someone could truncate the audit log (see [Design](/design.md) for more info).
+This can lead to security issues.
 ```
 
 
@@ -26,10 +27,10 @@ Some things to note here:
 
 - This command will do the following:
   - Create a folder `.sesam/` in the current directory.
-  - Create a default config file in `sesam.yml`. It is a declarative config describing 
-  - Create a `.gitignore` that ignores everything but `.sesam/` and `.sesam.yml`. This is to protect revealed secret so they never get accidentally added to git.
-  - It will also create a first secret: `README.sesam`. Read it for a condensed version of this tutorial.
-- The `--commit` will add commit directly. Remove it if you don't want that.
+  - Create a default config file in `sesam.yml`. It is a declarative config describing the state we want in our repo.
+  - Create a `.gitignore` that ignores everything but `.sesam/` and `.sesam.yml`. This is to protect revealed secret so they **never get accidentally added to git**.
+  - It will also create a first secret: `README.sesam`. Read it for a very condensed version of this tutorial.
+- The `--commit` will add a commit directly. Remove it if you don't want that.
 - You need to specify an initial user. This user will be the first admin. `sesam` has the concept of users with different access levels. As admin, `bob` has access to all secrets and can also create new users.
 - Every user needs an **identity** - a cryptographic way to prove he is this specific user.
   In the example above we used an ssh key.
@@ -66,6 +67,19 @@ If you want to know as what user you identify as, just type:
 ```bash
 $ sesam id
 bob
+```
+
+With the ``--json`` option you also get the public keys you are using:
+
+```bash
+$ sesam id --json
+{
+  "user": "bob",
+  "pub": [
+      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCvOFS7/GLmkKuuhr+w61IkT4tJJpAT+Os1jH8olDkWawETAeoP8RfRKBPVc/T3sqWv2CoC2orT0j6JN3ixZnlc3QCwWiJVpkOTOyF718UGvxRZFc5STpYk8oAE/HlEM+ShrkT5seOfamPRAdx+7cjxFhTDaYdprQ+m85RhZClsGSH5Qbr57KRwtnFlIPA1d4IpAGc8FlzpwS/foNRaJYp1MXF0/Kk5gR6dkJ7KCOljOaNkoZp2cNDcJDtycUyBf9SUoOYhVNVkeGSCtnQ3WRZa1r1/lQUcE3oVT+6iyd3vq/xFa6Iih49xHIKZ0ZH2FiBlynTTRGIW4ne8MeaY7U/FM2QkcZRk48jg+g3UMkfncfzpxat4ZZjtw3VhcxpXKLy76C6q5+YPQPUMFgKU9XlPMpw21+/dbCw5cPIa3EashBubAGJKa7XgFrf7qFZ7jGp5+JEdTmHqHyI6V63LZ6ya0cwbQlgxRckax/ct6OLwmIRGBQTlOuN45RFMhbI5Qj8=",
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEMXpWJBhFnrwBi//gNrXzZVOW1SyNRwFEK7elXhZOin"
+  ]
+}
 ```
 
 ## Recipients
