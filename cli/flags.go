@@ -47,6 +47,15 @@ var flagsSeal = []cli.Flag{}
 // flagsReveal contains optional controls for reveal.
 var flagsReveal = []cli.Flag{}
 
+// flagsAdd contains controls for adding secrets.
+var flagsAdd = []cli.Flag{
+	&cli.StringSliceFlag{
+		Name:     "group",
+		Required: true,
+		Usage:    "Group assignment for the secret (repeatable)",
+	},
+}
+
 // flagsTell contains controls for adding users.
 var flagsTell = []cli.Flag{
 	&cli.StringFlag{

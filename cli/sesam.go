@@ -54,13 +54,16 @@ func Main(args []string) error {
 				Action: commands.HandleUndo,
 				Usage:  "Restore secrets from an earlier revision",
 			}, {
-				Name:   "add",
-				Action: commands.HandleAdd,
-				Usage:  "Add a secret file or directory",
+				Name:      "add",
+				Flags:     flagsAdd,
+				ArgsUsage: "<path>",
+				Action:    commands.HandleAdd,
+				Usage:     "Add a secret file or directory",
 			}, {
-				Name:   "rm",
-				Action: commands.HandleRemove,
-				Usage:  "Remove a secret file or directory",
+				Name:      "rm",
+				ArgsUsage: "<path>",
+				Action:    commands.HandleRemove,
+				Usage:     "Remove a secret file or directory",
 			}, {
 				Name:   "mv",
 				Action: commands.HandleMove,
