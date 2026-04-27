@@ -127,7 +127,7 @@ func identityToUser(identities core.Identities, users map[string][]*core.Recipie
 	return "", nil, fmt.Errorf("no loaded identity matches any known user")
 }
 
-// loadIdentities reads one key file and parses all usable identity lines.
+// loadIdentities reads all given paths and parses all identities
 func loadIdentities(identityPaths []string, keyFingerprint string) (core.Identities, error) {
 	if len(identityPaths) == 0 {
 		return nil, fmt.Errorf("at least one --identity or SESAM_ID env var required")
