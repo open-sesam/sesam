@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	clirepo "github.com/open-sesam/sesam/cli/repo"
 	"github.com/urfave/cli/v3"
@@ -32,7 +31,7 @@ func HandleTell(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("missing group: pass --group at least once")
 	}
 
-	return withRepoLock(sesamDir, 5*time.Second, func() error {
+	return withRepoLock(sesamDir, func() error {
 		identityPaths := cmd.StringSlice("identity")
 		// TODO: close audit log
 		secMgr, usrMgr, err := buildManagers(sesamDir, identityPaths)
@@ -60,7 +59,7 @@ func HandleKill(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("missing user: pass --user")
 	}
 
-	return withRepoLock(sesamDir, 5*time.Second, func() error {
+	return withRepoLock(sesamDir, func() error {
 		secMgr, usrMgr, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
 		if err != nil {
 			return err

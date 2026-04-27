@@ -7,7 +7,9 @@ import (
 	"time"
 )
 
-func withRepoLock(sesamDir string, timeout time.Duration, fn func() error) error {
+const defaultRepoLockTimeout = 5 * time.Second
+
+func withRepoLock(sesamDir string, fn func() error) error {
 	lockPath := filepath.Join(sesamDir, ".sesam", "lock")
 	lockDir := filepath.Dir(lockPath)
 
@@ -19,7 +21,7 @@ func withRepoLock(sesamDir string, timeout time.Duration, fn func() error) error
 		return fmt.Errorf("failed to access lock directory %s: %w", lockDir, err)
 	}
 
-	acquired, err := acquireRepoLock(lockPath, timeout)
+	acquired, err := acquireRepoLock(lockPath, defaultRepoLockTimeout)
 	if err != nil {
 		return err
 	}

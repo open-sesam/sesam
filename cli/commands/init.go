@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/open-sesam/sesam/cli/repo"
 	"github.com/open-sesam/sesam/core"
@@ -47,7 +46,7 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return withRepoLock(sesamDir, 5*time.Second, func() error {
+	return withRepoLock(sesamDir, func() error {
 		configPath := repo.ResolveConfigPath(sesamDir, cmd.String("config"), cmd.IsSet("config"))
 		if err := repo.CreateInitialConfig(
 			configPath,

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/open-sesam/sesam/cli/repo"
 	"github.com/urfave/cli/v3"
@@ -28,7 +27,7 @@ func HandleAdd(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("missing group: pass --group at least once")
 	}
 
-	return withRepoLock(sesamDir, 5*time.Second, func() error {
+	return withRepoLock(sesamDir, func() error {
 		mgr, _, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
 		if err != nil {
 			return err
@@ -59,7 +58,7 @@ func HandleRemove(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("missing secret path: pass a path argument")
 	}
 
-	return withRepoLock(sesamDir, 5*time.Second, func() error {
+	return withRepoLock(sesamDir, func() error {
 		mgr, _, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
 		if err != nil {
 			return err

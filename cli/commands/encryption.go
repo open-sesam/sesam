@@ -19,7 +19,7 @@ func HandleSeal(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return withRepoLock(sesamDir, 5*time.Second, func() error {
+	return withRepoLock(sesamDir, func() error {
 		mgr, _, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
 		if err != nil {
 			return err
@@ -40,7 +40,7 @@ func HandleReveal(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return withRepoLock(sesamDir, 5*time.Second, func() error {
+	return withRepoLock(sesamDir, func() error {
 		mgr, _, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
 		if err != nil {
 			return err
