@@ -125,7 +125,7 @@ func InitAdminUser(
 	}
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	auditLog, err := InitAuditLog(sesamDir, signer, DetailUserTell{
+	auditLog, err := InitAuditLog(sesamDir, signer, recps, DetailUserTell{
 		User:        signer.UserName(),
 		Groups:      []string{"admin"},
 		PubKeys:     recps.Strings(),

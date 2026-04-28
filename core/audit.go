@@ -1,7 +1,11 @@
 package core
 
 import (
+	"bufio"
 	"bytes"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,8 +16,10 @@ import (
 	"strings"
 	"time"
 
+	"filippo.io/age"
 	"github.com/google/renameio"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/chacha20poly1305"
 )
 
 const (
@@ -245,6 +251,9 @@ type AuditLog struct {
 
 	// file descriptor for adding new entries.
 	fd *os.File
+
+	// key used for encryption
+	key [chacha20poly1305.KeySize]byte
 }
 
 // operationFor returns the operation type for a given detail struct.
@@ -323,10 +332,26 @@ func (aes *auditEntrySigned) Verify(kr Keyring) (string, error) {
 	return kr.Verify(SesamDomainSignAuditTag, wholeEntryJSON, aes.Signature, aes.ChangedBy)
 }
 
+func (al *AuditLog) writeAuditKey(sesamDir string, recps Recipients) error {
+	keyPath := filepath.Join(sesamDir, ".sesam", "audit", "key.age")
+
+	buf := &bytes.Buffer{}
+	w, err := age.Encrypt(buf, recps.AgeRecipients()...)
+	if err != nil {
+		return err
+	}
+
+	if _, err := w.Write(al.key[:]); err != nil {
+		return err
+	}
+
+	return renameio.WriteFile(keyPath, buf.Bytes(), 0o600)
+}
+
 // InitAuditLog initializes an empty audit log on repo init.
 // It creates the first init entry which also establishes the initial admin user.
-func InitAuditLog(sesamDir string, signer Signer, admin DetailUserTell) (*AuditLog, error) {
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
+func InitAuditLog(sesamDir string, signer Signer, recps Recipients, admin DetailUserTell) (*AuditLog, error) {
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.chacha20")
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 
 	if err := os.MkdirAll(filepath.Dir(initPath), 0o700); err != nil {
@@ -339,9 +364,16 @@ func InitAuditLog(sesamDir string, signer Signer, admin DetailUserTell) (*AuditL
 		return nil, err
 	}
 
+	// TODO: When do we re-generate the .key file?
 	al := &AuditLog{
 		SesamDir: sesamDir,
 		fd:       fd,
+	}
+
+	// generate new audit log key and write it to disk:
+	rand.Read(al.key[:])
+	if err := al.writeAuditKey(sesamDir, recps); err != nil {
+		return nil, err
 	}
 
 	initEntry := newAuditEntry(signer.UserName(), &DetailInit{
@@ -420,8 +452,21 @@ func (al *AuditLog) AddEntry(signer Signer, e *auditEntry, verify func() error) 
 		return nil, err
 	}
 
-	sigJSON = append(sigJSON, '\n')
-	if _, err := al.fd.Write(sigJSON); err != nil {
+	// TODO: store in struct instead of key?
+	aead, err := chacha20poly1305.New(al.key[:])
+	if err != nil {
+		return nil, err
+	}
+
+	nonce := make([]byte, aead.NonceSize())
+	binary.BigEndian.PutUint64(nonce, uint64(entry.SeqID))
+	encData := aead.Seal(nil, nonce, sigJSON, nil)
+
+	base64Buf := make([]byte, base64.RawStdEncoding.EncodedLen(len(encData)))
+	base64.RawStdEncoding.Encode(base64Buf, encData)
+
+	base64Buf = append(base64Buf, '\n')
+	if _, err := al.fd.Write(base64Buf); err != nil {
 		return nil, err
 	}
 
@@ -442,11 +487,45 @@ func (al *AuditLog) Iterate(fn func(idx int, entry *auditEntrySigned) error) err
 	return nil
 }
 
+func loadAuditKey(path string, ids Identities) ([]byte, error) {
+	data, err := ReadFileLimited(path, 1024*1024)
+	if err != nil {
+		return nil, err
+	}
+
+	r, err := age.Decrypt(bytes.NewReader(data), ids.AgeIdentities()...)
+	if err != nil {
+		return nil, err
+	}
+
+	key, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(key) != chacha20poly1305.KeySize {
+		return nil, fmt.Errorf("audit key is not %d byte", chacha20poly1305.KeySize)
+	}
+
+	return key, nil
+}
+
 // LoadAuditLog reads the audit log from disk and gives you an handle to operate on it.
 // It does NOT verify the log yet. Call Verify() for that.
-func LoadAuditLog(sesamDir string) (*AuditLog, error) {
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
+func LoadAuditLog(sesamDir string, ids Identities) (*AuditLog, error) {
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.chacha20")
+	keyPath := filepath.Join(sesamDir, ".sesam", "audit", "key.age")
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
+
+	key, err := loadAuditKey(keyPath, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load audit key: %w", err)
+	}
+
+	aead, err := chacha20poly1305.New(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize chacha20poly1305: %w", err)
+	}
 
 	initData, err := ReadFileLimited(initPath, 256)
 	if err != nil {
@@ -457,6 +536,8 @@ func LoadAuditLog(sesamDir string) (*AuditLog, error) {
 		SesamDir: sesamDir,
 		InitHash: strings.TrimSpace(string(initData)),
 	}
+
+	copy(al.key[:], key)
 
 	//nolint:gosec
 	al.fd, err = os.OpenFile(logPath, os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
@@ -479,26 +560,28 @@ func LoadAuditLog(sesamDir string) (*AuditLog, error) {
 	}
 
 	lineNumber := 1
-	dec := json.NewDecoder(al.fd)
-	for dec.More() {
+	lineBuf := make([]byte, 16*1024)
+	scanner := bufio.NewScanner(al.fd)
+	for scanner.Scan() {
+		base64Entry := scanner.Text()
+		encEntryData, err := base64.RawStdEncoding.DecodeString(base64Entry)
+		if err != nil {
+			closeLogged(al.fd)
+			return nil, err
+		}
+
+		nonce := make([]byte, aead.NonceSize())
+		binary.BigEndian.PutUint64(nonce, uint64(lineNumber))
+		jsonData, err := aead.Open(lineBuf[:0], nonce, encEntryData, nil)
+		if err != nil {
+			closeLogged(al.fd)
+			return nil, err
+		}
+
 		var entry auditEntrySigned
-		if err := dec.Decode(&entry); err != nil {
-			// A partial trailing entry means we were interrupted mid-write.
-			// Truncate back to the last good entry and continue — the incomplete
-			// entry never finished and can be safely discarded.
-			goodOffset := dec.InputOffset()
-			slog.Warn(
-				"audit log has incomplete trailing entry (interrupted write?), truncating",
-				slog.Int("line", lineNumber),
-				slog.Int64("truncate_at", goodOffset),
-			)
-
-			if err := al.fd.Truncate(goodOffset); err != nil {
-				closeLogged(al.fd)
-				return nil, fmt.Errorf("failed to truncate corrupt trailing entry: %w", err)
-			}
-
-			break
+		if err := json.Unmarshal(jsonData, &entry); err != nil {
+			closeLogged(al.fd)
+			return nil, fmt.Errorf("failed to unmarshal line %d: %w", lineNumber, err)
 		}
 
 		al.Entries = append(al.Entries, entry)

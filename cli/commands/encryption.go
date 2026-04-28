@@ -66,7 +66,7 @@ func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager,
 
 	keyring := core.EmptyKeyring()
 
-	auditLog, err := core.LoadAuditLog(sesamDir)
+	auditLog, err := core.LoadAuditLog(sesamDir, identities)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load audit log: %w", err)
 	}
