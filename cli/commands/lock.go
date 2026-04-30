@@ -1,10 +1,13 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 const defaultRepoLockTimeout = 5 * time.Second
@@ -26,32 +29,29 @@ func withRepoLock(sesamDir string, fn func() error) error {
 		return err
 	}
 
-	defer func() {
-		_ = acquired.Close()
-		_ = os.Remove(lockPath)
+	defer func() error {
+		err = acquired.Unlock()
+		if err != nil {
+			return fmt.Errorf("failed to unlock repository: %w", err)
+		}
+		return nil
 	}()
-
 	return fn()
 }
 
-func acquireRepoLock(lockPath string, timeout time.Duration) (*os.File, error) {
-	deadline := time.Now().Add(timeout)
-	for {
-		//nolint:gosec
-		fd, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err == nil {
-			_, _ = fmt.Fprintf(fd, "pid=%d\ntime=%s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano))
-			return fd, nil
-		}
+func acquireRepoLock(lockPath string, timeout time.Duration) (*flock.Flock, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-		if !os.IsExist(err) {
-			return nil, fmt.Errorf("failed to acquire repository lock %s: %w", lockPath, err)
-		}
-
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("repository is locked by another sesam process (%s); remove only if you are sure no sesam process is running", lockPath)
-		}
-
-		time.Sleep(150 * time.Millisecond)
+	fl := flock.New(lockPath)
+	locked, err := fl.TryLockContext(ctx, 150*time.Millisecond)
+	if err != nil {
+		return nil, fmt.Errorf("failed to acquire repository lock %s: %w", lockPath, err)
 	}
+
+	if !locked {
+		return nil, fmt.Errorf("repository is locked by another sesam process (%s)", lockPath)
+	}
+
+	return fl, nil
 }

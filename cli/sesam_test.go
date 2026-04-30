@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -241,4 +242,67 @@ func TestMainAddRemoveSecret(t *testing.T) {
 	if !strings.Contains(err.Error(), "no such secret") {
 		t.Fatalf("expected no-such-secret error, got: %v", err)
 	}
+}
+
+func TestMainSealDeleteRevealed(t *testing.T) {
+	repoRoot := makeTempDir(t)
+	initGitRepo(t, repoRoot)
+
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatalf("failed to generate identity: %v", err)
+	}
+
+	identityPath := filepath.Join(repoRoot, "identity.txt")
+	if err := os.WriteFile(identityPath, []byte(id.String()+"\n"), 0o600); err != nil {
+		t.Fatalf("failed to write identity: %v", err)
+	}
+
+	err = Main([]string{
+		"sesam",
+		"init",
+		"--sesam-dir", repoRoot,
+		"--user", "alice",
+		"--identity", identityPath,
+	})
+	if err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	secretPath := "app/config.env"
+	if err := os.MkdirAll(filepath.Join(repoRoot, "app"), 0o700); err != nil {
+		t.Fatalf("failed to create secret dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, secretPath), []byte("token=abc\n"), 0o600); err != nil {
+		t.Fatalf("failed to write secret file: %v", err)
+	}
+
+	err = Main([]string{
+		"sesam",
+		"add",
+		"--sesam-dir", repoRoot,
+		"--identity", identityPath,
+		"--group", "admin",
+		secretPath,
+	})
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+
+	err = Main([]string{
+		"sesam",
+		"seal",
+		"--sesam-dir", repoRoot,
+		"--identity", identityPath,
+		"--delete-revealed",
+	})
+	if err != nil {
+		t.Fatalf("seal failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(repoRoot, secretPath)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected revealed secret to be deleted, got err=%v", err)
+	}
+
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "objects", secretPath+".age"))
 }

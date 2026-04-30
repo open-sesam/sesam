@@ -48,7 +48,7 @@ func TestValidUserName(t *testing.T) {
 	}
 
 	for _, name := range valid {
-		require.NoError(t, validUserName(name), "should accept %q", name)
+		require.NoError(t, ValidUserName(name), "should accept %q", name)
 	}
 }
 
@@ -73,7 +73,7 @@ func TestValidUserNameRejects(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Error(t, validUserName(tc.input), "should reject %q", tc.input)
+			require.Error(t, ValidUserName(tc.input), "should reject %q", tc.input)
 		})
 	}
 }

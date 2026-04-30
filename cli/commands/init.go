@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/open-sesam/sesam/cli/repo"
@@ -11,7 +12,7 @@ import (
 )
 
 // HandleInit bootstraps sesam metadata in a git repository.
-func HandleInit(ctx context.Context, cmd *cli.Command) error {
+func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
@@ -67,7 +68,17 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 			return err
 		}
 		defer func() {
-			_ = mgr.AuditLog.Close()
+			closeErr := mgr.Close()
+			if closeErr == nil {
+				return
+			}
+
+			if err != nil {
+				err = fmt.Errorf("init: failed to close managers: %w", closeErr)
+				return
+			}
+
+			slog.Warn("failed to close manager", slog.Any("error", closeErr))
 		}()
 
 		if err := repo.EnsureDefaultGitIgnore(sesamDir); err != nil {
@@ -77,10 +88,10 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 		if err := repo.EnsureDefaultGitAttributes(sesamDir); err != nil {
 			return err
 		}
-
-		if err := repo.EnsureVerifyHook(sesamDir); err != nil {
-			return err
-		}
+		// TODO: fix pre-commit hook to verify and seal before commit.
+		// if err := repo.EnsureVerifyHook(sesamDir); err != nil {
+		// 	return err
+		// }
 
 		if err := repo.EnsureGitSesamShim(sesamDir); err != nil {
 			return err
@@ -91,7 +102,7 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 		}
 
 		if err := repo.WithWorkingDir(sesamDir, func() error {
-			return mgr.AddSecret("README.md", []string{"admin"})
+			return mgr.Secret.AddSecret("README.md", []string{"admin"})
 		}); err != nil {
 			return fmt.Errorf("failed to bootstrap readme secret: %w", err)
 		}
@@ -100,7 +111,7 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 			return err
 		}
 
-		if err := mgr.SealAll(); err != nil {
+		if err := mgr.Secret.SealAll(); err != nil {
 			return err
 		}
 
@@ -112,6 +123,22 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 	})
 }
 
+type initSecretManager struct {
+	Secret *core.SecretManager
+
+	auditLog *core.AuditLog
+}
+
+func (mgr *initSecretManager) Close() error {
+	if mgr == nil || mgr.auditLog == nil {
+		return nil
+	}
+
+	err := mgr.auditLog.Close()
+	mgr.auditLog = nil
+	return fmt.Errorf("failed to close audit log: %w", err)
+}
+
 // buildInitialSecretManager bootstraps audit/keyring state for init-time actions.
 func buildInitialSecretManager(
 	ctx context.Context,
@@ -119,7 +146,7 @@ func buildInitialSecretManager(
 	initialUser string,
 	pubKeySpecs []string,
 	identities core.Identities,
-) (*core.SecretManager, error) {
+) (*initSecretManager, error) {
 	signer, auditLog, err := core.InitAdminUser(
 		ctx,
 		sesamDir,
@@ -148,5 +175,8 @@ func buildInitialSecretManager(
 		return nil, fmt.Errorf("failed to build secret manager: %w", err)
 	}
 
-	return mgr, nil
+	return &initSecretManager{
+		Secret:   mgr,
+		auditLog: auditLog,
+	}, nil
 }

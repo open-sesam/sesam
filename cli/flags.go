@@ -42,7 +42,12 @@ var flagsInit = []cli.Flag{
 }
 
 // flagsSeal contains optional controls for sealing.
-var flagsSeal = []cli.Flag{}
+var flagsSeal = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "delete-revealed",
+		Usage: "Delete revealed secret files after successful seal",
+	},
+}
 
 // flagsReveal contains optional controls for reveal.
 var flagsReveal = []cli.Flag{}

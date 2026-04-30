@@ -11,10 +11,10 @@ import (
 	"strings"
 )
 
-// validUserName checks that a user name is safe for use in file paths and log entries.
+// ValidUserName checks that a user name is safe for use in file paths and log entries.
 // Only lowercase alphanumeric characters, hyphens and underscores are allowed.
 // The name must not be empty and must not exceed 64 characters.
-func validUserName(name string) error {
+func ValidUserName(name string) error {
 	if name == "" {
 		return fmt.Errorf("user name must not be empty")
 	}
@@ -30,11 +30,6 @@ func validUserName(name string) error {
 	}
 
 	return nil
-}
-
-// ValidUserName checks user name format for external callers.
-func ValidUserName(name string) error {
-	return validUserName(name)
 }
 
 func validSecretPathFormat(sesamDir string, revealedPath string) error {

@@ -42,15 +42,13 @@ func Main(args []string) error {
 				Action: commands.HandleReveal,
 				Usage:  "Decrypt all secrets available to the current user",
 			}, {
-				Name:   "server",
-				Action: commands.HandleServer,
-				Usage:  "Run the secret serving API",
-			}, {
 				Name:   "log",
+				Hidden: true,
 				Action: commands.HandleLog,
 				Usage:  "Show the audit log of secret changes",
 			}, {
 				Name:   "undo",
+				Hidden: true,
 				Action: commands.HandleUndo,
 				Usage:  "Restore secrets from an earlier revision",
 			}, {
@@ -66,6 +64,7 @@ func Main(args []string) error {
 				Usage:     "Remove a secret file or directory",
 			}, {
 				Name:   "mv",
+				Hidden: true,
 				Action: commands.HandleMove,
 				Usage:  "Move a secret to a different path",
 			}, {
@@ -74,6 +73,7 @@ func Main(args []string) error {
 				Usage:  "List known secrets and metadata",
 			}, {
 				Name:   "apply",
+				Hidden: true,
 				Action: commands.HandleApply,
 				Usage:  "Apply config differences to audit log and metadata",
 			}, {
@@ -97,19 +97,23 @@ func Main(args []string) error {
 				Usage:  "Write a markdown command reference to stdout",
 			}, {
 				Name:   "rotate",
+				Hidden: true,
 				Action: commands.HandleRotate,
 				Usage:  "Plan and execute secret rotation",
 				Commands: []*cli.Command{
 					{
 						Name:   "plan",
+						Hidden: true,
 						Action: commands.HandleRotatePlan,
 						Usage:  "Show the rotation and exchange plan",
 					}, {
 						Name:   "exec",
+						Hidden: true,
 						Action: commands.HandleRotateExec,
 						Usage:  "Execute the planned rotation",
 					}, {
 						Name:   "todo",
+						Hidden: true,
 						Action: commands.HandleRotateTodo,
 						Usage:  "Show rotation tasks and follow-up status",
 					},

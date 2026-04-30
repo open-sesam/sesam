@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -101,6 +100,9 @@ func countRepoFiles(root string) (int, error) {
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if d.Name() == ".gitignore" || d.Name() == "sesam.yml" || d.Name() == "README.sesam" {
+			return nil
 		}
 
 		if d.IsDir() {
@@ -301,6 +303,39 @@ func EnsureVerifyHook(sesamDir string) error {
 	return nil
 }
 
+func EnsureSesamDirGitConfig(sesamDir string) error {
+	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return fmt.Errorf("no git repository detected at %s: %w", sesamDir, err)
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("failed to access git worktree: %w", err)
+	}
+
+	relSesamDir, err := filepath.Rel(wt.Filesystem.Root(), sesamDir)
+	if err != nil {
+		return fmt.Errorf("failed to compute sesam dir relative path: %w", err)
+	}
+
+	if relSesamDir == "" {
+		relSesamDir = "."
+	}
+
+	cfg, err := repo.Config()
+	if err != nil {
+		return fmt.Errorf("failed to read git config: %w", err)
+	}
+
+	cfg.Raw.SetOption("sesam", "", "dir", relSesamDir)
+	if err := repo.SetConfig(cfg); err != nil {
+		return fmt.Errorf("failed to update git config with sesam.dir: %w", err)
+	}
+
+	return nil
+}
+
 func resolveGitDir(sesamDir string) (string, error) {
 	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
@@ -392,13 +427,34 @@ func StageInitFiles(sesamDir, configPath string) error {
 		filepath.Join(sesamDir, ".gitattributes"),
 	}
 
-	args := append([]string{"add", "-f"}, files...)
-	cmd := exec.Command("git", args...) //nolint:gosec,noctx
-	cmd.Dir = sesamDir
-
-	if output, err := cmd.CombinedOutput(); err != nil {
-		slog.Warn("failed to stage init files automatically", slog.Any("error", err), slog.String("output", strings.TrimSpace(string(output))))
+	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		slog.Warn("failed to open git repository for staging", slog.Any("error", err))
 		return nil
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		slog.Warn("failed to open git worktree for staging", slog.Any("error", err))
+		return nil
+	}
+
+	worktreeRoot := wt.Filesystem.Root()
+	for _, filePath := range files {
+		relPath, err := filepath.Rel(worktreeRoot, filePath)
+		if err != nil {
+			slog.Warn("failed to resolve path for staging", slog.String("path", filePath), slog.Any("error", err))
+			continue
+		}
+
+		if strings.HasPrefix(relPath, "..") {
+			slog.Warn("skipping path outside git worktree", slog.String("path", filePath))
+			continue
+		}
+
+		if _, err := wt.Add(relPath); err != nil {
+			slog.Warn("failed to stage path", slog.String("path", relPath), slog.Any("error", err))
+		}
 	}
 
 	return nil
