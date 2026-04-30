@@ -59,6 +59,12 @@ func (um *UserManager) TellUser(
 		return err
 	}
 
+	// audit key needs to be accessible by all recipients
+	allRecps := AllRecipients(um.state.keyring)
+	if err := um.log.WriteAuditKey(allRecps); err != nil {
+		return err
+	}
+
 	newUserSigner, err := GenerateSignKey(
 		um.sesamDir,
 		user,
@@ -99,6 +105,12 @@ func (um *UserManager) KillUsers(user string) error {
 
 	signKeyPath := filepath.Join(um.sesamDir, ".sesam", "signkeys", user+".age")
 	if err := os.RemoveAll(signKeyPath); err != nil {
+		return err
+	}
+
+	// audit log needs to be re-encrypted with a fresh key to keep out the deleted user.
+	allRecps := AllRecipients(um.state.keyring)
+	if err := um.log.Rekey(um.signer, allRecps); err != nil {
 		return err
 	}
 
