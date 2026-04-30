@@ -376,17 +376,17 @@ func (aes *auditEntrySigned) Verify(kr Keyring) (string, error) {
 // If the file exists already then it is replaced atomically.
 func (al *AuditLog) WriteAuditKey(recps Recipients) error {
 	keyPath := filepath.Join(al.SesamDir, ".sesam", "audit", "key.age")
-	return al.writeAuditKey(recps, keyPath)
+	return al.writeAuditKey(recps, keyPath, al.key[:])
 }
 
-func (al *AuditLog) writeAuditKey(recps Recipients, keyPath string) error {
+func (al *AuditLog) writeAuditKey(recps Recipients, keyPath string, keyBytes []byte) error {
 	buf := &bytes.Buffer{}
 	w, err := age.Encrypt(buf, recps.AgeRecipients()...)
 	if err != nil {
 		return fmt.Errorf("encrypt audit key for recipients: %w", err)
 	}
 
-	if _, err := w.Write(al.key[:]); err != nil {
+	if _, err := w.Write(keyBytes); err != nil {
 		return fmt.Errorf("write wrapped audit key: %w", err)
 	}
 
@@ -440,10 +440,12 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 		return fmt.Errorf("close tmp audit log: %w", err)
 	}
 
-	// write the updated key to a .tmp file:
+	// write the updated key to a .tmp file. Note: we deliberately wrap newKey
+	// here, not al.key — al.key is still the old key and will only be swapped
+	// in once both renames have committed.
 	keyPath := filepath.Join(al.SesamDir, ".sesam", "audit", "key.age")
 	tmpKeyPath := keyPath + ".tmp"
-	if err := al.writeAuditKey(recps, tmpKeyPath); err != nil {
+	if err := al.writeAuditKey(recps, tmpKeyPath, newKey); err != nil {
 		return fmt.Errorf("write tmp audit key: %w", err)
 	}
 
