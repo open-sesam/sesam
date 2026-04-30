@@ -111,7 +111,7 @@ type auditEntrySigned struct {
 func (aes *auditEntrySigned) Encrypt(aead cipher.AEAD) ([]byte, error) {
 	sigJSON, err := json.Marshal(aes)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshal signed entry: %w", err)
 	}
 
 	nonce := make([]byte, aead.NonceSize())
@@ -383,27 +383,31 @@ func (al *AuditLog) writeAuditKey(recps Recipients, keyPath string) error {
 	buf := &bytes.Buffer{}
 	w, err := age.Encrypt(buf, recps.AgeRecipients()...)
 	if err != nil {
-		return err
+		return fmt.Errorf("encrypt audit key for recipients: %w", err)
 	}
 
 	if _, err := w.Write(al.key[:]); err != nil {
-		return err
+		return fmt.Errorf("write wrapped audit key: %w", err)
 	}
 
 	if err := w.Close(); err != nil {
-		return err
+		return fmt.Errorf("finalize age stream: %w", err)
 	}
 
-	return renameio.WriteFile(keyPath, buf.Bytes(), 0o600)
+	if err := renameio.WriteFile(keyPath, buf.Bytes(), 0o600); err != nil {
+		return fmt.Errorf("persist audit key file %q: %w", keyPath, err)
+	}
+
+	return nil
 }
 
-func (al *AuditLog) Rekey(signer Signer, recps Recipients) error {
+func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 	newKey := make([]byte, chacha20poly1305.KeySize)
 	rand.Read(newKey)
 
 	newAead, err := chacha20poly1305.New(newKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("init aead with new key: %w", err)
 	}
 
 	tmpLogPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl.crypt.tmp")
@@ -411,36 +415,36 @@ func (al *AuditLog) Rekey(signer Signer, recps Recipients) error {
 	//nolint:gosec
 	fd, err := os.OpenFile(tmpLogPath, os.O_CREATE|os.O_TRUNC|os.O_SYNC|os.O_WRONLY, 0o600)
 	if err != nil {
-		return err
+		return fmt.Errorf("open tmp audit log: %w", err)
 	}
 
 	for idx := range al.Entries {
 		b64EntryData, err := al.Entries[idx].Encrypt(newAead)
 		if err != nil {
 			_ = fd.Close()
-			return err
+			return fmt.Errorf("re-encrypt entry %d: %w", idx, err)
 		}
 
 		if _, err := fd.Write(b64EntryData); err != nil {
 			_ = fd.Close()
-			return err
+			return fmt.Errorf("write entry %d to tmp log: %w", idx, err)
 		}
 	}
 
 	if err := fd.Sync(); err != nil {
 		_ = fd.Close()
-		return err
+		return fmt.Errorf("sync tmp audit log: %w", err)
 	}
 
 	if err := fd.Close(); err != nil {
-		return err
+		return fmt.Errorf("close tmp audit log: %w", err)
 	}
 
 	// write the updated key to a .tmp file:
 	keyPath := filepath.Join(al.SesamDir, ".sesam", "audit", "key.age")
 	tmpKeyPath := keyPath + ".tmp"
 	if err := al.writeAuditKey(recps, tmpKeyPath); err != nil {
-		return err
+		return fmt.Errorf("write tmp audit key: %w", err)
 	}
 
 	// Now rename both. Note that we might get interrutped between the two renames.
@@ -449,19 +453,19 @@ func (al *AuditLog) Rekey(signer Signer, recps Recipients) error {
 	logPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl.crypt")
 	if err := os.Rename(tmpLogPath, logPath); err != nil {
 		_ = al.Close()
-		return err
+		return fmt.Errorf("swap rotated log into place: %w", err)
 	}
 
 	if err := os.Rename(tmpKeyPath, keyPath); err != nil {
 		_ = al.Close()
-		return err
+		return fmt.Errorf("swap rotated key into place: %w", err)
 	}
 
 	//nolint:gosec
 	newFd, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
 	if err != nil {
 		_ = al.Close()
-		return err
+		return fmt.Errorf("reopen rotated audit log: %w", err)
 	}
 
 	// Update aead so we can continue working:
@@ -499,7 +503,10 @@ func ensureRekeyTmpFiles(sesamDir string) error {
 		// most likely interrupted rename.
 		// log was likely already written, so assume we should go and use the fitting key.
 		slog.Warn("found tmp audit key, will rename to actual key")
-		return os.Rename(tmpKeyPath, keyPath)
+		if err := os.Rename(tmpKeyPath, keyPath); err != nil {
+			return fmt.Errorf("complete interrupted rotation: %w", err)
+		}
+		return nil
 	}
 
 	if tmpLogExists && !tmpKeyExists {
@@ -622,15 +629,15 @@ func (al *AuditLog) AddEntry(signer Signer, e *auditEntry, verify func() error) 
 
 	b64EntryData, err := aes.Encrypt(al.aead)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encrypt entry: %w", err)
 	}
 
 	if _, err := al.fd.Write(b64EntryData); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("append entry to log: %w", err)
 	}
 
 	if err := al.fd.Sync(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("sync audit log: %w", err)
 	}
 
 	return aes, nil
@@ -653,17 +660,17 @@ func (al *AuditLog) Iterate(fn func(idx int, entry *auditEntrySigned) error) err
 func loadAuditKey(path string, ids Identities) ([]byte, error) {
 	data, err := ReadFileLimited(path, 1024*1024)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read audit key file: %w", err)
 	}
 
 	r, err := age.Decrypt(bytes.NewReader(data), ids.AgeIdentities()...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decrypt audit key (no matching identity?): %w", err)
 	}
 
 	key, err := io.ReadAll(r)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read decrypted audit key: %w", err)
 	}
 
 	if len(key) != chacha20poly1305.KeySize {
@@ -677,7 +684,7 @@ func loadAuditKey(path string, ids Identities) ([]byte, error) {
 // It does NOT verify the log yet. Call Verify() for that.
 func LoadAuditLog(sesamDir string, ids Identities) (*AuditLog, error) {
 	if err := ensureRekeyTmpFiles(sesamDir); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("recover from interrupted rotation: %w", err)
 	}
 
 	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt")
@@ -735,7 +742,7 @@ func LoadAuditLog(sesamDir string, ids Identities) (*AuditLog, error) {
 		encEntryData, err := base64.RawStdEncoding.DecodeString(base64Entry)
 		if err != nil {
 			closeLogged(al.fd)
-			return nil, err
+			return nil, fmt.Errorf("base64 decode line %d: %w", lineNumber, err)
 		}
 
 		nonce := make([]byte, aead.NonceSize())
@@ -743,7 +750,7 @@ func LoadAuditLog(sesamDir string, ids Identities) (*AuditLog, error) {
 		jsonData, err := aead.Open(lineBuf[:0], nonce, encEntryData, nil)
 		if err != nil {
 			closeLogged(al.fd)
-			return nil, err
+			return nil, fmt.Errorf("decrypt line %d: %w", lineNumber, err)
 		}
 
 		var entry auditEntrySigned

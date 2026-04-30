@@ -110,7 +110,7 @@ func (um *UserManager) KillUsers(user string) error {
 
 	// audit log needs to be re-encrypted with a fresh key to keep out the deleted user.
 	allRecps := AllRecipients(um.state.keyring)
-	if err := um.log.Rekey(um.signer, allRecps); err != nil {
+	if err := um.log.RotateKey(um.signer, allRecps); err != nil {
 		return err
 	}
 
