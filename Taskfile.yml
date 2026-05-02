@@ -22,7 +22,7 @@ tasks:
   test:
     desc: Run go tests
     cmds:
-      - go run gotest.tools/gotestsum@v1.10.1 -- -parallel 20 ./...
+      - go run gotest.tools/gotestsum@v1.10.1 --format testname -- -parallel 20 ./...
 
   coverage:
     desc: Run go tests with coverage report

@@ -261,11 +261,10 @@ func ensureGitConfig(r *git.Repository) error {
 
 	s = cfg.Raw.Section("diff").Subsection("sesam-diff")
 	s.SetOption("textconv", "sesam show")
-	s.SetOption("cachetextconv", "true")
 
 	s = cfg.Raw.Section("filter").Subsection("sesam-filter")
-	s.SetOption("smudge", "cat %f")
-	s.SetOption("clean", "cat %f")
+	s.SetOption("smudge", "cat")
+	s.SetOption("clean", "cat")
 	s.SetOption("required", "true")
 
 	if err := r.SetConfig(cfg); err != nil {

@@ -1,0 +1,39 @@
+# Verify that git diff shows plaintext diffs for sesam-tracked secrets.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec git add .gitkeep
+exec git commit -m 'initial'
+
+# Init sesam: creates README.md, registers it as a secret, seals it.
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Modify the secret and re-seal. Seal also wires up the git textconv config.
+cp modified_readme.md README.md
+exec sesam seal
+
+# Sanity-check: git sees the encrypted object as modified, textconv is configured.
+exec git status --short
+stdout '.sesam/objects/README.md.sesam'
+exec git config --local diff.sesam-diff.textconv
+stdout 'sesam show'
+exec git check-attr diff -- .sesam/objects/README.md.sesam
+stdout 'sesam-diff'
+
+# Without textconv, git treats the file as binary.
+exec git diff HEAD --no-textconv -- .sesam/objects/README.md.sesam
+stdout 'Binary files'
+
+# git diff HEAD decrypts both versions and shows a plaintext diff.
+exec git diff HEAD -- .sesam/objects/README.md.sesam
+stdout 'sesam bootstrap'
+stdout 'modified readme'
+
+-- .gitkeep --
+-- modified_readme.md --
+# modified readme
+
+This is the new content after the change.
