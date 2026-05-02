@@ -2,9 +2,12 @@ package core
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+
+	"filippo.io/age"
 )
 
 // SecretManager is the high level API to manage secrets,
@@ -163,6 +166,20 @@ func (sm *SecretManager) RevealAll() error {
 	return nil
 }
 
+func (sm *SecretManager) Show(path string, dst io.Writer) error {
+	//nolint:gosec
+	srcFd, err := os.Open(path)
+	if err != nil {
+		// if it does not exist, it probably means that the secret was not encrypted yet.
+		return fmt.Errorf("opening secret file failed: %w", err)
+	}
+
+	defer closeLogged(srcFd)
+
+	ids := sm.Identities.AgeIdentities()
+	return revealRaw(srcFd, dst, ids, sm.Keyring)
+}
+
 // RemoveSecret removes a secret from sesam's management.
 // The encrypted files (+associated) are deleted, but the original file is not touched.
 func (sm *SecretManager) RemoveSecret(revealedPath string) error {
@@ -189,4 +206,28 @@ func (sm *SecretManager) RemoveSecret(revealedPath string) error {
 
 	sm.secrets = slices.Delete(sm.secrets, idx, idx+1)
 	return nil
+}
+
+func ShowSecret(ids Identities, path string, dst io.Writer) error {
+	//nolint:gosec
+	srcFd, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("opening secret file failed: %w", err)
+	}
+
+	defer closeLogged(srcFd)
+
+	// TODO: Does not verify signature here. We'd need keyring for that.
+	ageRd, _, err := readSignature(srcFd)
+	if err != nil {
+		return fmt.Errorf("reading .sesam file: %w", err)
+	}
+
+	encR, err := age.Decrypt(ageRd, ids.AgeIdentities()...)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt: %w", err)
+	}
+
+	_, err = io.Copy(dst, encR)
+	return err
 }

@@ -161,21 +161,6 @@ func (s *secret) Reveal() error {
 
 	defer closeLogged(srcFd)
 
-	ageRd, sigDesc, err := readSignature(srcFd)
-	if err != nil {
-		return err
-	}
-
-	// Setup hashing parallel to decrypting:
-	h := sha3.New256()
-	tr := io.TeeReader(ageRd, h)
-
-	ageIds := s.Mgr.Identities.AgeIdentities()
-	encR, err := age.Decrypt(tr, ageIds...)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt %s: %w", s.RevealedPath, err)
-	}
-
 	// Write revealed file to a temp file first, so we can get rid of it later easily:
 	dstPath := filepath.Join(s.Mgr.SesamDir, s.RevealedPath)
 	dstFd, err := renameio.TempFile(s.Mgr.tmpDir(), dstPath)
@@ -188,6 +173,38 @@ func (s *secret) Reveal() error {
 		_ = dstFd.Cleanup()
 	}()
 
+	ids := s.Mgr.Identities.AgeIdentities()
+	if err := revealRaw(
+		srcFd,
+		dstFd,
+		ids,
+		s.Mgr.Keyring,
+	); err != nil {
+		return err
+	}
+
+	// TODO: Seal and reveal should carry over permissions and other attrs from the original file.
+	// Git can only differentiate between executable and normal files, not between 0600 and 0644.
+	// So default to 0600 to avoid troubles with ssh keys for now?
+	_ = dstFd.Chmod(0o600)
+	return dstFd.CloseAtomicallyReplace()
+}
+
+func revealRaw(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity, kr Keyring) error {
+	ageRd, sigDesc, err := readSignature(srcFd)
+	if err != nil {
+		return err
+	}
+
+	// Setup hashing parallel to decrypting:
+	h := sha3.New256()
+	tr := io.TeeReader(ageRd, h)
+
+	encR, err := age.Decrypt(tr, ageIds...)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt %s: %w", sigDesc.RevealedPath, err)
+	}
+
 	// Kick-off the decrypting and hashing:
 	_, err = io.Copy(dstFd, encR)
 	if err != nil {
@@ -195,7 +212,7 @@ func (s *secret) Reveal() error {
 	}
 
 	// Finish hash (includes path to make sure it is )
-	_, _ = h.Write([]byte(s.RevealedPath))
+	_, _ = h.Write([]byte(sigDesc.RevealedPath))
 	sha3HashBytes := h.Sum(nil)
 
 	// Verify the signature, but check before if hashes are the same at all as quick check:
@@ -204,18 +221,14 @@ func (s *secret) Reveal() error {
 		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", expectedHash, sigDesc.Hash)
 	}
 
-	if _, err := s.Mgr.Keyring.Verify(
+	if _, err := kr.Verify(
 		SesamDomainSignSecretTag,
 		sha3HashBytes,
 		sigDesc.Signature,
 		sigDesc.SealedBy,
 	); err != nil {
-		return fmt.Errorf("signature verification failed for %s: %w", s.RevealedPath, err)
+		return fmt.Errorf("signature verification failed for %s: %w", sigDesc.RevealedPath, err)
 	}
 
-	// TODO: Seal and reveal should carry over permissions and other attrs from the original file.
-	// Git can only differentiate between executable and normal files, not between 0600 and 0644.
-	// So default to 0600 to avoid troubles with ssh keys for now?
-	_ = dstFd.Chmod(0o600)
-	return dstFd.CloseAtomicallyReplace()
+	return nil
 }

@@ -24,9 +24,6 @@ var gitignoreTemplate string
 //go:embed assets/gitattributes.default
 var gitattributesTemplate string
 
-//go:embed assets/gitconfig.default
-var gitconfigTemplate string
-
 //go:embed assets/pre-commit_hook.default
 var preCommitHookTemplate string
 

@@ -428,7 +428,7 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 		return nil, err
 	}
 
-	// Verify that the latest seal's RootHash matches the .sig.json files on disk.
+	// Verify that the latest seal's RootHash matches the signature footers on disk.
 	if state.LastSealRootHash != "" {
 		sigs, err := readAllSignatures(log.SesamDir)
 		if err != nil {

@@ -36,7 +36,7 @@ Ed25519 signatures use domain-tagged messages (prefix before signing/verifying):
 
 ### Seal / reveal (not encrypt / decrypt)
 
-- **Seal** = encrypt a plaintext file with age for the allowed recipients, write `.age` + `.sig.json`
+- **Seal** = encrypt a plaintext file with age for the allowed recipients, write `.sesam` (which is like .age but with signature json at the end)
 - **Reveal** = decrypt, verify signature, write plaintext back
 
 ### Naming

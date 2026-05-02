@@ -120,7 +120,7 @@ Operation types:
 | `user.kill`      | User                                           | Must not remove last user or last admin.        |
 | `secret.change`  | RevealedPath, Groups                           | Add or update a secret and its access list.     |
 | `secret.remove`  | RevealedPath                                   | Only users with access may remove.              |
-| `seal`           | RootHash, FilesSealed                          | Hash over all sorted `.sig.json` files.         |
+| `seal`           | RootHash, FilesSealed                          | Hash over all sorted signatures.                |
 
 Group membership is part of the `user.tell` detail. There are no separate
 group operations. Changing a user's groups means `user.kill` + `user.tell`.
@@ -167,7 +167,7 @@ Three checks work together:
    - Users and their groups must match `sesam.yml`.
    - Secrets and their access lists must match `sesam.yml`.
    - The `RootHash` in the latest `seal` entry must match the hash computed
-     from the `.sig.json` files on disk.
+     from the signature footers on disk.
 
 Attack scenarios and which check catches them:
 
@@ -177,7 +177,7 @@ Attack scenarios and which check catches them:
 - Eve replaces the entire log: trust anchor check fails (init hash does not
   match `.sesam/audit/init`).
 - Eve replaces encrypted files: the `RootHash` in the seal entry no longer
-  matches the `.sig.json` files.
+  matches the signature footers.
 
 #### Branching and merging
 
@@ -209,7 +209,7 @@ then retry.
 
 ##### Secret content conflicts
 
-Encrypted files (`.age`, `.sig.json`) are marked as `binary` in
+Encrypted files (`.sesam`) are marked as `binary` in
 `.gitattributes` (set up by `sesam init`), so git does not produce conflict
 markers for them — it keeps "ours" and marks the path as conflicted.
 
@@ -225,20 +225,11 @@ Both are valid secrets in the audit log with their own access groups. The
 user inspects both, keeps the one they want, and removes the other via
 `sesam rm`. After cleanup, a `sesam seal` produces a consistent state.
 
-##### .gitattributes
-
-`sesam init` should generate:
-
-```
-.sesam/objects/**/*.age binary
-.sesam/objects/**/*.sig.json binary
-```
-
-This prevents git from attempting text merges on encrypted content.
+``.gitattributes`` is used to prevent git from attempting text merges on encrypted content.
 
 #### Additional checks
 
-- For each secret: `.sig.json` signature and ciphertext hash must be valid.
+- For each secret: signature and ciphertext hash must be valid.
 - For each user: at least one public key must match the configured identity.
 - Freshly added secrets: warn if the adding user has no access to them.
 
@@ -272,7 +263,7 @@ This prevents git from attempting text merges on encrypted content.
     ▼
 ┌────────────────────────────────────────────────┐
 │ Secret                                         │
-│  Seal():   encrypt + sign ──► .age + .sig.json │
+│  Seal():   encrypt + sign ──► .sesam           │
 │  Reveal(): decrypt via identity                │
 │  recipients come from VerifiedState + Keyring  │
 └───────────────────────┬────────────────────────┘
@@ -285,7 +276,7 @@ This prevents git from attempting text merges on encrypted content.
                        │
                        ▼
               BuildRootHash()
-               combined hash of all .sig.json,
+               combined hash of all signature footers
                stored in Seal entries
 
 Verify():

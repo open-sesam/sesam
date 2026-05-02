@@ -151,7 +151,7 @@ func TestStoreAndLoad(t *testing.T) {
 func TestLoadMissingInitFile(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt")
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
 	require.NoError(t, os.WriteFile(logPath, nil, 0o600))
 
 	_, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
@@ -178,7 +178,7 @@ func TestLoadCorruptTrailingEntryRejected(t *testing.T) {
 	require.NoError(t, al.Close())
 
 	// Append a base64-shaped but bogus line to the encrypted log.
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt")
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o600)
 	require.NoError(t, err)
 	_, err = f.WriteString("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n")

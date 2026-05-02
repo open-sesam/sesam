@@ -1,8 +1,6 @@
 package core
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"filippo.io/age"
@@ -81,22 +79,6 @@ func TestReadAllSignaturesNoObjectsDir(t *testing.T) {
 	sigs, err := readAllSignatures(sesamDir)
 	require.NoError(t, err, "should not fail when objects dir does not exist")
 	require.Empty(t, sigs)
-}
-
-func TestReadStoredSignatureMissing(t *testing.T) {
-	sesamDir := testRepo(t)
-	_, err := readStoredSignature(sesamDir, "does/not/exist")
-	require.Error(t, err)
-}
-
-func TestReadStoredSignatureCorrupt(t *testing.T) {
-	sesamDir := testRepo(t)
-	sesamPath := filepath.Join(sesamDir, ".sesam", "objects", "secrets", "corrupt.sesam")
-	os.MkdirAll(filepath.Dir(sesamPath), 0o700)
-	os.WriteFile(sesamPath, []byte("no-footer-here"), 0o600)
-
-	_, err := readStoredSignature(sesamDir, "secrets/corrupt")
-	require.Error(t, err, "should fail when footer is missing")
 }
 
 func TestSignCrossDomain(t *testing.T) {

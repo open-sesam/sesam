@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"log/slog"
+	"os"
 
 	"github.com/open-sesam/sesam/cli/commands"
 	"github.com/urfave/cli/v3"
@@ -13,6 +15,8 @@ import (
 // implemented right now. Unimplemented commands return explicit errors so the
 // caller can detect feature gaps in scripts and tests.
 func Main(args []string) error {
+	slog.SetDefault(slog.New(newPrettyHandler(os.Stderr, slog.LevelWarn)))
+
 	app := &cli.Command{
 		Name:  "sesam",
 		Usage: "Manage encrypted secrets in git repositories",

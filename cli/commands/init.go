@@ -79,9 +79,10 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 			return err
 		}
 
-		if err := repo.EnsureVerifyHook(sesamDir); err != nil {
-			return err
-		}
+		// TODO: Commented out until this actually works.
+		// if err := repo.EnsureVerifyHook(sesamDir); err != nil {
+		// 	return err
+		// }
 
 		if err := repo.EnsureGitSesamShim(sesamDir); err != nil {
 			return err

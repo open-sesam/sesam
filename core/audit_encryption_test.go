@@ -18,7 +18,7 @@ func TestEncryptedLogIsNotPlaintext(t *testing.T) {
 	al := initAuditLog(t, sesamDir, admin)
 	require.NoError(t, al.Close())
 
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt")
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
 	raw, err := os.ReadFile(logPath)
 	require.NoError(t, err)
 
@@ -209,7 +209,7 @@ func TestRecoveryRollBackWhenOnlyTmpLogExists(t *testing.T) {
 	al := initAuditLog(t, sesamDir, admin)
 	require.NoError(t, al.Close())
 
-	tmpLogPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt.tmp")
+	tmpLogPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.tmp")
 	require.NoError(t, os.WriteFile(tmpLogPath, []byte("orphan"), 0o600))
 
 	loaded, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
@@ -232,7 +232,7 @@ func TestRecoveryRollBackWhenBothTmpsExist(t *testing.T) {
 
 	keyPath := filepath.Join(sesamDir, ".sesam", "audit", "key.age")
 	tmpKeyPath := keyPath + ".tmp"
-	tmpLogPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt.tmp")
+	tmpLogPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.tmp")
 
 	require.NoError(t, os.WriteFile(tmpKeyPath, []byte("staged key"), 0o600))
 	require.NoError(t, os.WriteFile(tmpLogPath, []byte("staged log"), 0o600))

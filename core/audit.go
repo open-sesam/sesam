@@ -233,7 +233,7 @@ type DetailSecretRemove struct {
 //
 // - FilesSealed is purely informative.
 type DetailSeal struct {
-	// This hash is build from the sorted list of all .sig.json files after seal.
+	// This hash is build from the sorted list of all signature footers after seal.
 	RootHash string `json:"root_hash"`
 
 	// FilesSealed is the number of files that were sealed.
@@ -410,7 +410,7 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 		return fmt.Errorf("init aead with new key: %w", err)
 	}
 
-	tmpLogPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl.crypt.tmp")
+	tmpLogPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl.tmp")
 
 	//nolint:gosec
 	fd, err := os.OpenFile(tmpLogPath, os.O_CREATE|os.O_TRUNC|os.O_SYNC|os.O_WRONLY, 0o600)
@@ -452,7 +452,7 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 	// Now rename both. Note that we might get interrutped between the two renames.
 	// If that is the case we rely on the next LoadAuditLog() to realize this and
 	// fix this.
-	logPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl.crypt")
+	logPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl")
 	if err := os.Rename(tmpLogPath, logPath); err != nil {
 		_ = al.Close()
 		return fmt.Errorf("swap rotated log into place: %w", err)
@@ -483,7 +483,7 @@ func ensureRekeyTmpFiles(sesamDir string) error {
 	keyPath := filepath.Join(sesamDir, ".sesam", "audit", "key.age")
 	tmpKeyPath := keyPath + ".tmp"
 
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt")
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
 	tmpLogPath := logPath + ".tmp"
 
 	var tmpKeyExists bool
@@ -528,7 +528,7 @@ func ensureRekeyTmpFiles(sesamDir string) error {
 // InitAuditLog initializes an empty audit log on repo init.
 // It creates the first init entry which also establishes the initial admin user.
 func InitAuditLog(sesamDir string, signer Signer, recps Recipients, admin DetailUserTell) (*AuditLog, error) {
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt")
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 
 	if err := os.MkdirAll(filepath.Dir(initPath), 0o700); err != nil {
@@ -689,7 +689,7 @@ func LoadAuditLog(sesamDir string, ids Identities) (*AuditLog, error) {
 		return nil, fmt.Errorf("recover from interrupted rotation: %w", err)
 	}
 
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt")
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
 	keyPath := filepath.Join(sesamDir, ".sesam", "audit", "key.age")
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 

@@ -141,26 +141,6 @@ func GenerateSignKey(sesamDir, user string, userRecipient []age.Recipient) (Sign
 	}, nil
 }
 
-// readStoredSignature opens the .sesam file for revealedPath and extracts the signature footer.
-func readStoredSignature(sesamDir, revealedPath string) (secretSignature, error) {
-	sesamPath := filepath.Join(sesamDir, ".sesam", "objects", revealedPath+".sesam")
-
-	//nolint:gosec
-	fd, err := os.Open(sesamPath)
-	if err != nil {
-		return secretSignature{}, fmt.Errorf("failed to open .sesam file: %w", err)
-	}
-
-	defer closeLogged(fd)
-
-	_, sigDesc, err := readSignature(fd)
-	if err != nil {
-		return secretSignature{}, err
-	}
-
-	return *sigDesc, nil
-}
-
 // readAllSignatures finds all .sesam files under .sesam/objects/ and parses their signature footers.
 func readAllSignatures(sesamDir string) ([]secretSignature, error) {
 	objectsDir := filepath.Join(sesamDir, ".sesam", "objects")

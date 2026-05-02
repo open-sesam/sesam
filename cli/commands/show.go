@@ -2,14 +2,15 @@ package commands
 
 import (
 	"context"
-	"fmt"
+	"os"
 	"time"
 
 	clirepo "github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
-// HandleTell adds a user/group relation and updates access.
+// HandleShow decrypts a secret and writes it to stdout.
 func HandleShow(ctx context.Context, cmd *cli.Command) error {
 	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
@@ -17,16 +18,19 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// TODO: Support later showing audit log, users, forge-ids, ...
+	// TODO: Support showing several
+	// TODO: This loads the full audit log and all. Bit too much work for a simple diff. identity loadign is enough for reveal.
 	objectPath := cmd.Args().First()
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
 		identityPaths := cmd.StringSlice("identity")
-		sm, _, err := buildManagers(sesamDir, identityPaths)
+		ids, err := loadIdentities(
+			identityPaths,
+			"sesam.identity.runtime",
+		)
 		if err != nil {
 			return err
 		}
 
-		fmt.Println(objectPath, sm)
-		// TODO: call it here.
-		return nil
+		return core.ShowSecret(ids, objectPath, os.Stdout)
 	})
 }

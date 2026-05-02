@@ -104,7 +104,11 @@ func TestSealCreatesSignatureFile(t *testing.T) {
 	_, err := secret.Seal("testuser")
 	require.NoError(t, err)
 
-	sigDesc, err := readStoredSignature(mgr.SesamDir, "config/api_key")
+	sigs, err := readAllSignatures(mgr.SesamDir)
+	require.NoError(t, err)
+	require.Len(t, sigs, 1)
+
+	sigDesc := sigs[0]
 	require.NoError(t, err)
 	require.Equal(t, "config/api_key", sigDesc.RevealedPath)
 	require.Equal(t, "testuser", sigDesc.SealedBy)
@@ -285,8 +289,11 @@ func TestReadStoredSignatureRoundtrip(t *testing.T) {
 	expected, err := secret.Seal("testuser")
 	require.NoError(t, err)
 
-	got, err := readStoredSignature(mgr.SesamDir, "secrets/roundtrip")
+	sigs, err := readAllSignatures(mgr.SesamDir)
 	require.NoError(t, err)
+	require.Len(t, sigs, 1)
+
+	got := sigs[0]
 	require.Equal(t, expected.RevealedPath, got.RevealedPath)
 	require.Equal(t, expected.Hash, got.Hash)
 	require.Equal(t, expected.Signature, got.Signature)
