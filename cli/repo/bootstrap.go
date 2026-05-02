@@ -12,6 +12,7 @@ import (
 	"text/template"
 
 	"github.com/go-git/go-git/v5"
+	gogitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/google/renameio"
 )
 
@@ -22,6 +23,9 @@ var gitignoreTemplate string
 
 //go:embed assets/gitattributes.default
 var gitattributesTemplate string
+
+//go:embed assets/gitconfig.default
+var gitconfigTemplate string
 
 //go:embed assets/pre-commit_hook.default
 var preCommitHookTemplate string
@@ -88,6 +92,7 @@ func EnsureInitPathChoice(sesamRoot string, useRoot bool) error {
 		return err
 	}
 
+	// TODO: Need to improve on that heuristic.
 	if fileCount > initRootFileThreshold {
 		return fmt.Errorf("refusing to initialize in %s: found %d files; use a sub-directory with --sesam-dir or pass --use-root to proceed", sesamRoot, fileCount)
 	}
@@ -224,6 +229,53 @@ func EnsureDefaultGitIgnore(sesamDir string) error {
 func EnsureDefaultGitAttributes(sesamDir string) error {
 	gitAttributesPath := filepath.Join(sesamDir, ".gitattributes")
 	return appendMissingLines(gitAttributesPath, gitattributesTemplate, 0o644)
+}
+
+func EnsureDefaultGitConfig() error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+
+	r, err := git.PlainOpenWithOptions(cwd, &git.PlainOpenOptions{
+		DetectDotGit: true,
+	})
+	if err != nil {
+		return fmt.Errorf("no git repository found: %w", err)
+	}
+
+	return ensureGitConfig(r)
+}
+
+func ensureGitConfig(r *git.Repository) error {
+	cfg, err := r.ConfigScoped(gogitconfig.LocalScope)
+	if err != nil {
+		return fmt.Errorf("read local git config: %w", err)
+	}
+
+	// canary: if the merge driver is present, assume all drivers are configured
+	if cfg.Raw.Section("merge").Subsection("sesam-merge").Option("driver") != "" {
+		return nil
+	}
+
+	s := cfg.Raw.Section("merge").Subsection("sesam-merge")
+	s.SetOption("name", "merge the audit log of sesam")
+	s.SetOption("driver", "sesam audit merge %O %A %B %L %P")
+
+	s = cfg.Raw.Section("diff").Subsection("sesam-diff")
+	s.SetOption("textconv", "sesam show")
+	s.SetOption("cachetextconv", "true")
+
+	s = cfg.Raw.Section("filter").Subsection("sesam-filter")
+	s.SetOption("smudge", "cat %f")
+	s.SetOption("clean", "cat %f")
+	s.SetOption("required", "true")
+
+	if err := r.SetConfig(cfg); err != nil {
+		return fmt.Errorf("write git config: %w", err)
+	}
+
+	return nil
 }
 
 func appendMissingLines(path string, content string, mode os.FileMode) error {

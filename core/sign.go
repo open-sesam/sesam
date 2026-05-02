@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -142,30 +141,23 @@ func GenerateSignKey(sesamDir, user string, userRecipient []age.Recipient) (Sign
 	}, nil
 }
 
-func signaturePath(sesamDir, revealedPath string) string {
-	return filepath.Join(sesamDir, ".sesam", "objects", revealedPath+".sig.json")
-}
-
 // ReadStoredSignature will open the signature file belonging to `revealedPath`.
 // You will get an error if it has not been sealed yet.
 func readStoredSignature(sesamDir, revealedPath string) (secretSignature, error) {
-	sigPath := signaturePath(sesamDir, revealedPath)
-
 	//nolint:gosec
-	sigFd, err := os.Open(sigPath)
+	fd, err := os.Open(revealedPath)
 	if err != nil {
 		return secretSignature{}, fmt.Errorf("failed to open signature json: %w", err)
 	}
 
-	defer closeLogged(sigFd)
+	defer closeLogged(fd)
 
-	var sigDesc secretSignature
-	dec := json.NewDecoder(io.LimitReader(sigFd, 1024))
-	if err := dec.Decode(&sigDesc); err != nil {
-		return secretSignature{}, fmt.Errorf("failed to decode signature json %s: %w", sigPath, err)
+	_, sigDesc, err := readSignature(fd)
+	if err != nil {
+		return secretSignature{}, err
 	}
 
-	return sigDesc, nil
+	return *sigDesc, nil
 }
 
 // ReadAllSignatures finds all .sig.json files under .sesam/objects/ and parses them.
@@ -183,24 +175,23 @@ func readAllSignatures(sesamDir string) ([]secretSignature, error) {
 			return err
 		}
 
-		if d.IsDir() || !strings.HasSuffix(path, ".sig.json") {
+		if d.IsDir() || !strings.HasSuffix(path, ".sesam") {
 			return nil
 		}
 
 		//nolint:gosec
-		sigFd, err := os.Open(path)
+		fd, err := os.Open(path)
 		if err != nil {
 			return fmt.Errorf("failed to open signature json %s: %w", path, err)
 		}
-		defer closeLogged(sigFd)
+		defer closeLogged(fd)
 
-		var sig secretSignature
-		dec := json.NewDecoder(io.LimitReader(sigFd, 2048))
-		if err := dec.Decode(&sig); err != nil {
-			return fmt.Errorf("failed to decode signature json %s: %w", path, err)
+		_, sigDesc, err := readSignature(fd)
+		if err != nil {
+			return err
 		}
 
-		sigs = append(sigs, sig)
+		sigs = append(sigs, *sigDesc)
 		return nil
 	})
 

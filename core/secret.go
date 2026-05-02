@@ -31,6 +31,10 @@ type secretSignature struct {
 	SealedBy     string `json:"sealed_by"`
 }
 
+// Seal encrypts `s` into .sesam/objects/$revealed_path.sesam
+// The `sealedByUser` is the user that initiated the seal.
+// The `tee` writer is optional and can be used to get a hold on the encrypted stream that is
+// written to the disk.
 func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 	rd, err := os.Open(filepath.Join(s.Mgr.SesamDir, s.RevealedPath))
 	if err != nil {
@@ -38,6 +42,8 @@ func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 	}
 	defer closeLogged(rd)
 
+	// TODO: We don't really have renamio semantics here. Half-written files are possible. Don't like.
+	// TODO: support tee writer - do we want exclusive writing (write no file if tee is set)?
 	wc, encryptedPath, err := s.Mgr.cryptWriter(s.RevealedPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open encrypted file in repo: %w", err)
@@ -82,20 +88,63 @@ func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 		SealedBy:     sealedByUser,
 	}
 
-	// Write signature to buffer:
-	sigBuf := &bytes.Buffer{}
-	enc := json.NewEncoder(sigBuf)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(ss)
+	// Write signature to buffer, delimited by newline:
+	if _, err := wc.Write([]byte("\n")); err != nil {
+		return nil, err
+	}
 
-	// write the signature file along the encrypted file:
-	sigPath := signaturePath(s.Mgr.SesamDir, s.RevealedPath)
-	if err := renameio.WriteFile(sigPath, sigBuf.Bytes(), 0o600); err != nil {
-		_ = os.Remove(wc.Name())
+	sigJSONBytes, err := json.Marshal(ss)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := wc.Write(sigJSONBytes); err != nil {
 		return nil, err
 	}
 
 	return &ss, nil
+}
+
+// readSignature seeks to the footer & parses it.
+// It returns a reader that sees only the age content and the parsed signature.
+func readSignature(fd io.ReadSeeker) (io.Reader, *secretSignature, error) {
+	fileSize, err := fd.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// assumption: signature fits into one page, a file with less that one page is suspicious here.
+	const maxFooterSize = 4096
+
+	readBack := min(fileSize, maxFooterSize)
+	footerPageOffset, err := fd.Seek(-readBack, io.SeekEnd)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	footerBuf := make([]byte, fileSize-footerPageOffset)
+	if _, err := io.ReadFull(fd, footerBuf); err != nil {
+		return nil, nil, err
+	}
+
+	idx := bytes.LastIndexByte(footerBuf, '\n')
+	if idx < 0 {
+		return nil, nil, fmt.Errorf("contains no signature footer")
+	}
+
+	var ss secretSignature
+	if err := json.Unmarshal(footerBuf[idx+1:], &ss); err != nil {
+		return nil, nil, err
+	}
+
+	// move file cursor back to start for decryption.
+	if _, err := fd.Seek(0, io.SeekStart); err != nil {
+		return nil, nil, err
+	}
+
+	jsonTrailerSize := fileSize - (footerPageOffset + int64(idx))
+	ageSize := fileSize - jsonTrailerSize
+	return io.LimitReader(fd, ageSize), &ss, nil
 }
 
 // Reveal decrypts secret `s` and verifies its detached signature.
@@ -112,9 +161,14 @@ func (s *secret) Reveal() error {
 
 	defer closeLogged(srcFd)
 
+	ageRd, sigDesc, err := readSignature(srcFd)
+	if err != nil {
+		return err
+	}
+
 	// Setup hashing parallel to decrypting:
 	h := sha3.New256()
-	tr := io.TeeReader(srcFd, h)
+	tr := io.TeeReader(ageRd, h)
 
 	ageIds := s.Mgr.Identities.AgeIdentities()
 	encR, err := age.Decrypt(tr, ageIds...)
@@ -138,11 +192,6 @@ func (s *secret) Reveal() error {
 	_, err = io.Copy(dstFd, encR)
 	if err != nil {
 		return fmt.Errorf("failed to copy decrypted secret back in place: %w", err)
-	}
-
-	sigDesc, err := readStoredSignature(s.Mgr.SesamDir, s.RevealedPath)
-	if err != nil {
-		return fmt.Errorf("failed to read signature: %w", err)
 	}
 
 	// Finish hash (includes path to make sure it is )

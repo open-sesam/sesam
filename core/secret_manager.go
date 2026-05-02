@@ -69,18 +69,12 @@ func BuildSecretManager(
 }
 
 func (sm *SecretManager) cryptPath(path string) string {
-	return filepath.Join(sm.SesamDir, ".sesam", "objects", path+".age")
+	return filepath.Join(sm.SesamDir, ".sesam", "objects", path+".sesam")
 }
 
-func (sm *SecretManager) sigPath(path string) string {
-	return filepath.Join(sm.SesamDir, ".sesam", "objects", path+".sig.json")
-}
-
+// TODO: Kill that function.
 func (sm *SecretManager) cryptWriter(path string) (*os.File, string, error) {
 	cryptPath := sm.cryptPath(path)
-
-	// TODO: Move that to an init module and add a .donotdelete file in it so that git does not kill it.
-	// .sesam/tmp should be also part of gitignore
 	if err := os.MkdirAll(filepath.Dir(cryptPath), 0o700); err != nil {
 		return nil, "", err
 	}
@@ -190,10 +184,6 @@ func (sm *SecretManager) RemoveSecret(revealedPath string) error {
 	}
 
 	if err := os.RemoveAll(sm.cryptPath(revealedPath)); err != nil {
-		return err
-	}
-
-	if err := os.RemoveAll(sm.sigPath(revealedPath)); err != nil {
 		return err
 	}
 

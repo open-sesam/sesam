@@ -113,6 +113,12 @@ func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager,
 		return nil, nil, fmt.Errorf("failed to build user manager: %w", err)
 	}
 
+	// TODO: Find a better place to call this.
+	// .git/config is not synced and needs to be constantly checked.
+	if err := clirepo.EnsureDefaultGitConfig(); err != nil {
+		return nil, nil, err
+	}
+
 	return secMgr, usrMgr, nil
 }
 
