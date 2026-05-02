@@ -91,12 +91,12 @@ func TestReadStoredSignatureMissing(t *testing.T) {
 
 func TestReadStoredSignatureCorrupt(t *testing.T) {
 	sesamDir := testRepo(t)
-	sigPath := signaturePath(sesamDir, "secrets/corrupt")
-	os.MkdirAll(filepath.Dir(sigPath), 0o700)
-	os.WriteFile(sigPath, []byte("not json"), 0o600)
+	sesamPath := filepath.Join(sesamDir, ".sesam", "objects", "secrets", "corrupt.sesam")
+	os.MkdirAll(filepath.Dir(sesamPath), 0o700)
+	os.WriteFile(sesamPath, []byte("no-footer-here"), 0o600)
 
 	_, err := readStoredSignature(sesamDir, "secrets/corrupt")
-	require.Error(t, err, "should fail on corrupt sig JSON")
+	require.Error(t, err, "should fail when footer is missing")
 }
 
 func TestSignCrossDomain(t *testing.T) {

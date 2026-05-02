@@ -91,7 +91,7 @@ func TestRevealAllFailsMissingAge(t *testing.T) {
 }
 
 // sealedSecretManager returns a SecretManager with one sealed secret ("secrets/test")
-// and cwd set to the repo dir. Both .age and .sig.json exist on disk.
+// and cwd set to the repo dir. The .sesam file exists on disk.
 func sealedSecretManager(t *testing.T) *SecretManager {
 	t.Helper()
 	mgr := testSecretManagerFull(t)
@@ -109,16 +109,13 @@ func sealedSecretManager(t *testing.T) *SecretManager {
 func TestRemoveSecret(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
-	agePath := mgr.cryptPath("secrets/test")
-	sigPath := signaturePath(mgr.SesamDir, "secrets/test")
-	require.FileExists(t, agePath)
-	require.FileExists(t, sigPath)
+	sesamPath := mgr.cryptPath("secrets/test")
+	require.FileExists(t, sesamPath)
 
 	require.NoError(t, mgr.RemoveSecret("secrets/test"))
 
-	// Encrypted file and signature should be gone.
-	require.NoFileExists(t, agePath)
-	require.NoFileExists(t, sigPath)
+	// Encrypted file should be gone.
+	require.NoFileExists(t, sesamPath)
 
 	// Audit log should record the removal.
 	_, exists := mgr.State.SecretExists("secrets/test")
@@ -140,7 +137,7 @@ func TestRemoveSecretNotFound(t *testing.T) {
 func TestRemoveSecretNotSealed(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 
-	// Secret is in the manager's list but was never sealed — no .age/.sig.json on disk.
+	// Secret is in the manager's list but was never sealed — no .sesam file on disk.
 	// RemoveAll is used internally, so missing files are not an error.
 	// The audit entry should still be recorded.
 	require.NoError(t, mgr.RemoveSecret("secrets/test"))
@@ -148,18 +145,16 @@ func TestRemoveSecretNotSealed(t *testing.T) {
 	require.False(t, exists, "secret should be removed from verified state")
 }
 
-// Regression: RemoveSecret must call FeedEntry before touching .age/.sig.json.
-// If the audit entry is rejected (caller lacks access), the encrypted files
+// Regression: RemoveSecret must call FeedEntry before touching the .sesam file.
+// If the audit entry is rejected (caller lacks access), the encrypted file
 // must survive — otherwise any authenticated user could corrupt the repo
 // (audit log still lists the secret while its ciphertext is gone, breaking
 // Verify / VerifyIntegrity for everyone).
 func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
 	mgr := sealedSecretManager(t) // admin manager with secrets/test sealed for "admin"
 
-	agePath := mgr.cryptPath("secrets/test")
-	sigPath := signaturePath(mgr.SesamDir, "secrets/test")
-	require.FileExists(t, agePath)
-	require.FileExists(t, sigPath)
+	sesamPath := mgr.cryptPath("secrets/test")
+	require.FileExists(t, sesamPath)
 
 	// Add non-admin bob (in "dev") to the audit log and re-verify.
 	bob := newTestUser(t, "bob")
@@ -180,8 +175,7 @@ func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
 	// and the on-disk files must NOT be deleted.
 	require.Error(t, bobMgr.RemoveSecret("secrets/test"))
 
-	require.FileExists(t, agePath, "ciphertext must survive rejected remove")
-	require.FileExists(t, sigPath, "signature must survive rejected remove")
+	require.FileExists(t, sesamPath, "ciphertext must survive rejected remove")
 	_, exists := mgr.State.SecretExists("secrets/test")
 	require.True(t, exists, "secret must remain in verified state")
 }

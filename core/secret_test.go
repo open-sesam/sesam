@@ -52,9 +52,8 @@ func TestSealAndReveal(t *testing.T) {
 	require.NotEmpty(t, sig.Hash)
 	require.NotEmpty(t, sig.Signature)
 
-	// Check files were created.
+	// Check file was created.
 	require.FileExists(t, mgr.cryptPath("secrets/db_password"))
-	require.FileExists(t, signaturePath(mgr.SesamDir, "secrets/db_password"))
 
 	// Remove plaintext, then reveal and compare.
 	plainPath := filepath.Join(mgr.SesamDir, "secrets/db_password")
@@ -198,18 +197,18 @@ func TestRevealMissingAgeFile(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestRevealMissingSigFile(t *testing.T) {
+func TestRevealMissingFooter(t *testing.T) {
 	mgr := testSecretManager(t)
-	secret := testSecret(t, mgr, "secrets/nosig", "data")
+	secret := testSecret(t, mgr, "secrets/nofooter", "data")
 
 	_, err := secret.Seal("testuser")
 	require.NoError(t, err)
 
-	// Remove only the .sig.json, keep the .age.
-	os.Remove(signaturePath(mgr.SesamDir, "secrets/nosig"))
+	// Overwrite the .sesam file with content that has no newline footer.
+	os.WriteFile(mgr.cryptPath("secrets/nofooter"), []byte("no-footer-here"), 0o600)
 
 	err = secret.Reveal()
-	require.Error(t, err, "reveal should fail when .sig.json is missing")
+	require.Error(t, err, "reveal should fail when footer is missing")
 }
 
 func TestSealRevealLargeFile(t *testing.T) {

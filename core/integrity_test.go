@@ -2,7 +2,6 @@ package core
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,20 +30,12 @@ func TestIntegrityAllGood(t *testing.T) {
 	require.True(t, report.OK(), "expected no errors, got: %s", report.String())
 }
 
-func TestIntegrityMissingSigFile(t *testing.T) {
-	mgr, state := integritySetup(t)
-	os.Remove(signaturePath(mgr.SesamDir, "secrets/db"))
-
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
-	require.False(t, report.OK(), "should detect missing .sig.json")
-}
-
-func TestIntegrityMissingAgeFile(t *testing.T) {
+func TestIntegrityMissingFile(t *testing.T) {
 	mgr, state := integritySetup(t)
 	os.Remove(mgr.cryptPath("secrets/db"))
 
 	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
-	require.False(t, report.OK(), "should detect missing .age file")
+	require.False(t, report.OK(), "should detect missing .sesam file")
 }
 
 func TestIntegrityCorruptedAgeFile(t *testing.T) {
@@ -55,26 +46,16 @@ func TestIntegrityCorruptedAgeFile(t *testing.T) {
 	require.False(t, report.OK(), "should detect hash mismatch")
 }
 
-func TestIntegrityExtraSigFile(t *testing.T) {
+func TestIntegrityExtraFile(t *testing.T) {
 	mgr, state := integritySetup(t)
 
-	extraSigPath := signaturePath(mgr.SesamDir, "secrets/extra")
-	require.NoError(t, os.MkdirAll(filepath.Dir(extraSigPath), 0o700))
-	require.NoError(t, os.WriteFile(extraSigPath, []byte(`{"path":"secrets/extra","hash":"x","signature":"y","sealed_by":"z"}`), 0o600))
+	// Seal an extra secret that is not registered in state.
+	extra := testSecret(t, mgr, "secrets/extra", "extra-content")
+	_, err := extra.Seal("testuser")
+	require.NoError(t, err)
 
 	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
-	require.False(t, report.OK(), "should detect extra .sig.json")
-}
-
-func TestIntegrityExtraAgeFile(t *testing.T) {
-	mgr, state := integritySetup(t)
-
-	extraAgePath := filepath.Join(mgr.SesamDir, ".sesam", "objects", "secrets", "extra.age")
-	require.NoError(t, os.MkdirAll(filepath.Dir(extraAgePath), 0o700))
-	require.NoError(t, os.WriteFile(extraAgePath, []byte("extra"), 0o600))
-
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
-	require.False(t, report.OK(), "should detect extra .age file")
+	require.False(t, report.OK(), "should detect extra .sesam file not in state")
 }
 
 func TestIntegrityRootHashMismatch(t *testing.T) {
