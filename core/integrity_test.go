@@ -18,7 +18,7 @@ func integritySetup(t *testing.T) (*SecretManager, *VerifiedState) {
 		Secrets: []VerifiedSecret{
 			{RevealedPath: "secrets/db", AccessGroups: []string{"admin"}},
 		},
-		LastSealRootHash: buildRootHash([]*secretSignature{sig}),
+		LastSealRootHash: buildRootHash([]*secretFooter{sig}),
 	}
 
 	return mgr, state
@@ -77,7 +77,7 @@ func TestIntegrityNoSeal(t *testing.T) {
 func TestIntegrityMultipleSecrets(t *testing.T) {
 	mgr := testSecretManager(t)
 
-	var sigs []*secretSignature
+	var sigs []*secretFooter
 	var secrets []VerifiedSecret
 	for _, p := range []string{"secrets/a", "secrets/b", "secrets/c"} {
 		s := testSecret(t, mgr, p, "content-"+p)

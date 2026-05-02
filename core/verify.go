@@ -9,10 +9,10 @@ import (
 
 // VerifiedUser is a user that has been verified by the audit log.
 type VerifiedUser struct {
-	Name       string
-	Groups     []string
-	SignPubKey []string
-	PubKeys    []string
+	Name       string   `json:"name"`
+	Groups     []string `json:"groups"`
+	SignPubKey []string `json:"sign_pub_key"`
+	PubKeys    []string `json:"pub_keys"`
 }
 
 // VerifiedSecret is a secret verified by the audit log.
@@ -435,7 +435,7 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 			return nil, fmt.Errorf("reading signatures for root hash check: %w", err)
 		}
 
-		sigPtrs := make([]*secretSignature, len(sigs))
+		sigPtrs := make([]*secretFooter, len(sigs))
 		for i := range sigs {
 			sigPtrs[i] = &sigs[i]
 		}

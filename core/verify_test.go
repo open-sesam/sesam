@@ -669,7 +669,7 @@ func TestVerifyExportedRootHashMatch(t *testing.T) {
 	sig, err := s.Seal("admin")
 	require.NoError(t, err)
 
-	rootHash := buildRootHash([]*secretSignature{sig})
+	rootHash := buildRootHash([]*secretFooter{sig})
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{
 		RootHash: rootHash, FilesSealed: 1,
 	}), nil)

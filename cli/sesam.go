@@ -118,6 +118,12 @@ func Main(args []string) error {
 				Flags:  flagsShow,
 				Action: commands.HandleShow,
 				Usage:  "Show objects managed by sesam",
+				Arguments: []cli.Argument{
+					&cli.StringArg{
+						Name:      "object",
+						UsageText: "<object>",
+					},
+				},
 			},
 			{
 				Name:   "rotate",

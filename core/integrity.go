@@ -59,7 +59,7 @@ func verifyIntegritySingleSecret(
 	sesamDir string,
 	vs VerifiedSecret,
 	report *IntegrityReport,
-	diskSigMap map[string]*secretSignature,
+	diskSigMap map[string]*secretFooter,
 	kr Keyring,
 ) {
 	sig, hasSig := diskSigMap[vs.RevealedPath]
@@ -133,7 +133,7 @@ func VerifyIntegrity(sesamDir string, state *VerifiedState, kr Keyring) *Integri
 		return report
 	}
 
-	diskSigMap := make(map[string]*secretSignature, len(diskSigs))
+	diskSigMap := make(map[string]*secretFooter, len(diskSigs))
 	for idx := range diskSigs {
 		diskSigMap[diskSigs[idx].RevealedPath] = &diskSigs[idx]
 	}
@@ -148,7 +148,7 @@ func VerifyIntegrity(sesamDir string, state *VerifiedState, kr Keyring) *Integri
 	}
 
 	if state.LastSealRootHash != "" {
-		sigPtrs := make([]*secretSignature, 0, len(diskSigs))
+		sigPtrs := make([]*secretFooter, 0, len(diskSigs))
 		for idx := range diskSigs {
 			sigPtrs = append(sigPtrs, &diskSigs[idx])
 		}

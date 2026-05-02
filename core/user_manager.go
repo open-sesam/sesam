@@ -2,8 +2,10 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -87,6 +89,18 @@ func (um *UserManager) TellUser(
 			SignPubKeys: []string{newUserSignKeyStr},
 		}),
 	)
+}
+
+func (um *UserManager) ShowUser(user string, dst io.Writer) (bool, error) {
+	u, ok := um.state.UserExists(user)
+	if ok {
+		// convert u to json
+		enc := json.NewEncoder(dst)
+		enc.SetIndent("", "  ")
+		return true, enc.Encode(u)
+	}
+
+	return false, nil
 }
 
 func (um *UserManager) KillUsers(user string) error {

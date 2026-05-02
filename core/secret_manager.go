@@ -6,8 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-
-	"filippo.io/age"
+	"strings"
 )
 
 // SecretManager is the high level API to manage secrets,
@@ -136,7 +135,7 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 
 // SealAll seals all kown secrets.
 func (sm *SecretManager) SealAll() error {
-	sigs := make([]*secretSignature, 0, len(sm.secrets))
+	sigs := make([]*secretFooter, 0, len(sm.secrets))
 
 	for _, secret := range sm.secrets {
 		sig, err := secret.Seal(sm.Signer.UserName())
@@ -164,20 +163,6 @@ func (sm *SecretManager) RevealAll() error {
 		}
 	}
 	return nil
-}
-
-func (sm *SecretManager) Show(path string, dst io.Writer) error {
-	//nolint:gosec
-	srcFd, err := os.Open(path)
-	if err != nil {
-		// if it does not exist, it probably means that the secret was not encrypted yet.
-		return fmt.Errorf("opening secret file failed: %w", err)
-	}
-
-	defer closeLogged(srcFd)
-
-	ids := sm.Identities.AgeIdentities()
-	return revealRaw(srcFd, dst, ids, sm.Keyring)
 }
 
 // RemoveSecret removes a secret from sesam's management.
@@ -208,26 +193,31 @@ func (sm *SecretManager) RemoveSecret(revealedPath string) error {
 	return nil
 }
 
-func ShowSecret(ids Identities, path string, dst io.Writer) error {
+// ShowSecret outputs the secret content of `path` to `dst`.
+// It uses `ids` to decrypt it.
+//
+// `path` can be a path of an encrypted file (.sesam) or a revealed path.
+//
+// NOTE: This is primarily used to calculate content diffs. For performance reasons
+// it does not verify signatures - this requires parsing all of the audit log.
+func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bool, error) {
+	if !strings.HasSuffix(path, ".sesam") {
+		if err := validSecretPath(sesamDir, path); err == nil {
+			// user apparently gave the direct revealed path. Let's map it to the
+			// actual object file as a convenience feature.
+			path = filepath.Join(".sesam", "objects", path+".sesam")
+		}
+	}
+
 	//nolint:gosec
 	srcFd, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("opening secret file failed: %w", err)
+		// assume it's not something we can "show"
+		return false, nil
 	}
 
 	defer closeLogged(srcFd)
 
-	// TODO: Does not verify signature here. We'd need keyring for that.
-	ageRd, _, err := readSignature(srcFd)
-	if err != nil {
-		return fmt.Errorf("reading .sesam file: %w", err)
-	}
-
-	encR, err := age.Decrypt(ageRd, ids.AgeIdentities()...)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt: %w", err)
-	}
-
-	_, err = io.Copy(dst, encR)
-	return err
+	_, _, err = revealStream(srcFd, dst, ids.AgeIdentities())
+	return true, err
 }

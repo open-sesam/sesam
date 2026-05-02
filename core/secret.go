@@ -24,7 +24,7 @@ type secret struct {
 	Recipients Recipients
 }
 
-type secretSignature struct {
+type secretFooter struct {
 	RevealedPath string `json:"path"`
 	Hash         string `json:"hash"`
 	Signature    string `json:"signature"`
@@ -35,7 +35,7 @@ type secretSignature struct {
 // The `sealedByUser` is the user that initiated the seal.
 // The `tee` writer is optional and can be used to get a hold on the encrypted stream that is
 // written to the disk.
-func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
+func (s *secret) Seal(sealedByUser string) (*secretFooter, error) {
 	rd, err := os.Open(filepath.Join(s.Mgr.SesamDir, s.RevealedPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secret: %w", err)
@@ -81,7 +81,7 @@ func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 		return nil, fmt.Errorf("failed to compute signature for %s: %w", encryptedPath, err)
 	}
 
-	ss := secretSignature{
+	ss := secretFooter{
 		RevealedPath: s.RevealedPath,
 		Hash:         MulticodeEncode(hashBytes, MhSHA3_256),
 		Signature:    sig,
@@ -107,7 +107,7 @@ func (s *secret) Seal(sealedByUser string) (*secretSignature, error) {
 
 // readSignature seeks to the footer & parses it.
 // It returns a reader that sees only the age content and the parsed signature.
-func readSignature(fd io.ReadSeeker) (io.Reader, *secretSignature, error) {
+func readSignature(fd io.ReadSeeker) (io.Reader, *secretFooter, error) {
 	fileSize, err := fd.Seek(0, io.SeekEnd)
 	if err != nil {
 		return nil, nil, err
@@ -132,7 +132,7 @@ func readSignature(fd io.ReadSeeker) (io.Reader, *secretSignature, error) {
 		return nil, nil, fmt.Errorf("contains no signature footer")
 	}
 
-	var ss secretSignature
+	var ss secretFooter
 	if err := json.Unmarshal(footerBuf[idx+1:], &ss); err != nil {
 		return nil, nil, err
 	}
@@ -174,7 +174,7 @@ func (s *secret) Reveal() error {
 	}()
 
 	ids := s.Mgr.Identities.AgeIdentities()
-	if err := revealRaw(
+	if err := revealStreamAndVerify(
 		srcFd,
 		dstFd,
 		ids,
@@ -190,35 +190,16 @@ func (s *secret) Reveal() error {
 	return dstFd.CloseAtomicallyReplace()
 }
 
-func revealRaw(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity, kr Keyring) error {
-	ageRd, sigDesc, err := readSignature(srcFd)
+func revealStreamAndVerify(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity, kr Keyring) error {
+	sha3HashBytes, sigDesc, err := revealStream(srcFd, dstFd, ageIds)
 	if err != nil {
 		return err
 	}
 
-	// Setup hashing parallel to decrypting:
-	h := sha3.New256()
-	tr := io.TeeReader(ageRd, h)
-
-	encR, err := age.Decrypt(tr, ageIds...)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt %s: %w", sigDesc.RevealedPath, err)
-	}
-
-	// Kick-off the decrypting and hashing:
-	_, err = io.Copy(dstFd, encR)
-	if err != nil {
-		return fmt.Errorf("failed to copy decrypted secret back in place: %w", err)
-	}
-
-	// Finish hash (includes path to make sure it is )
-	_, _ = h.Write([]byte(sigDesc.RevealedPath))
-	sha3HashBytes := h.Sum(nil)
-
 	// Verify the signature, but check before if hashes are the same at all as quick check:
-	expectedHash := MulticodeEncode(sha3HashBytes, MhSHA3_256)
-	if expectedHash != sigDesc.Hash {
-		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", expectedHash, sigDesc.Hash)
+	computedhash := MulticodeEncode(sha3HashBytes, MhSHA3_256)
+	if computedhash != sigDesc.Hash {
+		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", computedhash, sigDesc.Hash)
 	}
 
 	if _, err := kr.Verify(
@@ -231,4 +212,31 @@ func revealRaw(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity, kr K
 	}
 
 	return nil
+}
+
+func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) ([]byte, *secretFooter, error) {
+	ageRd, sigDesc, err := readSignature(srcFd)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Setup hashing parallel to decrypting:
+	h := sha3.New256()
+	tr := io.TeeReader(ageRd, h)
+
+	encR, err := age.Decrypt(tr, ageIds...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to decrypt %s: %w", sigDesc.RevealedPath, err)
+	}
+
+	// Kick-off the decrypting and hashing:
+	_, err = io.Copy(dstFd, encR)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to copy decrypted secret back in place: %w", err)
+	}
+
+	// Finish hash (includes path to make sure it is )
+	_, _ = h.Write([]byte(sigDesc.RevealedPath))
+	sha3HashBytes := h.Sum(nil)
+	return sha3HashBytes, sigDesc, nil
 }

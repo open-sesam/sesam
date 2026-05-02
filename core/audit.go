@@ -277,23 +277,23 @@ type DetailSeal struct {
 //
 // In all cases verify would complain about it and warn an user about Eve.
 type AuditLog struct {
-	Entries []auditEntrySigned
+	Entries []auditEntrySigned `json:"entries"`
 
 	// SesamDir is the dir in which .sesam resides.
-	SesamDir string
+	SesamDir string `json:"sesam_dir"`
 
 	// The hash from the .sesam/audit/init file.
 	// It should be the same hash as the prev_hash of the 2nd entry.
-	InitHash string
+	InitHash string `json:"init_hash"`
 
 	// file descriptor for adding new entries.
-	fd *os.File
+	fd *os.File `json:"-"`
 
 	// encryption support:
-	key  [32]byte
-	aead cipher.AEAD
+	key  [32]byte    `json:"-"`
+	aead cipher.AEAD `json:"-"`
 
-	closed bool
+	closed bool `json:"-"`
 }
 
 // operationFor returns the operation type for a given detail struct.
@@ -645,6 +645,13 @@ func (al *AuditLog) AddEntry(signer Signer, e *auditEntry, verify func() error) 
 	return aes, nil
 }
 
+// AsJSON encodes the audit log as JSON to the specified writer
+func (al *AuditLog) AsJSON(w io.Writer) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(al)
+}
+
 func (al *AuditLog) Iterate(fn func(idx int, entry *auditEntrySigned) error) error {
 	if al.closed {
 		return os.ErrClosed
@@ -779,7 +786,7 @@ func LoadAuditLog(sesamDir string, ids Identities) (*AuditLog, error) {
 // (a bit similar like a merkle tree, just not with hierarchy)
 //
 // Side effect: This will sort `sigs`
-func buildRootHash(sigs []*secretSignature) string {
+func buildRootHash(sigs []*secretFooter) string {
 	sort.Slice(sigs, func(i, j int) bool {
 		return sigs[i].RevealedPath < sigs[j].RevealedPath
 	})
