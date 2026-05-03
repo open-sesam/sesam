@@ -33,6 +33,7 @@ type prettyHandler struct {
 func newPrettyHandler(w io.Writer, level slog.Level) *prettyHandler {
 	color := false
 	if f, ok := w.(*os.File); ok {
+		//nolint:gosec
 		color = term.IsTerminal(int(f.Fd()))
 	}
 	return &prettyHandler{w: w, level: level, color: color}

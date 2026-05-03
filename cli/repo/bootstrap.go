@@ -233,8 +233,11 @@ func EnsureDefaultGitConfig() error {
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
 	}
+	return EnsureGitConfigAt(cwd)
+}
 
-	r, err := git.PlainOpenWithOptions(cwd, &git.PlainOpenOptions{
+func EnsureGitConfigAt(dir string) error {
+	r, err := git.PlainOpenWithOptions(dir, &git.PlainOpenOptions{
 		DetectDotGit: true,
 	})
 	if err != nil {
@@ -263,7 +266,7 @@ func ensureGitConfig(r *git.Repository) error {
 	s.SetOption("textconv", "sesam show")
 
 	s = cfg.Raw.Section("filter").Subsection("sesam-filter")
-	s.SetOption("smudge", "cat")
+	s.SetOption("smudge", "sesam smudge %f")
 	s.SetOption("clean", "cat")
 	s.SetOption("required", "true")
 

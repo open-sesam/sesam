@@ -1,12 +1,15 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"filippo.io/age"
 )
 
 // SecretManager is the high level API to manage secrets,
@@ -220,4 +223,49 @@ func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bo
 
 	_, _, err = revealStream(srcFd, dst, ids.AgeIdentities())
 	return true, err
+}
+
+// RevealBlob decrypts src and writes the plaintext to sesamDir/RevealedPath,
+// where RevealedPath is extracted from the encrypted footer.
+//
+// Returns (true, nil) on success. Returns (false, nil) when the caller is not
+// a recipient — the blob is not meant for them and is silently skipped.
+func RevealBlob(sesamDir string, ids Identities, src io.ReadSeeker) (bool, error) {
+	tmpDir := filepath.Join(sesamDir, ".sesam", "tmp")
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+		return false, fmt.Errorf("creating tmp dir: %w", err)
+	}
+
+	// Decrypt into a temp file; we don't know the revealed path yet.
+	tmp, err := os.CreateTemp(tmpDir, "reveal-*")
+	if err != nil {
+		return false, fmt.Errorf("creating temp file: %w", err)
+	}
+	renamed := false
+	defer func() {
+		_ = tmp.Close()
+		if !renamed {
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+
+	_, footer, err := revealStream(src, tmp, ids.AgeIdentities())
+	if err != nil {
+		var noMatch *age.NoIdentityMatchError
+		if errors.As(err, &noMatch) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	dstPath := filepath.Join(sesamDir, footer.RevealedPath)
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
+		return false, fmt.Errorf("creating revealed dir: %w", err)
+	}
+
+	_ = tmp.Chmod(0o600)
+	tmpName := tmp.Name()
+	_ = tmp.Close()
+	renamed = true
+	return true, os.Rename(tmpName, dstPath)
 }

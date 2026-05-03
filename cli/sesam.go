@@ -126,6 +126,12 @@ func Main(args []string) error {
 				},
 			},
 			{
+				Name:   "smudge",
+				Hidden: true,
+				Action: commands.HandleSmudge,
+				Usage:  "Git smudge filter: reveal a secret to its plaintext path (called by git)",
+			},
+			{
 				Name:   "rotate",
 				Action: commands.HandleRotate,
 				Usage:  "Plan and execute secret rotation",

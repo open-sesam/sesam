@@ -1,7 +1,5 @@
 # Verify that git diff shows plaintext JSON diffs for the sesam audit log.
 
-# TODO: Make loading of audit log possible via arbitrary path.
-
 exec git init
 exec git config user.email test@sesam.dev
 exec git config user.name 'Sesam Test'
