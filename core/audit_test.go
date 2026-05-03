@@ -73,7 +73,7 @@ func TestParseDetailWrongType(t *testing.T) {
 	_, err := parseDetail[DetailInit](signed)
 	require.NoError(t, err)
 
-	// Now try to parse as a different type — should fail.
+	// Now try to parse as a different type - should fail.
 	_, err = parseDetail[DetailSeal](signed)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not *")
@@ -169,7 +169,7 @@ func TestLoadMissingLogFile(t *testing.T) {
 }
 
 // TestLoadCorruptTrailingEntryRejected: with the encrypted log we no longer
-// auto-truncate partial trailing entries — any line that fails to decrypt
+// auto-truncate partial trailing entries - any line that fails to decrypt
 // must surface as an error instead of silently being discarded.
 func TestLoadCorruptTrailingEntryRejected(t *testing.T) {
 	sesamDir := testRepo(t)

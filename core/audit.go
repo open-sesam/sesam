@@ -412,7 +412,7 @@ func (al *AuditLog) WriteAuditKey(recps Recipients) error {
 		return fmt.Errorf("write key line: %w", err)
 	}
 
-	// Stream entry lines verbatim — same symmetric key, no re-encryption needed.
+	// Stream entry lines verbatim - same symmetric key, no re-encryption needed.
 	if _, err := al.fd.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("seek log: %w", err)
 	}
@@ -809,7 +809,7 @@ func buildRootHash(sigs []*secretFooter) string {
 }
 
 // ShowAuditLog decrypts the audit log at path and writes it as JSON to w.
-// path may be an arbitrary file path (e.g. a git temp-file blob) — sesamDir
+// path may be an arbitrary file path (e.g. a git temp-file blob) - sesamDir
 // is not used for key lookup.
 func ShowAuditLog(ids Identities, path string, w io.Writer) (bool, error) {
 	al, err := loadAuditLogFile(path, ids)

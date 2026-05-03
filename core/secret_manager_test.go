@@ -78,7 +78,7 @@ func TestSealAllAndRevealAll(t *testing.T) {
 
 func TestSealAllFailsMissingPlaintext(t *testing.T) {
 	mgr := testSecretManagerFull(t)
-	// Don't write the secret file — seal should fail.
+	// Don't write the secret file - seal should fail.
 	err := mgr.SealAll()
 	require.Error(t, err, "seal should fail when plaintext file is missing")
 }
@@ -137,7 +137,7 @@ func TestRemoveSecretNotFound(t *testing.T) {
 func TestRemoveSecretNotSealed(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 
-	// Secret is in the manager's list but was never sealed — no .sesam file on disk.
+	// Secret is in the manager's list but was never sealed - no .sesam file on disk.
 	// RemoveAll is used internally, so missing files are not an error.
 	// The audit entry should still be recorded.
 	require.NoError(t, mgr.RemoveSecret("secrets/test"))
@@ -147,7 +147,7 @@ func TestRemoveSecretNotSealed(t *testing.T) {
 
 // Regression: RemoveSecret must call FeedEntry before touching the .sesam file.
 // If the audit entry is rejected (caller lacks access), the encrypted file
-// must survive — otherwise any authenticated user could corrupt the repo
+// must survive - otherwise any authenticated user could corrupt the repo
 // (audit log still lists the secret while its ciphertext is gone, breaking
 // Verify / VerifyIntegrity for everyone).
 func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {

@@ -456,7 +456,7 @@ func TestVerifyChainIntegrity(t *testing.T) {
 			PubKeys: []string{carol.Recipient.String()}, SignPubKeys: []string{carol.SignPubKey},
 		}), nil)
 
-		// Swap entries 1 and 2 — should break chain.
+		// Swap entries 1 and 2 - should break chain.
 		al.Entries[1], al.Entries[2] = al.Entries[2], al.Entries[1]
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
@@ -478,7 +478,7 @@ func TestVerifyChainIntegrity(t *testing.T) {
 			PubKeys: []string{carol.Recipient.String()}, SignPubKeys: []string{carol.SignPubKey},
 		}), nil)
 
-		// Remove middle entry — chain breaks.
+		// Remove middle entry - chain breaks.
 		al.Entries = append(al.Entries[:1], al.Entries[2:]...)
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})

@@ -61,7 +61,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 
 // TestRotateKeyPreservesChain verifies rotation is transparent at the chain
 // layer: signatures, SeqIDs, and PreviousHash links must survive untouched.
-// This is the load-bearing invariant — if rotation re-signed entries, the
+// This is the load-bearing invariant - if rotation re-signed entries, the
 // init trust anchor would no longer match and verification would fail for
 // every entry not signed by the rotator.
 func TestRotateKeyPreservesChain(t *testing.T) {
@@ -111,7 +111,7 @@ func TestRotateKeyAllowsContinuedAppend(t *testing.T) {
 
 	require.NoError(t, al.RotateKey(admin.Signer, Recipients{admin.Recipient}))
 
-	// In-memory state was swapped — the fresh fd / aead must accept new entries.
+	// In-memory state was swapped - the fresh fd / aead must accept new entries.
 	bob := newTestUser(t, "bob")
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},

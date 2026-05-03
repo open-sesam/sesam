@@ -1,5 +1,5 @@
 # Verify that git checkout triggers the smudge filter, which reveals the secret
-# to its plaintext path as a side effect — specifically when checking out an
+# to its plaintext path as a side effect - specifically when checking out an
 # older commit whose encrypted blob differs from the current working tree.
 
 exec git init
@@ -14,7 +14,7 @@ exec git commit -m 'init sesam'
 exec git config --local filter.sesam-filter.smudge
 stdout 'sesam smudge'
 
-# Modify the secret and seal it, then commit — this produces a second blob.
+# Modify the secret and seal it, then commit - this produces a second blob.
 cp modified_readme.md README.md
 exec sesam seal
 exec git add -A

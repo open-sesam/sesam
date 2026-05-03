@@ -11,9 +11,9 @@ import (
 
 // TestIntegrationInitAndRegular mirrors the two-phase flow in main.go:
 //
-//  1. "init" — create repo, generate sign key, init audit log, add a secret,
+//  1. "init" - create repo, generate sign key, init audit log, add a secret,
 //     seal everything, store.
-//  2. "regular" — load audit log, verify, resolve identity → user, load sign
+//  2. "regular" - load audit log, verify, resolve identity → user, load sign
 //     key, build manager, run integrity check, seal + reveal.
 func TestIntegrationInitAndRegular(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)

@@ -18,7 +18,7 @@ import (
 // through to stdout unchanged (the working-tree .sesam file stays encrypted),
 // and as a side effect decrypts the blob to the embedded RevealedPath.
 //
-// Errors during reveal are logged as warnings and do not fail the smudge — a
+// Errors during reveal are logged as warnings and do not fail the smudge - a
 // failed smudge would abort the git checkout entirely, which is worse than a
 // stale or missing revealed file.
 func HandleSmudge(_ context.Context, cmd *cli.Command) error {

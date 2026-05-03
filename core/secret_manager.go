@@ -229,7 +229,7 @@ func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bo
 // where RevealedPath is extracted from the encrypted footer.
 //
 // Returns (true, nil) on success. Returns (false, nil) when the caller is not
-// a recipient — the blob is not meant for them and is silently skipped.
+// a recipient - the blob is not meant for them and is silently skipped.
 func RevealBlob(sesamDir string, ids Identities, src io.ReadSeeker) (bool, error) {
 	tmpDir := filepath.Join(sesamDir, ".sesam", "tmp")
 	if err := os.MkdirAll(tmpDir, 0o700); err != nil {

@@ -52,7 +52,7 @@ func verifyInitFileUnchanged(sesamDir string) error {
 	})
 	if err != nil {
 		if errors.Is(err, plumbing.ErrReferenceNotFound) {
-			// No commits yet — treat as commitCount==0 (fine during sesam init).
+			// No commits yet - treat as commitCount==0 (fine during sesam init).
 			return nil
 		}
 		return fmt.Errorf("git log failed: %w", err)

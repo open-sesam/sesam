@@ -39,7 +39,7 @@ func TestVerifyInitFileUnchangedMultipleCommits(t *testing.T) {
 	require.NoError(t, os.WriteFile(initPath, []byte("hash1"), 0o600))
 	gitCommitAll(t, repo, "first commit")
 
-	// Modify the init file and commit again — should be detected.
+	// Modify the init file and commit again - should be detected.
 	require.NoError(t, os.WriteFile(initPath, []byte("hash2"), 0o600))
 	gitCommitAll(t, repo, "tampered commit")
 

@@ -47,7 +47,7 @@ func TestLoadSignKeyWrongIdentity(t *testing.T) {
 	_, err := GenerateSignKey(sesamDir, "alice", []age.Recipient{alice.Recipient.Recipient})
 	require.NoError(t, err)
 
-	// Try loading with bob's identity — should fail to decrypt.
+	// Try loading with bob's identity - should fail to decrypt.
 	_, err = LoadSignKey(sesamDir, "alice", bob.Identity)
 	require.Error(t, err, "should fail when decrypting with wrong identity")
 }
