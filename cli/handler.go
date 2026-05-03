@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
+
+	"golang.org/x/term"
 )
 
 const (
@@ -17,17 +20,22 @@ const (
 
 // prettyHandler is a slog.Handler that writes human-readable output:
 //   - INFO: message and attrs only, no level label or timestamp
-//   - WARN: yellow "WARN" prefix
-//   - ERROR: red "ERR " prefix
+//   - WARN: "WARN" prefix (yellow when writing to a terminal)
+//   - ERROR: "ERR " prefix (red when writing to a terminal)
 type prettyHandler struct {
 	w     io.Writer
 	mu    sync.Mutex
 	pre   []slog.Attr
 	level slog.Level
+	color bool
 }
 
 func newPrettyHandler(w io.Writer, level slog.Level) *prettyHandler {
-	return &prettyHandler{w: w, level: level}
+	color := false
+	if f, ok := w.(*os.File); ok {
+		color = term.IsTerminal(int(f.Fd()))
+	}
+	return &prettyHandler{w: w, level: level, color: color}
 }
 
 func (h *prettyHandler) Enabled(_ context.Context, l slog.Level) bool {
@@ -42,9 +50,17 @@ func (h *prettyHandler) Handle(_ context.Context, r slog.Record) error {
 
 	switch {
 	case r.Level >= slog.LevelError:
-		sb.WriteString(ansiRed + "ERR " + ansiReset)
+		if h.color {
+			sb.WriteString(ansiRed + "ERR " + ansiReset)
+		} else {
+			sb.WriteString("ERR ")
+		}
 	case r.Level >= slog.LevelWarn:
-		sb.WriteString(ansiYellow + "WARN" + ansiReset + " ")
+		if h.color {
+			sb.WriteString(ansiYellow + "WARN" + ansiReset + " ")
+		} else {
+			sb.WriteString("WARN ")
+		}
 	}
 
 	sb.WriteString(r.Message)
@@ -67,7 +83,7 @@ func (h *prettyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	pre := make([]slog.Attr, len(h.pre)+len(attrs))
 	copy(pre, h.pre)
 	copy(pre[len(h.pre):], attrs)
-	return &prettyHandler{w: h.w, level: h.level, pre: pre}
+	return &prettyHandler{w: h.w, level: h.level, pre: pre, color: h.color}
 }
 
 func (h *prettyHandler) WithGroup(_ string) slog.Handler {

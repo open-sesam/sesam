@@ -3,8 +3,6 @@
 exec git init
 exec git config user.email test@sesam.dev
 exec git config user.name 'Sesam Test'
-exec git add .gitkeep
-exec git commit -m 'initial'
 
 # Init sesam: creates README.md, registers it as a secret, seals it.
 exec sesam init --user admin
@@ -23,16 +21,16 @@ stdout 'sesam show'
 exec git check-attr diff -- .sesam/objects/README.md.sesam
 stdout 'sesam-diff'
 
-# Without textconv, git treats the file as binary.
+# Without textconv, git shows the raw encrypted content, not the decrypted plaintext.
 exec git diff HEAD --no-textconv -- .sesam/objects/README.md.sesam
-stdout 'Binary files'
+! stdout 'sesam bootstrap'
+! stdout 'modified readme'
 
 # git diff HEAD decrypts both versions and shows a plaintext diff.
 exec git diff HEAD -- .sesam/objects/README.md.sesam
 stdout 'sesam bootstrap'
 stdout 'modified readme'
 
--- .gitkeep --
 -- modified_readme.md --
 # modified readme
 

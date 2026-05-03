@@ -34,12 +34,11 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 				return err
 			}
 
-			auditLog, err := core.LoadAuditLog(sesamDir, ids)
-			if err != nil {
-				return fmt.Errorf("failed to load audit log: %w", err)
+			ok, err := core.ShowAuditLog(ids, object, os.Stdout)
+			if ok {
+				return err
 			}
-
-			return auditLog.AsJSON(os.Stdout)
+			return fmt.Errorf("cannot open audit log: %s", object)
 		default:
 			// assume we should show a secret:
 			identityPaths := cmd.StringSlice("identity")

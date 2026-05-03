@@ -61,8 +61,9 @@ func (um *UserManager) TellUser(
 		return err
 	}
 
-	// audit key needs to be accessible by all recipients
-	allRecps := AllRecipients(um.state.keyring)
+	// audit key needs to be accessible by all recipients, including the new user.
+	// FeedEntry hasn't run yet so the new user isn't in the keyring; add explicitly.
+	allRecps := append(AllRecipients(um.state.keyring), recps...)
 	if err := um.log.WriteAuditKey(allRecps); err != nil {
 		return err
 	}

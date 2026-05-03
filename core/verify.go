@@ -524,15 +524,20 @@ func verify(state *VerifiedState) error {
 		return err
 	}
 
+	*state = newState
+	return nil
+}
+
+// TODO: Make sure this is called
+func (s *VerifiedState) Close() error {
 	// NOTE: Not a hard error for now, there might be valid reasons this happened.
 	// Could be that sesam was legit interrupted during operation.
-	if srs := state.SealRequiredSeqID; srs > 0 {
+	if srs := s.SealRequiredSeqID; srs > 0 {
 		slog.Warn(
 			"verify: entry required a seal, but none was made after",
 			slog.Uint64("seq_id", srs),
 		)
 	}
 
-	*state = newState
 	return nil
 }

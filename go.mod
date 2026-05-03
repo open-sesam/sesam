@@ -14,6 +14,7 @@ require (
 	github.com/urfave/cli/v3 v3.8.0
 	github.com/zalando/go-keyring v0.2.7
 	golang.org/x/crypto v0.45.0
+	golang.org/x/term v0.37.0
 )
 
 require (
