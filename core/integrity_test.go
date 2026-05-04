@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"os"
 	"testing"
 
@@ -99,6 +100,37 @@ func TestIntegrityMultipleSecrets(t *testing.T) {
 	require.NoError(t, os.WriteFile(mgr.cryptPath("secrets/b"), []byte("bad"), 0o600))
 	report = VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect corruption in one of multiple secrets")
+}
+
+func TestIntegrityHashMismatch(t *testing.T) {
+	mgr, state := integritySetup(t)
+
+	sesamPath := mgr.cryptPath("secrets/db")
+	data, err := os.ReadFile(sesamPath)
+	require.NoError(t, err)
+
+	// Flip a byte in the age ciphertext (before the trailing JSON footer).
+	lastNL := bytes.LastIndexByte(data, '\n')
+	require.Greater(t, lastNL, 0)
+	data[0] ^= 0xFF
+	require.NoError(t, os.WriteFile(sesamPath, data, 0o600))
+
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	require.False(t, report.OK(), "should detect hash mismatch")
+	require.Contains(t, report.String(), "hash mismatch")
+}
+
+func TestIntegrityBadSignature(t *testing.T) {
+	mgr, state := integritySetup(t)
+
+	// Replace the keyring with a fresh key for the same user name — hash matches
+	// but the signature cannot be verified against the new key.
+	other := newTestUser(t, "testuser")
+	mgr.Keyring = testKeyring(t, other)
+
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	require.False(t, report.OK(), "should detect invalid signature")
+	require.Contains(t, report.String(), "invalid signature")
 }
 
 func TestIntegrityReportString(t *testing.T) {

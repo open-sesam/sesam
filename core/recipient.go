@@ -127,7 +127,7 @@ func splitByLine(s string) []string {
 
 // resolveCachedLink will download the specified `url` and write it to a cache under `sesamDir`.
 // If the cached response is already available, then it is returned directly.
-func resolveCachedLink(ctx context.Context, sesamDir, url string, cacheMode CacheMode) ([]string, error) {
+func resolveCachedLink(ctx context.Context, sesamDir, url string, cacheMode CacheMode, client ...*http.Client) ([]string, error) {
 	if !strings.HasPrefix(url, "https://") {
 		// we should not download public keys over http:// or whatever.
 		// https is not ideal either, so links should be noted in the docs to be difficult from a security perspective.
@@ -149,11 +149,14 @@ func resolveCachedLink(ctx context.Context, sesamDir, url string, cacheMode Cach
 		return nil, fmt.Errorf("failed to build request: %w", err)
 	}
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
+	var hc *http.Client
+	if len(client) > 0 && client[0] != nil {
+		hc = client[0]
+	} else {
+		hc = &http.Client{Timeout: 30 * time.Second}
 	}
 
-	resp, err := client.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download %s: %w", url, err)
 	}

@@ -1,9 +1,11 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -322,4 +324,38 @@ func TestAuditEntrySignedString(t *testing.T) {
 	s := signed.String()
 	require.NotEmpty(t, s)
 	require.Contains(t, s, "abc")
+}
+
+func TestShowAuditLogSuccess(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+	require.NoError(t, al.Close())
+
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
+	var buf bytes.Buffer
+	ok, err := ShowAuditLog(Identities{admin.Identity}, logPath, &buf)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.True(t, strings.Contains(buf.String(), `"operation"`))
+	require.True(t, strings.Contains(buf.String(), `"init"`))
+}
+
+func TestShowAuditLogNotFound(t *testing.T) {
+	ok, err := ShowAuditLog(Identities{}, "/nonexistent/log.jsonl", &bytes.Buffer{})
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+func TestShowAuditLogWrongIdentity(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+	require.NoError(t, al.Close())
+
+	stranger := newTestUser(t, "stranger")
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
+	ok, err := ShowAuditLog(Identities{stranger.Identity}, logPath, &bytes.Buffer{})
+	require.True(t, ok)
+	require.Error(t, err, "wrong identity should fail to decrypt audit key")
 }

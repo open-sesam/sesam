@@ -121,7 +121,7 @@ func TestRevealDetectsCorruptedCiphertext(t *testing.T) {
 	_, err := secret.Seal("testuser")
 	require.NoError(t, err)
 
-	// Corrupt the .age file contents.
+	// Corrupt the .sesam file contents.
 	os.WriteFile(mgr.cryptPath("secrets/token"), []byte("corrupted-ciphertext"), 0o600)
 
 	err = secret.Reveal()

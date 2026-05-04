@@ -322,6 +322,48 @@ func TestResolveRecipientHTTPSDownload(t *testing.T) {
 	require.Equal(t, []string{user.Recipient.String()}, got)
 }
 
+func TestResolveCachedLinkHTTPDownloadSuccess(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "age1keydata")
+	}))
+	defer srv.Close()
+
+	sesamDir := testRepo(t)
+	got, err := resolveCachedLink(context.Background(), sesamDir, srv.URL+"/keys", CacheModeNone, srv.Client())
+	require.NoError(t, err)
+	require.Equal(t, []string{"age1keydata"}, got)
+}
+
+func TestResolveCachedLinkHTTPDownloadAndCache(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "age1cached-fresh")
+	}))
+	defer srv.Close()
+
+	sesamDir := testRepo(t)
+	url := srv.URL + "/keys"
+
+	got, err := resolveCachedLink(context.Background(), sesamDir, url, CacheModeWrite, srv.Client())
+	require.NoError(t, err)
+	require.Equal(t, []string{"age1cached-fresh"}, got)
+
+	data, err := os.ReadFile(cachePath(sesamDir, url))
+	require.NoError(t, err)
+	require.Contains(t, string(data), "age1cached-fresh")
+}
+
+func TestResolveCachedLinkHTTP4xx(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	sesamDir := testRepo(t)
+	_, err := resolveCachedLink(context.Background(), sesamDir, srv.URL+"/keys", CacheModeNone, srv.Client())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "404")
+}
+
 func TestIdentitiesRecipientStrings(t *testing.T) {
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
