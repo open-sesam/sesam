@@ -71,10 +71,12 @@ func HandleSmudge(_ context.Context, cmd *cli.Command) error {
 	// ".sesam/objects/secrets/token.sesam". Strip the prefix and suffix to get
 	// the revealed path ("secrets/token") without reading the footer.
 	objectPath := cmd.Args().Get(0)
-	revealedPath := strings.TrimSuffix(
-		strings.TrimPrefix(objectPath, ".sesam/objects/"),
-		".sesam",
-	)
+	const objectsPrefix = ".sesam/objects/"
+	if !strings.HasPrefix(objectPath, objectsPrefix) || !strings.HasSuffix(objectPath, ".sesam") {
+		slog.Warn("smudge: unexpected object path, skipping reveal", slog.String("path", objectPath))
+		return nil
+	}
+	revealedPath := strings.TrimSuffix(strings.TrimPrefix(objectPath, objectsPrefix), ".sesam")
 
 	revealed, err := core.RevealBlob(sesamDir, ids, smudgeTmp, revealedPath)
 	if err != nil {
