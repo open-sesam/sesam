@@ -28,7 +28,7 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 			identityPaths := cmd.StringSlice("identity")
 			ids, err := loadIdentities(
 				identityPaths,
-				"sesam.identity.runtime",
+				keyringFingerprint,
 			)
 			if err != nil {
 				return err
@@ -44,7 +44,7 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 			identityPaths := cmd.StringSlice("identity")
 			ids, err := loadIdentities(
 				identityPaths,
-				"sesam.identity.runtime",
+				keyringFingerprint,
 			)
 			if err != nil {
 				return err

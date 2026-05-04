@@ -268,7 +268,7 @@ func ensureGitConfig(r *git.Repository) error {
 	s = cfg.Raw.Section("filter").Subsection("sesam-filter")
 	s.SetOption("smudge", "sesam smudge %f")
 	s.SetOption("clean", "cat")
-	s.SetOption("required", "true")
+	s.SetOption("required", "false")
 
 	if err := r.SetConfig(cfg); err != nil {
 		return fmt.Errorf("write git config: %w", err)

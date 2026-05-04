@@ -58,7 +58,7 @@ func HandleReveal(_ context.Context, cmd *cli.Command) error {
 func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager, *core.UserManager, error) {
 	identities, err := loadIdentities(
 		identityPath,
-		"sesam.identity.runtime",
+		keyringFingerprint,
 	)
 	if err != nil {
 		return nil, nil, err

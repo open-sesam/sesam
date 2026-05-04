@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"filippo.io/age"
+	"github.com/google/renameio"
 )
 
 // SecretManager is the high level API to manage secrets,
@@ -75,18 +76,6 @@ func BuildSecretManager(
 
 func (sm *SecretManager) cryptPath(path string) string {
 	return filepath.Join(sm.SesamDir, ".sesam", "objects", path+".sesam")
-}
-
-// TODO: Kill that function.
-func (sm *SecretManager) cryptWriter(path string) (*os.File, string, error) {
-	cryptPath := sm.cryptPath(path)
-	if err := os.MkdirAll(filepath.Dir(cryptPath), 0o700); err != nil {
-		return nil, "", err
-	}
-
-	//nolint:gosec
-	fd, err := os.Create(cryptPath)
-	return fd, cryptPath, err
 }
 
 func (sm *SecretManager) tmpDir() string {
@@ -225,47 +214,41 @@ func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bo
 	return true, err
 }
 
-// RevealBlob decrypts src and writes the plaintext to sesamDir/RevealedPath,
-// where RevealedPath is extracted from the encrypted footer.
+// RevealBlob decrypts src and writes the plaintext to sesamDir/revealedPath.
+//
+// revealedPath is the repo-relative plain path (e.g. "secrets/token"), derived
+// by the caller from git's %f argument so no footer read-back is needed.
 //
 // Returns (true, nil) on success. Returns (false, nil) when the caller is not
 // a recipient - the blob is not meant for them and is silently skipped.
-func RevealBlob(sesamDir string, ids Identities, src io.ReadSeeker) (bool, error) {
-	tmpDir := filepath.Join(sesamDir, ".sesam", "tmp")
-	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
-		return false, fmt.Errorf("creating tmp dir: %w", err)
-	}
-
-	// Decrypt into a temp file; we don't know the revealed path yet.
-	tmp, err := os.CreateTemp(tmpDir, "reveal-*")
-	if err != nil {
-		return false, fmt.Errorf("creating temp file: %w", err)
-	}
-	renamed := false
-	defer func() {
-		_ = tmp.Close()
-		if !renamed {
-			_ = os.Remove(tmp.Name())
-		}
-	}()
-
-	_, footer, err := revealStream(src, tmp, ids.AgeIdentities())
-	if err != nil {
-		var noMatch *age.NoIdentityMatchError
-		if errors.As(err, &noMatch) {
-			return false, nil
-		}
-		return false, err
-	}
-
-	dstPath := filepath.Join(sesamDir, footer.RevealedPath)
+//
+// This function should only be called for quick decryption (i.e. git diff or smudge)
+// and when we only have access to the encrypted file and not the audit log.
+// For most cases, uses SecretManager.
+func RevealBlob(sesamDir string, ids Identities, src io.ReadSeeker, revealedPath string) (bool, error) {
+	dstPath := filepath.Join(sesamDir, revealedPath)
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
 		return false, fmt.Errorf("creating revealed dir: %w", err)
 	}
 
-	_ = tmp.Chmod(0o600)
-	tmpName := tmp.Name()
-	_ = tmp.Close()
-	renamed = true
-	return true, os.Rename(tmpName, dstPath)
+	tmpDir := filepath.Join(sesamDir, ".sesam", "tmp")
+	dst, err := renameio.TempFile(tmpDir, dstPath)
+	if err != nil {
+		return false, fmt.Errorf("creating temp file: %w", err)
+	}
+	defer func() { _ = dst.Cleanup() }()
+
+	_, _, err = revealStream(src, dst, ids.AgeIdentities())
+	if err != nil {
+		var noMatch *age.NoIdentityMatchError
+		if errors.As(err, &noMatch) {
+			// count as no error, checking out old state is a best effort.
+			return false, nil
+		}
+
+		return false, err
+	}
+
+	_ = dst.Chmod(0o600)
+	return true, dst.CloseAtomicallyReplace()
 }

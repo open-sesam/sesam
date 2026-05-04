@@ -11,6 +11,8 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+const keyringFingerprint = "sesam.identity.runtime"
+
 // HandleInit bootstraps sesam metadata in a git repository.
 func HandleInit(ctx context.Context, cmd *cli.Command) error {
 	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))

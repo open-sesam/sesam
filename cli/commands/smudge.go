@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	clirepo "github.com/open-sesam/sesam/cli/repo"
 	"github.com/open-sesam/sesam/core"
@@ -55,7 +56,7 @@ func HandleSmudge(_ context.Context, cmd *cli.Command) error {
 
 	// if it's an encrypted identity, let's hope user already gave his passkey here.
 	// TODO: make that a const
-	ids, err := loadIdentities(identityPaths, "sesam.identity.runtime")
+	ids, err := loadIdentities(identityPaths, keyringFingerprint)
 	if err != nil {
 		slog.Warn("smudge: failed to load identities", slog.String("err", err.Error()))
 		return nil
@@ -66,12 +67,20 @@ func HandleSmudge(_ context.Context, cmd *cli.Command) error {
 		return nil
 	}
 
-	path := cmd.Args().Get(0) // %f from git, for logging only
-	revealed, err := core.RevealBlob(sesamDir, ids, smudgeTmp)
+	// %f is the repo-relative path of the encrypted object, e.g.
+	// ".sesam/objects/secrets/token.sesam". Strip the prefix and suffix to get
+	// the revealed path ("secrets/token") without reading the footer.
+	objectPath := cmd.Args().Get(0)
+	revealedPath := strings.TrimSuffix(
+		strings.TrimPrefix(objectPath, ".sesam/objects/"),
+		".sesam",
+	)
+
+	revealed, err := core.RevealBlob(sesamDir, ids, smudgeTmp, revealedPath)
 	if err != nil {
-		slog.Warn("smudge: could not reveal", slog.String("path", path), slog.String("err", err.Error()))
+		slog.Warn("smudge: could not reveal", slog.String("path", objectPath), slog.String("err", err.Error()))
 	} else if !revealed {
-		slog.Debug("smudge: not a recipient, skipping reveal", slog.String("path", path))
+		slog.Debug("smudge: not a recipient, skipping reveal", slog.String("path", objectPath))
 	}
 
 	return nil

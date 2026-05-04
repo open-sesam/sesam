@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -13,6 +14,9 @@ import (
 
 	"filippo.io/age"
 )
+
+// assumption: signature fits into one page, a file with less that one page is suspicious here.
+const maxFooterSize = 4096
 
 type secret struct {
 	Mgr *SecretManager
@@ -42,13 +46,20 @@ func (s *secret) Seal(sealedByUser string) (*secretFooter, error) {
 	}
 	defer closeLogged(rd)
 
-	// TODO: We don't really have renamio semantics here. Half-written files are possible. Don't like.
-	// TODO: support tee writer - do we want exclusive writing (write no file if tee is set)?
-	wc, encryptedPath, err := s.Mgr.cryptWriter(s.RevealedPath)
+	cryptPath := s.Mgr.cryptPath(s.RevealedPath)
+	if err := os.MkdirAll(filepath.Dir(cryptPath), 0o700); err != nil {
+		return nil, err
+	}
+
+	tmpDir := filepath.Join(s.Mgr.SesamDir, ".sesam", "tmp")
+	wc, err := renameio.TempFile(tmpDir, cryptPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open encrypted file in repo: %w", err)
 	}
-	defer closeLogged(wc)
+
+	defer func() {
+		_ = wc.Cleanup()
+	}()
 
 	// use the stream to compute the hash, what is written to wc, is also written to the hash:
 	h := sha3.New256()
@@ -78,7 +89,7 @@ func (s *secret) Seal(sealedByUser string) (*secretFooter, error) {
 	sig, err := s.Mgr.Signer.Sign(SesamDomainSignSecretTag, hashBytes)
 	if err != nil {
 		_ = os.Remove(wc.Name())
-		return nil, fmt.Errorf("failed to compute signature for %s: %w", encryptedPath, err)
+		return nil, fmt.Errorf("failed to compute signature for %s: %w", cryptPath, err)
 	}
 
 	ss := secretFooter{
@@ -98,11 +109,15 @@ func (s *secret) Seal(sealedByUser string) (*secretFooter, error) {
 		return nil, err
 	}
 
+	if len(sigJSONBytes) > maxFooterSize {
+		slog.Warn("footer bigger than page", slog.Int("size", len(sigJSONBytes)))
+	}
+
 	if _, err := wc.Write(sigJSONBytes); err != nil {
 		return nil, err
 	}
 
-	return &ss, nil
+	return &ss, wc.CloseAtomicallyReplace()
 }
 
 // readSignature seeks to the footer & parses it.
@@ -112,9 +127,6 @@ func readSignature(fd io.ReadSeeker) (io.Reader, *secretFooter, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// assumption: signature fits into one page, a file with less that one page is suspicious here.
-	const maxFooterSize = 4096
 
 	readBack := min(fileSize, maxFooterSize)
 	footerPageOffset, err := fd.Seek(-readBack, io.SeekEnd)
@@ -129,7 +141,7 @@ func readSignature(fd io.ReadSeeker) (io.Reader, *secretFooter, error) {
 
 	idx := bytes.LastIndexByte(footerBuf, '\n')
 	if idx < 0 {
-		return nil, nil, fmt.Errorf("contains no signature footer")
+		return nil, nil, fmt.Errorf("contains no signature footer or footer too big")
 	}
 
 	var ss secretFooter
@@ -235,7 +247,7 @@ func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) (
 		return nil, nil, fmt.Errorf("failed to copy decrypted secret back in place: %w", err)
 	}
 
-	// Finish hash (includes path to make sure it is )
+	// Finish hash (includes path to make sure it is non-movable)
 	_, _ = h.Write([]byte(sigDesc.RevealedPath))
 	sha3HashBytes := h.Sum(nil)
 	return sha3HashBytes, sigDesc, nil
