@@ -133,8 +133,27 @@ func identityToUser(identities core.Identities, users map[string]core.Recipients
 	return "", nil, fmt.Errorf("no loaded identity matches any known user")
 }
 
-// loadIdentities reads all given paths and parses all identities
+// loadIdentities reads all given paths and parses all identities. Encrypted
+// identities are unlocked via the system keyring, falling back to a stdin
+// prompt when no entry exists.
 func loadIdentities(identityPaths []string, keyFingerprint string) (core.Identities, error) {
+	return loadIdentitiesWith(identityPaths, &core.KeyringPassphraseProvider{
+		KeyFingerprint: keyFingerprint,
+		Fallback:       &core.StdinPassphraseProvider{},
+	})
+}
+
+// loadIdentitiesKeyringOnly is like loadIdentities but never prompts on stdin.
+// It is required for the long-running smudge filter, where stdin is owned by
+// the git pkt-line protocol and a passphrase prompt would corrupt the stream.
+// If the keyring has no entry for an encrypted identity, parsing fails.
+func loadIdentitiesKeyringOnly(identityPaths []string, keyFingerprint string) (core.Identities, error) {
+	return loadIdentitiesWith(identityPaths, &core.KeyringPassphraseProvider{
+		KeyFingerprint: keyFingerprint,
+	})
+}
+
+func loadIdentitiesWith(identityPaths []string, provider core.PassphraseProvider) (core.Identities, error) {
 	if len(identityPaths) == 0 {
 		return nil, fmt.Errorf("at least one --identity or SESAM_ID env var required")
 	}
@@ -157,10 +176,7 @@ func loadIdentities(identityPaths []string, keyFingerprint string) (core.Identit
 			return nil, fmt.Errorf("failed to read identity %s: %w", expandedPath, err)
 		}
 
-		identity, err := core.ParseIdentity(strings.TrimSpace(string(data)), &core.KeyringPassphraseProvider{
-			KeyFingerprint: keyFingerprint,
-			Fallback:       &core.StdinPassphraseProvider{},
-		})
+		identity, err := core.ParseIdentity(strings.TrimSpace(string(data)), provider)
 		if err != nil {
 			return nil, err
 		}

@@ -237,9 +237,7 @@ func EnsureDefaultGitConfig() error {
 }
 
 func EnsureGitConfigAt(dir string) error {
-	r, err := git.PlainOpenWithOptions(dir, &git.PlainOpenOptions{
-		DetectDotGit: true,
-	})
+	r, err := OpenGitRepo(dir)
 	if err != nil {
 		return fmt.Errorf("no git repository found: %w", err)
 	}
@@ -253,22 +251,36 @@ func ensureGitConfig(r *git.Repository) error {
 		return fmt.Errorf("read local git config: %w", err)
 	}
 
-	// canary: if the merge driver is present, assume all drivers are configured
-	if cfg.Raw.Section("merge").Subsection("sesam-merge").Option("driver") != "" {
+	mergeSection := cfg.Raw.Section("merge").Subsection("sesam-merge")
+	filterSection := cfg.Raw.Section("filter").Subsection("sesam-filter")
+
+	mergeConfigured := mergeSection.Option("driver") != ""
+	processConfigured := filterSection.Option("process") != ""
+
+	// Both legacy drivers and the long-running filter process are already
+	// installed; nothing to do.
+	if mergeConfigured && processConfigured {
 		return nil
 	}
 
-	s := cfg.Raw.Section("merge").Subsection("sesam-merge")
-	s.SetOption("name", "merge the audit log of sesam")
-	s.SetOption("driver", "sesam audit merge %O %A %B %L %P")
+	if !mergeConfigured {
+		mergeSection.SetOption("name", "merge the audit log of sesam")
+		mergeSection.SetOption("driver", "sesam audit merge %O %A %B %L %P")
 
-	s = cfg.Raw.Section("diff").Subsection("sesam-diff")
-	s.SetOption("textconv", "sesam show")
+		diffSection := cfg.Raw.Section("diff").Subsection("sesam-diff")
+		diffSection.SetOption("textconv", "sesam show")
 
-	s = cfg.Raw.Section("filter").Subsection("sesam-filter")
-	s.SetOption("smudge", "sesam smudge %f")
-	s.SetOption("clean", "cat")
-	s.SetOption("required", "false")
+		filterSection.SetOption("smudge", "sesam smudge %f")
+		filterSection.SetOption("clean", "cat")
+		filterSection.SetOption("required", "false")
+	}
+
+	if !processConfigured {
+		// Long-running filter process - amortises identity loading across all
+		// blobs in a single git operation. Git 2.11+ prefers this over the
+		// legacy smudge/clean keys; older git ignores it and uses the fallback.
+		filterSection.SetOption("process", "sesam smudge")
+	}
 
 	if err := r.SetConfig(cfg); err != nil {
 		return fmt.Errorf("write git config: %w", err)
@@ -353,7 +365,7 @@ func EnsureVerifyHook(sesamDir string) error {
 }
 
 func resolveGitDir(sesamDir string) (string, error) {
-	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{DetectDotGit: true})
+	repo, err := OpenGitRepo(sesamDir)
 	if err != nil {
 		return "", err
 	}

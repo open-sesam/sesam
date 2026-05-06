@@ -3,87 +3,51 @@ package commands
 import (
 	"context"
 	"fmt"
-	"io"
-	"log/slog"
 	"os"
-	"path/filepath"
-	"strings"
 
 	clirepo "github.com/open-sesam/sesam/cli/repo"
-	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
-// HandleSmudge is the git smudge filter entry point. Git calls it for each
-// .sesam object file that needs to be checked out. It passes the encrypted blob
-// through to stdout unchanged (the working-tree .sesam file stays encrypted),
-// and as a side effect decrypts the blob to the embedded RevealedPath.
+// HandleSmudge is the git smudge filter entry point. It supports two modes:
 //
-// Errors during reveal are logged as warnings and do not fail the smudge - a
-// failed smudge would abort the git checkout entirely, which is worse than a
-// stale or missing revealed file.
-func HandleSmudge(_ context.Context, cmd *cli.Command) error {
-	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
+//   - Long-running filter process (no path argument): git invokes the command
+//     once per `git checkout` (or similar) and drives the pkt-line protocol
+//     described in `man 5 gitattributes` and gitprotocol-common. Identities
+//     are loaded once and reused across every blob, amortising key/passphrase
+//     cost. Configured via `filter.sesam-filter.process = sesam smudge`.
+//
+//   - One-shot smudge (path argument): git invokes the command once per file,
+//     piping the encrypted blob through stdin/stdout and passing the object
+//     path as `%f`. Configured via `filter.sesam-filter.smudge = sesam
+//     smudge %f`. Kept for older git versions and for manual debugging.
+//
+// In both modes the encrypted blob passes through to stdout unchanged (the
+// working-tree .sesam file stays encrypted) and the plaintext is decrypted
+// to the embedded RevealedPath as a side effect. The sesamDir is derived
+// from the per-request pathname (see clirepo.splitObjectPath) so the
+// handler works whether .sesam lives at the worktree root or in a subdir.
+// Reveal failures are logged but do not fail the smudge - aborting the git
+// checkout would be worse than a stale or missing revealed file.
+func HandleSmudge(ctx context.Context, cmd *cli.Command) error {
+	identityPaths := cmd.StringSlice("identity")
+	if len(identityPaths) == 0 {
+		return fmt.Errorf("need at least one identity")
+	}
+
+	ids, err := loadIdentitiesKeyringOnly(identityPaths, keyringFingerprint)
 	if err != nil {
 		return err
 	}
 
-	// Stream stdin to stdout and simultaneously write to a temp file so we can
-	// seek back over it for decryption without buffering the blob in memory.
-	tmpDir := filepath.Join(sesamDir, ".sesam", "tmp")
-	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
-		return fmt.Errorf("creating tmp dir: %w", err)
+	if cmd.Args().Len() > 0 {
+		path := cmd.Args().Get(0)
+		return clirepo.RunOneShotSmudge(ids, path, os.Stdin, os.Stdout)
 	}
 
-	smudgeTmp, err := os.CreateTemp(tmpDir, "smudge-*")
-	if err != nil {
-		return fmt.Errorf("creating smudge tmp: %w", err)
-	}
-	defer func() {
-		_ = smudgeTmp.Close()
-		_ = os.Remove(smudgeTmp.Name())
-	}()
-
-	if _, err := io.Copy(io.MultiWriter(os.Stdout, smudgeTmp), os.Stdin); err != nil {
-		return fmt.Errorf("streaming stdin: %w", err)
+	handler := &clirepo.FilterProcessHandler{
+		Identities: ids,
 	}
 
-	identityPaths := cmd.StringSlice("identity")
-	if len(identityPaths) == 0 {
-		slog.Debug("smudge: no identity configured, skipping reveal")
-		return nil
-	}
-
-	// if it's an encrypted identity, let's hope user already gave his passkey here.
-	// TODO: make that a const
-	ids, err := loadIdentities(identityPaths, keyringFingerprint)
-	if err != nil {
-		slog.Warn("smudge: failed to load identities", slog.String("err", err.Error()))
-		return nil
-	}
-
-	if _, err := smudgeTmp.Seek(0, io.SeekStart); err != nil {
-		slog.Warn("smudge: failed to seek tmp file", slog.String("err", err.Error()))
-		return nil
-	}
-
-	// %f is the repo-relative path of the encrypted object, e.g.
-	// ".sesam/objects/secrets/token.sesam". Strip the prefix and suffix to get
-	// the revealed path ("secrets/token") without reading the footer.
-	objectPath := cmd.Args().Get(0)
-	const objectsPrefix = ".sesam/objects/"
-	if !strings.HasPrefix(objectPath, objectsPrefix) || !strings.HasSuffix(objectPath, ".sesam") {
-		slog.Warn("smudge: unexpected object path, skipping reveal", slog.String("path", objectPath))
-		return nil
-	}
-	revealedPath := strings.TrimSuffix(strings.TrimPrefix(objectPath, objectsPrefix), ".sesam")
-
-	revealed, err := core.RevealBlob(sesamDir, ids, smudgeTmp, revealedPath)
-	if err != nil {
-		slog.Warn("smudge: could not reveal", slog.String("path", objectPath), slog.String("err", err.Error()))
-	} else if !revealed {
-		slog.Debug("smudge: not a recipient, skipping reveal", slog.String("path", objectPath))
-	}
-
-	return nil
+	return handler.Run(ctx, os.Stdin, os.Stdout)
 }

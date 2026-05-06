@@ -1,0 +1,33 @@
+# Smudge reveals a sealed blob to plaintext on checkout; sesam clean removes
+# that plaintext once the sealed object is dropped from the repository.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Seal the README created by sesam init; this writes the encrypted object to
+# .sesam/objects/ and leaves the plaintext in place.
+exec sesam seal
+exec git add -A
+exec git commit -m 'seal readme'
+
+# Smudge: re-checking out the sealed object must reveal the plaintext.
+exec git checkout HEAD -- .sesam/objects/README.md.sesam
+exec cat README.md
+stdout 'sesam bootstrap'
+
+# Remove the sealed object from git — the secret is gone from the tree.
+exec git rm .sesam/objects/README.md.sesam
+exec git commit -m 'drop secret'
+
+# Git does not invoke smudge for deleted objects; README.md lingers as stale
+# revealed plaintext.
+exists README.md
+
+# sesam clean must wipe every untracked file left behind by a previous smudge.
+exec sesam clean
+! exists README.md

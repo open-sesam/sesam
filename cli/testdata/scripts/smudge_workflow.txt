@@ -14,6 +14,11 @@ exec git commit -m 'init sesam'
 exec git config --local filter.sesam-filter.smudge
 stdout 'sesam smudge'
 
+# Long-running filter process is configured for git 2.11+; the legacy
+# smudge/clean keys remain as a fallback for older git versions.
+exec git config --local filter.sesam-filter.process
+stdout 'sesam smudge'
+
 # Modify the secret and seal it, then commit - this produces a second blob.
 cp modified_readme.md README.md
 exec sesam seal

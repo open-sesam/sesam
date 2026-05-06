@@ -132,6 +132,11 @@ func Main(args []string) error {
 				Usage:  "Git smudge filter: reveal a secret to its plaintext path (called by git)",
 			},
 			{
+				Name:   "clean",
+				Action: commands.HandleClean,
+				Usage:  "Remove revealed plaintext and other untracked files from the sesam directory",
+			},
+			{
 				Name:   "rotate",
 				Action: commands.HandleRotate,
 				Usage:  "Plan and execute secret rotation",
