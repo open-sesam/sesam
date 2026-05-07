@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -110,7 +109,9 @@ func (s *secret) Seal(sealedByUser string) (*secretFooter, error) {
 	}
 
 	if len(sigJSONBytes) > maxFooterSize {
-		slog.Warn("footer bigger than page", slog.Int("size", len(sigJSONBytes)))
+		// This might in theory happen for very very long paths and/or exceedingly long users.
+		// If this ever becomes a real use case/problem we could go and make this dynamic.
+		return nil, fmt.Errorf("footer bigger than page: %d - please file a bug", len(sigJSONBytes))
 	}
 
 	if _, err := wc.Write(sigJSONBytes); err != nil {

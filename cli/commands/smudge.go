@@ -41,6 +41,9 @@ func HandleSmudge(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if cmd.Args().Len() > 0 {
+		// Fallback for git<2.11: Long-running processes were not supported.
+		// Instead we are called per-file. This is slower and has the drawback
+		// that we do not cleanup revealed files that are not in the current index.
 		path := cmd.Args().Get(0)
 		return clirepo.RunOneShotSmudge(ids, path, os.Stdin, os.Stdout)
 	}

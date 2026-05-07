@@ -283,10 +283,11 @@ func (h *FilterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 
 	sesamDir, revealedPath, isObject := splitObjectPath(pathname)
 	if !isObject {
-		return fmt.Errorf("not a path sesam smuge can handle: %v", pathname)
+		return fmt.Errorf("not a path sesam smudge can handle: %v", pathname)
 	}
 
 	if !h.cleaned {
+		// can only clean once we got the sesamDir once.
 		h.cleaned = true
 		if err := cleanWorktree(sesamDir, h.IdentityPaths); err != nil {
 			slog.Warn("smudge: cleanup failed", slog.String("err", err.Error()))

@@ -3,7 +3,6 @@ package repo
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -27,9 +26,8 @@ func runHandler(t *testing.T, clientScript []byte) []byte {
 
 	var stdout bytes.Buffer
 	err := handler.Run(context.Background(), bytes.NewReader(clientScript), &stdout)
-	if err != nil && !errors.Is(err, io.EOF) {
-		t.Fatalf("handler.Run returned error: %v", err)
-	}
+
+	require.NoError(t, err)
 	return stdout.Bytes()
 }
 
@@ -61,15 +59,12 @@ func pktScript(t *testing.T, payloads ...string) []byte {
 	enc := pktline.NewEncoder(&buf)
 	for _, p := range payloads {
 		if p == "" {
-			if err := enc.Flush(); err != nil {
-				t.Fatalf("encode flush: %v", err)
-			}
+			require.NoError(t, enc.Flush())
 			continue
 		}
-		if err := enc.EncodeString(p); err != nil {
-			t.Fatalf("encode %q: %v", p, err)
-		}
+		require.NoError(t, enc.EncodeString(p))
 	}
+
 	return buf.Bytes()
 }
 
@@ -83,9 +78,8 @@ func readPkts(t *testing.T, raw []byte) []string {
 	for scanner.Scan() {
 		out = append(out, string(scanner.Bytes()))
 	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("scanner err: %v", err)
-	}
+
+	require.NoError(t, scanner.Err())
 	return out
 }
 
@@ -112,13 +106,10 @@ func TestFilterProcessHandshake(t *testing.T) {
 		"capability=smudge\n",
 		"",
 	}
-	if len(got) != len(want) {
-		t.Fatalf("got %d packets %q, want %d %q", len(got), got, len(want), want)
-	}
+
+	require.Len(t, got, len(want))
 	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("packet %d: got %q, want %q", i, got[i], want[i])
-		}
+		require.Equal(t, want[i], got[i], i)
 	}
 }
 
@@ -131,7 +122,7 @@ func TestFilterProcessOnlyAdvertisesSmudge(t *testing.T) {
 
 	for _, pkt := range got {
 		if strings.HasPrefix(pkt, "capability=") && pkt != "capability=smudge\n" {
-			t.Errorf("unexpected capability advertised: %q", pkt)
+			require.Fail(t, "unexpected capability advertised: %q", pkt)
 		}
 	}
 }
@@ -142,12 +133,8 @@ func TestFilterProcessClientWithoutSmudgeIsRejected(t *testing.T) {
 	script := validHandshake(t, "clean")
 	handler := &FilterProcessHandler{Identities: nil}
 	err := handler.Run(context.Background(), bytes.NewReader(script), io.Discard)
-	if err == nil {
-		t.Fatal("expected handshake error, got nil")
-	}
-	if !errors.Is(err, errProtocol) {
-		t.Errorf("expected errProtocol, got %v", err)
-	}
+
+	require.ErrorIs(t, err, errProtocol)
 }
 
 func TestFilterProcessEOFAfterHandshake(t *testing.T) {
@@ -156,9 +143,7 @@ func TestFilterProcessEOFAfterHandshake(t *testing.T) {
 	got := readPkts(t, runHandler(t, script))
 
 	// Expect handshake response only; no per-blob frames.
-	if len(got) != 5 {
-		t.Errorf("expected 5 handshake packets only, got %d: %q", len(got), got)
-	}
+	require.Len(t, got, 5)
 }
 
 func TestFilterProcessSmudgePassthrough(t *testing.T) {
@@ -284,15 +269,10 @@ func TestFilterProcessUnknownCommandReturnsStatusError(t *testing.T) {
 	handler := &FilterProcessHandler{Identities: nil}
 	var stdout bytes.Buffer
 	err := handler.Run(context.Background(), bytes.NewReader(script), &stdout)
-	if err == nil {
-		t.Fatal("expected protocol error, got nil")
-	}
-	if !errors.Is(err, errProtocol) {
-		t.Errorf("expected errProtocol, got %v", err)
-	}
 
+	require.ErrorIs(t, err, errProtocol)
 	resp := readPkts(t, stdout.Bytes())[5:]
 	if len(resp) < 1 || resp[0] != "status=error\n" {
-		t.Errorf("expected status=error response, got %q", resp)
+		require.Fail(t, "expected status=error response, got %q", resp)
 	}
 }

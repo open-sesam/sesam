@@ -400,7 +400,8 @@ func (al *AuditLog) WriteAuditKey(recps Recipients) error {
 		return err
 	}
 
-	tmp, err := renameio.TempFile("", logPath)
+	tmpDir := filepath.Join(al.SesamDir, ".sesam", "tmp")
+	tmp, err := renameio.TempFile(tmpDir, logPath)
 	if err != nil {
 		return fmt.Errorf("create tmp audit log: %w", err)
 	}
@@ -445,7 +446,8 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 
 	logPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl")
 
-	tmp, err := renameio.TempFile("", logPath)
+	tmpDir := filepath.Join(al.SesamDir, ".sesam", "tmp")
+	tmp, err := renameio.TempFile(tmpDir, logPath)
 	if err != nil {
 		return fmt.Errorf("create tmp audit log: %w", err)
 	}
