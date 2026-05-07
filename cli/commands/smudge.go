@@ -46,7 +46,8 @@ func HandleSmudge(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	handler := &clirepo.FilterProcessHandler{
-		Identities: ids,
+		Identities:    ids,
+		IdentityPaths: identityPaths,
 	}
 
 	return handler.Run(ctx, os.Stdin, os.Stdout)

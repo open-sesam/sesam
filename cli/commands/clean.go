@@ -21,5 +21,5 @@ func HandleClean(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return clirepo.Cleanup(repo, sesamDir)
+	return clirepo.Cleanup(repo, sesamDir, cmd.StringSlice("identity")...)
 }

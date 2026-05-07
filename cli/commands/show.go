@@ -19,21 +19,21 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	identityPaths := cmd.StringSlice("identity")
+	ids, err := loadIdentities(
+		identityPaths,
+		keyringFingerprint,
+	)
+	if err != nil {
+		return err
+	}
+
 	// TODO: Options to either force resolution as audit, user, secret, ...
 	// TODO: Show secret metadata (access list)
 	object := cmd.StringArg("object")
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
 		switch {
 		case filepath.Base(object) == "log.jsonl":
-			identityPaths := cmd.StringSlice("identity")
-			ids, err := loadIdentities(
-				identityPaths,
-				keyringFingerprint,
-			)
-			if err != nil {
-				return err
-			}
-
 			ok, err := core.ShowAuditLog(ids, object, os.Stdout)
 			if ok {
 				return err
@@ -41,15 +41,6 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 			return fmt.Errorf("cannot open audit log: %s", object)
 		default:
 			// assume we should show a secret:
-			identityPaths := cmd.StringSlice("identity")
-			ids, err := loadIdentities(
-				identityPaths,
-				keyringFingerprint,
-			)
-			if err != nil {
-				return err
-			}
-
 			ok, err := core.ShowSecret(sesamDir, ids, object, os.Stdout)
 			if ok {
 				return err

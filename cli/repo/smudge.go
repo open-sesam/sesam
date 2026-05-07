@@ -24,13 +24,15 @@ import (
 // The sesamDir is derived per-blob from the pathname header (see
 // splitObjectPath) so the handler also works when .sesam lives in a
 // worktree subdirectory.
+//
+// IdentityPaths lists the key files loaded as Identities. Any path that
+// points inside the worktree is excluded from Cleanup so users who store
+// their age key inside the repo don't lose it on checkout.
 type FilterProcessHandler struct {
-	Identities core.Identities
+	Identities    core.Identities
+	IdentityPaths []string
 
-	// cleaned guards Cleanup so it runs at most once per session: the first
-	// smudge request wipes stale plaintext from earlier checkouts, then later
-	// blobs in the same session are free to repopulate the worktree.
-	cleaned bool
+	cleaned bool // true once Cleanup has run for this session
 }
 
 // objectsSegment and sesamSuffix bracket the encrypted-blob path that git
@@ -286,8 +288,8 @@ func (h *FilterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 
 	if !h.cleaned {
 		h.cleaned = true
-		if err := cleanWorktree(sesamDir); err != nil {
-			slog.Warn("smudge: cleanup before reveal failed", slog.String("sesamDir", sesamDir), slog.String("err", err.Error()))
+		if err := cleanWorktree(sesamDir, h.IdentityPaths); err != nil {
+			slog.Warn("smudge: cleanup failed", slog.String("err", err.Error()))
 		}
 	}
 
@@ -343,6 +345,17 @@ func (h *FilterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 		slog.Debug("smudge: not a recipient, skipping reveal", slog.String("path", pathname))
 	}
 	return nil
+}
+
+// cleanWorktree removes stale untracked files from sesamDir, excluding the
+// given identity file paths. It is called at most once per filter session
+// (guarded by FilterProcessHandler.cleaned).
+func cleanWorktree(sesamDir string, identityPaths []string) error {
+	repo, err := OpenGitRepo(sesamDir)
+	if err != nil {
+		return err
+	}
+	return Cleanup(repo, sesamDir, identityPaths...)
 }
 
 // openSpillFile creates a scratch file inside sesamDir/.sesam/tmp using
@@ -418,13 +431,3 @@ func expectFlush(scanner *pktline.Scanner) error {
 	return nil
 }
 
-// cleanWorktree opens the git repo containing sesamDir and removes every
-// untracked file under it. Used by the long-running smudge session to wipe
-// stale plaintext once at the start - see Cleanup for the full contract.
-func cleanWorktree(sesamDir string) error {
-	repo, err := OpenGitRepo(sesamDir)
-	if err != nil {
-		return err
-	}
-	return Cleanup(repo, sesamDir)
-}

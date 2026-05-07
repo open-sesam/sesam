@@ -170,7 +170,6 @@ func loadIdentitiesWith(identityPaths []string, provider core.PassphraseProvider
 		}
 
 		const maxIdentityFileBytes = 1024 * 1024
-
 		data, err := core.ReadFileLimited(expandedPath, maxIdentityFileBytes)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read identity %s: %w", expandedPath, err)

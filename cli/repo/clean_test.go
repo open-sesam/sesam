@@ -120,3 +120,78 @@ func TestCleanupErrorsOnMissingSesamDir(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not a sesam directory")
 }
+
+func TestRecursiveRmEmptyDirs(t *testing.T) {
+	tcs := []struct {
+		Name             string
+		CreateDirs       []string
+		CreateFiles      []string
+		Except           map[string]bool
+		ExpectedToDelete []string
+	}{
+		{
+			Name: "basic",
+			CreateDirs: []string{
+				"empty",
+			},
+			CreateFiles: []string{},
+			ExpectedToDelete: []string{
+				"empty",
+			},
+		},
+		{
+			Name: "except",
+			CreateDirs: []string{
+				".git",
+			},
+			Except: map[string]bool{
+				".git": true,
+			},
+			ExpectedToDelete: []string{},
+		},
+		{
+			Name: "nested",
+			CreateDirs: []string{
+				"sub1/sub2/sub3",
+			},
+			ExpectedToDelete: []string{
+				"sub1/sub2/sub3",
+				"sub1/sub2",
+				"sub1",
+			},
+		},
+		{
+			Name: "nested_with_file",
+			CreateDirs: []string{
+				"sub1/sub2/sub3",
+			},
+			CreateFiles: []string{
+				"sub1/file",
+			},
+			ExpectedToDelete: []string{
+				"sub1/sub2/sub3",
+				"sub1/sub2",
+			},
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.Name, func(t *testing.T) {
+			tmpDir, err := os.MkdirTemp("", "rmdir")
+			require.NoError(t, err)
+			defer os.RemoveAll(tmpDir)
+
+			for _, dir := range tc.CreateDirs {
+				require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, dir), 0700))
+			}
+
+			for _, path := range tc.CreateFiles {
+				require.NoError(t, os.WriteFile(filepath.Join(tmpDir, path), nil, 0700))
+			}
+
+			emptyDirs, err := recursiveRmEmptyDirs(tmpDir, tc.Except)
+			require.NoError(t, err)
+			require.Equal(t, tc.ExpectedToDelete, emptyDirs)
+		})
+	}
+}

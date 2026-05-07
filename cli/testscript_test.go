@@ -25,12 +25,27 @@ func TestWorkflows(t *testing.T) {
 	testscript.Run(t, testscript.Params{
 		Dir: "testdata/scripts",
 		Setup: func(e *testscript.Env) error {
+			// All auxiliary files (identities, TMPDIR) live outside the git
+			// worktree ($WORK) so that sesam's worktree cleanup never touches
+			// them. git uses TMPDIR for textconv temp files; if TMPDIR were
+			// inside $WORK, Cleanup would delete those files mid-diff.
+			idDir := e.WorkDir + ".ids"
+			if err := os.MkdirAll(idDir, 0o700); err != nil {
+				return err
+			}
+			tmpDir := e.WorkDir + ".tmp"
+			if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+				return err
+			}
+			e.Setenv("TMPDIR", tmpDir)
+
 			writeIdentity := func(name string) (*age.X25519Identity, error) {
 				id, err := age.GenerateX25519Identity()
 				if err != nil {
 					return nil, fmt.Errorf("generate age identity: %w", err)
 				}
-				keyPath := filepath.Join(e.WorkDir, name+".age")
+
+				keyPath := filepath.Join(idDir, name+".age")
 				f, err := os.Create(keyPath)
 				if err != nil {
 					return nil, err
@@ -50,7 +65,7 @@ func TestWorkflows(t *testing.T) {
 			}
 
 			// SESAM_ID points to admin's key so all commands run as admin by default.
-			e.Setenv("SESAM_ID", filepath.Join(e.WorkDir, "ADMIN.age"))
+			e.Setenv("SESAM_ID", filepath.Join(idDir, "ADMIN.age"))
 			return nil
 		},
 	})
