@@ -182,11 +182,11 @@ func TestRecursiveRmEmptyDirs(t *testing.T) {
 			defer os.RemoveAll(tmpDir)
 
 			for _, dir := range tc.CreateDirs {
-				require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, dir), 0700))
+				require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, dir), 0o700))
 			}
 
 			for _, path := range tc.CreateFiles {
-				require.NoError(t, os.WriteFile(filepath.Join(tmpDir, path), nil, 0700))
+				require.NoError(t, os.WriteFile(filepath.Join(tmpDir, path), nil, 0o700))
 			}
 
 			emptyDirs, err := recursiveRmEmptyDirs(tmpDir, tc.Except)

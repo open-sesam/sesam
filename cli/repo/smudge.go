@@ -430,4 +430,3 @@ func expectFlush(scanner *pktline.Scanner) error {
 	}
 	return nil
 }
-
