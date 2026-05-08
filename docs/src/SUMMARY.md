@@ -27,6 +27,5 @@
 - [Config Reference](./config_ref.md)
 - [CLI](./cli_ref.md)
 - [Design](./design.md)
-  - [Security](./security.md)
 - [Alternatives](./alternatives.md)
 - [Developer Notes](./developer.md)

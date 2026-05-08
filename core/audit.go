@@ -708,6 +708,11 @@ func loadAuditLogFile(logPath string, ids Identities) (*AuditLog, error) {
 	if !scanner.Scan() {
 		return nil, fmt.Errorf("audit log is empty (missing key line)")
 	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scanning audit log failed: %w", err)
+	}
+
 	keyB64 := scanner.Bytes()
 	keyRaw := make([]byte, base64.RawStdEncoding.DecodedLen(len(keyB64)))
 	n, err := base64.RawStdEncoding.Decode(keyRaw, keyB64)

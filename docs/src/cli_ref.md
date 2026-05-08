@@ -95,6 +95,10 @@ List persons, groups, and access
 
 Show objects managed by sesam
 
+### `sesam clean`
+
+Remove revealed plaintext and other untracked files from the sesam directory
+
 ### `sesam rotate`
 
 Plan and execute secret rotation
