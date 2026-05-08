@@ -31,31 +31,58 @@ var sesamReadmeTemplate string
 //go:embed assets/config.default
 var configTemplate string
 
-// ResolveSesamDir validates the directory where .sesam will live.
+// ResolveSesamDir resolves the sesam repository root.
 //
-// The returned path is the sesam target directory, which may be a
-// sub-directory inside a larger git worktree.
+// It starts at sesamPath and walks upward until the git worktree root,
+// returning the first directory that contains .sesam.
+// If none is found, it returns sesamPath (used by init before .sesam exists).
 func ResolveSesamDir(sesamPath string) (string, error) {
 	if strings.TrimSpace(sesamPath) == "" {
 		sesamPath = "."
 	}
-	sesamPath = filepath.Clean(sesamPath)
-
-	repoInfo, err := os.Stat(sesamPath)
+	absPath, err := filepath.Abs(filepath.Clean(sesamPath))
 	if err != nil {
-		return "", fmt.Errorf("failed to access repo path %s: %w", sesamPath, err)
+		return "", fmt.Errorf("failed to resolve repo path %s: %w", sesamPath, err)
+	}
+
+	repoInfo, err := os.Stat(absPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to access repo path %s: %w", absPath, err)
 	}
 
 	if !repoInfo.IsDir() {
-		return "", fmt.Errorf("repo path %s is not a directory", sesamPath)
+		return "", fmt.Errorf("repo path %s is not a directory", absPath)
 	}
 
-	_, err = resolveGitDir(sesamPath)
+	repo, err := git.PlainOpenWithOptions(absPath, &git.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
-		return "", fmt.Errorf("no git repository found at %s: %w", sesamPath, err)
+		return "", fmt.Errorf("no git repository found at %s: %w", absPath, err)
 	}
 
-	return sesamPath, nil
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", fmt.Errorf("failed to access git worktree: %w", err)
+	}
+
+	worktreeRoot := filepath.Clean(wt.Filesystem.Root())
+	current := absPath
+	for {
+		if _, err := os.Stat(filepath.Join(current, ".sesam")); err == nil {
+			return current, nil
+		}
+
+		if current == worktreeRoot {
+			break
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+
+	return absPath, nil
 }
 
 func IsInitialized(sesamRoot string) error {

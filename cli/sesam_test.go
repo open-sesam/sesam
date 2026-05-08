@@ -306,3 +306,56 @@ func TestMainSealDeleteRevealed(t *testing.T) {
 
 	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "objects", secretPath+".age"))
 }
+
+func TestMainVerifyFindsSesamDirFromNestedPath(t *testing.T) {
+	repoRoot := makeTempDir(t)
+	initGitRepo(t, repoRoot)
+
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatalf("failed to generate identity: %v", err)
+	}
+
+	identityPath := filepath.Join(repoRoot, "identity.txt")
+	if err := os.WriteFile(identityPath, []byte(id.String()+"\n"), 0o600); err != nil {
+		t.Fatalf("failed to write identity: %v", err)
+	}
+
+	sesamRoot := filepath.Join(repoRoot, "secrets")
+	if err := os.MkdirAll(sesamRoot, 0o700); err != nil {
+		t.Fatalf("failed to create sesam root: %v", err)
+	}
+
+	err = Main([]string{
+		"sesam",
+		"init",
+		"--sesam-dir", sesamRoot,
+		"--user", "alice",
+		"--identity", identityPath,
+	})
+	if err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	nestedPath := filepath.Join(sesamRoot, "certs")
+	if err := os.MkdirAll(nestedPath, 0o700); err != nil {
+		t.Fatalf("failed to create nested dir: %v", err)
+	}
+
+	originalWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get cwd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(originalWD)
+	})
+
+	if err := os.Chdir(nestedPath); err != nil {
+		t.Fatalf("failed to chdir to nested path: %v", err)
+	}
+
+	err = Main([]string{"sesam", "verify"})
+	if err != nil {
+		t.Fatalf("verify failed from nested path: %v", err)
+	}
+}
