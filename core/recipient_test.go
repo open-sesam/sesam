@@ -140,16 +140,6 @@ func TestResolveRecipientPassthrough(t *testing.T) {
 	require.Equal(t, KeySourceManual, source)
 }
 
-func TestResolveRecipientGitlabIsPassthrough(t *testing.T) {
-	// GitLab uses JSON for keys (not the plain authorized_keys format) so it is
-	// temporarily disabled - gitlab: args pass through unchanged.
-	arg := "gitlab:testuser"
-	got, source, err := ResolveRecipient(context.Background(), arg)
-	require.NoError(t, err)
-	require.Equal(t, []string{arg}, got)
-	require.Equal(t, KeySourceManual, source)
-}
-
 func TestResolveRecipientFile(t *testing.T) {
 	dir := t.TempDir()
 	keyFile := filepath.Join(dir, "key.pub")

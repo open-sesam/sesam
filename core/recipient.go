@@ -97,12 +97,12 @@ func ResolveRecipient(ctx context.Context, pubKeySpec string) ([]string, KeySour
 	switch {
 	case strings.HasPrefix(pubKeySpec, "github:"):
 		forgeURL = fmt.Sprintf("https://github.com/%s.keys", url.QueryEscape(forgeIdToUser(pubKeySpec)))
+	case strings.HasPrefix(pubKeySpec, "gitlab:"):
+		forgeURL = fmt.Sprintf("https://gitlab.com/%s.keys", url.QueryEscape(forgeIdToUser(pubKeySpec)))
 	case strings.HasPrefix(pubKeySpec, "codeberg:"):
 		forgeURL = fmt.Sprintf("https://codeberg.org/%s.keys", url.QueryEscape(forgeIdToUser(pubKeySpec)))
 	case strings.HasPrefix(pubKeySpec, "https://"):
 		forgeURL = pubKeySpec
-	// TODO: gitlab support — gitlab serves keys as JSON, not authorized_keys format,
-	// so it needs a separate parser before it can use this branch.
 	case strings.HasPrefix(pubKeySpec, "file://"):
 		path := strings.TrimPrefix(pubKeySpec, "file://")
 
