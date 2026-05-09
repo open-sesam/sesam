@@ -39,7 +39,9 @@ const KeySourceManual KeySource = "manual"
 type Recipient struct {
 	age.Recipient
 	comparablePublicKey
-	Source KeySource
+	// Source is in-memory only; serialization goes through MarshalJSON
+	// onto a UserPubKey.
+	Source KeySource `json:"-"`
 }
 
 func (r *Recipient) MarshalJSON() ([]byte, error) {
@@ -78,6 +80,11 @@ func forgeIdToUser(arg string) string {
 	return strings.TrimSpace(user)
 }
 
+// maxKeyMaterialSize bounds the bytes we accept from a single forge
+// fetch or local key file. Forge endpoints can return several keys at
+// once (one per line), which is why this is generous.
+const maxKeyMaterialSize = 32 * 1024
+
 // ResolveRecipient handles special recipient spec forms (forge ids
 // like "github:user", "https://..." links, and "file://..." paths).
 // All other inputs are returned verbatim and recorded as
@@ -86,23 +93,16 @@ func forgeIdToUser(arg string) string {
 // The returned source records the spec form so that the caller can
 // store it in the audit log alongside the resolved key material.
 func ResolveRecipient(ctx context.Context, pubKeySpec string) ([]string, KeySource, error) {
+	var forgeURL string
 	switch {
 	case strings.HasPrefix(pubKeySpec, "github:"):
-		url := fmt.Sprintf("https://github.com/%s.keys", url.QueryEscape(forgeIdToUser(pubKeySpec)))
-		v, err := resolveLink(ctx, url)
-		return v, KeySource(pubKeySpec), err
-	// TODO: gitlab uses json; fix
-	// case strings.HasPrefix(pubKeySpec, "gitlab:"):
-	// 	url := fmt.Sprintf("https://gitlab.com/%s.keys", url.QueryEscape(forgeIdToUser(pubKeySpec)))
-	// 	v, err := resolveLink(ctx, url)
-	// 	return v, KeySource(pubKeySpec), err
+		forgeURL = fmt.Sprintf("https://github.com/%s.keys", url.QueryEscape(forgeIdToUser(pubKeySpec)))
 	case strings.HasPrefix(pubKeySpec, "codeberg:"):
-		url := fmt.Sprintf("https://codeberg.org/%s.keys", url.QueryEscape(forgeIdToUser(pubKeySpec)))
-		v, err := resolveLink(ctx, url)
-		return v, KeySource(pubKeySpec), err
+		forgeURL = fmt.Sprintf("https://codeberg.org/%s.keys", url.QueryEscape(forgeIdToUser(pubKeySpec)))
 	case strings.HasPrefix(pubKeySpec, "https://"):
-		v, err := resolveLink(ctx, pubKeySpec)
-		return v, KeySource(pubKeySpec), err
+		forgeURL = pubKeySpec
+	// TODO: gitlab support — gitlab serves keys as JSON, not authorized_keys format,
+	// so it needs a separate parser before it can use this branch.
 	case strings.HasPrefix(pubKeySpec, "file://"):
 		path := strings.TrimPrefix(pubKeySpec, "file://")
 
@@ -114,7 +114,7 @@ func ResolveRecipient(ctx context.Context, pubKeySpec string) ([]string, KeySour
 
 		defer closeLogged(fd)
 
-		data, err := io.ReadAll(io.LimitReader(fd, 4096))
+		data, err := io.ReadAll(io.LimitReader(fd, maxKeyMaterialSize))
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to read %s: %w", pubKeySpec, err)
 		}
@@ -124,6 +124,9 @@ func ResolveRecipient(ctx context.Context, pubKeySpec string) ([]string, KeySour
 		// pass through, assume it was directly specified in the config.
 		return []string{pubKeySpec}, KeySourceManual, nil
 	}
+
+	keys, err := resolveLink(ctx, forgeURL)
+	return keys, KeySource(pubKeySpec), err
 }
 
 func splitByLine(s string) []string {
@@ -169,10 +172,7 @@ func resolveLink(ctx context.Context, url string, client ...*http.Client) ([]str
 		return nil, fmt.Errorf("%s failed with code %d", url, resp.StatusCode)
 	}
 
-	// Limit response size so cannot be DoS'd by large responses:
-	const maxSize = 32 * 1024
-
-	tr := io.LimitReader(resp.Body, maxSize)
+	tr := io.LimitReader(resp.Body, maxKeyMaterialSize)
 
 	buf := bytes.Buffer{}
 	_, err = io.Copy(&buf, tr)
@@ -225,7 +225,7 @@ func ParseRecipient(arg string) (*Recipient, error) {
 	return &Recipient{
 		Recipient:           r,
 		comparablePublicKey: spk,
-		Source:              KeySourceManual, // overwritten later, if applicable
+		Source:              KeySourceManual,
 	}, err
 }
 

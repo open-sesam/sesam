@@ -16,11 +16,4 @@
 
 <!-- Steps to verify the change works correctly -->
 
-1.
-
-## Checklist
-
-- [ ] `go build ./...` passes
-- [ ] `go vet ./...` clean
-- [ ] Tested manually with seal/reveal round-trip
-- [ ] No secrets or key material in the diff
+-
