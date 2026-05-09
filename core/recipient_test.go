@@ -81,17 +81,20 @@ func TestParseRecipientsInvalidKey(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestRecipientsStrings(t *testing.T) {
+func TestRecipientsUserPubKeys(t *testing.T) {
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
 	rs := Recipients{alice.Recipient, bob.Recipient}
 
-	strs := rs.Strings()
-	require.Equal(t, []string{alice.Recipient.String(), bob.Recipient.String()}, strs)
+	want := []UserPubKey{
+		{Key: alice.Recipient.String(), Source: KeySourceManual},
+		{Key: bob.Recipient.String(), Source: KeySourceManual},
+	}
+	require.Equal(t, want, rs.UserPubKeys())
 }
 
-func TestRecipientsStringsEmpty(t *testing.T) {
-	require.Empty(t, Recipients{}.Strings())
+func TestRecipientsUserPubKeysEmpty(t *testing.T) {
+	require.Empty(t, Recipients{}.UserPubKeys())
 }
 
 func TestForgeIdToUser(t *testing.T) {
@@ -105,12 +108,6 @@ func TestForgeIdToUser(t *testing.T) {
 	for _, tc := range cases {
 		require.Equal(t, tc.want, forgeIdToUser(tc.in), "forgeIdToUser(%q)", tc.in)
 	}
-}
-
-func TestCachePath(t *testing.T) {
-	p := cachePath("/repo", "https://example.com/user.keys")
-	want := filepath.Join("/repo", ".sesam", "links", "https:__example.com_user.keys")
-	require.Equal(t, want, p)
 }
 
 func TestSplitByLine(t *testing.T) {
@@ -137,124 +134,36 @@ func TestSplitByLine(t *testing.T) {
 
 func TestResolveRecipientPassthrough(t *testing.T) {
 	user := newTestUser(t, "alice")
-	got, err := ResolveRecipient(context.Background(), "/tmp", user.Recipient.String(), CacheModeNone)
+	got, source, err := ResolveRecipient(context.Background(), user.Recipient.String())
 	require.NoError(t, err)
 	require.Equal(t, []string{user.Recipient.String()}, got)
-}
-
-func TestResolveRecipientForgeIds(t *testing.T) {
-	cases := []struct {
-		name   string
-		prefix string
-		forge  string
-	}{
-		{"github", "github:", "github.com"},
-		{"codeberg", "codeberg:", "codeberg.org"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			sesamDir := testRepo(t)
-
-			// Pre-populate cache with mock response to avoid real network calls.
-			url := fmt.Sprintf("https://%s/%s.keys", tc.forge, "testuser")
-			cp := cachePath(sesamDir, url)
-			os.MkdirAll(filepath.Dir(cp), 0o700)
-			os.WriteFile(cp, []byte("cached-key-"+tc.name), 0o600)
-
-			got, err := ResolveRecipient(context.Background(), sesamDir, tc.prefix+"testuser", CacheModeRead)
-			require.NoError(t, err)
-			require.Equal(t, []string{"cached-key-" + tc.name}, got)
-		})
-	}
+	require.Equal(t, KeySourceManual, source)
 }
 
 func TestResolveRecipientGitlabIsPassthrough(t *testing.T) {
 	// GitLab uses JSON for keys (not the plain authorized_keys format) so it is
 	// temporarily disabled - gitlab: args pass through unchanged.
 	arg := "gitlab:testuser"
-	got, err := ResolveRecipient(context.Background(), "/tmp", arg, CacheModeNone)
+	got, source, err := ResolveRecipient(context.Background(), arg)
 	require.NoError(t, err)
 	require.Equal(t, []string{arg}, got)
-}
-
-func TestResolveRecipientForgeIdsMultipleKeys(t *testing.T) {
-	// Forge endpoints can return multiple SSH keys (one per line).
-	sesamDir := testRepo(t)
-	url := "https://github.com/multikey.keys"
-	cp := cachePath(sesamDir, url)
-	os.MkdirAll(filepath.Dir(cp), 0o700)
-	os.WriteFile(cp, []byte("key-one\nkey-two\nkey-three\n"), 0o600)
-
-	// Resolve via an https:// URL directly.
-	got, err := ResolveRecipient(context.Background(), sesamDir, url, CacheModeRead)
-	require.NoError(t, err)
-	require.Equal(t, []string{"key-one", "key-two", "key-three"}, got)
-}
-
-func TestResolveRecipientHTTPS(t *testing.T) {
-	sesamDir := testRepo(t)
-	url := "https://example.com/keys"
-	cp := cachePath(sesamDir, url)
-	os.MkdirAll(filepath.Dir(cp), 0o700)
-	os.WriteFile(cp, []byte("https-cached"), 0o600)
-
-	got, err := ResolveRecipient(context.Background(), sesamDir, url, CacheModeRead)
-	require.NoError(t, err)
-	require.Equal(t, []string{"https-cached"}, got)
-}
-
-func TestResolveCachedLinkCacheReadWrite(t *testing.T) {
-	// Use httptest with plain HTTP won't work because resolveCachedLink rejects non-https.
-	// Test cache read path.
-	sesamDir := testRepo(t)
-	url := "https://example.com/test.keys"
-	cp := cachePath(sesamDir, url)
-	os.MkdirAll(filepath.Dir(cp), 0o700)
-	os.WriteFile(cp, []byte("cached-value"), 0o600)
-
-	got, err := resolveCachedLink(context.Background(), sesamDir, url, CacheModeRead)
-	require.NoError(t, err)
-	require.Equal(t, []string{"cached-value"}, got)
-}
-
-func TestResolveCachedLinkNonHTTPS(t *testing.T) {
-	_, err := resolveCachedLink(context.Background(), "/tmp", "http://example.com", CacheModeNone)
-	require.Error(t, err, "should reject non-https URLs")
-	require.Contains(t, err.Error(), "unsupported protocol")
-}
-
-func TestResolveCachedLinkCacheMiss(t *testing.T) {
-	// No cache, no network - should try to download and fail (no real server).
-	sesamDir := testRepo(t)
-	_, err := resolveCachedLink(context.Background(), sesamDir, "https://192.0.2.1/nonexistent", CacheModeNone)
-	require.Error(t, err, "should fail when cache misses and download fails")
+	require.Equal(t, KeySourceManual, source)
 }
 
 func TestResolveRecipientFile(t *testing.T) {
 	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "key.pub")
+	require.NoError(t, os.WriteFile(keyFile, []byte("age1testkey"), 0o600))
 
-	// ResolveRecipient does NOT strip "file://" - it calls os.ReadFile with the literal
-	// "file://..." string. To avoid leaking a "file:" directory into the working directory,
-	// create the literal path structure inside the temp dir and run the test from there.
-	literalDir := filepath.Join(dir, "sub")
-	require.NoError(t, os.MkdirAll(literalDir, 0o700))
-	literalFile := filepath.Join(literalDir, "key.pub")
-	require.NoError(t, os.WriteFile(literalFile, []byte("age1testkey"), 0o600))
-
-	origDir, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { os.Chdir(origDir) })
-
-	keyArg := "file://sub/key.pub"
-	got, err := ResolveRecipient(t.Context(), dir, keyArg, CacheModeNone)
+	keyArg := "file://" + keyFile
+	got, source, err := ResolveRecipient(t.Context(), keyArg)
 	require.NoError(t, err)
 	require.Equal(t, []string{"age1testkey"}, got)
+	require.Equal(t, KeySource(keyArg), source)
 }
 
 func TestResolveRecipientFileMissing(t *testing.T) {
-	_, err := ResolveRecipient(context.Background(), "/tmp", "file:///nonexistent/key.pub", CacheModeNone)
+	_, _, err := ResolveRecipient(context.Background(), "file:///nonexistent/key.pub")
 	require.Error(t, err, "should fail for missing file")
 }
 
@@ -262,104 +171,62 @@ func TestParseAndResolveRecipients(t *testing.T) {
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
 
-	// Pass through two age public keys directly.
 	recps, err := ParseAndResolveRecipients(
 		context.Background(),
-		"/tmp",
 		[]string{alice.Recipient.String(), bob.Recipient.String()},
 	)
 	require.NoError(t, err)
 	require.Len(t, recps, 2)
-}
-
-func TestParseAndResolveRecipientsMultiKeyURL(t *testing.T) {
-	// An https:// URL with multiple keys returns all of them as separate recipients.
-	alice := newTestUser(t, "alice")
-	bob := newTestUser(t, "bob")
-
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "%s\n%s\n", alice.Recipient.String(), bob.Recipient.String())
-	}))
-	defer srv.Close()
-
-	sesamDir := testRepo(t)
-	url := srv.URL + "/keys"
-
-	// Pre-populate cache so we don't need an actual TLS handshake.
-	cp := cachePath(sesamDir, url)
-	os.MkdirAll(filepath.Dir(cp), 0o700)
-	os.WriteFile(cp, []byte(alice.Recipient.String()+"\n"+bob.Recipient.String()+"\n"), 0o600)
-
-	recps, err := ParseAndResolveRecipients(context.Background(), sesamDir, []string{url})
-	require.NoError(t, err)
-	require.Len(t, recps, 2)
+	require.Equal(t, KeySourceManual, recps[0].Source)
+	require.Equal(t, KeySourceManual, recps[1].Source)
 }
 
 func TestParseAndResolveRecipientsInvalidKey(t *testing.T) {
-	_, err := ParseAndResolveRecipients(context.Background(), "/tmp", []string{"not-a-key"})
+	_, err := ParseAndResolveRecipients(context.Background(), []string{"not-a-key"})
 	require.Error(t, err)
 }
 
 func TestParseAndResolveRecipientsEmpty(t *testing.T) {
-	recps, err := ParseAndResolveRecipients(context.Background(), "/tmp", []string{})
+	recps, err := ParseAndResolveRecipients(context.Background(), []string{})
 	require.NoError(t, err)
 	require.Empty(t, recps)
 }
 
-func TestResolveRecipientHTTPSDownload(t *testing.T) {
-	// Test the live download path with a real HTTPS test server - but pre-cache
-	// the response so resolveCachedLink returns immediately without dialing.
-	user := newTestUser(t, "alice")
-	sesamDir := testRepo(t)
-
-	url := "https://example.com/alice.keys"
-	cp := cachePath(sesamDir, url)
-	os.MkdirAll(filepath.Dir(cp), 0o700)
-	os.WriteFile(cp, []byte(user.Recipient.String()), 0o600)
-
-	got, err := ResolveRecipient(context.Background(), sesamDir, url, CacheModeRead)
-	require.NoError(t, err)
-	require.Equal(t, []string{user.Recipient.String()}, got)
-}
-
-func TestResolveCachedLinkHTTPDownloadSuccess(t *testing.T) {
+func TestResolveLinkSuccess(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "age1keydata")
 	}))
 	defer srv.Close()
 
-	sesamDir := testRepo(t)
-	got, err := resolveCachedLink(context.Background(), sesamDir, srv.URL+"/keys", CacheModeNone, srv.Client())
+	got, err := resolveLink(context.Background(), srv.URL+"/keys", srv.Client())
 	require.NoError(t, err)
 	require.Equal(t, []string{"age1keydata"}, got)
 }
 
-func TestResolveCachedLinkHTTPDownloadAndCache(t *testing.T) {
+func TestResolveLinkMultipleKeys(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "age1cached-fresh")
+		fmt.Fprintln(w, "key-one\nkey-two\nkey-three")
 	}))
 	defer srv.Close()
 
-	sesamDir := testRepo(t)
-	url := srv.URL + "/keys"
-
-	got, err := resolveCachedLink(context.Background(), sesamDir, url, CacheModeWrite, srv.Client())
+	got, err := resolveLink(context.Background(), srv.URL+"/keys", srv.Client())
 	require.NoError(t, err)
-	require.Equal(t, []string{"age1cached-fresh"}, got)
-
-	data, err := os.ReadFile(cachePath(sesamDir, url))
-	require.NoError(t, err)
-	require.Contains(t, string(data), "age1cached-fresh")
+	require.Equal(t, []string{"key-one", "key-two", "key-three"}, got)
 }
 
-func TestResolveCachedLinkHTTP4xx(t *testing.T) {
+func TestResolveLinkNonHTTPS(t *testing.T) {
+	_, err := resolveLink(context.Background(), "http://example.com")
+	require.Error(t, err, "should reject non-https URLs")
+	require.Contains(t, err.Error(), "unsupported protocol")
+}
+
+func TestResolveLinkHTTP4xx(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 	}))
 	defer srv.Close()
 
-	sesamDir := testRepo(t)
-	_, err := resolveCachedLink(context.Background(), sesamDir, srv.URL+"/keys", CacheModeNone, srv.Client())
+	_, err := resolveLink(context.Background(), srv.URL+"/keys", srv.Client())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "404")
 }

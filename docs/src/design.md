@@ -56,8 +56,6 @@ sesam.yml
 ├── audit
 │   ├── init
 │   └── log.jsonl
-├── links
-│   └── https:__github.com_sahib.keys
 ├── objects
 │   ├── some_folder
 │   │   └── secret.sesam
@@ -159,11 +157,6 @@ outside `.sesam`. This also gives us the guarantee (well, if the user is not
 really doing weird stuff) that we're on the same partition, which makes
 renaming files atomically easier.
 
-## `links`
-
-This is a cache for public keys we downloaded from git-forges or links.
-It is mainly here to make sure link contents are not just changing out of nowhere.
-
 ## Cryptography
 
 
@@ -188,11 +181,11 @@ It is mainly here to make sure link contents are not just changing out of nowher
 | Read-only attacker on the git remote                          | Yes          | age hybrid encryption of all files in `.sesam/objects`        |
 | Repo-write collaborator self-elevating to admin               | Yes          | New audit entries must be signed by an admin already pinned   |
 | Repo-write collaborator adding self to a secret's reveal list | Yes          | Same - must be signed by an existing recipient                |
-| Repo-write collaborator pushing broken state (DoS)            | Partial      | `sesam verify` flags it, but the repo state is poisoned       |
 | Audit log truncation / substitution                           | Yes          | Init-file pin + prefix check across git history (see below)   |
+| Repo-write collaborator pushing broken state (DoS)            | Partial      | `sesam verify` flags it, but the repo state needs to be reverted |
+| Compromise of forge public-key directory (e.g. github:user)   | Partial      | Resolved keys + alias pinned in audit log ([TOFU](https://en.wikipedia.org/wiki/Trust_on_first_use)); manual exchange is safer |
 | Force-push that rewrites history                              | Out of scope | User must disable force-push at the forge                     |
-| Compromise of forge public-key directory (e.g. github:user)   | Partial      | Cached in `.sesam/links/` (TOFU); manual exchange is safer    |
-| Local machine compromise / identity-key extraction            | Out of scope | User responsibility                                           |
+| Local machine compromise / identity-key extraction            | Out of scope | User responsibility (e.g. encrypted fs)                                           |
 | Removed user reading secrets they previously had access to    | Out of scope | Requires explicit `rotate`; see Confidentiality section       |
 | Social engineering of an admin (e.g. `sesam tell attacker`)   | Out of scope | -                                                             |
 
@@ -363,9 +356,12 @@ apply and verify will complain. There are situations where this could be valid t
 ### Possible improvements
 
 - Limit each user to at most 2 keys, to avoid losing overview.
-- Using forge-ids or links as public key input might have some transparency issues. We need to show the users clearly
-  what user/public keys are coming in there. Document that transmitting via side channel is probably safer as we don't
-  need to rely on forges like GitHub.
+- Using forge-ids or links as public key input has transparency issues:
+  the resolved key material is pinned into the audit log on `tell` ([TOFU](https://en.wikipedia.org/wiki/Trust_on_first_use)),
+  but the *first* resolution still trusts the forge. Surface a clear
+  summary of which user/public keys are about to be recorded before
+  signing the audit entry, and document that side-channel exchange is
+  safer when high assurance is required.
 - Make seal atomic (or at least close to) - interrupting it might
   lead to a failed root hash check, since seal + rm of the previous
   secret is not currently transactional.

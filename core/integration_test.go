@@ -30,7 +30,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	auditLog, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:        whoami,
 		Groups:      []string{"admin"},
-		PubKeys:     []string{admin.Recipient.String()},
+		PubKeys:     []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
 		SignPubKeys: []string{signKeyStr},
 	})
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:        "admin",
 		Groups:      []string{"admin"},
-		PubKeys:     []string{admin.Recipient.String()},
+		PubKeys:     []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
 		SignPubKeys: []string{signKeyStr},
 	})
 	require.NoError(t, err)
@@ -129,7 +129,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailUserTell{
 		User:        "bob",
 		Groups:      []string{"dev"},
-		PubKeys:     []string{bob.Recipient.String()},
+		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
 		SignPubKeys: []string{bobSignKeyStr},
 	}), nil)
 	require.NoError(t, err)
@@ -193,7 +193,7 @@ func TestIntegrationTamperDetection(t *testing.T) {
 	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:        "admin",
 		Groups:      []string{"admin"},
-		PubKeys:     []string{admin.Recipient.String()},
+		PubKeys:     []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
 		SignPubKeys: []string{signKeyStr},
 	})
 	require.NoError(t, err)
@@ -221,7 +221,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:        "admin",
 		Groups:      []string{"admin"},
-		PubKeys:     []string{admin.Recipient.String()},
+		PubKeys:     []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
 		SignPubKeys: []string{signKeyStr},
 	})
 	require.NoError(t, err)
