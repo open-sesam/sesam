@@ -27,7 +27,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	keyring := EmptyKeyring()
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
 
-	auditLog, err := InitAuditLog(sesamDir, signer, DetailUserTell{
+	auditLog, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:        whoami,
 		Groups:      []string{"admin"},
 		PubKeys:     []string{admin.Recipient.String()},
@@ -68,7 +68,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	// ── Phase 2: regular (simulates opening an existing repo) ────────
 	require.NoError(t, auditLog.Close())
 	keyring2 := EmptyKeyring()
-	auditLog2, err := LoadAuditLog(sesamDir)
+	auditLog2, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.NoError(t, err)
 
 	vstate2, err := Verify(auditLog2, keyring2)
@@ -108,7 +108,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 
 	keyring := EmptyKeyring()
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitAuditLog(sesamDir, signer, DetailUserTell{
+	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:        "admin",
 		Groups:      []string{"admin"},
 		PubKeys:     []string{admin.Recipient.String()},
@@ -167,7 +167,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 
 	// Full reload + verify from scratch.
 	keyring3 := EmptyKeyring()
-	al3, err := LoadAuditLog(sesamDir)
+	al3, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.NoError(t, err)
 
 	vstate3, err := Verify(al3, keyring3)
@@ -190,7 +190,7 @@ func TestIntegrationTamperDetection(t *testing.T) {
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitAuditLog(sesamDir, signer, DetailUserTell{
+	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:        "admin",
 		Groups:      []string{"admin"},
 		PubKeys:     []string{admin.Recipient.String()},
@@ -218,7 +218,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitAuditLog(sesamDir, signer, DetailUserTell{
+	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:        "admin",
 		Groups:      []string{"admin"},
 		PubKeys:     []string{admin.Recipient.String()},
@@ -296,7 +296,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 
 	// Full re-verify.
 	kr2 := EmptyKeyring()
-	al2, err := LoadAuditLog(sesamDir)
+	al2, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.NoError(t, err)
 
 	vs2, err := Verify(al2, kr2)

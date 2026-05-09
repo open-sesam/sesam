@@ -59,6 +59,12 @@ func (um *UserManager) TellUser(
 		return err
 	}
 
+	// audit key needs to be accessible by all recipients
+	allRecps := AllRecipients(um.state.keyring)
+	if err := um.log.WriteAuditKey(allRecps); err != nil {
+		return err
+	}
+
 	newUserSigner, err := GenerateSignKey(
 		um.sesamDir,
 		user,
@@ -102,6 +108,12 @@ func (um *UserManager) KillUsers(user string) error {
 		return err
 	}
 
+	// audit log needs to be re-encrypted with a fresh key to keep out the deleted user.
+	allRecps := AllRecipients(um.state.keyring)
+	if err := um.log.RotateKey(um.signer, allRecps); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -125,7 +137,7 @@ func InitAdminUser(
 	}
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	auditLog, err := InitAuditLog(sesamDir, signer, DetailUserTell{
+	auditLog, err := InitAuditLog(sesamDir, signer, recps, DetailUserTell{
 		User:        signer.UserName(),
 		Groups:      []string{"admin"},
 		PubKeys:     recps.Strings(),

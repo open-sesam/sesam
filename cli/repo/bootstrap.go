@@ -392,7 +392,7 @@ func StageInitFiles(sesamDir, configPath string) error {
 		filepath.Join(sesamDir, ".gitattributes"),
 	}
 
-	args := append([]string{"add"}, files...)
+	args := append([]string{"add", "-f"}, files...)
 	cmd := exec.Command("git", args...) //nolint:gosec,noctx
 	cmd.Dir = sesamDir
 

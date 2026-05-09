@@ -137,7 +137,7 @@ func TestStoreAndLoad(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, al.Close())
-	loaded, err := LoadAuditLog(sesamDir)
+	loaded, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.NoError(t, err)
 	require.Len(t, loaded.Entries, len(al.Entries))
 	require.Equal(t, al.InitHash, loaded.InitHash)
@@ -150,41 +150,43 @@ func TestStoreAndLoad(t *testing.T) {
 
 func TestLoadMissingInitFile(t *testing.T) {
 	sesamDir := testRepo(t)
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
-	require.NoError(t, os.WriteFile(logPath, []byte(`{"entries":[]}`), 0o600))
+	admin := newTestUser(t, "admin")
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt")
+	require.NoError(t, os.WriteFile(logPath, nil, 0o600))
 
-	_, err := LoadAuditLog(sesamDir)
+	_, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.Error(t, err)
 }
 
 func TestLoadMissingLogFile(t *testing.T) {
 	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0o600))
 
-	_, err := LoadAuditLog(sesamDir)
+	_, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.Error(t, err)
 }
 
-func TestLoadCorruptTrailingEntry(t *testing.T) {
+// TestLoadCorruptTrailingEntryRejected: with the encrypted log we no longer
+// auto-truncate partial trailing entries — any line that fails to decrypt
+// must surface as an error instead of silently being discarded.
+func TestLoadCorruptTrailingEntryRejected(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 	require.NoError(t, al.Close())
 
-	// Append garbage after the valid entry to simulate a crash mid-write.
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
+	// Append a base64-shaped but bogus line to the encrypted log.
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt")
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o600)
 	require.NoError(t, err)
-	_, err = f.WriteString(`{"operation":"seal","changed_by":"adm`)
+	_, err = f.WriteString("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n")
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	// Should recover: truncate the partial entry and load the valid one.
-	loaded, err := LoadAuditLog(sesamDir)
-	require.NoError(t, err)
-	require.Len(t, loaded.Entries, 1, "should have the one valid init entry")
-	require.NoError(t, loaded.Close())
+	_, err = LoadAuditLog(sesamDir, Identities{admin.Identity})
+	require.Error(t, err, "garbage trailing entry should be rejected, not truncated")
 }
 
 func TestBuildRootHash(t *testing.T) {

@@ -66,7 +66,7 @@ func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager,
 
 	keyring := core.EmptyKeyring()
 
-	auditLog, err := core.LoadAuditLog(sesamDir)
+	auditLog, err := core.LoadAuditLog(sesamDir, identities)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load audit log: %w", err)
 	}
@@ -116,7 +116,7 @@ func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager,
 	return secMgr, usrMgr, nil
 }
 
-func identityToUser(identities core.Identities, users map[string][]*core.Recipient) (string, *core.Identity, error) {
+func identityToUser(identities core.Identities, users map[string]core.Recipients) (string, *core.Identity, error) {
 	for _, identity := range identities {
 		user, err := core.IdentityToUser(identity, users)
 		if err == nil {
