@@ -1,6 +1,11 @@
 package cli
 
-import "github.com/urfave/cli/v3"
+import (
+	"context"
+
+	"github.com/open-sesam/sesam/config"
+	"github.com/urfave/cli/v3"
+)
 
 // flagsGeneral are shared by most top-level commands.
 //
@@ -38,6 +43,33 @@ var flagsInit = []cli.Flag{
 	&cli.BoolFlag{
 		Name:  "use-root",
 		Usage: "Initialize in the selected directory even when it already contains many files",
+	},
+}
+
+var flagsModifyAddSecret = []cli.Flag{
+	&cli.StringFlag{
+		Name:  "type",
+		Usage: "Type of secret (ssh_key,password,template,custom)",
+		Action: func(_ context.Context, _ *cli.Command, v string) error {
+			return config.VerifySecretType(v)
+		},
+	},
+	&cli.StringFlag{
+		Name:     "path",
+		Required: true,
+		Usage:    "Path to the secret which should be added",
+	},
+	&cli.StringFlag{
+		Name:  "name",
+		Usage: "Name of the secret (filename if empty)",
+	},
+	&cli.StringSliceFlag{
+		Name:  "access",
+		Usage: "Group with access to this secret (can be given multiple times)",
+	},
+	&cli.StringFlag{
+		Name:  "description",
+		Usage: "Description of the secret",
 	},
 }
 
