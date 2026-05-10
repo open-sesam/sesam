@@ -92,6 +92,51 @@ func closeLogged(fd io.Closer) {
 	}
 }
 
+// pathExists reports whether `p` is reachable via os.Stat. It does not
+// distinguish between "missing" and "permission denied" - it simply
+// answers "can I see something there?".
+func pathExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// copyFile materializes `dst` with the same contents as `src`. It tries
+// a hardlink first (zero-copy when src and dst sit on the same
+// filesystem and the FS supports it - Linux/macOS/BSD via link(2),
+// Windows on NTFS via CreateHardLinkW) and falls back to a byte-for-byte
+// copy on any error (EXDEV across mounts, EPERM on FAT/some FUSE,
+// EEXIST, ...).
+//
+// Hardlinks share the source inode, so dst inherits its mode/owner/mtime.
+// The byte copy creates a fresh inode at mode 0o600. Both call sites
+// today operate exclusively under .sesam/ (0o700 dirs, 0o600 files) so
+// no permission widening can result either way.
+func copyFile(src, dst string) error {
+	if err := os.Link(src, dst); err == nil {
+		return nil
+	}
+
+	//nolint:gosec
+	srcFd, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", src, err)
+	}
+	defer closeLogged(srcFd)
+
+	//nolint:gosec
+	dstFd, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", dst, err)
+	}
+
+	if _, err := io.Copy(dstFd, srcFd); err != nil {
+		_ = dstFd.Close()
+		_ = os.Remove(dst)
+		return fmt.Errorf("copy %s -> %s: %w", src, dst, err)
+	}
+	return dstFd.Close()
+}
+
 // TODO: Add WriteAgeFile() and ReadAgeFile() utils
 
 func ReadFileLimited(path string, size int64) ([]byte, error) {

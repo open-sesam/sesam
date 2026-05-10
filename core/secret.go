@@ -34,24 +34,22 @@ type secretFooter struct {
 	SealedBy     string `json:"sealed_by"`
 }
 
-// Seal encrypts `s` into .sesam/objects/$revealed_path.sesam
-// The `sealedByUser` is the user that initiated the seal.
-// The `tee` writer is optional and can be used to get a hold on the encrypted stream that is
-// written to the disk.
-func (s *secret) Seal(sealedByUser string) (*secretFooter, error) {
+// Seal encrypts `s` to `destPath` for `sealedByUser`. The destination
+// directory is created if missing; the write goes through a renameio temp
+// file in .sesam/tmp so the final destination is replaced atomically.
+func (s *secret) Seal(destPath, sealedByUser string) (*secretFooter, error) {
 	rd, err := os.Open(filepath.Join(s.Mgr.SesamDir, s.RevealedPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secret: %w", err)
 	}
 	defer closeLogged(rd)
 
-	cryptPath := s.Mgr.cryptPath(s.RevealedPath)
-	if err := os.MkdirAll(filepath.Dir(cryptPath), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o700); err != nil {
 		return nil, err
 	}
 
 	tmpDir := filepath.Join(s.Mgr.SesamDir, ".sesam", "tmp")
-	wc, err := renameio.TempFile(tmpDir, cryptPath)
+	wc, err := renameio.TempFile(tmpDir, destPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open encrypted file in repo: %w", err)
 	}
@@ -88,7 +86,7 @@ func (s *secret) Seal(sealedByUser string) (*secretFooter, error) {
 	sig, err := s.Mgr.Signer.Sign(SesamDomainSignSecretTag, hashBytes)
 	if err != nil {
 		_ = os.Remove(wc.Name())
-		return nil, fmt.Errorf("failed to compute signature for %s: %w", cryptPath, err)
+		return nil, fmt.Errorf("failed to compute signature for %s: %w", destPath, err)
 	}
 
 	ss := secretFooter{

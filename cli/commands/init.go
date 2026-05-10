@@ -11,6 +11,8 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// TODO: Show ascii logo on init
+
 const keyringFingerprint = "sesam.identity.runtime"
 
 // HandleInit bootstraps sesam metadata in a git repository.

@@ -10,17 +10,20 @@ When developing and deploying software it is often required to store and load se
 
 `sesam` allows leveled access with multiple users to those encrypted secrets and gives you a simple interface to manage both users and secrets.
 
-
 ```admonish note
 The term *user* does not necessarily refer to a person. A user can also be a machine, like a server where `sesam` is installed.
 ```
 
+You might think of a password manager now, which is not too far off. A password manager is usually targeted at managing an individual secrets,
+while a secret manager is focused on sharing some of those secrets with other users in a team and machines.
+
 ## Features
 
+- High integration with `git`.
 - Declarative config as main interface.
 - Different access levels through user groups.
 - Secure - common crypto, minimal info leakage in rest.
-- Familiarity to git users.
+- Familiarity to `git` users.
 - Decentralized & offline ready.
 - Safe to use (hard to accidentally push unencrypted secrets)
 - Versioned - by wrapping git.
