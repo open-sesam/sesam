@@ -37,7 +37,10 @@ Automatically run on `sesam reveal --pull`.
 
 ## Forge checks
 
-When using forge user IDs like `github:sahib` we can check whether they match with the locally cached public key.
-This is not a security issue per se, but it can mean that a user might have locked himself out because he might have removed his old key.
+When using forge user IDs like `github:sahib`, `sesam verify --forge` re-fetches
+the live keys and checks them against the values recorded in the audit log
+when the user was added. A mismatch is not a security issue per se — it can
+also mean a user has rotated their keys upstream and might have locked
+themselves out — but it is something an admin should investigate.
 
 This will be run on `sesam verify --forge`

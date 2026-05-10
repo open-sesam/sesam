@@ -72,7 +72,7 @@ func TestRotateKeyPreservesChain(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []string{bob.Recipient.String()}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
 	}), nil)
 	require.NoError(t, err)
 
@@ -115,7 +115,7 @@ func TestRotateKeyAllowsContinuedAppend(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []string{bob.Recipient.String()}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
 	}), nil)
 	require.NoError(t, err)
 	require.Len(t, al.Entries, 2)

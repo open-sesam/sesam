@@ -151,6 +151,15 @@ type DetailInit struct {
 	Admin DetailUserTell `json:"admin"`
 }
 
+// UserPubKey stores a pub key and from which source it was derived
+type UserPubKey struct {
+	// Actual encoded key material
+	Key string `json:"key"`
+
+	// The source where this key was from (e.g. "github:user" or "config")
+	Source KeySource `json:"source"`
+}
+
 // DetailUserTell describes a newly added user.
 //
 // Verification:
@@ -177,7 +186,7 @@ type DetailUserTell struct {
 	Groups []string `json:"group"`
 
 	// PubKeys of that user over time.
-	PubKeys []string `json:"pub_key"`
+	PubKeys []UserPubKey `json:"pub_keys"`
 
 	// SignPubKeys of that user.
 	// This should most likely just be one,
