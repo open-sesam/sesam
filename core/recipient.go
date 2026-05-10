@@ -174,7 +174,7 @@ func resolveCachedLink(ctx context.Context, sesamDir, url string, cacheMode Cach
 		_ = os.MkdirAll(filepath.Dir(cachePath), 0o700)
 
 		//nolint:gosec
-		cacheFd, err := os.OpenFile(cachePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE|os.O_SYNC, 0600)
+		cacheFd, err := os.OpenFile(cachePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE|os.O_SYNC, 0o600)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create cache path: %w", err)
 		}

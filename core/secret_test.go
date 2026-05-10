@@ -45,7 +45,7 @@ func TestSealAndReveal(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/db_password", "super-secret-password-123")
 
-	sig, err := secret.Seal("testuser")
+	sig, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 	require.Equal(t, "secrets/db_password", sig.RevealedPath)
 	require.Equal(t, "testuser", sig.SealedBy)
@@ -84,7 +84,7 @@ func TestSealRevealTableDriven(t *testing.T) {
 			mgr := testSecretManager(t)
 			secret := testSecret(t, mgr, tc.path, tc.content)
 
-			_, err := secret.Seal("testuser")
+			_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 			require.NoError(t, err)
 
 			os.Remove(filepath.Join(mgr.SesamDir, tc.path))
@@ -101,7 +101,7 @@ func TestSealCreatesSignatureFile(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "config/api_key", "key-abc-456")
 
-	_, err := secret.Seal("testuser")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	sigs, err := readAllSignatures(mgr.SesamDir)
@@ -118,7 +118,7 @@ func TestRevealDetectsCorruptedCiphertext(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/token", "original-token")
 
-	_, err := secret.Seal("testuser")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	// Corrupt the .sesam file contents.
@@ -132,7 +132,7 @@ func TestRevealDetectsTruncatedCiphertext(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/trunc", "some-data")
 
-	_, err := secret.Seal("testuser")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	// Truncate the .age file to half its size.
@@ -148,7 +148,7 @@ func TestRevealDetectsBadSignature(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/cert", "cert-data")
 
-	_, err := secret.Seal("testuser")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	// Replace keyring with a different signing key.
@@ -165,7 +165,7 @@ func TestRevealDetectsWrongSigner(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/wrong-signer", "data")
 
-	_, err := secret.Seal("testuser")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	// Add a second user and remove the original, so sealedBy doesn't match any key.
@@ -185,7 +185,7 @@ func TestSealMissingFile(t *testing.T) {
 		Recipients:   mgr.Keyring.Recipients([]string{"testuser"}),
 	}
 
-	_, err := secret.Seal("testuser")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.Error(t, err)
 }
 
@@ -205,7 +205,7 @@ func TestRevealMissingFooter(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/nofooter", "data")
 
-	_, err := secret.Seal("testuser")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	// Overwrite the .sesam file with content that has no newline footer.
@@ -224,7 +224,7 @@ func TestSealRevealLargeFile(t *testing.T) {
 
 	secret := testSecret(t, mgr, "secrets/large", string(data))
 
-	_, err := secret.Seal("testuser")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	os.Remove(filepath.Join(mgr.SesamDir, "secrets/large"))
@@ -241,7 +241,7 @@ func TestSealDoesNotLeakFileDescriptors(t *testing.T) {
 	fdsBefore := countOpenFDs(t)
 
 	for i := 0; i < 50; i++ {
-		_, err := secret.Seal("testuser")
+		_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 		require.NoError(t, err)
 	}
 
@@ -257,7 +257,7 @@ func TestRevealDoesNotLeakFileDescriptors(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/fdleak2", "fd-test")
 
-	_, err := secret.Seal("testuser")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	fdsBefore := countOpenFDs(t)
@@ -286,7 +286,7 @@ func TestReadStoredSignatureRoundtrip(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/roundtrip", "roundtrip-data")
 
-	expected, err := secret.Seal("testuser")
+	expected, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	sigs, err := readAllSignatures(mgr.SesamDir)

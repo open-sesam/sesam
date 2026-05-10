@@ -666,7 +666,7 @@ func TestVerifyExportedRootHashMatch(t *testing.T) {
 		Recipients:   kr2.Recipients([]string{"admin"}),
 	}
 
-	sig, err := s.Seal("admin")
+	sig, err := s.Seal(s.Mgr.cryptPath(s.RevealedPath), "admin")
 	require.NoError(t, err)
 
 	rootHash := buildRootHash([]*secretFooter{sig})

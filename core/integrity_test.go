@@ -12,7 +12,7 @@ func integritySetup(t *testing.T) (*SecretManager, *VerifiedState) {
 	t.Helper()
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/db", "password123")
-	sig, err := secret.Seal("testuser")
+	sig, err := secret.Seal(mgr.cryptPath("secrets/db"), "testuser")
 	require.NoError(t, err)
 
 	state := &VerifiedState{
@@ -52,7 +52,7 @@ func TestIntegrityExtraFile(t *testing.T) {
 
 	// Seal an extra secret that is not registered in state.
 	extra := testSecret(t, mgr, "secrets/extra", "extra-content")
-	_, err := extra.Seal("testuser")
+	_, err := extra.Seal(mgr.cryptPath("secrets/extra"), "testuser")
 	require.NoError(t, err)
 
 	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
@@ -82,7 +82,7 @@ func TestIntegrityMultipleSecrets(t *testing.T) {
 	var secrets []VerifiedSecret
 	for _, p := range []string{"secrets/a", "secrets/b", "secrets/c"} {
 		s := testSecret(t, mgr, p, "content-"+p)
-		sig, err := s.Seal("testuser")
+		sig, err := s.Seal(mgr.cryptPath(p), "testuser")
 		require.NoError(t, err)
 		sigs = append(sigs, sig)
 		secrets = append(secrets, VerifiedSecret{RevealedPath: p, AccessGroups: []string{"admin"}})

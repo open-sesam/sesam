@@ -184,7 +184,7 @@ func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
 func TestRevealBlobHappyPath(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/token", "top-secret")
-	_, err := secret.Seal("testuser")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	//nolint:gosec
@@ -206,7 +206,7 @@ func TestRevealBlobHappyPath(t *testing.T) {
 func TestRevealBlobNonRecipient(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/token", "top-secret")
-	_, err := secret.Seal("testuser")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	//nolint:gosec
@@ -223,7 +223,7 @@ func TestRevealBlobNonRecipient(t *testing.T) {
 func TestRevealBlobCorruptedFile(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/token", "top-secret")
-	_, err := secret.Seal("testuser")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	os.WriteFile(mgr.cryptPath("secrets/token"), []byte("not-a-valid-sesam-file"), 0o600)
@@ -295,10 +295,168 @@ func TestSealAllMultiple(t *testing.T) {
 	}
 }
 
+func TestSealAllCleansStageAndMarker(t *testing.T) {
+	mgr := sealedSecretManager(t)
+
+	require.NoDirExists(t, mgr.stageDir(), "stage dir must be gone after a successful seal")
+	require.NoFileExists(t, mgr.sealMarkerPath(), "marker must be gone after a successful seal")
+}
+
+// A failed seal must not touch the live objects/ tree.
+func TestSealAllFailureLeavesObjectsUntouched(t *testing.T) {
+	mgr := sealedSecretManager(t) // writes secrets/test sealed
+
+	original, err := os.ReadFile(mgr.cryptPath("secrets/test"))
+	require.NoError(t, err)
+
+	// Add a second secret with plaintext but never seal it; then remove
+	// the plaintext. SealAll will iterate both: the first re-encrypts
+	// fine, the second has neither plaintext nor ciphertext and must
+	// abort the whole transaction. The live secrets/test ciphertext
+	// must remain byte-identical.
+	writeSecret(t, mgr.SesamDir, "secrets/missing", "x")
+	require.NoError(t, mgr.AddSecret("secrets/missing", []string{"admin"}))
+	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/missing")))
+
+	err = mgr.SealAll()
+	require.Error(t, err, "seal must fail when a secret has neither plaintext nor ciphertext")
+
+	current, err := os.ReadFile(mgr.cryptPath("secrets/test"))
+	require.NoError(t, err)
+	require.Equal(t, original, current, "live ciphertext must be unchanged on seal failure")
+
+	require.NoDirExists(t, mgr.stageDir(), "stage dir must be cleaned on failure")
+	require.NoFileExists(t, mgr.sealMarkerPath(), "marker must be removed when swap never happened")
+}
+
+// A non-admin who does not have access to a secret must still be able to seal:
+// they re-encrypt what they can decrypt and copy the existing ciphertext for
+// what they cannot. The copied ciphertext must be byte-identical and the
+// RootHash must remain consistent with what is on disk.
+func TestSealAllNonAdminPreservesCiphertextItCannotDecrypt(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	bob := newTestUser(t, "bob")
+	al := initAuditLog(t, sesamDir, admin)
+
+	// Add bob to the dev group.
+	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+		User:        "bob",
+		Groups:      []string{"dev"},
+		PubKeys:     []string{bob.Recipient.String()},
+		SignPubKeys: []string{bob.SignPubKey},
+	}), nil)
+	require.NoError(t, err)
+
+	// Two secrets: one admin-only (bob cannot decrypt), one shared with dev.
+	for _, sc := range []DetailSecretChange{
+		{RevealedPath: "secrets/admin-only", Groups: []string{"admin"}},
+		{RevealedPath: "secrets/dev-shared", Groups: []string{"dev"}},
+	} {
+		_, err = al.AddEntry(admin.Signer, newAuditEntry("admin", &sc), nil)
+		require.NoError(t, err)
+	}
+
+	_, err = al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{
+		RootHash: "placeholder", FilesSealed: 0,
+	}), nil)
+	require.NoError(t, err)
+
+	kr := EmptyKeyring()
+	state := &VerifiedState{auditLog: al, keyring: kr}
+	require.NoError(t, verify(state))
+
+	adminMgr, err := BuildSecretManager(
+		sesamDir, Identities{admin.Identity}, admin.Signer, kr, al, state,
+	)
+	require.NoError(t, err)
+
+	writeSecret(t, sesamDir, "secrets/admin-only", "admin payload")
+	writeSecret(t, sesamDir, "secrets/dev-shared", "dev payload")
+	require.NoError(t, adminMgr.SealAll())
+
+	adminOnlyBefore, err := os.ReadFile(adminMgr.cryptPath("secrets/admin-only"))
+	require.NoError(t, err)
+	devSharedBefore, err := os.ReadFile(adminMgr.cryptPath("secrets/dev-shared"))
+	require.NoError(t, err)
+
+	// Bob takes over. He has plaintext only for the dev secret. Wipe both
+	// plaintexts here and recreate just the dev one to make the scenario
+	// explicit.
+	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/admin-only")))
+	writeSecret(t, sesamDir, "secrets/dev-shared", "dev payload")
+
+	bobMgr, err := BuildSecretManager(
+		sesamDir, Identities{bob.Identity}, bob.Signer, kr, al, state,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, bobMgr.SealAll(), "non-admin should be able to seal")
+
+	adminOnlyAfter, err := os.ReadFile(bobMgr.cryptPath("secrets/admin-only"))
+	require.NoError(t, err)
+	require.Equal(t, adminOnlyBefore, adminOnlyAfter,
+		"admin-only ciphertext must be copied byte-for-byte by a non-recipient")
+
+	devSharedAfter, err := os.ReadFile(bobMgr.cryptPath("secrets/dev-shared"))
+	require.NoError(t, err)
+	require.NotEqual(t, devSharedBefore, devSharedAfter,
+		"dev-shared must be re-encrypted by bob (age uses fresh randomness)")
+
+	require.NoDirExists(t, bobMgr.stageDir())
+	require.NoFileExists(t, bobMgr.sealMarkerPath())
+}
+
+func TestBuildSecretManagerClearsLeftoverStage(t *testing.T) {
+	mgr := testSecretManagerFull(t)
+
+	// Plant a stale stage dir as if a previous seal had crashed before the swap.
+	stage := mgr.stageDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(stage, "junk"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(stage, "junk", "leftover"), []byte("x"), 0o600))
+
+	// Re-build the manager - recovery should clear the stage dir.
+	mgr2, err := BuildSecretManager(
+		mgr.SesamDir, mgr.Identities, mgr.Signer, mgr.Keyring, mgr.AuditLog, mgr.State,
+	)
+	require.NoError(t, err)
+	require.NoDirExists(t, mgr2.stageDir())
+}
+
+func TestBuildSecretManagerKeepsOrphanMarker(t *testing.T) {
+	mgr := testSecretManagerFull(t)
+
+	// Marker without stage = "swap completed but audit entry never made it".
+	// Recovery should leave the marker in place so the next load surfaces it.
+	require.NoError(t, os.WriteFile(mgr.sealMarkerPath(), []byte("some-hash\n"), 0o600))
+
+	mgr2, err := BuildSecretManager(
+		mgr.SesamDir, mgr.Identities, mgr.Signer, mgr.Keyring, mgr.AuditLog, mgr.State,
+	)
+	require.NoError(t, err)
+	require.FileExists(t, mgr2.sealMarkerPath(),
+		"orphan marker must persist so the inconsistency is not silently forgotten")
+}
+
+func TestBuildSecretManagerDropsMarkerWhenStageStillPresent(t *testing.T) {
+	mgr := testSecretManagerFull(t)
+
+	require.NoError(t, os.MkdirAll(mgr.stageDir(), 0o700))
+	require.NoError(t, os.WriteFile(mgr.sealMarkerPath(), []byte("stale\n"), 0o600))
+
+	mgr2, err := BuildSecretManager(
+		mgr.SesamDir, mgr.Identities, mgr.Signer, mgr.Keyring, mgr.AuditLog, mgr.State,
+	)
+	require.NoError(t, err)
+	require.NoDirExists(t, mgr2.stageDir())
+	require.NoFileExists(t, mgr2.sealMarkerPath(),
+		"marker must be dropped when stage is also present (swap never committed)")
+}
+
 func TestShowSecretSuccessSesamPath(t *testing.T) {
 	mgr := testSecretManager(t)
 	s := testSecret(t, mgr, "secrets/tok", "content123")
-	_, err := s.Seal("testuser")
+	_, err := s.Seal(s.Mgr.cryptPath(s.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -318,7 +476,7 @@ func TestShowSecretNotFound(t *testing.T) {
 func TestShowSecretRevealedPathConvenience(t *testing.T) {
 	mgr := testSecretManager(t)
 	s := testSecret(t, mgr, "secrets/tok", "content123")
-	_, err := s.Seal("testuser")
+	_, err := s.Seal(s.Mgr.cryptPath(s.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	origDir, err := os.Getwd()
