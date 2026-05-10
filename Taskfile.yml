@@ -44,6 +44,11 @@ tasks:
     cmds:
       - go run mvdan.cc/gofumpt@v0.9.2 -w -extra .
 
+  fmt:
+    desc: Format all Go sources via gofumpt
+    cmds:
+      - go run mvdan.cc/gofumpt@v0.9.2 -w -extra .
+
   docgen:
     desc: Generate CLI reference markdown from live command tree
     deps: [build]
