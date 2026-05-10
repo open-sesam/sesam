@@ -118,6 +118,19 @@ func (s *VerifiedState) UsersForSecret(revealedPath string) []string {
 	return users
 }
 
+// SealerAuthorized reports whether `user` is allowed to seal `revealedPath`,
+// i.e. whether the secret exists in the verified state and `user` has
+// access to it via group membership. Used by reveal- and integrity-time
+// checks to detect substitution attacks where a known signer produces a
+// footer for a path they never had access to.
+func (s *VerifiedState) SealerAuthorized(user, revealedPath string) bool {
+	secret, ok := s.SecretExists(revealedPath)
+	if !ok {
+		return false
+	}
+	return s.UserHasAccess(user, secret.AccessGroups)
+}
+
 func (s *VerifiedState) UserForGroups(groups []string) []string {
 	users := make([]string, 0)
 	groupMap := groupsToMap(groups)
