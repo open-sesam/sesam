@@ -16,13 +16,16 @@ type UserManager struct {
 	log      *AuditLog
 	state    *VerifiedState
 	signUser *VerifiedUser
+	secMgr   *SecretManager
 }
 
+// BuildUserManager wires a UserManager.
 func BuildUserManager(
 	sesamDir string,
 	signer Signer,
 	log *AuditLog,
 	state *VerifiedState,
+	secMgr *SecretManager,
 ) (*UserManager, error) {
 	vu, exists := state.UserExists(signer.UserName())
 	if !exists {
@@ -36,7 +39,27 @@ func BuildUserManager(
 		log:      log,
 		state:    state,
 		signUser: vu,
+		secMgr:   secMgr,
 	}, nil
+}
+
+// resealAfterMembershipChange re-encrypts every managed secret with the
+// post-change recipient list. Called at the end of TellUser and
+// KillUsers so a single command leaves disk and audit log consistent.
+//
+// The audit entry from the membership change is already committed by
+// the time we get here, so a SealAll failure puts the repo in a
+// partial state: log advanced, ciphertext recipients stale. The error
+// message points at `sesam seal` as the resync.
+func (um *UserManager) resealAfterMembershipChange(op string) error {
+	um.secMgr.refreshRecipients()
+	if err := um.secMgr.SealAll(); err != nil {
+		return fmt.Errorf(
+			"%s succeeded but auto re-seal failed (run `sesam seal` to resync): %w",
+			op, err,
+		)
+	}
+	return nil
 }
 
 func (um *UserManager) TellUser(
@@ -81,7 +104,7 @@ func (um *UserManager) TellUser(
 		newUserSigner.PublicKey(),
 		MhEd25519Pub,
 	)
-	return um.state.FeedEntry(
+	if err := um.state.FeedEntry(
 		um.signer,
 		newAuditEntry(um.signer.UserName(), &DetailUserTell{
 			User:        user,
@@ -89,7 +112,11 @@ func (um *UserManager) TellUser(
 			PubKeys:     recps.Strings(),
 			SignPubKeys: []string{newUserSignKeyStr},
 		}),
-	)
+	); err != nil {
+		return err
+	}
+
+	return um.resealAfterMembershipChange("tell")
 }
 
 func (um *UserManager) ShowUser(user string, dst io.Writer) (bool, error) {
@@ -129,7 +156,7 @@ func (um *UserManager) KillUsers(user string) error {
 		return err
 	}
 
-	return nil
+	return um.resealAfterMembershipChange("kill")
 }
 
 // InitAdminUser has to be called on init to create the initial user.

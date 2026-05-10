@@ -84,6 +84,19 @@ func (sm *SecretManager) cryptPath(path string) string {
 	return filepath.Join(sm.objectsDir(), path+".sesam")
 }
 
+// refreshRecipients re-derives the recipient list for every managed
+// secret from the current state and keyring. The list of secrets itself
+// is not touched - that is owned by AddSecret/RemoveSecret. This is the
+// hook that user-membership changes (tell/kill) call before SealAll, so
+// the swap captures the new keyring rather than the stale one cached at
+// BuildSecretManager time.
+func (sm *SecretManager) refreshRecipients() {
+	for i := range sm.secrets {
+		users := sm.State.UsersForSecret(sm.secrets[i].RevealedPath)
+		sm.secrets[i].Recipients = sm.Keyring.Recipients(users)
+	}
+}
+
 func (sm *SecretManager) tmpDir() string {
 	return filepath.Join(sm.SesamDir, ".sesam", "tmp")
 }
@@ -262,7 +275,7 @@ func (sm *SecretManager) SealAll() error {
 	}
 	swapped = true
 
-	// Audit entry FIRST — keeps the swap-vs-log window as small as
+	// Audit entry FIRST - keeps the swap-vs-log window as small as
 	// possible. Old objects are now in `stage` and will be reaped below.
 	if err := sm.State.FeedEntry(
 		sm.Signer,
@@ -308,7 +321,18 @@ func (sm *SecretManager) stageSecret(s secret, stageRoot string) (*secretFooter,
 	plainPath := filepath.Join(sm.SesamDir, s.RevealedPath)
 	switch _, err := os.Stat(plainPath); {
 	case err == nil:
-		return s.Seal(stageDest, sm.Signer.UserName())
+		// Good-citizen guard: an honest client refuses to produce a
+		// footer it knows the verifier will reject. The "preserve
+		// existing ciphertext" branch below does not hit this because
+		// it does not change SealedBy.
+		sealer := sm.Signer.UserName()
+		if !sm.State.SealerAuthorized(sealer, s.RevealedPath) {
+			return nil, fmt.Errorf(
+				"user %q is not authorized to seal %q",
+				sealer, s.RevealedPath,
+			)
+		}
+		return s.Seal(stageDest, sealer)
 	case !os.IsNotExist(err):
 		return nil, fmt.Errorf("stat plaintext: %w", err)
 	}
@@ -388,6 +412,8 @@ func (sm *SecretManager) RemoveSecret(revealedPath string) error {
 //
 // NOTE: This is primarily used to calculate content diffs. For performance reasons
 // it does not verify signatures - this requires parsing all of the audit log.
+// As a consequence it also does not check whether the sealer was authorized
+// to seal this path. Use `sesam reveal` or `sesam verify --all` for that.
 func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bool, error) {
 	if !strings.HasSuffix(path, ".sesam") {
 		if err := validSecretPath(sesamDir, path); err == nil {
@@ -421,6 +447,9 @@ func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bo
 // This function should only be called for quick decryption (i.e. git diff or smudge)
 // and when we only have access to the encrypted file and not the audit log.
 // For most cases, uses SecretManager.
+//
+// Like ShowSecret, this skips signature verification AND the sealer-vs-access
+// check. Authoritative reveal goes through SecretManager.RevealAll.
 func RevealBlob(sesamDir string, ids Identities, src io.ReadSeeker, revealedPath string) (bool, error) {
 	dstPath := filepath.Join(sesamDir, revealedPath)
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {

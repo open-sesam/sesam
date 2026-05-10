@@ -83,7 +83,7 @@ func recursiveRmEmptyDirs(rootDir string, except map[string]bool) ([]string, err
 //
 // Tracked files are preserved even when modified; symlinks and other
 // non-regular entries are left alone. The optional exclude list holds
-// absolute paths that must not be deleted even if untracked — intended for
+// absolute paths that must not be deleted even if untracked - intended for
 // identity files that happen to live inside the worktree.
 func Cleanup(repo *git.Repository, sesamDir string, exclude ...string) error {
 	var err error

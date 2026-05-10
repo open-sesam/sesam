@@ -289,7 +289,7 @@ func ensureGitConfig(r *git.Repository) error {
 	return nil
 }
 
-func appendMissingLines(path string, content string, mode os.FileMode) error {
+func appendMissingLines(path, content string, mode os.FileMode) error {
 	var existing string
 	fileMissing := false
 	if data, err := os.ReadFile(path); err == nil { //nolint:gosec

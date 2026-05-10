@@ -108,6 +108,7 @@ func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager,
 		signer,
 		auditLog,
 		vstate,
+		secMgr,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to build user manager: %w", err)

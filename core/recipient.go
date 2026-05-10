@@ -66,7 +66,7 @@ func forgeIdToUser(arg string) string {
 //
 // It will return the cleaned version that can be given to ParseRecipient().
 // Links and forge-id will be cached in `sesamDir`.
-func ResolveRecipient(ctx context.Context, sesamDir string, arg string, cacheMode CacheMode) ([]string, error) {
+func ResolveRecipient(ctx context.Context, sesamDir, arg string, cacheMode CacheMode) ([]string, error) {
 	switch {
 	case strings.HasPrefix(arg, "github:"):
 		url := fmt.Sprintf("https://github.com/%s.keys", url.QueryEscape(forgeIdToUser(arg)))

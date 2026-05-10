@@ -1,0 +1,55 @@
+# Verify that a non-admin cannot seal an admin-only secret. This exercises
+# the seal-time guard in stageSecret: bob is in the audit log (in the
+# "dev" group) but README.md was registered admin-only by `sesam init`,
+# so bob's `sesam seal` must abort before producing a footer.
+#
+# The cryptographic defense (reveal rejecting a forged footer) is harder
+# to demonstrate from a shell because constructing a malicious footer
+# requires running Go directly; that case is covered by the unit tests
+# TestRevealRejectsUnauthorizedSealer and TestIntegrityRejectsUnauthorizedSealer.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Add bob to the dev group. He has no access to README.md (admin-only).
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+
+# Snapshot the sealed object before bob tries anything; it must remain
+# byte-identical after his failed seal attempt.
+cp .sesam/objects/README.md.sesam original.sesam
+
+# Bob substitutes README.md content and tries to seal as himself.
+cp evil_readme.md README.md
+! exec sesam --identity $BOB_KEY seal
+stderr 'not authorized'
+stderr 'README.md'
+
+# The on-disk ciphertext must not have been touched by the failed seal:
+# the swap never happened because stageSecret rejected before staging.
+cmp .sesam/objects/README.md.sesam original.sesam
+
+# Admin reveals: gets the original content, not bob's substitution.
+exec sesam reveal
+cmp README.md original_readme.md
+
+# Restore the legitimate content and confirm admin can re-seal normally.
+cp original_readme.md README.md
+exec sesam seal
+
+-- evil_readme.md --
+# evil readme
+bob's substituted content
+-- original_readme.md --
+# sesam bootstrap
+
+This repository was initialized with sesam.
+
+Next steps:
+- Review and commit sesam.yml and .sesam/ metadata.
+- Add or change secrets with sesam add.
+- Seal and reveal via sesam seal / sesam reveal.

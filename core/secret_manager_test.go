@@ -295,6 +295,33 @@ func TestSealAllMultiple(t *testing.T) {
 	}
 }
 
+// A non-admin who does not have access to a secret must not be able to
+// seal it via the normal path. The seal-time guard catches this even in
+// honest clients - the cryptographic defense lives in revealStreamAndVerify.
+func TestSealRejectsUnauthorizedUser(t *testing.T) {
+	mgr := sealedSecretManager(t) // admin-only secrets/test
+
+	bob := newTestUser(t, "bob")
+	_, err := mgr.AuditLog.AddEntry(mgr.Signer, newAuditEntry("admin", &DetailUserTell{
+		User: "bob", Groups: []string{"dev"},
+		PubKeys: []string{bob.Recipient.String()}, SignPubKeys: []string{bob.SignPubKey},
+	}), nil)
+	require.NoError(t, err)
+	require.NoError(t, verify(mgr.State))
+
+	bobMgr, err := BuildSecretManager(
+		mgr.SesamDir, Identities{bob.Identity}, bob.Signer,
+		mgr.Keyring, mgr.AuditLog, mgr.State,
+	)
+	require.NoError(t, err)
+
+	// Bob has plaintext on disk (left over from sealedSecretManager)
+	// but no access to secrets/test. SealAll must refuse.
+	err = bobMgr.SealAll()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not authorized")
+}
+
 func TestSealAllCleansStageAndMarker(t *testing.T) {
 	mgr := sealedSecretManager(t)
 

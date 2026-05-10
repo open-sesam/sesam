@@ -190,6 +190,7 @@ func (s *secret) Reveal() error {
 		dstFd,
 		ids,
 		s.Mgr.Keyring,
+		s.Mgr.State.SealerAuthorized,
 	); err != nil {
 		return err
 	}
@@ -201,7 +202,18 @@ func (s *secret) Reveal() error {
 	return dstFd.CloseAtomicallyReplace()
 }
 
-func revealStreamAndVerify(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity, kr Keyring) error {
+// revealStreamAndVerify decrypts the stream in `srcFd`, then validates the footer.
+// The result is piped to `dstFd`. For decryption the identities in `ageIds` are used.
+// For verification `kr` checks if the signature fits to the encrypted content and
+// using `authorize` we can check if the user was actually allowed to seal this file
+// (to avoid having users overwrite secrets they have no access to).
+func revealStreamAndVerify(
+	srcFd io.ReadSeeker,
+	dstFd io.Writer,
+	ageIds []age.Identity,
+	kr Keyring,
+	authorize func(user, path string) bool,
+) error {
 	sha3HashBytes, sigDesc, err := revealStream(srcFd, dstFd, ageIds)
 	if err != nil {
 		return err
@@ -213,18 +225,31 @@ func revealStreamAndVerify(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Id
 		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", computedhash, sigDesc.Hash)
 	}
 
-	if _, err := kr.Verify(
+	sealer, err := kr.Verify(
 		SesamDomainSignSecretTag,
 		sha3HashBytes,
 		sigDesc.Signature,
 		sigDesc.SealedBy,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf("signature verification failed for %s: %w", sigDesc.RevealedPath, err)
+	}
+
+	if authorize != nil && !authorize(sealer, sigDesc.RevealedPath) {
+		return fmt.Errorf(
+			"sealer %s was not authorized to seal %s",
+			sealer, sigDesc.RevealedPath,
+		)
 	}
 
 	return nil
 }
 
+// revealStream decrypts the stream without checking the footer signature
+// or the sealer's authorization. Used by RevealBlob (git smudge) and
+// ShowSecret (git diff) where the audit log is not loaded for UX
+// reasons. Authoritative verification lives in revealStreamAndVerify
+// (sesam reveal) and VerifyIntegrity (sesam verify --all).
 func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) ([]byte, *secretFooter, error) {
 	ageRd, sigDesc, err := readSignature(srcFd)
 	if err != nil {

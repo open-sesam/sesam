@@ -61,6 +61,7 @@ func verifyIntegritySingleSecret(
 	report *IntegrityReport,
 	diskSigMap map[string]*secretFooter,
 	kr Keyring,
+	state *VerifiedState,
 ) {
 	sig, hasSig := diskSigMap[vs.RevealedPath]
 	defer delete(diskSigMap, vs.RevealedPath)
@@ -109,8 +110,16 @@ func verifyIntegritySingleSecret(
 		return
 	}
 
-	if _, err := kr.Verify(SesamDomainSignSecretTag, hashBytes, sig.Signature, sig.SealedBy); err != nil {
+	sealer, err := kr.Verify(SesamDomainSignSecretTag, hashBytes, sig.Signature, sig.SealedBy)
+	if err != nil {
 		report.add(vs.RevealedPath, fmt.Sprintf("invalid signature: %v", err))
+		return
+	}
+
+	if !state.SealerAuthorized(sealer, vs.RevealedPath) {
+		report.add(vs.RevealedPath, fmt.Sprintf(
+			"sealer %s is not authorized to seal this secret", sealer,
+		))
 	}
 }
 
@@ -139,7 +148,7 @@ func VerifyIntegrity(sesamDir string, state *VerifiedState, kr Keyring) *Integri
 	}
 
 	for _, vs := range state.Secrets {
-		verifyIntegritySingleSecret(sesamDir, vs, report, diskSigMap, kr)
+		verifyIntegritySingleSecret(sesamDir, vs, report, diskSigMap, kr, state)
 	}
 
 	// Any remaining entries are .sesam files not tracked in the state.

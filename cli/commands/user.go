@@ -35,7 +35,7 @@ func HandleTell(ctx context.Context, cmd *cli.Command) error {
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
 		identityPaths := cmd.StringSlice("identity")
 		// TODO: close audit log
-		secMgr, usrMgr, err := buildManagers(sesamDir, identityPaths)
+		_, usrMgr, err := buildManagers(sesamDir, identityPaths)
 		if err != nil {
 			return fmt.Errorf(" failed to load secret manager: %w", err)
 		}
@@ -44,7 +44,7 @@ func HandleTell(ctx context.Context, cmd *cli.Command) error {
 			return fmt.Errorf("failed to add user: %w", err)
 		}
 
-		return secMgr.SealAll()
+		return nil
 	})
 }
 
@@ -61,7 +61,7 @@ func HandleKill(_ context.Context, cmd *cli.Command) error {
 	}
 
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
-		secMgr, usrMgr, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
+		_, usrMgr, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
 		if err != nil {
 			return err
 		}
@@ -70,6 +70,6 @@ func HandleKill(_ context.Context, cmd *cli.Command) error {
 			return fmt.Errorf("failed to remove user: %w", err)
 		}
 
-		return secMgr.SealAll()
+		return nil
 	})
 }
