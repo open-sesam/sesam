@@ -26,6 +26,7 @@ jobs:
       with:
         version: latest
         install-mode: goinstall
+        args: "-c linter.yml"
 
     - name: Vet
       run: go vet ./...
