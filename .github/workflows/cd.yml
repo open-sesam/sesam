@@ -31,4 +31,4 @@ jobs:
           version: latest
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # built-in, no setup needed
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
