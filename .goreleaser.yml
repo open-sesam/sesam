@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 
-project_name: sesam
+project_name: "sesam"
 
 metadata:
   mod_timestamp: "{{ .CommitTimestamp }}"
