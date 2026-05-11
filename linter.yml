@@ -20,6 +20,7 @@ linters-settings:
     enable-all: true
     disable:
       - fieldalignment
+      - inline
   revive:
     ignore-generated-header: true
     severity: warning
