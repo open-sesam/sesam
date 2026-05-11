@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -525,16 +524,29 @@ func StageInitFiles(sesamDir, configPath string) error {
 		filepath.Join(sesamDir, ".sesam"),
 	}
 
-	args := append([]string{"add"}, files...)
-	cmd := exec.Command("git", args...) //nolint:gosec,noctx
-	cmd.Dir = sesamDir
-
-	output, err := cmd.CombinedOutput()
+	// Paths above are worktree-relative (or absolute, for an explicit
+	// --config). Run `git add` from the worktree root so a nested layout
+	// like `--sesam-dir sub` doesn't double-prefix to `sub/sub/...`.
+	repo, err := OpenGitRepo(sesamDir)
 	if err != nil {
-		slog.Warn("failed to stage init files automatically", slog.Any("error", err), slog.String("output", strings.TrimSpace(string(output))))
+		slog.Warn("failed to open git repo for staging init files", slog.Any("error", err))
+		return nil
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		slog.Warn("failed to read git worktree for staging init files", slog.Any("error", err))
 		return nil
 	}
 
+	for _, file := range files {
+		if _, err := wt.Add(file); err != nil {
+			slog.Warn(
+				"failed to stage init files",
+				slog.String("path", file),
+				slog.Any("error", err),
+			)
+		}
+	}
 	return nil
 }
 
