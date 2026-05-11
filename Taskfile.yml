@@ -1,0 +1,50 @@
+# https://taskfile.dev
+version: "3"
+
+tasks:
+  default:
+    deps: [build]
+
+  build:
+    desc: "Build the sesam binary"
+    aliases:
+      - build-cli
+    cmds:
+      - cmd: go build -o sesam .
+    sources:
+      - ./*.go
+      - ./**/*.go
+      - Taskfile.yml
+    generates:
+      - ./sesam
+    method: checksum
+
+  test:
+    desc: Run go tests
+    cmds:
+      - go run gotest.tools/gotestsum@v1.10.1 -- -parallel 20 ./...
+
+  coverage:
+    desc: Run go tests with coverage report
+    cmds:
+      - go test -v ./... -coverprofile=coverage.out
+      - go tool cover -func=coverage.out
+      - go tool cover -html=coverage.out
+
+  # TODO: Build an docker image for CI + also for end users.
+
+  lint:
+    desc: Run the linter
+    cmds:
+      - go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run -c linter.yml
+
+  docs:
+    desc: Builds docs
+    cmds:
+      - cd docs && mdbook serve --open
+
+  setup-docs:
+    desc: Setup dependency for docs
+    cmds:
+      - command -v cargo-binstall || cargo install cargo-binstall
+      - cargo binstall --no-confirm mdbook@0.4.52 mdbook-admonish@1.18.0 mdbook-gitinfo@1.2.0 mdbook-pagetoc@0.2.2
