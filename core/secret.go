@@ -223,7 +223,7 @@ func (e *BadSealerError) Error() string {
 // using `authorize` we can check if the user was actually allowed to seal this file
 // (to avoid having users overwrite secrets they have no access to).
 //
-// Authorization failure is returned as a typed *AuthorizationError so callers
+// Authorization failure is returned as a typed *BadSealerError so callers
 // can distinguish "decryption succeeded, policy says no" from cryptographic
 // failures and apply different policies.
 func revealStreamAndVerify(

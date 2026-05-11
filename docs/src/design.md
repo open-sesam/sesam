@@ -369,6 +369,10 @@ another privileged user (e.g. an admin) to then call `sesam apply` to change the
 to only apply the changes if they are present as git diff in the current working directory. When the change came already committed, then
 apply and verify will complain. There are situations where this could be valid though, which is why you can force apply to do it anyways.
 
+#### Supply chain attacks
+
+TODO: Figure out what we can do to make sure sesam is a trusted binary.
+
 ### Possible improvements
 
 - Limit each user to at most 2 keys, to avoid losing overview.
