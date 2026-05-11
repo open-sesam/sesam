@@ -19,10 +19,11 @@ import (
 )
 
 // FilterProcessHandler decrypts blobs as part of the long-running git filter
-// protocol. Identities are loaded by the caller before Run is invoked, so
-// key/passphrase work is amortised across all blobs in a single git
-// operation. A nil/empty Identities slice means no reveal is attempted;
-// smudge requests are still answered and the encrypted blob passes through.
+// protocol. Identities, Keyring and Authorize are loaded by the caller
+// before Run is invoked, so key/passphrase work and audit-log parsing are
+// amortised across all blobs in a single git operation - and so a session
+// can never silently degrade to "no auth check" because of a missing audit
+// log: the caller's LoadAuditView decides up-front whether to proceed.
 //
 // The sesamDir is derived per-blob from the pathname header (see
 // splitObjectPath) so the handler also works when .sesam lives in a
@@ -41,13 +42,19 @@ type FilterProcessHandler struct {
 	Identities    core.Identities
 	IdentityPaths []string
 
-	cleaned bool
+	// Keyring is used by reveal to verify the ed25519 signature on the
+	// sealed file footer. Loaded by the caller via LoadAuditView so the
+	// filter session can fail-fast if the audit log can't be read,
+	// rather than silently skipping the check per-blob.
+	Keyring core.Keyring
 
-	// Audit-log state loaded once at the start of Run. nil when
-	// Identities is empty (no decrypt to do, audit irrelevant).
-	auditLog   *core.AuditLog
-	auditState *core.VerifiedState
-	auditKr    core.Keyring
+	// Authorize reports whether the user named in the sealed file
+	// footer is allowed to have sealed revealedPath under the audit
+	// log's state at session start. Caller-supplied (alongside Keyring)
+	// for the same fail-fast reason.
+	Authorize func(user, revealedPath string) bool
+
+	cleaned bool
 }
 
 // objectsSegment and sesamSuffix bracket the encrypted-blob path that git
@@ -83,14 +90,6 @@ func (h *FilterProcessHandler) Run(ctx context.Context, stdin io.Reader, stdout 
 
 	if err := negotiateCapabilities(scanner, encoder); err != nil {
 		return fmt.Errorf("capability negotiation: %w", err)
-	}
-
-	if err := h.loadAudit(); err != nil {
-		slog.Error(
-			"smudge: audit log load failed; filter can't verify - run `sesam verify` afterwards",
-			slog.String("sesamDir", h.SesamDir),
-			slog.String("err", err.Error()),
-		)
 	}
 
 	for ctx.Err() == nil {
@@ -319,18 +318,13 @@ func (h *FilterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 		return nil
 	}
 
-	if h.auditLog == nil {
-		// TODO: This case is only relevant for tests right now. Goal is to get rid of that.
-		return nil
-	}
-
 	revealed, err := core.RevealBlob(
 		h.SesamDir,
 		h.Identities,
 		spill,
 		revealedPath,
-		h.auditKr,
-		h.auditState.SealerAuthorized,
+		h.Keyring,
+		h.Authorize,
 	)
 
 	var authErr *core.BadSealerError
@@ -354,95 +348,93 @@ func (h *FilterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 	return nil
 }
 
-// loadAudit populates h.auditLog / h.auditState / h.auditKr from the
-// git **index** (consistent with the target tree even mid-checkout -
-// git updates the index before invoking the filter), with the working-
-// tree audit log as a fallback. Called once at the start of Run; a
-// failure aborts the filter session entirely so we never silently
-// skip the auth check.
-func (h *FilterProcessHandler) loadAudit() error {
-	if err := h.tryLoadAuditFromIndex(); err != nil {
-		slog.Debug(
-			"smudge: audit log not loadable from git index; trying working tree",
-			slog.String("err", err.Error()),
-		)
-
-		// Fallback: working-tree audit log. May lag the in-progress
-		// checkout (git writes files in unspecified order), but is
-		// the best we can do when the index lookup is unavailable.
-		al, err := core.LoadAuditLog(h.SesamDir, h.Identities)
-		if err != nil {
-			return fmt.Errorf("load audit log (index and worktree both failed): %w", err)
-		}
-		kr := core.EmptyKeyring()
-		state, err := core.VerifyChain(al, kr)
-		if err != nil {
-			return fmt.Errorf("verify audit chain (worktree version): %w", err)
-		}
-		h.auditLog = al
-		h.auditState = state
-		h.auditKr = kr
+// LoadAuditView reads the audit log (preferring the git **index** copy -
+// consistent with the target tree even mid-checkout, since git updates the
+// index before invoking the filter - and falling back to the working-tree
+// copy) and returns the keyring + sealer-authorization predicate the
+// smudge filter needs to verify each revealed blob.
+//
+// Callers must invoke this before constructing FilterProcessHandler so a
+// filter session never silently degrades to "no auth check" because the
+// audit log was unavailable.
+func LoadAuditView(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
+	kr, authorize, err := loadAuditViewFromIndex(sesamDir, ids)
+	if err == nil {
+		return kr, authorize, nil
 	}
-	return nil
+	slog.Debug(
+		"smudge: audit log not loadable from git index; falling back to working tree",
+		slog.String("err", err.Error()),
+	)
+
+	// Working-tree copy may lag the in-progress checkout (git writes
+	// files in unspecified order), but it's the only remaining source
+	// when the index lookup is unavailable.
+	kr, authorize, wtErr := loadAuditViewFromWorktree(sesamDir, ids)
+	if wtErr != nil {
+		return nil, nil, fmt.Errorf("load audit view (index and worktree both failed): %w", errors.Join(err, wtErr))
+	}
+	return kr, authorize, nil
 }
 
-// tryLoadAuditFromIndex reads `.sesam/audit/log.jsonl` from the git
-// index via go-git, decrypts it with the handler's identities, and
-// replays the chain into a VerifiedState. Reading from the index
-// (rather than the working tree) gives us the version consistent with
-// the file currently being smudged: git updates the index to reflect
-// the target tree before walking paths to invoke the filter, so the
-// audit log blob we read here matches the .sesam files git is about to
-// smudge.
-func (h *FilterProcessHandler) tryLoadAuditFromIndex() error {
-	repo, err := OpenGitRepo(h.SesamDir)
+func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
+	repo, err := OpenGitRepo(sesamDir)
 	if err != nil {
-		return fmt.Errorf("open git repo at %q: %w", h.SesamDir, err)
+		return nil, nil, fmt.Errorf("open git repo at %q: %w", sesamDir, err)
 	}
 	idx, err := repo.Storer.Index()
 	if err != nil {
-		return fmt.Errorf("read git index: %w", err)
+		return nil, nil, fmt.Errorf("read git index: %w", err)
 	}
 
 	// Index entries are repo-root-relative with forward slashes.
-	// h.SesamDir is the same shape (resolved from --sesam-dir, default
+	// sesamDir is the same shape (resolved from --sesam-dir, default
 	// "."); path.Join collapses "." correctly when sesam lives at the
 	// worktree root.
-	auditPath := path.Join(h.SesamDir, ".sesam/audit/log.jsonl")
+	auditPath := path.Join(sesamDir, ".sesam/audit/log.jsonl")
 
 	blobIdx := slices.IndexFunc(idx.Entries, func(e *index.Entry) bool {
 		return e.Name == auditPath
 	})
 
 	if blobIdx < 0 {
-		return fmt.Errorf("audit log not in git index at %q", auditPath)
+		return nil, nil, fmt.Errorf("audit log not in git index at %q", auditPath)
 	}
 
 	blobHash := idx.Entries[blobIdx].Hash
 	blob, err := repo.BlobObject(blobHash)
 	if err != nil {
-		return fmt.Errorf("read audit log blob %s: %w", blobHash, err)
+		return nil, nil, fmt.Errorf("read audit log blob %s: %w", blobHash, err)
 	}
 	rd, err := blob.Reader()
 	if err != nil {
-		return fmt.Errorf("open audit log blob: %w", err)
+		return nil, nil, fmt.Errorf("open audit log blob: %w", err)
 	}
 	defer func() { _ = rd.Close() }()
 
-	al, err := core.LoadAuditLogFromReader(rd, h.Identities)
+	al, err := core.LoadAuditLogFromReader(rd, ids)
 	if err != nil {
-		return fmt.Errorf("decrypt audit log from index: %w", err)
+		return nil, nil, fmt.Errorf("decrypt audit log from index: %w", err)
 	}
 	kr := core.EmptyKeyring()
 	state, err := core.VerifyChain(al, kr)
 	if err != nil {
-		return fmt.Errorf("verify audit chain (index version): %w", err)
+		return nil, nil, fmt.Errorf("verify audit chain (index version): %w", err)
 	}
+	return kr, state.SealerAuthorized, nil
+}
 
-	h.auditLog = al
-	h.auditState = state
-	h.auditKr = kr
-	return nil
+func loadAuditViewFromWorktree(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
+	al, err := core.LoadAuditLog(sesamDir, ids)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load audit log: %w", err)
+	}
+	kr := core.EmptyKeyring()
+	state, err := core.VerifyChain(al, kr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("verify audit chain: %w", err)
+	}
+	return kr, state.SealerAuthorized, nil
 }
 
 // cleanWorktree removes stale untracked files from sesamDir, excluding the

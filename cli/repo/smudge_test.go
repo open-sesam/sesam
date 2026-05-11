@@ -10,18 +10,28 @@ import (
 	"testing"
 
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
+	"github.com/open-sesam/sesam/core"
 	"github.com/stretchr/testify/require"
 )
 
+// stubKeyring and stubAuthorize satisfy the post-LoadAuditView contract on
+// FilterProcessHandler for tests that exercise the pkt-line layer only. The
+// reveal call inside handleSmudgeRequest still runs but fails harmlessly on
+// the non-age content these tests send, so wire framing is unaffected.
+func stubKeyring() core.Keyring                    { return core.EmptyKeyring() }
+func stubAuthorize(user, revealedPath string) bool { return true }
+
 // runHandler drives FilterProcessHandler.Run with a scripted pkt-line client.
 // The client writes `clientScript` to the handler's stdin, then reads the
-// handler's stdout into `serverOutput`. The handler's identity loader is
-// short-circuited because none of these tests exercise actual reveal.
+// handler's stdout into `serverOutput`. The handler is given trivial Keyring
+// and Authorize stubs because these tests exercise wire framing only - real
+// reveal never succeeds against the synthetic content.
 func runHandler(t *testing.T, clientScript []byte) []byte {
 	t.Helper()
 
 	handler := &FilterProcessHandler{
-		Identities: nil,
+		Keyring:   stubKeyring(),
+		Authorize: stubAuthorize,
 	}
 
 	var stdout bytes.Buffer
@@ -131,7 +141,7 @@ func TestFilterProcessClientWithoutSmudgeIsRejected(t *testing.T) {
 	// A client that only offers `clean` cannot be served by sesam; surface
 	// this as a hard error rather than silently accepting.
 	script := validHandshake(t, "clean")
-	handler := &FilterProcessHandler{Identities: nil}
+	handler := &FilterProcessHandler{Keyring: stubKeyring(), Authorize: stubAuthorize}
 	err := handler.Run(context.Background(), bytes.NewReader(script), io.Discard)
 
 	require.ErrorIs(t, err, errProtocol)
@@ -266,7 +276,7 @@ func TestFilterProcessUnknownCommandReturnsStatusError(t *testing.T) {
 		),
 	}, nil)
 
-	handler := &FilterProcessHandler{Identities: nil}
+	handler := &FilterProcessHandler{Keyring: stubKeyring(), Authorize: stubAuthorize}
 	var stdout bytes.Buffer
 	err := handler.Run(context.Background(), bytes.NewReader(script), &stdout)
 
