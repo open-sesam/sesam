@@ -1,0 +1,79 @@
+# git-cliff config for sesam.
+#
+# Run via `task changelog` to regenerate CHANGELOG.md from history,
+# or `task changelog:unreleased` to preview the unreleased section only.
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to sesam will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project follows [Conventional Commits](https://www.conventionalcommits.org/).
+
+"""
+
+# Render each release as a Keep-a-Changelog section. Groups are named with
+# a leading digit ("1 Features", "2 Bug Fixes", ...) so they sort into the
+# intended order; the body strips the digit at render time.
+body = """
+{% if version -%}
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+## [Unreleased]
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | split(pat=" ") | slice(start=1) | join(sep=" ") }}
+{% for commit in commits -%}
+- {% if commit.breaking %}**[breaking]** {% endif %}{{ commit.message | split(pat="\n") | first | upper_first }} ({{ commit.id | truncate(length=7, end="") }})
+{% endfor %}
+{% endfor %}
+"""
+
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+# Surface unconventional commits via the "Other" catch-all parser below
+# rather than silently dropping them.
+filter_unconventional = false
+# Combined with `skip = true` parsers below, drops merge/UI-noise commits.
+filter_commits = true
+# A `feat!:` or `BREAKING CHANGE:` commit always appears, even if its type
+# would otherwise be filtered.
+protect_breaking_commits = true
+tag_pattern = "v[0-9].*"
+sort_commits = "newest"
+
+# Rewrite legacy prefix typos so they group with the canonical type.
+commit_preprocessors = [
+  { pattern = '^chores:', replace = 'chore:' },
+  { pattern = '^linter:', replace = 'chore:' },
+]
+
+commit_parsers = [
+  # Drop merge commits, GitHub-UI bulk edits, and one-off pre-convention
+  # prefixes that didn't survive into the final taxonomy.
+  { message = '^Merge ', skip = true },
+  { message = '^Update docs/', skip = true },
+  { message = '^review:', skip = true },
+  { message = '^design:', skip = true },
+  { message = '^crypto:', skip = true },
+  { message = '^WIP', skip = true },
+
+  # Conventional types -> sections. Numeric prefixes are render-time stripped
+  # (see body template) but control the rendered section order.
+  { message = '^feat',                       group = "1 Features" },
+  { message = '^fix',                        group = "2 Bug Fixes" },
+  { message = '^security',                   group = "3 Security" },
+  { message = '^perf',                       group = "4 Performance" },
+  { message = '^refactor',                   group = "5 Refactor" },
+  { message = '^docs',                       group = "6 Documentation" },
+  { message = '^test',                       group = "7 Tests" },
+  { message = '^(chore|ci|build|style|lint)', group = "8 Internal" },
+
+  # Catch-all so anything unconventional still surfaces.
+  { message = '.*',                          group = "9 Other" },
+]

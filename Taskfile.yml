@@ -48,3 +48,19 @@ tasks:
     cmds:
       - command -v cargo-binstall || cargo install cargo-binstall
       - cargo binstall --no-confirm mdbook@0.4.52 mdbook-admonish@1.18.0 mdbook-gitinfo@1.2.0 mdbook-pagetoc@0.2.2
+
+  changelog:
+    desc: Regenerate CHANGELOG.md from conventional-commit history
+    cmds:
+      - git-cliff -o CHANGELOG.md
+
+  changelog:unreleased:
+    desc: Preview the unreleased changelog section without writing the file
+    cmds:
+      - git-cliff --unreleased
+
+  setup-changelog:
+    desc: Setup git-cliff for changelog generation
+    cmds:
+      - command -v cargo-binstall || cargo install cargo-binstall
+      - cargo binstall --no-confirm git-cliff@2.13.1
