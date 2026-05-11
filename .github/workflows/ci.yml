@@ -40,4 +40,4 @@ jobs:
         files: coverage.out
 
     - name: Build
-      run: go build -o bin/app ./cmd/app
+      run: go build -o bin/app .
