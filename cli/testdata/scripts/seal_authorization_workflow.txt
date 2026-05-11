@@ -24,10 +24,10 @@ exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
 cp .sesam/objects/README.md.sesam original.sesam
 
 # Bob substitutes README.md content and tries to seal as himself.
+# sesam should warn about that but keep sealing for other files.
 cp evil_readme.md README.md
-! exec sesam --identity $BOB_KEY seal
-stderr 'not authorized'
-stderr 'README.md'
+exec sesam --identity $BOB_KEY seal
+stderr 'WARN ignoring path because user is not authorized user=bob path=README.md'
 
 # The on-disk ciphertext must not have been touched by the failed seal:
 # the swap never happened because stageSecret rejected before staging.

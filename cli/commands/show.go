@@ -32,7 +32,6 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 	// TODO: Show secret metadata (access list)
 	object := cmd.StringArg("object")
 
-	fmt.Println("SHOW", object)
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
 		switch {
 		case filepath.Base(object) == "log.jsonl":

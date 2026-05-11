@@ -11,6 +11,7 @@ import (
 	"filippo.io/age"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/stretchr/testify/require"
 )
 
 // testUser holds all key material for a test user.
@@ -134,13 +135,8 @@ func loadAuditLog(t *testing.T, sesamDir string, users ...*testUser) *AuditLog {
 func writeSecret(t *testing.T, sesamDir, revealedPath, content string) {
 	t.Helper()
 	fullPath := filepath.Join(sesamDir, revealedPath)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o700))
+	require.NoError(t, os.WriteFile(fullPath, []byte(content), 0o600))
 }
 
 // testGitRepo creates a temp dir initialized as a git repo with .sesam subdirs.

@@ -252,7 +252,7 @@ func (sm *SecretManager) SealAll() error {
 
 	sigs := make([]*secretFooter, 0, len(sm.secrets))
 	for _, s := range sm.secrets {
-		sig, err := sm.stageSecret(s, stage)
+		sig, _, err := sm.stageSecret(s, stage)
 		if err != nil {
 			return fmt.Errorf("stage %s: %w", s.RevealedPath, err)
 		}
@@ -312,10 +312,10 @@ func (sm *SecretManager) SealAll() error {
 // the plaintext is missing we copy the existing ciphertext from the live
 // objects/ tree so the file survives the swap. It is an error if neither
 // is available.
-func (sm *SecretManager) stageSecret(s secret, stageRoot string) (*secretFooter, error) {
+func (sm *SecretManager) stageSecret(s secret, stageRoot string) (*secretFooter, bool, error) {
 	stageDest := filepath.Join(stageRoot, s.RevealedPath+".sesam")
 	if err := os.MkdirAll(filepath.Dir(stageDest), 0o700); err != nil {
-		return nil, fmt.Errorf("create stage subdir: %w", err)
+		return nil, false, fmt.Errorf("create stage subdir: %w", err)
 	}
 
 	plainPath := filepath.Join(sm.SesamDir, s.RevealedPath)
@@ -326,30 +326,35 @@ func (sm *SecretManager) stageSecret(s secret, stageRoot string) (*secretFooter,
 		// existing ciphertext" branch below does not hit this because
 		// it does not change SealedBy.
 		sealer := sm.Signer.UserName()
-		if !sm.State.SealerAuthorized(sealer, s.RevealedPath) {
-			return nil, fmt.Errorf(
-				"user %q is not authorized to seal %q",
-				sealer, s.RevealedPath,
-			)
+		if sm.State.SealerAuthorized(sealer, s.RevealedPath) {
+			sig, err := s.Seal(stageDest, sealer)
+			return sig, true, err
 		}
-		return s.Seal(stageDest, sealer)
+
+		slog.Warn(
+			"ignoring path because user is not authorized",
+			slog.String("user", sealer),
+			slog.String("path", s.RevealedPath),
+		)
 	case !os.IsNotExist(err):
-		return nil, fmt.Errorf("stat plaintext: %w", err)
+		return nil, false, fmt.Errorf("stat plaintext: %w", err)
 	}
 
 	// No plaintext: preserve the existing ciphertext if we have one.
 	existing := sm.cryptPath(s.RevealedPath)
 	if !pathExists(existing) {
-		return nil, fmt.Errorf(
+		return nil, false, fmt.Errorf(
 			"no plaintext at %q and no existing ciphertext at %q to preserve",
 			plainPath, existing,
 		)
 	}
 
 	if err := copyFile(existing, stageDest); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return readSecretFooter(stageDest)
+
+	sig, err := readSecretFooter(stageDest)
+	return sig, false, err
 }
 
 func readSecretFooter(path string) (*secretFooter, error) {
