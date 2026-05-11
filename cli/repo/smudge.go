@@ -91,7 +91,6 @@ func (h *FilterProcessHandler) Run(ctx context.Context, stdin io.Reader, stdout 
 			slog.String("sesamDir", h.SesamDir),
 			slog.String("err", err.Error()),
 		)
-		// return fmt.Errorf("load audit log: %w", err)
 	}
 
 	for ctx.Err() == nil {
@@ -321,6 +320,7 @@ func (h *FilterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 	}
 
 	if h.auditLog == nil {
+		// TODO: This case is only relevant for tests right now. Goal is to get rid of that.
 		return nil
 	}
 
