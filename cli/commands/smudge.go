@@ -40,10 +40,21 @@ func HandleSmudge(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	// Load the audit view up-front. A filter session that can't verify
+	// the audit log must fail-fast: silently degrading to "decrypt without
+	// auth check" would defeat the sealer-authorization check on every
+	// blob in the session.
+	kr, authorize, err := clirepo.LoadAuditView(sesamDir, ids)
+	if err != nil {
+		return fmt.Errorf("load audit view for smudge filter: %w", err)
+	}
+
 	handler := &clirepo.FilterProcessHandler{
 		SesamDir:      sesamDir,
 		Identities:    ids,
 		IdentityPaths: identityPaths,
+		Keyring:       kr,
+		Authorize:     authorize,
 	}
 
 	return handler.Run(ctx, os.Stdin, os.Stdout)
