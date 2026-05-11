@@ -7,9 +7,12 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 	"github.com/google/renameio"
 	"github.com/open-sesam/sesam/core"
@@ -29,10 +32,22 @@ import (
 // points inside the worktree is excluded from Cleanup so users who store
 // their age key inside the repo don't lose it on checkout.
 type FilterProcessHandler struct {
+	// SesamDir is the directory containing `.sesam/` (resolved via
+	// clirepo.ResolveSesamDir from --sesam-dir / SESAM_DIR). The same
+	// path drives audit-log loading, working-tree cleanup, and the
+	// destination for revealed plaintext.
+	SesamDir string
+
 	Identities    core.Identities
 	IdentityPaths []string
 
-	cleaned bool // true once Cleanup has run for this session
+	cleaned bool
+
+	// Audit-log state loaded once at the start of Run. nil when
+	// Identities is empty (no decrypt to do, audit irrelevant).
+	auditLog   *core.AuditLog
+	auditState *core.VerifiedState
+	auditKr    core.Keyring
 }
 
 // objectsSegment and sesamSuffix bracket the encrypted-blob path that git
@@ -70,6 +85,15 @@ func (h *FilterProcessHandler) Run(ctx context.Context, stdin io.Reader, stdout 
 		return fmt.Errorf("capability negotiation: %w", err)
 	}
 
+	if err := h.loadAudit(); err != nil {
+		slog.Error(
+			"smudge: audit log load failed; filter can't verify - run `sesam verify` afterwards",
+			slog.String("sesamDir", h.SesamDir),
+			slog.String("err", err.Error()),
+		)
+		// return fmt.Errorf("load audit log: %w", err)
+	}
+
 	for ctx.Err() == nil {
 		headers, ok, err := readHeaders(scanner)
 		if err != nil {
@@ -95,46 +119,6 @@ func (h *FilterProcessHandler) Run(ctx context.Context, stdin io.Reader, stdout 
 	}
 
 	return ctx.Err()
-}
-
-// RunOneShotSmudge handles a single git smudge invocation: stream src to dst
-// while spilling the same bytes to a temp file, then decrypt the spilled
-// blob to the plaintext path. objectPath is git's repo-relative pathname
-// (as passed via %f) - same derivation rules as the long-running handler.
-//
-// .gitattributes scopes the smudge filter to sesam objects, so a malformed
-// objectPath is treated as a hard error rather than something to recover
-// from. Reveal failures (seek, RevealBlob) are still tolerated with a warn
-// log - aborting `git checkout` over one undecryptable file is worse than a
-// stale plaintext.
-func RunOneShotSmudge(ids core.Identities, objectPath string, src io.Reader, dst io.Writer) error {
-	sesamDir, revealedPath, isObject := splitObjectPath(objectPath)
-	if !isObject {
-		return fmt.Errorf("not a path sesam smudge can handle: %v", objectPath)
-	}
-
-	spill, err := openSpillFile(sesamDir)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = spill.Cleanup() }()
-
-	if _, err := io.Copy(io.MultiWriter(dst, spill), src); err != nil {
-		return fmt.Errorf("streaming stdin: %w", err)
-	}
-
-	if _, err := spill.Seek(0, io.SeekStart); err != nil {
-		slog.Warn("smudge: failed to seek spill", slog.String("path", objectPath), slog.String("err", err.Error()))
-		return nil
-	}
-	revealed, err := core.RevealBlob(sesamDir, ids, spill, revealedPath)
-	switch {
-	case err != nil:
-		slog.Warn("smudge: could not reveal", slog.String("path", objectPath), slog.String("err", err.Error()))
-	case !revealed:
-		slog.Debug("smudge: not a recipient, skipping reveal", slog.String("path", objectPath))
-	}
-	return nil
 }
 
 // splitObjectPath splits a worktree-relative encrypted-object pathname into
@@ -277,24 +261,23 @@ func readHeaders(scanner *pktline.Scanner) (map[string]string, bool, error) {
 // warn log - aborting `git checkout` over one undecryptable file is worse
 // than a stale plaintext.
 func (h *FilterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, encoder *pktline.Encoder, pathname string) error {
-	if err := writeStatus(encoder, "success"); err != nil {
-		return err
-	}
-
-	sesamDir, revealedPath, isObject := splitObjectPath(pathname)
+	_, revealedPath, isObject := splitObjectPath(pathname)
 	if !isObject {
 		return fmt.Errorf("not a path sesam smudge can handle: %v", pathname)
 	}
 
 	if !h.cleaned {
-		// can only clean once we got the sesamDir once.
 		h.cleaned = true
-		if err := cleanWorktree(sesamDir, h.IdentityPaths); err != nil {
+		if err := cleanWorktree(h.SesamDir, h.IdentityPaths); err != nil {
 			slog.Warn("smudge: cleanup failed", slog.String("err", err.Error()))
 		}
 	}
 
-	spill, err := openSpillFile(sesamDir)
+	if err := writeStatus(encoder, "success"); err != nil {
+		return err
+	}
+
+	spill, err := openSpillFile(h.SesamDir)
 	if err != nil {
 		return err
 	}
@@ -337,14 +320,128 @@ func (h *FilterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 		return nil
 	}
 
-	// TODO: Pass a reader here that takes the chunks directly?
-	revealed, err := core.RevealBlob(sesamDir, h.Identities, spill, revealedPath)
+	if h.auditLog == nil {
+		return nil
+	}
+
+	revealed, err := core.RevealBlob(
+		h.SesamDir,
+		h.Identities,
+		spill,
+		revealedPath,
+		h.auditKr,
+		h.auditState.SealerAuthorized,
+	)
+
+	var authErr *core.BadSealerError
 	switch {
+	case errors.As(err, &authErr):
+		// The plaintext landed (RevealBlob returns true on auth
+		// errors); we just shout into stderr so the user sees the
+		// mismatch in their `git checkout` output. Hard-failing
+		// would block history bisects of pre-fix commits where the
+		// killed-user re-seal never happened.
+		slog.Error(
+			"smudge: sealer is not in the access list - decrypting anyway, run `sesam verify --all` to confirm intent",
+			slog.String("path", pathname),
+			slog.String("sealer", authErr.SealedBy),
+		)
 	case err != nil:
 		slog.Warn("smudge: could not reveal", slog.String("path", pathname), slog.String("err", err.Error()))
 	case !revealed:
 		slog.Debug("smudge: not a recipient, skipping reveal", slog.String("path", pathname))
 	}
+	return nil
+}
+
+// loadAudit populates h.auditLog / h.auditState / h.auditKr from the
+// git **index** (consistent with the target tree even mid-checkout -
+// git updates the index before invoking the filter), with the working-
+// tree audit log as a fallback. Called once at the start of Run; a
+// failure aborts the filter session entirely so we never silently
+// skip the auth check.
+func (h *FilterProcessHandler) loadAudit() error {
+	if err := h.tryLoadAuditFromIndex(); err != nil {
+		slog.Debug(
+			"smudge: audit log not loadable from git index; trying working tree",
+			slog.String("err", err.Error()),
+		)
+
+		// Fallback: working-tree audit log. May lag the in-progress
+		// checkout (git writes files in unspecified order), but is
+		// the best we can do when the index lookup is unavailable.
+		al, err := core.LoadAuditLog(h.SesamDir, h.Identities)
+		if err != nil {
+			return fmt.Errorf("load audit log (index and worktree both failed): %w", err)
+		}
+		kr := core.EmptyKeyring()
+		state, err := core.VerifyChain(al, kr)
+		if err != nil {
+			return fmt.Errorf("verify audit chain (worktree version): %w", err)
+		}
+		h.auditLog = al
+		h.auditState = state
+		h.auditKr = kr
+	}
+	return nil
+}
+
+// tryLoadAuditFromIndex reads `.sesam/audit/log.jsonl` from the git
+// index via go-git, decrypts it with the handler's identities, and
+// replays the chain into a VerifiedState. Reading from the index
+// (rather than the working tree) gives us the version consistent with
+// the file currently being smudged: git updates the index to reflect
+// the target tree before walking paths to invoke the filter, so the
+// audit log blob we read here matches the .sesam files git is about to
+// smudge.
+func (h *FilterProcessHandler) tryLoadAuditFromIndex() error {
+	repo, err := OpenGitRepo(h.SesamDir)
+	if err != nil {
+		return fmt.Errorf("open git repo at %q: %w", h.SesamDir, err)
+	}
+	idx, err := repo.Storer.Index()
+	if err != nil {
+		return fmt.Errorf("read git index: %w", err)
+	}
+
+	// Index entries are repo-root-relative with forward slashes.
+	// h.SesamDir is the same shape (resolved from --sesam-dir, default
+	// "."); path.Join collapses "." correctly when sesam lives at the
+	// worktree root.
+	auditPath := path.Join(h.SesamDir, ".sesam/audit/log.jsonl")
+
+	blobIdx := slices.IndexFunc(idx.Entries, func(e *index.Entry) bool {
+		return e.Name == auditPath
+	})
+
+	if blobIdx < 0 {
+		return fmt.Errorf("audit log not in git index at %q", auditPath)
+	}
+
+	blobHash := idx.Entries[blobIdx].Hash
+	blob, err := repo.BlobObject(blobHash)
+	if err != nil {
+		return fmt.Errorf("read audit log blob %s: %w", blobHash, err)
+	}
+	rd, err := blob.Reader()
+	if err != nil {
+		return fmt.Errorf("open audit log blob: %w", err)
+	}
+	defer func() { _ = rd.Close() }()
+
+	al, err := core.LoadAuditLogFromReader(rd, h.Identities)
+	if err != nil {
+		return fmt.Errorf("decrypt audit log from index: %w", err)
+	}
+	kr := core.EmptyKeyring()
+	state, err := core.VerifyChain(al, kr)
+	if err != nil {
+		return fmt.Errorf("verify audit chain (index version): %w", err)
+	}
+
+	h.auditLog = al
+	h.auditState = state
+	h.auditKr = kr
 	return nil
 }
 

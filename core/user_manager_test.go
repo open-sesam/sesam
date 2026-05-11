@@ -207,7 +207,7 @@ func TestTellUserResealsForNewRecipient(t *testing.T) {
 	require.NoError(t, err)
 	defer cryptFd.Close()
 
-	ok, err := RevealBlob(sesamDir, Identities{bob.Identity}, cryptFd, "secrets/api")
+	ok, err := RevealBlob(sesamDir, Identities{bob.Identity}, cryptFd, "secrets/api", nil, nil)
 	require.NoError(t, err)
 	require.True(t, ok, "bob must be a recipient after tell")
 
@@ -260,7 +260,7 @@ func TestKillUserResealsWithoutKilledRecipient(t *testing.T) {
 	cryptPath := filepath.Join(sesamDir, ".sesam", "objects", "secrets/api.sesam")
 	fd, err := os.Open(cryptPath)
 	require.NoError(t, err)
-	ok, err := RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api")
+	ok, err := RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api", nil, nil)
 	_ = fd.Close()
 	require.NoError(t, err)
 	require.True(t, ok, "bob should be a recipient before kill")
@@ -272,7 +272,7 @@ func TestKillUserResealsWithoutKilledRecipient(t *testing.T) {
 	fd, err = os.Open(cryptPath)
 	require.NoError(t, err)
 	defer fd.Close()
-	ok, err = RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api")
+	ok, err = RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api", nil, nil)
 	require.NoError(t, err)
 	require.False(t, ok, "killed user must not be a recipient of the resealed file")
 }
