@@ -11,6 +11,7 @@ should have been read and ideally the reader also tried `sesam`.
 - Concept of adding `.crypt` files along-side the actual files is very annoying in practice (like git-secret does)
 - Where possible we re-use well regarded projects like SSH and age.
 - Private key handling should be in the control of the user.
+- The revealed files are a subset of the files that are sealed. Not all users can reveal all files.
 
 ### Why `age` and `ssh`?
 
@@ -107,6 +108,9 @@ The header contains this information encoded as a single JSON line:
 
 - The hash used is `sha3-256`
 - The signature used is `ed25519` using the sealer's signing key.
+- On reveal, `sealed_by` is checked against the access list of `path` in the
+  verified state. A signature is rejected if its sealer has no current access
+  to the secret, even when the signature is cryptographically valid.
 
 ## `audit` log
 
@@ -234,6 +238,11 @@ The audit log's signatures are verified on most commands (seal, tell, kill, ...)
 (`sesam show` and `sesam smudge` for git integration and UI/UX purposes).
 
 Full integrity check is being done on revealing the secrets or when doing `sesam verify --all`.
+This includes checking that the user named in `sealed_by` has access to the secret
+according to the verified state. `sesam show` (git diff textconv) skips this check
+by design; the smudge filter applies a softer variant (warn-and-decrypt instead of
+refuse). Run `sesam verify --all` for the authoritative result before trusting a
+value.
 
 #### Availability - data/systems are accessible when needed
 
@@ -312,7 +321,7 @@ Signatures protect the integrity of a secret, but what if the signature is repla
 
 - If the attacker does not add an entry to the audit log, then we will notice because the `root_hash` changed.
 - If the attacker tries to add an audit entry then he has no way to sign it if he is not already part of the repository.
-- If the attacker is part of the repository but cannot access this specific secret then verification of the audit log will complain.
+- If the attacker is part of the repository but cannot access this specific secret, the file's footer will name them in `sealed_by`. On `sesam reveal` and `sesam verify --all` we check that `sealed_by` is in the secret's access list and reject the file otherwise. `sesam show` and the git diff/smudge integration skip this check by design.
 - If the attacker already had legitimate access to the secret then this is out of scope for `sesam`.
 
 #### Self-add to reveal list or admin list

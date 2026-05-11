@@ -5,6 +5,7 @@ exec git config user.email test@sesam.dev
 exec git config user.name 'Sesam Test'
 
 # Init sesam and commit the baseline audit log.
+exec tree -a
 exec sesam init --user admin
 exec git add -A
 exec git commit -m 'init sesam'

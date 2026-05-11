@@ -228,24 +228,16 @@ func EnsureDefaultGitAttributes(sesamDir string) error {
 	return appendMissingLines(gitAttributesPath, gitattributesTemplate, 0o644)
 }
 
-func EnsureDefaultGitConfig() error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
-	}
-	return EnsureGitConfigAt(cwd)
-}
-
-func EnsureGitConfigAt(dir string) error {
-	r, err := OpenGitRepo(dir)
+func EnsureGitConfigAt(sesamDir string) error {
+	r, err := OpenGitRepo(sesamDir)
 	if err != nil {
 		return fmt.Errorf("no git repository found: %w", err)
 	}
 
-	return ensureGitConfig(r)
+	return ensureGitConfig(r, sesamDir)
 }
 
-func ensureGitConfig(r *git.Repository) error {
+func ensureGitConfig(r *git.Repository, sesamDir string) error {
 	cfg, err := r.ConfigScoped(gogitconfig.LocalScope)
 	if err != nil {
 		return fmt.Errorf("read local git config: %w", err)
@@ -263,23 +255,42 @@ func ensureGitConfig(r *git.Repository) error {
 		return nil
 	}
 
+	// Every git driver below is `sesam <subcommand>` run through the
+	// shell with cwd = worktree root; for nested layouts each one
+	// needs the same --sesam-dir treatment to find `.sesam/`.
+	mergeCmd, err := sesamCmd(r, sesamDir, "audit", "merge", "%O", "%A", "%B", "%L", "%P")
+	if err != nil {
+		return err
+	}
+	textconvCmd, err := sesamCmd(r, sesamDir, "show")
+	if err != nil {
+		return err
+	}
+	smudgeCmd, err := sesamCmd(r, sesamDir, "smudge")
+	if err != nil {
+		return err
+	}
+
 	if !mergeConfigured {
 		mergeSection.SetOption("name", "merge the audit log of sesam")
-		mergeSection.SetOption("driver", "sesam audit merge %O %A %B %L %P")
+		mergeSection.SetOption("driver", mergeCmd)
 
 		diffSection := cfg.Raw.Section("diff").Subsection("sesam-diff")
-		diffSection.SetOption("textconv", "sesam show")
-
-		filterSection.SetOption("smudge", "sesam smudge %f")
-		filterSection.SetOption("clean", "cat")
-		filterSection.SetOption("required", "false")
+		diffSection.SetOption("textconv", textconvCmd)
 	}
 
 	if !processConfigured {
-		// Long-running filter process - amortises identity loading across all
-		// blobs in a single git operation. Git 2.11+ prefers this over the
-		// legacy smudge/clean keys; older git ignores it and uses the fallback.
-		filterSection.SetOption("process", "sesam smudge")
+		// required=false means a smudge failure doesn't abort
+		// `git checkout`; the encrypted bytes land instead. We rely
+		// on this to keep history bisects working when the audit log
+		// is unavailable.
+		filterSection.SetOption("required", "false")
+
+		// Long-running filter process - amortises identity loading
+		// across all blobs in a single git operation AND lets the
+		// handler load the audit log once per session for the
+		// sealer-vs-access check. Requires git >= 2.11 (Dec 2016).
+		filterSection.SetOption("process", smudgeCmd)
 	}
 
 	if err := r.SetConfig(cfg); err != nil {
@@ -287,6 +298,65 @@ func ensureGitConfig(r *git.Repository) error {
 	}
 
 	return nil
+}
+
+// sesamCmd builds a shell-safe `sesam ...` invocation suitable for git
+// config strings. The --sesam-dir flag is included only when
+// sesamDir is not the worktree root, and its value is shell-quoted.
+// Subcommand args are emitted as-is - callers must pass already-safe
+// tokens, e.g. git's %X placeholders or fixed verbs.
+//
+// The flag is positioned at the top level (`sesam --sesam-dir=... sub`)
+// so it's uniformly attached to the binary regardless of how deep the
+// subcommand path is.
+func sesamCmd(r *git.Repository, sesamDir string, args ...string) (string, error) {
+	rel, err := relSesamDir(r, sesamDir)
+	if err != nil {
+		return "", err
+	}
+	parts := []string{"sesam"}
+	if rel != "." && rel != "" {
+		parts = append(parts, "--sesam-dir="+shellQuote(rel))
+	}
+	parts = append(parts, args...)
+	return strings.Join(parts, " "), nil
+}
+
+func relSesamDir(r *git.Repository, sesamDir string) (string, error) {
+	wt, err := r.Worktree()
+	if err != nil {
+		return "", fmt.Errorf("worktree: %w", err)
+	}
+	absSesam, err := filepath.Abs(sesamDir)
+	if err != nil {
+		return "", fmt.Errorf("absolute sesam dir: %w", err)
+	}
+	rel, err := filepath.Rel(wt.Filesystem.Root(), absSesam)
+	if err != nil {
+		return "", fmt.Errorf("relative sesam dir: %w", err)
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+// shellQuote returns s wrapped in POSIX single-quotes if it contains
+// any character that the shell would interpret. Inner single quotes
+// are escaped via the standard '\” dance ("close, escaped quote, open").
+// For ordinary paths (alphanumerics, /, -, _, .) this returns s
+// unchanged.
+func shellQuote(s string) string {
+	const safeMeta = "/-_.+:@~"
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			strings.ContainsRune(safeMeta, r):
+			continue
+		default:
+			return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+		}
+	}
+	return s
 }
 
 func appendMissingLines(path, content string, mode os.FileMode) error {
@@ -449,17 +519,18 @@ func EnsureSesamReadme(sesamDir string) error {
 
 func StageInitFiles(sesamDir, configPath string) error {
 	files := []string{
-		filepath.Join(sesamDir, ".sesam"),
 		configPath,
 		filepath.Join(sesamDir, ".gitignore"),
 		filepath.Join(sesamDir, ".gitattributes"),
+		filepath.Join(sesamDir, ".sesam"),
 	}
 
-	args := append([]string{"add", "-f"}, files...)
+	args := append([]string{"add"}, files...)
 	cmd := exec.Command("git", args...) //nolint:gosec,noctx
 	cmd.Dir = sesamDir
 
-	if output, err := cmd.CombinedOutput(); err != nil {
+	output, err := cmd.CombinedOutput()
+	if err != nil {
 		slog.Warn("failed to stage init files automatically", slog.Any("error", err), slog.String("output", strings.TrimSpace(string(output))))
 		return nil
 	}

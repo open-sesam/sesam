@@ -699,9 +699,23 @@ func loadAuditLogFile(logPath string, ids Identities) (*AuditLog, error) {
 		return nil, fmt.Errorf("audit log too big (> 512M). Please consider opening a bug report")
 	}
 
+	return loadAuditLogFromReader(fd, ids)
+}
+
+// LoadAuditLogFromReader parses a log.jsonl byte stream into an AuditLog.
+// Used by the git smudge filter, which reads the log from the git index
+// (via `git cat-file`) rather than the working tree to stay consistent with
+// the file being smudged. Callers are responsible for any size-bound checks
+// before invoking. The returned AuditLog has fd=nil; callers that need to
+// append must open their own fd.
+func LoadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
+	return loadAuditLogFromReader(rd, ids)
+}
+
+func loadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
 	al := &AuditLog{}
 
-	scanner := bufio.NewScanner(fd)
+	scanner := bufio.NewScanner(rd)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
 	// Line 1: base64-encoded age-encrypted key.

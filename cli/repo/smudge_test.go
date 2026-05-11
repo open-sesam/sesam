@@ -25,7 +25,7 @@ func runHandler(t *testing.T, clientScript []byte) []byte {
 	}
 
 	var stdout bytes.Buffer
-	err := handler.Run(context.Background(), bytes.NewReader(clientScript), &stdout)
+	err := handler.Run(t.Context(), bytes.NewReader(clientScript), &stdout)
 
 	require.NoError(t, err)
 	return stdout.Bytes()

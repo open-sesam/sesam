@@ -116,7 +116,7 @@ func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager,
 
 	// TODO: Find a better place to call this.
 	// .git/config is not synced and needs to be constantly checked.
-	if err := clirepo.EnsureDefaultGitConfig(); err != nil {
+	if err := clirepo.EnsureGitConfigAt(sesamDir); err != nil {
 		return nil, nil, err
 	}
 

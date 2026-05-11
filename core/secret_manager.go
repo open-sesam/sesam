@@ -441,16 +441,29 @@ func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bo
 // revealedPath is the repo-relative plain path (e.g. "secrets/token"), derived
 // by the caller from git's %f argument so no footer read-back is needed.
 //
+// When `kr` is non-nil the footer signature is verified against the keyring,
+// and when `authorize` is also non-nil the named sealer is checked against
+// the predicate (see VerifiedState.SealerAuthorized). Both nil preserves
+// the historical "decrypt and ask no questions" behaviour, which is what
+// low-level test fixtures need when no audit log is available.
+//
 // Returns (true, nil) on success. Returns (false, nil) when the caller is not
 // a recipient - the blob is not meant for them and is silently skipped.
 //
-// This function should only be called for quick decryption (i.e. git diff or smudge)
-// and when we only have access to the encrypted file and not the audit log.
-// For most cases, uses SecretManager.
-//
-// Like ShowSecret, this skips signature verification AND the sealer-vs-access
-// check. Authoritative reveal goes through SecretManager.RevealAll.
-func RevealBlob(sesamDir string, ids Identities, src io.ReadSeeker, revealedPath string) (bool, error) {
+// On *AuthorizationError the decryption succeeded but the sealer was not in
+// the access list. The plaintext is still landed (`true` is returned) and
+// the typed error is propagated so callers can pick a policy: the smudge
+// filter logs the mismatch and treats it as success; CLI tools may prefer
+// to refuse. This split lets `git checkout` survive history written before
+// the auth check shipped while still surfacing the deviation loudly.
+func RevealBlob(
+	sesamDir string,
+	ids Identities,
+	src io.ReadSeeker,
+	revealedPath string,
+	kr Keyring,
+	authorize func(user, path string) bool,
+) (bool, error) {
 	dstPath := filepath.Join(sesamDir, revealedPath)
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
 		return false, fmt.Errorf("creating revealed dir: %w", err)
@@ -463,15 +476,33 @@ func RevealBlob(sesamDir string, ids Identities, src io.ReadSeeker, revealedPath
 	}
 	defer func() { _ = dst.Cleanup() }()
 
-	_, _, err = revealStream(src, dst, ids.AgeIdentities())
-	if err != nil {
+	var revealErr error
+	if kr != nil {
+		revealErr = revealStreamAndVerify(src, dst, ids.AgeIdentities(), kr, authorize)
+	} else {
+		_, _, revealErr = revealStream(src, dst, ids.AgeIdentities())
+	}
+
+	if revealErr != nil {
 		var noMatch *age.NoIdentityMatchError
-		if errors.As(err, &noMatch) {
+		if errors.As(revealErr, &noMatch) {
 			// count as no error, checking out old state is a best effort.
 			return false, nil
 		}
 
-		return false, err
+		var authErr *BadSealerError
+		if errors.As(revealErr, &authErr) {
+			// Decryption succeeded; only the policy check failed. Land
+			// the plaintext and propagate the typed error - the caller
+			// decides whether to warn or refuse.
+			_ = dst.Chmod(0o600)
+			if closeErr := dst.CloseAtomicallyReplace(); closeErr != nil {
+				return false, closeErr
+			}
+			return true, revealErr
+		}
+
+		return false, revealErr
 	}
 
 	_ = dst.Chmod(0o600)

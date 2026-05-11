@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -194,7 +195,7 @@ func TestRevealBlobHappyPath(t *testing.T) {
 
 	os.Remove(filepath.Join(mgr.SesamDir, "secrets/token"))
 
-	ok, err := RevealBlob(mgr.SesamDir, mgr.Identities, src, "secrets/token")
+	ok, err := RevealBlob(mgr.SesamDir, mgr.Identities, src, "secrets/token", nil, nil)
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -215,7 +216,7 @@ func TestRevealBlobNonRecipient(t *testing.T) {
 	defer src.Close()
 
 	stranger := newTestUser(t, "stranger")
-	ok, err := RevealBlob(mgr.SesamDir, Identities{stranger.Identity}, src, "secrets/token")
+	ok, err := RevealBlob(mgr.SesamDir, Identities{stranger.Identity}, src, "secrets/token", nil, nil)
 	require.NoError(t, err)
 	require.False(t, ok, "non-recipient should return (false, nil)")
 }
@@ -233,9 +234,89 @@ func TestRevealBlobCorruptedFile(t *testing.T) {
 	require.NoError(t, err)
 	defer src.Close()
 
-	ok, err := RevealBlob(mgr.SesamDir, mgr.Identities, src, "secrets/token")
+	ok, err := RevealBlob(mgr.SesamDir, mgr.Identities, src, "secrets/token", nil, nil)
 	require.Error(t, err)
 	require.False(t, ok)
+}
+
+// RevealBlob's policy split: an authorize-mismatch must NOT swallow the
+// plaintext. The smudge filter relies on this to keep `git checkout`
+// non-blocking against history written before the auth check shipped -
+// the typed *AuthorizationError lets the caller pick a policy.
+func TestRevealBlobAuthMismatchLandsPlaintext(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	bob := newTestUser(t, "bob")
+	kr := testKeyring(t, admin, bob)
+
+	state := &VerifiedState{
+		Users: []VerifiedUser{
+			{Name: "admin", Groups: []string{"admin"}},
+			{Name: "bob", Groups: []string{"dev"}},
+		},
+		Secrets: []VerifiedSecret{
+			{RevealedPath: "secrets/admin-only", AccessGroups: []string{"admin"}},
+		},
+	}
+
+	// Admin seals the secret normally.
+	adminMgr := &SecretManager{
+		SesamDir:   sesamDir,
+		Identities: Identities{admin.Identity},
+		Signer:     admin.Signer,
+		Keyring:    kr,
+		State:      state,
+	}
+	writeSecret(t, sesamDir, "secrets/admin-only", "real payload")
+	legit := &secret{
+		Mgr:          adminMgr,
+		RevealedPath: "secrets/admin-only",
+		Recipients:   kr.Recipients([]string{"admin", "bob"}),
+	}
+	cryptPath := adminMgr.cryptPath("secrets/admin-only")
+	_, err := legit.Seal(cryptPath, "admin")
+	require.NoError(t, err)
+
+	// Bob substitutes the file (bypasses the seal-time guard, which
+	// honest clients run but a patched client would not).
+	bobMgr := &SecretManager{SesamDir: sesamDir, Signer: bob.Signer}
+	writeSecret(t, sesamDir, "secrets/admin-only", "bob's substituted payload")
+	bad := &secret{
+		Mgr:          bobMgr,
+		RevealedPath: "secrets/admin-only",
+		Recipients:   kr.Recipients([]string{"admin", "bob"}),
+	}
+	_, err = bad.Seal(cryptPath, "bob")
+	require.NoError(t, err)
+
+	// Reveal via RevealBlob with kr+authorize wired up. Bob's name in
+	// `sealed_by` is cryptographically valid (real bob signature) but
+	// the access list does not include bob.
+	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/admin-only")))
+	src, err := os.Open(cryptPath)
+	require.NoError(t, err)
+	defer src.Close()
+
+	ok, err := RevealBlob(
+		sesamDir,
+		Identities{admin.Identity},
+		src,
+		"secrets/admin-only",
+		kr,
+		state.SealerAuthorized,
+	)
+	require.True(t, ok, "plaintext must still land - smudge needs this")
+	var authErr *BadSealerError
+	require.True(t, errors.As(err, &authErr), "expected *AuthorizationError, got %T: %v", err, err)
+	require.Equal(t, "bob", authErr.SealedBy)
+	require.Equal(t, "secrets/admin-only", authErr.Path)
+
+	// And the plaintext is the substituted bytes - the user can see
+	// what was substituted, which combined with the loud log is the
+	// signal they need to act.
+	got, err := os.ReadFile(filepath.Join(sesamDir, "secrets/admin-only"))
+	require.NoError(t, err)
+	require.Equal(t, "bob's substituted payload", string(got))
 }
 
 func TestRemoveSecretThenSealAll(t *testing.T) {

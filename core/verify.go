@@ -426,6 +426,26 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) er
 	return nil
 }
 
+// VerifyChain replays the audit log into a fresh VerifiedState without the
+// expensive disk-side checks done by Verify (init-file unchanged across git
+// history, root-hash of all .sesam files on disk). This is what callers
+// that already trust the file source need - notably the git smudge filter,
+// which reads the audit log from the consistent git index and only wants
+// per-file sealed_by enforcement.
+//
+// Use Verify when you also want disk and git-history consistency
+// (`sesam reveal`, `sesam verify --all`).
+func VerifyChain(log *AuditLog, kr Keyring) (*VerifiedState, error) {
+	state := VerifiedState{
+		auditLog: log,
+		keyring:  kr,
+	}
+	if err := verify(&state); err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
 func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 	if err := verifyInitFileUnchanged(log.SesamDir); err != nil {
 		return nil, fmt.Errorf("init file check: %w", err)
