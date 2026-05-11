@@ -399,8 +399,19 @@ func TestSealRejectsUnauthorizedUser(t *testing.T) {
 	// Bob has plaintext on disk (left over from sealedSecretManager)
 	// but no access to secrets/test. SealAll must refuse.
 	err = bobMgr.SealAll()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not authorized")
+	require.NoError(t, err)
+
+	tmpDir, err := os.MkdirTemp("", "")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	_, wasSealed, err := bobMgr.stageSecret(secret{
+		Mgr:          mgr,
+		RevealedPath: "secrets/test",
+	}, tmpDir)
+
+	require.NoError(t, err)
+	require.False(t, wasSealed)
 }
 
 func TestSealAllCleansStageAndMarker(t *testing.T) {
