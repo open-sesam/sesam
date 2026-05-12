@@ -54,7 +54,7 @@ tasks:
     cmds:
       - git-cliff -o CHANGELOG.md
 
-  changelog:unreleased:
+  unreleased:
     desc: Preview the unreleased changelog section without writing the file
     cmds:
       - git-cliff --unreleased

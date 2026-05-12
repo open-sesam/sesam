@@ -9,6 +9,7 @@ and this project follows [Conventional Commits](https://www.conventionalcommits.
 
 
 ### Features
+- Basic changelog setup (c69653d)
 - Add mdbook docs template (4adeb5b)
 - Add sketch for user manager (06b4a65)
 - Make audit log use JSONL & make it crash safe (9715527)
