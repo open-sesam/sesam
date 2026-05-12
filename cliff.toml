@@ -1,7 +1,7 @@
 # git-cliff config for sesam.
 #
 # Run via `task changelog` to regenerate CHANGELOG.md from history,
-# or `task changelog:unreleased` to preview the unreleased section only.
+# or `task unreleased` to preview the unreleased section only.
 
 [changelog]
 header = """
@@ -65,15 +65,15 @@ commit_parsers = [
 
   # Conventional types -> sections. Numeric prefixes are render-time stripped
   # (see body template) but control the rendered section order.
-  { message = '^feat',                       group = "1 Features" },
-  { message = '^fix',                        group = "2 Bug Fixes" },
-  { message = '^security',                   group = "3 Security" },
-  { message = '^perf',                       group = "4 Performance" },
-  { message = '^refactor',                   group = "5 Refactor" },
-  { message = '^docs',                       group = "6 Documentation" },
-  { message = '^test',                       group = "7 Tests" },
+  { message = '^feat', group = "1 Features" },
+  { message = '^fix', group = "2 Bug Fixes" },
+  { message = '^security', group = "3 Security" },
+  { message = '^perf', group = "4 Performance" },
+  { message = '^refactor', group = "5 Refactor" },
+  { message = '^docs', group = "6 Documentation" },
+  { message = '^test', group = "7 Tests" },
   { message = '^(chore|ci|build|style|lint)', group = "8 Internal" },
 
   # Catch-all so anything unconventional still surfaces.
-  { message = '.*',                          group = "9 Other" },
+  { message = '.*', group = "9 Other" },
 ]

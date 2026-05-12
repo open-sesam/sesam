@@ -36,3 +36,4 @@ Feel free to write a Issue first.
 
 - We use AI-based assistants ourselves for reviewing, ideation, tests and the occasional clearly scoped code change. The majority code is still hand-written to make sure we don't loose touch.
 - However, we will reject a PR if we feel it is completely vibe-coded and beyond a certain size. AIs are too good at creating correct-looking but utterly-broken code.
+- Please do not automate communication via LLMs. `sesam` is a tool from humans for humans.

@@ -38,6 +38,11 @@ tasks:
     cmds:
       - go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run -c linter.yml
 
+  vuln:
+    desc: Scan dependencies and stdlib usage for known vulnerabilities (govulncheck)
+    cmds:
+      - go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+
   docs:
     desc: Builds docs
     cmds:
