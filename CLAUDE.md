@@ -65,3 +65,11 @@ Tests in `core/` use helpers from `test_helpers_test.go`:
 - `sealedSecretManager(t)` — like above but the secret is already sealed on disk
 
 Integration tests (`integration_test.go`) exercise the full init + reload + verify + seal + reveal cycle with real git repos.
+
+## Commit messages
+
+Subjects follow Conventional Commits (`type: subject`) so `task changelog`
+(via git-cliff, configured in `cliff.toml`) groups them correctly. Recognised
+types: `feat`, `fix`, `security`, `perf`, `refactor`, `docs`, `test`, `chore`,
+`ci`, `build`, `style`, `lint`. Mark breaking changes with `!` after the type
+(e.g. `feat!: rename --repo to --sesam-dir`) or a `BREAKING CHANGE:` footer.
