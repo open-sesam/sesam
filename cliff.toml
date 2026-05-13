@@ -1,5 +1,4 @@
 # git-cliff config for sesam.
-#
 # Run via `task changelog` to regenerate CHANGELOG.md from history,
 # or `task unreleased` to preview the unreleased section only.
 
