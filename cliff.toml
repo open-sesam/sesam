@@ -26,7 +26,7 @@ body = """
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | split(pat=" ") | slice(start=1) | join(sep=" ") }}
 {% for commit in commits -%}
-- {% if commit.breaking %}**[breaking]** {% endif %}{{ commit.message | split(pat="\n") | first | upper_first }} ({{ commit.id | truncate(length=7, end="") }})
+- {% if commit.breaking %}**[breaking]** {% endif %}{{ commit.message | split(pat="\n") | first | upper_first }} ({{ commit.id | truncate(length=7, end="") }}{% if commit.remote.username %} by @{{ commit.remote.username }}{%- endif %}{% if commit.remote.pr_number %} in #{{ commit.remote.pr_number }}{%- endif %})
 {% endfor %}
 {% endfor %}
 """
@@ -77,3 +77,8 @@ commit_parsers = [
   # Catch-all so anything unconventional still surfaces.
   { message = '.*', group = "9 Other" },
 ]
+
+[remote.github]
+owner = "open-sesam"
+repo = "sesam"
+token = ""
