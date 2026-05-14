@@ -65,11 +65,11 @@ var flagsModifyAddSecret = []cli.Flag{
 	},
 	&cli.StringSliceFlag{
 		Name:  "access",
-		Usage: "Group with access to this secret (can be given multiple times)",
+		Usage: "Group with access to this secret (can be given multiple times) (optional)",
 	},
 	&cli.StringFlag{
 		Name:  "description",
-		Usage: "Description of the secret",
+		Usage: "Description of the secret (optional)",
 	},
 }
 
