@@ -110,16 +110,6 @@ func TestParseIdentityPluginWithPublicKeyHeader(t *testing.T) {
 	require.Equal(t, recipient, id.Public().String())
 }
 
-func TestParseIdentityPluginRequiresUI(t *testing.T) {
-	identity := plugin.EncodeIdentity("yubikey", []byte{1, 2, 3, 4, 5, 6, 7, 8})
-	recipient := plugin.EncodeRecipient("yubikey", []byte{8, 7, 6, 5, 4, 3, 2, 1})
-	file := "# public key: " + recipient + "\n" + identity
-
-	_, err := ParseIdentity(file, nil, nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "PluginUI")
-}
-
 func TestParseIdentityAgeKeyWithComments(t *testing.T) {
 	// age-keygen output: header comments followed by the secret line.
 	ageID, err := age.GenerateX25519Identity()

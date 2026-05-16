@@ -278,11 +278,7 @@ func scanAgeIdentity(data string) (identityLine, publicKey string) {
 // placeholder ("<identity-based recipient>") rather than the recipient
 // encoding sesam needs to match identities to users.
 func parsePluginIdentity(ageLine, recipientHint string, pluginUI *PluginUI) (*Identity, error) {
-	if pluginUI == nil {
-		return nil, fmt.Errorf("plugin identity requires a PluginUI; pass NewInteractivePluginUI()")
-	}
-
-	pluginID, err := plugin.NewIdentity(ageLine, pluginUI.ClientUI())
+	pluginIdentity, err := plugin.NewIdentity(ageLine, pluginUI.ClientUI())
 	if err != nil {
 		return nil, fmt.Errorf("parse plugin identity: %w", err)
 	}
@@ -290,7 +286,7 @@ func parsePluginIdentity(ageLine, recipientHint string, pluginUI *PluginUI) (*Id
 	if recipientHint == "" {
 		return nil, fmt.Errorf(
 			"plugin identity for %q is missing a `# public key: …` header; sesam needs the recipient to map identities to users",
-			pluginID.Name(),
+			pluginIdentity.Name(),
 		)
 	}
 
@@ -300,7 +296,7 @@ func parsePluginIdentity(ageLine, recipientHint string, pluginUI *PluginUI) (*Id
 	// /dev/tty, so PluginUI.requestValue never fires - this Unwrap hook is
 	// the only place sesam can prompt the user before the plugin takes over.
 	return &Identity{
-		Identity: &pluginIdentityWithHint{inner: pluginID, ui: pluginUI},
+		Identity: &pluginIdentityWithHint{inner: pluginIdentity, ui: pluginUI},
 		pub:      newStringPubKey(recipientHint),
 	}, nil
 }
