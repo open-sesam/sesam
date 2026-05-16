@@ -20,7 +20,7 @@ func HandleSeal(_ context.Context, cmd *cli.Command) error {
 	}
 
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
-		mgr, _, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
+		mgr, _, err := buildManagers(sesamDir, cmd.StringSlice("identity"), core.NewInteractivePluginUI())
 		if err != nil {
 			return err
 		}
@@ -41,7 +41,7 @@ func HandleReveal(_ context.Context, cmd *cli.Command) error {
 	}
 
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
-		mgr, _, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
+		mgr, _, err := buildManagers(sesamDir, cmd.StringSlice("identity"), core.NewInteractivePluginUI())
 		if err != nil {
 			return err
 		}
@@ -54,11 +54,15 @@ func HandleReveal(_ context.Context, cmd *cli.Command) error {
 	})
 }
 
-// buildManagers initializes runtime state for non-init operations.
-func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager, *core.UserManager, error) {
+// buildManagers initializes runtime state for non-init operations. pluginUI
+// controls how age plugins prompt for user input (PIN, touch, etc.); pass
+// core.NewInteractivePluginUI() for foreground commands and
+// core.NewNonInteractivePluginUI() for git filter contexts.
+func buildManagers(sesamDir string, identityPath []string, pluginUI *core.PluginUI) (*core.SecretManager, *core.UserManager, error) {
 	identities, err := loadIdentities(
 		identityPath,
 		keyringFingerprint,
+		pluginUI,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -72,7 +76,7 @@ func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager,
 	}
 
 	verifyStart := time.Now()
-	vstate, err := core.Verify(auditLog, keyring)
+	vstate, err := core.Verify(auditLog, keyring, pluginUI)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}
@@ -136,25 +140,28 @@ func identityToUser(identities core.Identities, users map[string]core.Recipients
 
 // loadIdentities reads all given paths and parses all identities. Encrypted
 // identities are unlocked via the system keyring, falling back to a stdin
-// prompt when no entry exists.
-func loadIdentities(identityPaths []string, keyFingerprint string) (core.Identities, error) {
+// prompt when no entry exists. pluginUI is used when a path holds a plugin
+// identity; pass core.NewInteractivePluginUI() for foreground commands.
+func loadIdentities(identityPaths []string, keyFingerprint string, pluginUI *core.PluginUI) (core.Identities, error) {
 	return loadIdentitiesWith(identityPaths, &core.KeyringPassphraseProvider{
 		KeyFingerprint: keyFingerprint,
 		Fallback:       &core.StdinPassphraseProvider{},
-	})
+	}, pluginUI)
 }
 
 // loadIdentitiesKeyringOnly is like loadIdentities but never prompts on stdin.
 // It is required for the long-running smudge filter, where stdin is owned by
 // the git pkt-line protocol and a passphrase prompt would corrupt the stream.
 // If the keyring has no entry for an encrypted identity, parsing fails.
+// Plugin identities load successfully but will return ErrNoTTY on first use,
+// which age.Decrypt skips so other identities still have a chance to work.
 func loadIdentitiesKeyringOnly(identityPaths []string, keyFingerprint string) (core.Identities, error) {
 	return loadIdentitiesWith(identityPaths, &core.KeyringPassphraseProvider{
 		KeyFingerprint: keyFingerprint,
-	})
+	}, core.NewNonInteractivePluginUI())
 }
 
-func loadIdentitiesWith(identityPaths []string, provider core.PassphraseProvider) (core.Identities, error) {
+func loadIdentitiesWith(identityPaths []string, provider core.PassphraseProvider, pluginUI *core.PluginUI) (core.Identities, error) {
 	if len(identityPaths) == 0 {
 		return nil, fmt.Errorf("at least one --identity or SESAM_ID env var required")
 	}
@@ -176,7 +183,7 @@ func loadIdentitiesWith(identityPaths []string, provider core.PassphraseProvider
 			return nil, fmt.Errorf("failed to read identity %s: %w", expandedPath, err)
 		}
 
-		identity, err := core.ParseIdentity(strings.TrimSpace(string(data)), provider)
+		identity, err := core.ParseIdentity(strings.TrimSpace(string(data)), provider, pluginUI)
 		if err != nil {
 			return nil, err
 		}

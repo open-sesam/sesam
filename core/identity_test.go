@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"filippo.io/age"
+	"filippo.io/age/plugin"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
@@ -27,7 +28,7 @@ func TestParseIdentityAgeNative(t *testing.T) {
 	ageID, err := age.GenerateX25519Identity()
 	require.NoError(t, err)
 
-	id, err := ParseIdentity(ageID.String(), nil)
+	id, err := ParseIdentity(ageID.String(), nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, ageID.Recipient().String(), id.Public().String())
 }
@@ -36,7 +37,7 @@ func TestParseIdentityAgePQ(t *testing.T) {
 	pqID, err := age.GenerateHybridIdentity()
 	require.NoError(t, err)
 
-	id, err := ParseIdentity(pqID.String(), nil)
+	id, err := ParseIdentity(pqID.String(), nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, pqID.Recipient().String(), id.Public().String())
 }
@@ -49,7 +50,7 @@ func TestParseIdentitySSHEd25519Unencrypted(t *testing.T) {
 	require.NoError(t, err)
 
 	pemBytes := pem.EncodeToMemory(pemBlock)
-	id, err := ParseIdentity(string(pemBytes), nil)
+	id, err := ParseIdentity(string(pemBytes), nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, id.Public())
 }
@@ -65,12 +66,12 @@ func TestParseIdentitySSHEncryptedWithPassphrase(t *testing.T) {
 	pemBytes := pem.EncodeToMemory(pemBlock)
 
 	// Should fail without a passphrase provider.
-	_, err = ParseIdentity(string(pemBytes), nil)
+	_, err = ParseIdentity(string(pemBytes), nil, nil)
 	require.Error(t, err, "should fail without passphrase")
 
 	// Should succeed with the mock provider.
 	mock := &mockPassphraseProvider{passphrase: passphrase}
-	id, err := ParseIdentity(string(pemBytes), mock)
+	id, err := ParseIdentity(string(pemBytes), mock, nil)
 	require.NoError(t, err)
 	require.True(t, mock.called, "passphrase provider should have been called")
 	require.NotNil(t, id.Public())
@@ -85,8 +86,109 @@ func TestParseIdentitySSHWrongPassphrase(t *testing.T) {
 
 	pemBytes := pem.EncodeToMemory(pemBlock)
 	mock := &mockPassphraseProvider{passphrase: []byte("wrong")}
-	_, err = ParseIdentity(string(pemBytes), mock)
+	_, err = ParseIdentity(string(pemBytes), mock, nil)
 	require.Error(t, err, "should fail with wrong passphrase")
+}
+
+func TestParseIdentityPluginRequiresPublicKeyHeader(t *testing.T) {
+	identity := plugin.EncodeIdentity("yubikey", []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
+
+	// Without # public key: header sesam can't match the identity to a user.
+	_, err := ParseIdentity(identity, nil, NewInteractivePluginUI())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "public key")
+}
+
+func TestParseIdentityPluginWithPublicKeyHeader(t *testing.T) {
+	identity := plugin.EncodeIdentity("yubikey", []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
+	recipient := plugin.EncodeRecipient("yubikey", []byte{16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1})
+
+	file := "# created: 2026-05-16\n# public key: " + recipient + "\n" + identity + "\n"
+
+	id, err := ParseIdentity(file, nil, NewInteractivePluginUI())
+	require.NoError(t, err)
+	require.Equal(t, recipient, id.Public().String())
+}
+
+func TestParseIdentityPluginRequiresUI(t *testing.T) {
+	identity := plugin.EncodeIdentity("yubikey", []byte{1, 2, 3, 4, 5, 6, 7, 8})
+	recipient := plugin.EncodeRecipient("yubikey", []byte{8, 7, 6, 5, 4, 3, 2, 1})
+	file := "# public key: " + recipient + "\n" + identity
+
+	_, err := ParseIdentity(file, nil, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "PluginUI")
+}
+
+func TestParseIdentityAgeKeyWithComments(t *testing.T) {
+	// age-keygen output: header comments followed by the secret line.
+	ageID, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+
+	file := "# created: 2026-05-16\n# public key: " + ageID.Recipient().String() + "\n" + ageID.String() + "\n"
+	id, err := ParseIdentity(file, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, ageID.Recipient().String(), id.Public().String())
+}
+
+func TestScanAgeIdentity(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		wantLine string
+		wantPub  string
+	}{
+		{
+			name:     "bare age key",
+			input:    "AGE-SECRET-KEY-1ABC",
+			wantLine: "AGE-SECRET-KEY-1ABC",
+			wantPub:  "",
+		},
+		{
+			name:     "age-keygen output",
+			input:    "# created: 2026-05-16\n# public key: age1xyz\nAGE-SECRET-KEY-1ABC\n",
+			wantLine: "AGE-SECRET-KEY-1ABC",
+			wantPub:  "age1xyz",
+		},
+		{
+			name:     "plugin output",
+			input:    "# public key: age1yubikey1xyz\nAGE-PLUGIN-YUBIKEY-1ABC",
+			wantLine: "AGE-PLUGIN-YUBIKEY-1ABC",
+			wantPub:  "age1yubikey1xyz",
+		},
+		{
+			name:     "recipient header alternative",
+			input:    "# recipient: age1yubikey1xyz\nAGE-PLUGIN-YUBIKEY-1ABC",
+			wantLine: "AGE-PLUGIN-YUBIKEY-1ABC",
+			wantPub:  "age1yubikey1xyz",
+		},
+		{
+			name:     "capital Recipient header (age-plugin-yubikey)",
+			input:    "#    Recipient: age1yubikey1xyz\nAGE-PLUGIN-YUBIKEY-1ABC",
+			wantLine: "AGE-PLUGIN-YUBIKEY-1ABC",
+			wantPub:  "age1yubikey1xyz",
+		},
+		{
+			name:     "indented metadata header is ignored",
+			input:    "#       Serial: 32876122, Slot: 1\n#    Recipient: age1yubikey1xyz\nAGE-PLUGIN-YUBIKEY-1ABC",
+			wantLine: "AGE-PLUGIN-YUBIKEY-1ABC",
+			wantPub:  "age1yubikey1xyz",
+		},
+		{
+			name:     "blank lines tolerated",
+			input:    "\n\n# public key: age1xyz\n\nAGE-SECRET-KEY-1ABC\n",
+			wantLine: "AGE-SECRET-KEY-1ABC",
+			wantPub:  "age1xyz",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotLine, gotPub := scanAgeIdentity(tc.input)
+			require.Equal(t, tc.wantLine, gotLine)
+			require.Equal(t, tc.wantPub, gotPub)
+		})
+	}
 }
 
 func TestParseIdentityInvalidInputs(t *testing.T) {
@@ -102,7 +204,7 @@ func TestParseIdentityInvalidInputs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseIdentity(tc.key, nil)
+			_, err := ParseIdentity(tc.key, nil, nil)
 			require.Error(t, err)
 		})
 	}

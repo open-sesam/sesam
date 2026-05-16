@@ -39,9 +39,11 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("invalid initial user %q: %w", initialUser, err)
 	}
 
+	pluginUI := core.NewInteractivePluginUI()
 	identities, err := loadIdentities(
 		cmd.StringSlice("identity"),
 		"sesam.id."+initialUser,
+		pluginUI,
 	)
 	if err != nil {
 		return err
@@ -67,6 +69,7 @@ func HandleInit(ctx context.Context, cmd *cli.Command) error {
 			initialUser,
 			identities.RecipientStrings(),
 			identities,
+			pluginUI,
 		)
 		if err != nil {
 			return err
@@ -129,19 +132,21 @@ func buildInitialSecretManager(
 	initialUser string,
 	pubKeySpecs []string,
 	identities core.Identities,
+	pluginUI *core.PluginUI,
 ) (*core.SecretManager, error) {
 	signer, auditLog, err := core.InitAdminUser(
 		ctx,
 		sesamDir,
 		initialUser,
 		pubKeySpecs,
+		pluginUI,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize admin user: %w", err)
 	}
 
 	keyring := core.EmptyKeyring()
-	vstate, err := core.Verify(auditLog, keyring)
+	vstate, err := core.Verify(auditLog, keyring, pluginUI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}

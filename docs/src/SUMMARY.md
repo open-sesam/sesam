@@ -21,6 +21,7 @@
 - [Rotation](./rotation.md)
 - [Branching](./branching.md)
 - [User identity exchange](./key_exchange.md)
+- [Hardware identities](./plugins.md)
 
 # Reference
 
