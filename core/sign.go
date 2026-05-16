@@ -54,7 +54,7 @@ func (es *ed25519Signer) UserName() string {
 
 // LoadSignKey will load a signer specific to a user and decrypt it via `userIdentity`
 func LoadSignKey(sesamDir, user string, userIdentity age.Identity) (Signer, error) {
-	if err := validUserName(user); err != nil {
+	if err := ValidUserName(user); err != nil {
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
 
@@ -101,7 +101,7 @@ func LoadSignKey(sesamDir, user string, userIdentity age.Identity) (Signer, erro
 
 // GenerateSignKey will generate a new ed25519 signing key only accessible to `userRecipient`
 func GenerateSignKey(sesamDir, user string, userRecipient []age.Recipient) (Signer, error) {
-	if err := validUserName(user); err != nil {
+	if err := ValidUserName(user); err != nil {
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
 

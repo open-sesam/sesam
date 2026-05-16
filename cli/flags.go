@@ -42,10 +42,24 @@ var flagsInit = []cli.Flag{
 }
 
 // flagsSeal contains optional controls for sealing.
-var flagsSeal = []cli.Flag{}
+var flagsSeal = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "delete-revealed",
+		Usage: "Delete revealed secret files after successful seal",
+	},
+}
 
 // flagsReveal contains optional controls for reveal.
 var flagsReveal = []cli.Flag{}
+
+// flagsAdd contains controls for adding secrets.
+var flagsAdd = []cli.Flag{
+	&cli.StringSliceFlag{
+		Name:     "group",
+		Required: true,
+		Usage:    "Group assignment for the secret (repeatable)",
+	},
+}
 
 // flagsTell contains controls for adding users.
 var flagsTell = []cli.Flag{

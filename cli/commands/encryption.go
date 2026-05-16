@@ -2,31 +2,35 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
-	clirepo "github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/cli/repo"
 	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
 // HandleSeal encrypts and signs tracked secrets via SecretManager.SealAll.
 func HandleSeal(_ context.Context, cmd *cli.Command) error {
-	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
+	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}
 
-	return withRepoLock(sesamDir, 5*time.Second, func() error {
-		mgr, _, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
-		if err != nil {
-			return err
+	return withManagers(sesamDir, cmd.StringSlice("identity"), func(mgr *runtimeManagers) error {
+		if err := mgr.Secret.SealAll(); err != nil {
+			return fmt.Errorf("failed to seal secrets: %w", err)
 		}
 
-		if err := mgr.SealAll(); err != nil {
-			return fmt.Errorf("failed to seal secrets: %w", err)
+		if cmd.Bool("delete-revealed") {
+			if err := deleteRevealedSecrets(sesamDir, mgr.Secret.State.Secrets); err != nil {
+				return fmt.Errorf("failed to delete revealed secrets: %w", err)
+			}
 		}
 
 		return nil
@@ -35,18 +39,13 @@ func HandleSeal(_ context.Context, cmd *cli.Command) error {
 
 // HandleReveal decrypts and verifies tracked secrets via SecretManager.RevealAll.
 func HandleReveal(_ context.Context, cmd *cli.Command) error {
-	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
+	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}
 
-	return withRepoLock(sesamDir, 5*time.Second, func() error {
-		mgr, _, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
-		if err != nil {
-			return err
-		}
-
-		if err := mgr.RevealAll(); err != nil {
+	return withManagers(sesamDir, cmd.StringSlice("identity"), func(mgr *runtimeManagers) error {
+		if err := mgr.Secret.RevealAll(); err != nil {
 			return fmt.Errorf("failed to reveal secrets: %w", err)
 		}
 
@@ -54,41 +53,85 @@ func HandleReveal(_ context.Context, cmd *cli.Command) error {
 	})
 }
 
+func withManagers(sesamDir string, identityPaths []string, fn func(*runtimeManagers) error) error {
+	return withRepoLock(sesamDir, func() (err error) {
+		mgr, err := buildManagers(sesamDir, identityPaths)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			closeErr := mgr.Close()
+			if closeErr == nil {
+				return
+			}
+
+			if err != nil {
+				err = fmt.Errorf("failed to close managers: %w", closeErr)
+				return
+			}
+
+			slog.Warn("encrypt: failed to close managers", slog.Any("error", closeErr))
+		}()
+
+		return fn(mgr)
+	})
+}
+
+type runtimeManagers struct {
+	Secret *core.SecretManager
+	User   *core.UserManager
+
+	auditLog *core.AuditLog
+}
+
+func (mgr *runtimeManagers) Close() error {
+	if mgr == nil || mgr.auditLog == nil {
+		return nil
+	}
+
+	err := mgr.auditLog.Close()
+	if err != nil {
+		return fmt.Errorf("failed to close audit log: %w", err)
+	}
+
+	return nil
+}
+
 // buildManagers initializes runtime state for non-init operations.
-func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager, *core.UserManager, error) {
+func buildManagers(sesamDir string, identityPath []string) (*runtimeManagers, error) {
 	identities, err := loadIdentities(
 		identityPath,
 		keyringFingerprint,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	keyring := core.EmptyKeyring()
 
 	auditLog, err := core.LoadAuditLog(sesamDir, identities)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load audit log: %w", err)
+		return nil, fmt.Errorf("failed to load audit log: %w", err)
 	}
 
 	verifyStart := time.Now()
 	vstate, err := core.Verify(auditLog, keyring)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to verify audit log: %w", err)
+		return nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}
 
 	slog.Info("audit log verified", slog.Duration("duration", time.Since(verifyStart)))
 
 	whoami, signIdentity, err := identityToUser(identities, keyring.ListUsers())
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to map identity to user: %w", err)
+		return nil, fmt.Errorf("failed to map identity to user: %w", err)
 	}
 
 	slog.Info("resolved signer identity", slog.String("user", whoami))
 
 	signer, err := core.LoadSignKey(sesamDir, whoami, signIdentity)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
+		return nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
 	}
 
 	secMgr, err := core.BuildSecretManager(
@@ -100,7 +143,7 @@ func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager,
 		vstate,
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to build secret manager: %w", err)
+		return nil, fmt.Errorf("failed to build secret manager: %w", err)
 	}
 
 	usrMgr, err := core.BuildUserManager(
@@ -110,16 +153,20 @@ func buildManagers(sesamDir string, identityPath []string) (*core.SecretManager,
 		vstate,
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to build user manager: %w", err)
+		return nil, fmt.Errorf("failed to build user manager: %w", err)
 	}
 
 	// TODO: Find a better place to call this.
 	// .git/config is not synced and needs to be constantly checked.
-	if err := clirepo.EnsureDefaultGitConfig(); err != nil {
-		return nil, nil, err
+	if err := repo.EnsureDefaultGitConfig(); err != nil {
+		return nil, err
 	}
 
-	return secMgr, usrMgr, nil
+	return &runtimeManagers{
+		Secret:   secMgr,
+		User:     usrMgr,
+		auditLog: auditLog,
+	}, nil
 }
 
 func identityToUser(identities core.Identities, users map[string]core.Recipients) (string, *core.Identity, error) {
@@ -184,4 +231,15 @@ func loadIdentitiesWith(identityPaths []string, provider core.PassphraseProvider
 	}
 
 	return identities, nil
+}
+
+func deleteRevealedSecrets(sesamDir string, secrets []core.VerifiedSecret) error {
+	for _, secret := range secrets {
+		revealedPath := filepath.Join(sesamDir, secret.RevealedPath)
+		if err := os.Remove(revealedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("failed to delete %s: %w", secret.RevealedPath, err)
+		}
+	}
+
+	return nil
 }
