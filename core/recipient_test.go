@@ -12,13 +12,14 @@ import (
 	"testing"
 
 	"filippo.io/age"
+	"filippo.io/age/plugin"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
 
 func TestParseRecipientAge(t *testing.T) {
 	user := newTestUser(t, "alice")
-	r, err := ParseRecipient(user.Recipient.String())
+	r, err := ParseRecipient(user.Recipient.String(), nil)
 	require.NoError(t, err)
 	require.Equal(t, user.Recipient.String(), r.String())
 }
@@ -33,10 +34,28 @@ func TestParseRecipientSSH(t *testing.T) {
 
 	authorizedKey := string(ssh.MarshalAuthorizedKey(sshPub))
 
-	r, err := ParseRecipient(authorizedKey)
+	r, err := ParseRecipient(authorizedKey, nil)
 	require.NoError(t, err)
 	require.NotNil(t, r)
 	require.NotEmpty(t, r.String())
+}
+
+func TestParseRecipientPluginHRP(t *testing.T) {
+	// age1yubikey1… (HRP "age1yubikey") must dispatch to plugin parsing,
+	// not the X25519 parser - that's the whole point of the bech32 sniff.
+	rec := plugin.EncodeRecipient("yubikey", []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
+
+	r, err := ParseRecipient(rec, NewInteractivePluginUI())
+	require.NoError(t, err)
+	require.Equal(t, rec, r.String())
+}
+
+func TestParseRecipientPluginRequiresUI(t *testing.T) {
+	rec := plugin.EncodeRecipient("yubikey", []byte{1, 2, 3, 4, 5, 6, 7, 8})
+
+	_, err := ParseRecipient(rec, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "PluginUI")
 }
 
 func TestParseRecipientInvalidInputs(t *testing.T) {
@@ -52,7 +71,7 @@ func TestParseRecipientInvalidInputs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseRecipient(tc.key)
+			_, err := ParseRecipient(tc.key, nil)
 			require.Error(t, err)
 		})
 	}
@@ -62,7 +81,7 @@ func TestParseRecipientsFromSlice(t *testing.T) {
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
 
-	recps, err := ParseRecipients([]string{alice.Recipient.String(), bob.Recipient.String()})
+	recps, err := ParseRecipients([]string{alice.Recipient.String(), bob.Recipient.String()}, nil)
 	require.NoError(t, err)
 	require.Len(t, recps, 2)
 	require.Equal(t, alice.Recipient.String(), recps[0].String())
@@ -71,13 +90,13 @@ func TestParseRecipientsFromSlice(t *testing.T) {
 
 func TestParseRecipientsEmpty(t *testing.T) {
 	// Empty slice should return empty recipients with no error (old "no recipient found" check was removed).
-	recps, err := ParseRecipients([]string{})
+	recps, err := ParseRecipients([]string{}, nil)
 	require.NoError(t, err)
 	require.Empty(t, recps)
 }
 
 func TestParseRecipientsInvalidKey(t *testing.T) {
-	_, err := ParseRecipients([]string{"not-a-key"})
+	_, err := ParseRecipients([]string{"not-a-key"}, nil)
 	require.Error(t, err)
 }
 
@@ -267,6 +286,7 @@ func TestParseAndResolveRecipients(t *testing.T) {
 		context.Background(),
 		"/tmp",
 		[]string{alice.Recipient.String(), bob.Recipient.String()},
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, recps, 2)
@@ -290,18 +310,18 @@ func TestParseAndResolveRecipientsMultiKeyURL(t *testing.T) {
 	os.MkdirAll(filepath.Dir(cp), 0o700)
 	os.WriteFile(cp, []byte(alice.Recipient.String()+"\n"+bob.Recipient.String()+"\n"), 0o600)
 
-	recps, err := ParseAndResolveRecipients(context.Background(), sesamDir, []string{url})
+	recps, err := ParseAndResolveRecipients(context.Background(), sesamDir, []string{url}, nil)
 	require.NoError(t, err)
 	require.Len(t, recps, 2)
 }
 
 func TestParseAndResolveRecipientsInvalidKey(t *testing.T) {
-	_, err := ParseAndResolveRecipients(context.Background(), "/tmp", []string{"not-a-key"})
+	_, err := ParseAndResolveRecipients(context.Background(), "/tmp", []string{"not-a-key"}, nil)
 	require.Error(t, err)
 }
 
 func TestParseAndResolveRecipientsEmpty(t *testing.T) {
-	recps, err := ParseAndResolveRecipients(context.Background(), "/tmp", []string{})
+	recps, err := ParseAndResolveRecipients(context.Background(), "/tmp", []string{}, nil)
 	require.NoError(t, err)
 	require.Empty(t, recps)
 }

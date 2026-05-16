@@ -1,0 +1,31 @@
+# Verify that sesam supports age plugin identities and recipients end-to-end.
+# Uses the mock age-plugin-sesamtest binary (registered in TestMain) so the
+# scenario exercises the real plugin protocol without needing a YubiKey.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Tell: add 'yubi' as a dev with the mock plugin's recipient. ParseRecipient
+# must dispatch the `age1sesamtest1…` HRP to the plugin client, and the
+# reseal at the end of tell calls Wrap through the plugin.
+exec sesam tell --user yubi --recipient $PLUGIN_PUBKEY --group dev
+
+# Audit log now records the plugin recipient verbatim.
+exec sesam show .sesam/audit/log.jsonl
+stdout '"yubi"'
+stdout 'age1sesamtest1'
+
+# The plugin identity can decrypt the audit log: ParseIdentity dispatches
+# AGE-PLUGIN-SESAMTEST-1 to the plugin, and Unwrap runs through the mock.
+exec sesam --identity $PLUGIN_KEY show .sesam/audit/log.jsonl
+stdout '"user.tell"'
+stdout '"yubi"'
+
+# Kill 'yubi': rotates the audit key so the plugin identity loses access.
+exec sesam kill --user yubi
+! exec sesam --identity $PLUGIN_KEY show .sesam/audit/log.jsonl

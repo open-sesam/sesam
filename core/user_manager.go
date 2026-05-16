@@ -79,7 +79,7 @@ func (um *UserManager) TellUser(
 		return fmt.Errorf("re-adding user not yet supported")
 	}
 
-	recps, err := ParseAndResolveRecipients(ctx, um.sesamDir, pubKeySpecs)
+	recps, err := ParseAndResolveRecipients(ctx, um.sesamDir, pubKeySpecs, um.state.pluginUI)
 	if err != nil {
 		return err
 	}
@@ -160,11 +160,14 @@ func (um *UserManager) KillUsers(user string) error {
 }
 
 // InitAdminUser has to be called on init to create the initial user.
+// pluginUI is used when any of pubKeySpecs is a plugin recipient; pass nil
+// to default to a non-interactive UI.
 func InitAdminUser(
 	ctx context.Context,
 	sesamDir, user string, pubKeySpecs []string,
+	pluginUI *PluginUI,
 ) (Signer, *AuditLog, error) {
-	recps, err := ParseAndResolveRecipients(ctx, sesamDir, pubKeySpecs)
+	recps, err := ParseAndResolveRecipients(ctx, sesamDir, pubKeySpecs, pluginUI)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	clirepo "github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
@@ -35,7 +36,7 @@ func HandleTell(ctx context.Context, cmd *cli.Command) error {
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
 		identityPaths := cmd.StringSlice("identity")
 		// TODO: close audit log
-		_, usrMgr, err := buildManagers(sesamDir, identityPaths)
+		_, usrMgr, err := buildManagers(sesamDir, identityPaths, core.NewInteractivePluginUI())
 		if err != nil {
 			return fmt.Errorf(" failed to load secret manager: %w", err)
 		}
@@ -61,7 +62,7 @@ func HandleKill(_ context.Context, cmd *cli.Command) error {
 	}
 
 	return withRepoLock(sesamDir, 5*time.Second, func() error {
-		_, usrMgr, err := buildManagers(sesamDir, cmd.StringSlice("identity"))
+		_, usrMgr, err := buildManagers(sesamDir, cmd.StringSlice("identity"), core.NewInteractivePluginUI())
 		if err != nil {
 			return err
 		}

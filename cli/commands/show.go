@@ -20,9 +20,11 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	identityPaths := cmd.StringSlice("identity")
+	pluginUI := core.NewInteractivePluginUI()
 	ids, err := loadIdentities(
 		identityPaths,
 		keyringFingerprint,
+		pluginUI,
 	)
 	if err != nil {
 		return err
@@ -48,7 +50,7 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 			}
 
 			// NOTE: This gets expensive, so do it last:
-			_, um, err := buildManagers(sesamDir, identityPaths)
+			_, um, err := buildManagers(sesamDir, identityPaths, pluginUI)
 			if err != nil {
 				return err
 			}

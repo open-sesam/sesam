@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
+	"filippo.io/age/plugin"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -188,15 +190,18 @@ func resolveCachedLink(ctx context.Context, sesamDir, url string, cacheMode Cach
 	return splitByLine(buf.String()), err
 }
 
-// ParseRecipient will turn a public key to a recipient that age can understand.
+// ParseRecipient turns a public key string into a recipient age can use to
+// encrypt. Accepts X25519 (`age1…`), hybrid (`age1pq1…`), age plugin recipients
+// (`age1yubikey1…`, `age1tpm1…`, …) and SSH public keys. pluginUI is required
+// when arg may be a plugin recipient; pass NewInteractivePluginUI() when in
+// doubt - it is invoked only if a plugin actually prompts during Wrap.
 // This function does not resolve forge-ids or links.
-func ParseRecipient(arg string) (*Recipient, error) {
+func ParseRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
 	var r age.Recipient
 	var s string
 	var err error
 
 	// NOTE: Code based on age cli.
-	// TODO: For yubikeys etc. we need to support a couple more lines here I guess.
 	switch {
 	case strings.HasPrefix(arg, "age1pq1"):
 		hr, err := age.ParseHybridRecipient(arg)
@@ -206,12 +211,19 @@ func ParseRecipient(arg string) (*Recipient, error) {
 
 		r, s = hr, hr.String()
 	case strings.HasPrefix(arg, "age1"):
-		xr, err := age.ParseX25519Recipient(arg)
-		if err != nil {
-			return nil, err
+		// X25519 (HRP "age") and plugin recipients (HRP "age1<name>") share
+		// the `age1` literal prefix. Try X25519 first; on HRP mismatch fall
+		// through to plugin parsing so e.g. `age1yubikey1…` resolves.
+		xr, xerr := age.ParseX25519Recipient(arg)
+		if xerr == nil {
+			r, s = xr, xr.String()
+			break
 		}
-
-		r, s = xr, xr.String()
+		pr, perr := parsePluginRecipient(arg, pluginUI)
+		if perr != nil {
+			return nil, fmt.Errorf("not a recognised age recipient: %w", errors.Join(xerr, perr))
+		}
+		r, s = pr.Recipient, pr.String()
 	case strings.HasPrefix(arg, "ssh-"):
 		// ssh keys have no stringer sadly. Incoming ssh keys might contain comments (like user@host) or options.
 		// which can making comparison hard. Parse it therefore and re-marshal to strip that kind of stops.
@@ -237,12 +249,27 @@ func ParseRecipient(arg string) (*Recipient, error) {
 	}, err
 }
 
+func parsePluginRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
+	if pluginUI == nil {
+		return nil, fmt.Errorf("plugin recipient requires a PluginUI; pass NewInteractivePluginUI()")
+	}
+
+	pr, err := plugin.NewRecipient(arg, pluginUI.ClientUI())
+	if err != nil {
+		return nil, err
+	}
+	return &Recipient{
+		Recipient:           pr,
+		comparablePublicKey: newStringPubKey(pr.String()),
+	}, nil
+}
+
 // ParseRecipients parses one or more newline-separated recipient keys.
-func ParseRecipients(recps []string) (Recipients, error) {
+func ParseRecipients(recps []string, pluginUI *PluginUI) (Recipients, error) {
 	var recipients Recipients
 
 	for _, recp := range recps {
-		recp, err := ParseRecipient(recp)
+		recp, err := ParseRecipient(recp, pluginUI)
 		if err != nil {
 			return nil, err
 		}
@@ -253,7 +280,7 @@ func ParseRecipients(recps []string) (Recipients, error) {
 	return recipients, nil
 }
 
-func ParseAndResolveRecipients(ctx context.Context, sesamDir string, pubKeySpecs []string) (Recipients, error) {
+func ParseAndResolveRecipients(ctx context.Context, sesamDir string, pubKeySpecs []string, pluginUI *PluginUI) (Recipients, error) {
 	recps := make(Recipients, 0, len(pubKeySpecs))
 	for idx, pubKeySpec := range pubKeySpecs {
 		rawPubKeys, err := ResolveRecipient(
@@ -266,7 +293,7 @@ func ParseAndResolveRecipients(ctx context.Context, sesamDir string, pubKeySpecs
 			return nil, fmt.Errorf("failed to resolve recipient %s (#%d): %w", pubKeySpec, idx, err)
 		}
 
-		subRecps, err := ParseRecipients(rawPubKeys)
+		subRecps, err := ParseRecipients(rawPubKeys, pluginUI)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse recipient %s (#%d): %w", rawPubKeys, idx, err)
 		}

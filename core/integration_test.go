@@ -37,7 +37,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 
 	gitCommitAll(t, repo, "sesam init")
 
-	vstate, err := Verify(auditLog, keyring)
+	vstate, err := Verify(auditLog, keyring, nil)
 	require.NoError(t, err, "Verify after init")
 
 	sm, err := BuildSecretManager(
@@ -71,7 +71,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	auditLog2, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.NoError(t, err)
 
-	vstate2, err := Verify(auditLog2, keyring2)
+	vstate2, err := Verify(auditLog2, keyring2, nil)
 	require.NoError(t, err, "Verify on reload")
 
 	resolvedUser, err := IdentityToUser(admin.Identity, keyring2.ListUsers())
@@ -117,7 +117,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	require.NoError(t, err)
 	gitCommitAll(t, repo, "init")
 
-	vstate, err := Verify(al, keyring)
+	vstate, err := Verify(al, keyring, nil)
 	require.NoError(t, err)
 
 	// ── Admin adds bob ──
@@ -146,7 +146,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	gitCommitAll(t, repo, "add bob and secret")
 
 	// Re-verify to pick up the new entries.
-	vstate, err = Verify(al, keyring)
+	vstate, err = Verify(al, keyring, nil)
 	require.NoError(t, err)
 
 	smBob, err := BuildSecretManager(
@@ -170,7 +170,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	al3, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.NoError(t, err)
 
-	vstate3, err := Verify(al3, keyring3)
+	vstate3, err := Verify(al3, keyring3, nil)
 	require.NoError(t, err, "full re-verify")
 
 	require.Len(t, vstate3.Users, 2)
@@ -205,7 +205,7 @@ func TestIntegrationTamperDetection(t *testing.T) {
 	gitCommitAll(t, repo, "tamper")
 
 	keyring := EmptyKeyring()
-	_, err = Verify(al, keyring)
+	_, err = Verify(al, keyring, nil)
 	require.Error(t, err, "should detect init file tampering")
 }
 
@@ -228,7 +228,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	gitCommitAll(t, repo, "init")
 
 	kr := EmptyKeyring()
-	vs, err := Verify(al, kr)
+	vs, err := Verify(al, kr, nil)
 	require.NoError(t, err)
 
 	sm, err := BuildSecretManager(
@@ -263,7 +263,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 
 	// 4. Re-seal.
 	writeSecret(t, sesamDir, "secrets/token", "tok-abc")
-	vs, err = Verify(al, kr)
+	vs, err = Verify(al, kr, nil)
 	require.NoError(t, err)
 	sm, err = BuildSecretManager(
 		sesamDir,
@@ -298,7 +298,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	al2, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.NoError(t, err)
 
-	vs2, err := Verify(al2, kr2)
+	vs2, err := Verify(al2, kr2, nil)
 	require.NoError(t, err, "final verify")
 	require.Empty(t, vs2.Secrets)
 }

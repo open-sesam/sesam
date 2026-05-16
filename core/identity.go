@@ -10,9 +10,11 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
+	"filippo.io/age/plugin"
 	"github.com/chzyer/readline"
 	"github.com/zalando/go-keyring"
 	"golang.org/x/crypto/ssh"
@@ -162,14 +164,23 @@ func sshKeyToIdentity(rawKey any) (*Identity, error) {
 	}
 }
 
-// ParseIdentities parses raw key bytes into age identities. It tries native
-// age keys first, then falls back to SSH key parsing. Passphrase protected keys are supported
-// via the `passphraseProvider`.
-func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity, error) {
-	// Try native age identities first (AGE-SECRET-KEY-1...).
+// ParseIdentity parses raw key bytes into an age identity. It accepts native
+// age identities, age plugin identities (`AGE-PLUGIN-…`), and SSH private
+// keys (with passphrase support via passphraseProvider). pluginUI is required
+// for plugin identities and may be nil otherwise.
+//
+// age and plugin identity files commonly carry `# created:` and
+// `# public key: …` header comments (the output format of age-keygen and
+// age-plugin-yubikey). Those are tolerated; the first non-comment line is
+// taken as the identity payload. For plugin identities the `# public key: …`
+// line is the recipient encoding sesam compares against the audit log and is
+// therefore required.
+func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *PluginUI) (*Identity, error) {
+	ageLine, recipientHint := scanAgeIdentity(key)
+
 	switch {
-	case strings.HasPrefix(key, "AGE-SECRET-KEY-1"):
-		x25519id, err := age.ParseX25519Identity(key)
+	case strings.HasPrefix(ageLine, "AGE-SECRET-KEY-1"):
+		x25519id, err := age.ParseX25519Identity(ageLine)
 		if err != nil {
 			return nil, err
 		}
@@ -178,8 +189,8 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity
 			Identity: x25519id,
 			pub:      newStringPubKey(x25519id.Recipient().String()),
 		}, nil
-	case strings.HasPrefix(key, "AGE-SECRET-KEY-PQ-1"):
-		hybridID, err := age.ParseHybridIdentity(key)
+	case strings.HasPrefix(ageLine, "AGE-SECRET-KEY-PQ-1"):
+		hybridID, err := age.ParseHybridIdentity(ageLine)
 		if err != nil {
 			return nil, err
 		}
@@ -188,6 +199,8 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity
 			Identity: hybridID,
 			pub:      newStringPubKey(hybridID.Recipient().String()),
 		}, nil
+	case strings.HasPrefix(ageLine, "AGE-PLUGIN-"):
+		return parsePluginIdentity(ageLine, recipientHint, pluginUI)
 	}
 
 	// Try parsing it as an unencrypted SSH key first, since it's apparently not age.
@@ -218,6 +231,91 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider) (*Identity
 	}
 
 	return sshKeyToIdentity(rawKey)
+}
+
+// scanAgeIdentity walks an identity file, returning the first non-comment
+// line (the identity payload) and any `# public key: …` value carried in
+// the file's header comments. age-keygen emits `# public key:`,
+// age-plugin-yubikey emits `# Recipient:`; matching is case-insensitive on
+// both the key and the prefix so either format is accepted. Empty strings
+// if no match.
+func scanAgeIdentity(data string) (identityLine, publicKey string) {
+	for _, raw := range strings.Split(data, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "#") {
+			if identityLine == "" {
+				identityLine = line
+			}
+			continue
+		}
+
+		// Comment line: try to extract a public-key / recipient header.
+		// Format: "# <key>: <value>" with key match case-insensitive.
+		body := strings.TrimSpace(strings.TrimPrefix(line, "#"))
+		key, value, ok := strings.Cut(body, ":")
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "public key":
+			publicKey = strings.TrimSpace(value)
+		case "recipient":
+			if publicKey == "" {
+				publicKey = strings.TrimSpace(value)
+			}
+		}
+	}
+
+	return
+}
+
+// parsePluginIdentity wraps a plugin.Identity into core's Identity type.
+// recipientHint is the `# public key: …` value from the identity file - it
+// is required because plugin.Identity.Recipient().String() returns a
+// placeholder ("<identity-based recipient>") rather than the recipient
+// encoding sesam needs to match identities to users.
+func parsePluginIdentity(ageLine, recipientHint string, pluginUI *PluginUI) (*Identity, error) {
+	pluginIdentity, err := plugin.NewIdentity(ageLine, pluginUI.ClientUI())
+	if err != nil {
+		return nil, fmt.Errorf("parse plugin identity: %w", err)
+	}
+
+	if recipientHint == "" {
+		return nil, fmt.Errorf(
+			"plugin identity for %q is missing a `# public key: …` header; sesam needs the recipient to map identities to users",
+			pluginIdentity.Name(),
+		)
+	}
+
+	// Wrap so we can print a heads-up before handing control to the plugin
+	// subprocess. age-plugin-yubikey (and other hardware plugins) bypass the
+	// plugin protocol's request-secret and read the PIN directly from
+	// /dev/tty, so PluginUI.requestValue never fires - this Unwrap hook is
+	// the only place sesam can prompt the user before the plugin takes over.
+	return &Identity{
+		Identity: &pluginIdentityWithHint{inner: pluginIdentity, ui: pluginUI},
+		pub:      newStringPubKey(recipientHint),
+	}, nil
+}
+
+// pluginIdentityWithHint prints a user-facing notice before the plugin
+// subprocess starts, so the PIN prompt and the touch wait aren't
+// uninterpreted silence to the user. The hint fires only on the first
+// Unwrap: age.Decrypt tries each identity against every recipient stanza
+// in the file, so without the guard we'd announce N times in a row for an
+// audit key encrypted to N users.
+type pluginIdentityWithHint struct {
+	inner    *plugin.Identity
+	ui       *PluginUI
+	announce sync.Once
+}
+
+func (p *pluginIdentityWithHint) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
+	p.announce.Do(func() { p.ui.announcePluginCall(p.inner.Name()) })
+	return p.inner.Unwrap(stanzas)
 }
 
 func (spp *StdinPassphraseProvider) ReadPassphrase() ([]byte, error) {
