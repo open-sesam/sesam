@@ -88,3 +88,5 @@ var flagsKill = []cli.Flag{
 		Usage:    "User name to remove",
 	},
 }
+
+var flagsShow = []cli.Flag{}

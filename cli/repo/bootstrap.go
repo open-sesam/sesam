@@ -11,6 +11,7 @@ import (
 	"text/template"
 
 	"github.com/go-git/go-git/v5"
+	gogitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/google/renameio"
 )
 
@@ -114,6 +115,7 @@ func EnsureInitPathChoice(sesamRoot string, useRoot bool) error {
 		return err
 	}
 
+	// TODO: Need to improve on that heuristic.
 	if fileCount > initRootFileThreshold {
 		return fmt.Errorf("refusing to initialize in %s: found %d files; use a sub-directory with --sesam-dir or pass --use-root to proceed", sesamRoot, fileCount)
 	}
@@ -255,6 +257,67 @@ func EnsureDefaultGitAttributes(sesamDir string) error {
 	return appendMissingLines(gitAttributesPath, gitattributesTemplate, 0o644)
 }
 
+func EnsureDefaultGitConfig() error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+	return EnsureGitConfigAt(cwd)
+}
+
+func EnsureGitConfigAt(dir string) error {
+	r, err := OpenGitRepo(dir)
+	if err != nil {
+		return fmt.Errorf("no git repository found: %w", err)
+	}
+
+	return ensureGitConfig(r)
+}
+
+func ensureGitConfig(r *git.Repository) error {
+	cfg, err := r.ConfigScoped(gogitconfig.LocalScope)
+	if err != nil {
+		return fmt.Errorf("read local git config: %w", err)
+	}
+
+	mergeSection := cfg.Raw.Section("merge").Subsection("sesam-merge")
+	filterSection := cfg.Raw.Section("filter").Subsection("sesam-filter")
+
+	mergeConfigured := mergeSection.Option("driver") != ""
+	processConfigured := filterSection.Option("process") != ""
+
+	// Both legacy drivers and the long-running filter process are already
+	// installed; nothing to do.
+	if mergeConfigured && processConfigured {
+		return nil
+	}
+
+	if !mergeConfigured {
+		mergeSection.SetOption("name", "merge the audit log of sesam")
+		mergeSection.SetOption("driver", "sesam audit merge %O %A %B %L %P")
+
+		diffSection := cfg.Raw.Section("diff").Subsection("sesam-diff")
+		diffSection.SetOption("textconv", "sesam show")
+
+		filterSection.SetOption("smudge", "sesam smudge %f")
+		filterSection.SetOption("clean", "cat")
+		filterSection.SetOption("required", "false")
+	}
+
+	if !processConfigured {
+		// Long-running filter process - amortises identity loading across all
+		// blobs in a single git operation. Git 2.11+ prefers this over the
+		// legacy smudge/clean keys; older git ignores it and uses the fallback.
+		filterSection.SetOption("process", "sesam smudge")
+	}
+
+	if err := r.SetConfig(cfg); err != nil {
+		return fmt.Errorf("write git config: %w", err)
+	}
+
+	return nil
+}
+
 func appendMissingLines(path string, content string, mode os.FileMode) error {
 	var existing string
 	fileMissing := false
@@ -364,7 +427,7 @@ func EnsureSesamDirGitConfig(sesamDir string) error {
 }
 
 func resolveGitDir(sesamDir string) (string, error) {
-	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{DetectDotGit: true})
+	repo, err := OpenGitRepo(sesamDir)
 	if err != nil {
 		return "", err
 	}

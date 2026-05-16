@@ -71,32 +71,22 @@ func HandleList(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	auditLog, _, vstate, err := loadVerifiedState(sesamDir)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = auditLog.Close()
-	}()
+	return withManagers(sesamDir, cmd.StringSlice("identity"), func(mgr *runtimeManagers) error {
+		vstate := mgr.Secret.State
+		secrets := make([]string, 0, len(vstate.Secrets))
+		for _, secret := range vstate.Secrets {
+			groups := append([]string(nil), secret.AccessGroups...)
+			sort.Strings(groups)
+			secrets = append(secrets, fmt.Sprintf("%s\tgroups=%s", secret.RevealedPath, commaJoined(groups)))
+		}
 
-	if len(vstate.Secrets) == 0 {
-		fmt.Println("no secrets")
+		sort.Strings(secrets)
+		for _, line := range secrets {
+			fmt.Println(line)
+		}
+
 		return nil
-	}
-
-	secrets := make([]string, 0, len(vstate.Secrets))
-	for _, secret := range vstate.Secrets {
-		groups := append([]string(nil), secret.AccessGroups...)
-		sort.Strings(groups)
-		secrets = append(secrets, fmt.Sprintf("%s\tgroups=%s", secret.RevealedPath, commaJoined(groups)))
-	}
-
-	sort.Strings(secrets)
-	for _, line := range secrets {
-		fmt.Println(line)
-	}
-
-	return nil
+	})
 }
 
 func normalizedGroups(groups []string) []string {

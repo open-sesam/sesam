@@ -91,6 +91,14 @@ Remove a person from a group
 
 List persons, groups, and access
 
+### `sesam show`
+
+Show objects managed by sesam
+
+### `sesam clean`
+
+Remove revealed plaintext and other untracked files from the sesam directory
+
 ### `sesam rotate`
 
 Plan and execute secret rotation
@@ -108,4 +116,4 @@ Execute the planned rotation
 Show rotation tasks and follow-up status
 
 
-> `*` — required flag
+> `*` - required flag

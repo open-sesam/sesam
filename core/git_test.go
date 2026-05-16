@@ -39,7 +39,7 @@ func TestVerifyInitFileUnchangedMultipleCommits(t *testing.T) {
 	require.NoError(t, os.WriteFile(initPath, []byte("hash1"), 0o600))
 	gitCommitAll(t, repo, "first commit")
 
-	// Modify the init file and commit again — should be detected.
+	// Modify the init file and commit again - should be detected.
 	require.NoError(t, os.WriteFile(initPath, []byte("hash2"), 0o600))
 	gitCommitAll(t, repo, "tampered commit")
 
@@ -66,4 +66,10 @@ func TestVerifyInitFileUnchangedNotAGitRepo(t *testing.T) {
 
 	err := verifyInitFileUnchanged(sesamDir)
 	require.Error(t, err, "should fail for non-git directory")
+}
+
+func TestVerifyInitFileUnchangedNoCommitsAtAll(t *testing.T) {
+	sesamDir, _ := testGitRepo(t)
+	// Zero commits — repo.Log() returns ErrReferenceNotFound, treated as "fine during init".
+	require.NoError(t, verifyInitFileUnchanged(sesamDir))
 }

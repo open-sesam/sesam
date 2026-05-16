@@ -9,10 +9,10 @@ import (
 
 // VerifiedUser is a user that has been verified by the audit log.
 type VerifiedUser struct {
-	Name       string
-	Groups     []string
-	SignPubKey []string
-	PubKeys    []string
+	Name       string   `json:"name"`
+	Groups     []string `json:"groups"`
+	SignPubKey []string `json:"sign_pub_key"`
+	PubKeys    []string `json:"pub_keys"`
 }
 
 // VerifiedSecret is a secret verified by the audit log.
@@ -428,14 +428,14 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 		return nil, err
 	}
 
-	// Verify that the latest seal's RootHash matches the .sig.json files on disk.
+	// Verify that the latest seal's RootHash matches the signature footers on disk.
 	if state.LastSealRootHash != "" {
 		sigs, err := readAllSignatures(log.SesamDir)
 		if err != nil {
 			return nil, fmt.Errorf("reading signatures for root hash check: %w", err)
 		}
 
-		sigPtrs := make([]*secretSignature, len(sigs))
+		sigPtrs := make([]*secretFooter, len(sigs))
 		for i := range sigs {
 			sigPtrs[i] = &sigs[i]
 		}
@@ -524,15 +524,20 @@ func verify(state *VerifiedState) error {
 		return err
 	}
 
+	*state = newState
+	return nil
+}
+
+// TODO: Make sure this is called
+func (s *VerifiedState) Close() error {
 	// NOTE: Not a hard error for now, there might be valid reasons this happened.
 	// Could be that sesam was legit interrupted during operation.
-	if srs := state.SealRequiredSeqID; srs > 0 {
+	if srs := s.SealRequiredSeqID; srs > 0 {
 		slog.Warn(
 			"verify: entry required a seal, but none was made after",
 			slog.Uint64("seq_id", srs),
 		)
 	}
 
-	*state = newState
 	return nil
 }

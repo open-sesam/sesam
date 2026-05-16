@@ -1,8 +1,6 @@
 package core
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"filippo.io/age"
@@ -49,7 +47,7 @@ func TestLoadSignKeyWrongIdentity(t *testing.T) {
 	_, err := GenerateSignKey(sesamDir, "alice", []age.Recipient{alice.Recipient.Recipient})
 	require.NoError(t, err)
 
-	// Try loading with bob's identity — should fail to decrypt.
+	// Try loading with bob's identity - should fail to decrypt.
 	_, err = LoadSignKey(sesamDir, "alice", bob.Identity)
 	require.Error(t, err, "should fail when decrypting with wrong identity")
 }
@@ -81,22 +79,6 @@ func TestReadAllSignaturesNoObjectsDir(t *testing.T) {
 	sigs, err := readAllSignatures(sesamDir)
 	require.NoError(t, err, "should not fail when objects dir does not exist")
 	require.Empty(t, sigs)
-}
-
-func TestReadStoredSignatureMissing(t *testing.T) {
-	sesamDir := testRepo(t)
-	_, err := readStoredSignature(sesamDir, "does/not/exist")
-	require.Error(t, err)
-}
-
-func TestReadStoredSignatureCorrupt(t *testing.T) {
-	sesamDir := testRepo(t)
-	sigPath := signaturePath(sesamDir, "secrets/corrupt")
-	os.MkdirAll(filepath.Dir(sigPath), 0o700)
-	os.WriteFile(sigPath, []byte("not json"), 0o600)
-
-	_, err := readStoredSignature(sesamDir, "secrets/corrupt")
-	require.Error(t, err, "should fail on corrupt sig JSON")
 }
 
 func TestSignCrossDomain(t *testing.T) {

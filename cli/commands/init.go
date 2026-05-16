@@ -11,6 +11,10 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// TODO: Show ascii logo on init
+
+const keyringFingerprint = "sesam.identity.runtime"
+
 // HandleInit bootstraps sesam metadata in a git repository.
 func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
@@ -88,6 +92,11 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 		if err := repo.EnsureDefaultGitAttributes(sesamDir); err != nil {
 			return err
 		}
+
+		if err := repo.EnsureGitConfigAt(sesamDir); err != nil {
+			return err
+		}
+
 		// TODO: fix pre-commit hook to verify and seal before commit.
 		// if err := repo.EnsureVerifyHook(sesamDir); err != nil {
 		// 	return err

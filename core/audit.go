@@ -233,7 +233,7 @@ type DetailSecretRemove struct {
 //
 // - FilesSealed is purely informative.
 type DetailSeal struct {
-	// This hash is build from the sorted list of all .sig.json files after seal.
+	// This hash is build from the sorted list of all signature footers after seal.
 	RootHash string `json:"root_hash"`
 
 	// FilesSealed is the number of files that were sealed.
@@ -277,23 +277,23 @@ type DetailSeal struct {
 //
 // In all cases verify would complain about it and warn an user about Eve.
 type AuditLog struct {
-	Entries []auditEntrySigned
+	Entries []auditEntrySigned `json:"entries"`
 
 	// SesamDir is the dir in which .sesam resides.
-	SesamDir string
+	SesamDir string `json:"-"`
 
 	// The hash from the .sesam/audit/init file.
 	// It should be the same hash as the prev_hash of the 2nd entry.
-	InitHash string
+	InitHash string `json:"-"`
 
 	// file descriptor for adding new entries.
-	fd *os.File
+	fd *os.File `json:"-"`
 
 	// encryption support:
-	key  [32]byte
-	aead cipher.AEAD
+	key  [32]byte    `json:"-"`
+	aead cipher.AEAD `json:"-"`
 
-	closed bool
+	closed bool `json:"-"`
 }
 
 // operationFor returns the operation type for a given detail struct.
@@ -372,95 +372,110 @@ func (aes *auditEntrySigned) Verify(kr Keyring) (string, error) {
 	return kr.Verify(SesamDomainSignAuditTag, wholeEntryJSON, aes.Signature, aes.ChangedBy)
 }
 
-// WriteAuditKey rewrites key.age on disk with all `recps` having access.
-// If the file exists already then it is replaced atomically.
-func (al *AuditLog) WriteAuditKey(recps Recipients) error {
-	keyPath := filepath.Join(al.SesamDir, ".sesam", "audit", "key.age")
-	return al.writeAuditKey(recps, keyPath, al.key[:])
-}
-
-func (al *AuditLog) writeAuditKey(recps Recipients, keyPath string, keyBytes []byte) error {
+// encryptAuditKey wraps key for recps using age, base64-encodes the result,
+// and appends a newline. The return value is a complete line-1 for log.jsonl.
+func encryptAuditKey(key [32]byte, recps Recipients) ([]byte, error) {
 	buf := &bytes.Buffer{}
 	w, err := age.Encrypt(buf, recps.AgeRecipients()...)
 	if err != nil {
-		return fmt.Errorf("encrypt audit key for recipients: %w", err)
+		return nil, fmt.Errorf("encrypt audit key for recipients: %w", err)
 	}
-
-	if _, err := w.Write(keyBytes); err != nil {
-		return fmt.Errorf("write wrapped audit key: %w", err)
+	if _, err := w.Write(key[:]); err != nil {
+		return nil, fmt.Errorf("write wrapped audit key: %w", err)
 	}
-
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("finalize age stream: %w", err)
+		return nil, fmt.Errorf("finalize age stream: %w", err)
+	}
+	encoded := base64.RawStdEncoding.EncodeToString(buf.Bytes())
+	return []byte(encoded + "\n"), nil
+}
+
+// WriteAuditKey rewrites the log with the same symmetric key but a new recipient
+// set. The update is atomic: a tmp file is written and then renamed into place.
+func (al *AuditLog) WriteAuditKey(recps Recipients) error {
+	logPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl")
+
+	newLine1, err := encryptAuditKey(al.key, recps)
+	if err != nil {
+		return err
 	}
 
-	if err := renameio.WriteFile(keyPath, buf.Bytes(), 0o600); err != nil {
-		return fmt.Errorf("persist audit key file %q: %w", keyPath, err)
+	tmpDir := filepath.Join(al.SesamDir, ".sesam", "tmp")
+	tmp, err := renameio.TempFile(tmpDir, logPath)
+	if err != nil {
+		return fmt.Errorf("create tmp audit log: %w", err)
+	}
+	defer func() {
+		_ = tmp.Cleanup()
+	}()
+
+	if _, err := tmp.Write(newLine1); err != nil {
+		return fmt.Errorf("write key line: %w", err)
 	}
 
-	return nil
+	// Stream entry lines verbatim - same symmetric key, no re-encryption needed.
+	if _, err := al.fd.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("seek log: %w", err)
+	}
+	br := bufio.NewReader(al.fd)
+	if _, err := br.ReadString('\n'); err != nil {
+		return fmt.Errorf("skip key line: %w", err)
+	}
+	if _, err := io.Copy(tmp, br); err != nil {
+		return fmt.Errorf("copy entry lines: %w", err)
+	}
+
+	if err := tmp.CloseAtomicallyReplace(); err != nil {
+		return fmt.Errorf("replace audit log: %w", err)
+	}
+
+	_ = al.fd.Close()
+	//nolint:gosec
+	al.fd, err = os.OpenFile(logPath, os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
+	return err
 }
 
 func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
-	newKey := make([]byte, chacha20poly1305.KeySize)
-	rand.Read(newKey)
+	var newKey [32]byte
+	rand.Read(newKey[:])
 
-	newAead, err := chacha20poly1305.New(newKey)
+	newAead, err := chacha20poly1305.New(newKey[:])
 	if err != nil {
 		return fmt.Errorf("init aead with new key: %w", err)
 	}
 
-	tmpLogPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl.crypt.tmp")
+	logPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl")
 
-	//nolint:gosec
-	fd, err := os.OpenFile(tmpLogPath, os.O_CREATE|os.O_TRUNC|os.O_SYNC|os.O_WRONLY, 0o600)
+	tmpDir := filepath.Join(al.SesamDir, ".sesam", "tmp")
+	tmp, err := renameio.TempFile(tmpDir, logPath)
 	if err != nil {
-		return fmt.Errorf("open tmp audit log: %w", err)
+		return fmt.Errorf("create tmp audit log: %w", err)
+	}
+	defer func() {
+		_ = tmp.Cleanup()
+	}()
+
+	line1, err := encryptAuditKey(newKey, recps)
+	if err != nil {
+		return fmt.Errorf("encrypt new audit key: %w", err)
+	}
+	if _, err := tmp.Write(line1); err != nil {
+		return fmt.Errorf("write key line to tmp: %w", err)
 	}
 
 	for idx := range al.Entries {
 		b64EntryData, err := al.Entries[idx].Encrypt(newAead)
 		if err != nil {
-			_ = fd.Close()
 			return fmt.Errorf("re-encrypt entry %d: %w", idx, err)
 		}
-
-		if _, err := fd.Write(b64EntryData); err != nil {
-			_ = fd.Close()
+		if _, err := tmp.Write(b64EntryData); err != nil {
 			return fmt.Errorf("write entry %d to tmp log: %w", idx, err)
 		}
 	}
 
-	if err := fd.Sync(); err != nil {
-		_ = fd.Close()
-		return fmt.Errorf("sync tmp audit log: %w", err)
-	}
-
-	if err := fd.Close(); err != nil {
-		return fmt.Errorf("close tmp audit log: %w", err)
-	}
-
-	// write the updated key to a .tmp file. Note: we deliberately wrap newKey
-	// here, not al.key — al.key is still the old key and will only be swapped
-	// in once both renames have committed.
-	keyPath := filepath.Join(al.SesamDir, ".sesam", "audit", "key.age")
-	tmpKeyPath := keyPath + ".tmp"
-	if err := al.writeAuditKey(recps, tmpKeyPath, newKey); err != nil {
-		return fmt.Errorf("write tmp audit key: %w", err)
-	}
-
-	// Now rename both. Note that we might get interrutped between the two renames.
-	// If that is the case we rely on the next LoadAuditLog() to realize this and
-	// fix this.
-	logPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl.crypt")
-	if err := os.Rename(tmpLogPath, logPath); err != nil {
+	if err := tmp.CloseAtomicallyReplace(); err != nil {
 		_ = al.Close()
 		return fmt.Errorf("swap rotated log into place: %w", err)
-	}
-
-	if err := os.Rename(tmpKeyPath, keyPath); err != nil {
-		_ = al.Close()
-		return fmt.Errorf("swap rotated key into place: %w", err)
 	}
 
 	//nolint:gosec
@@ -470,65 +485,32 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 		return fmt.Errorf("reopen rotated audit log: %w", err)
 	}
 
-	// Update aead so we can continue working:
-	copy(al.key[:], newKey)
+	al.key = newKey
 	al.aead = newAead
 	_ = al.fd.Close()
 	al.fd = newFd
 	return nil
 }
 
-// ensureRekeyTmpFiles only exists of Rekey() was interrupted between renames.
-func ensureRekeyTmpFiles(sesamDir string) error {
-	keyPath := filepath.Join(sesamDir, ".sesam", "audit", "key.age")
-	tmpKeyPath := keyPath + ".tmp"
-
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt")
-	tmpLogPath := logPath + ".tmp"
-
-	var tmpKeyExists bool
-	if _, err := os.Stat(tmpKeyPath); err == nil {
-		tmpKeyExists = true
-	}
-
-	var tmpLogExists bool
-	if _, err := os.Stat(tmpLogPath); err == nil {
-		tmpLogExists = true
-	}
-
-	if !tmpKeyExists && !tmpLogExists {
-		// all good, no interrutped rename.
-		return nil
-	}
-
-	if !tmpLogExists && tmpKeyExists {
-		// most likely interrupted rename.
-		// log was likely already written, so assume we should go and use the fitting key.
-		slog.Warn("found tmp audit key, will rename to actual key")
-		if err := os.Rename(tmpKeyPath, keyPath); err != nil {
-			return fmt.Errorf("complete interrupted rotation: %w", err)
+// cleanupAuditTmp removes any leftover tmp files created by renameio in a
+// previous WriteAuditKey or RotateKey run that crashed before the rename.
+// renameio names them ".log.jsonlXXXXXX" (dot prefix + random suffix).
+// We don't know how much was written, so we just delete and let the caller retry.
+func cleanupAuditTmp(sesamDir string) {
+	dir := filepath.Join(sesamDir, ".sesam", "audit")
+	pattern := filepath.Join(dir, ".log.jsonl*")
+	if matches, err := filepath.Glob(pattern); err == nil {
+		for _, m := range matches {
+			slog.Warn("removing leftover tmp audit log", slog.String("path", m))
+			_ = os.Remove(m)
 		}
-		return nil
 	}
-
-	if tmpLogExists && !tmpKeyExists {
-		// key was never writtten, needs a Rekey()
-		// will be likely done when the user retries the operation.
-		slog.Warn("found tmp log but no tmp key")
-	} else {
-		slog.Warn("found rekey in progress, deleting tmp state for safe retry")
-	}
-
-	// both tmp file exist, remove them. We will likely retry the Rekey()
-	_ = os.Remove(tmpKeyPath)
-	_ = os.Remove(tmpLogPath)
-	return nil
 }
 
 // InitAuditLog initializes an empty audit log on repo init.
 // It creates the first init entry which also establishes the initial admin user.
 func InitAuditLog(sesamDir string, signer Signer, recps Recipients, admin DetailUserTell) (*AuditLog, error) {
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt")
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 
 	if err := os.MkdirAll(filepath.Dir(initPath), 0o700); err != nil {
@@ -546,10 +528,20 @@ func InitAuditLog(sesamDir string, signer Signer, recps Recipients, admin Detail
 		fd:       fd,
 	}
 
-	// generate new audit log key and write it to disk:
+	// Generate the symmetric key and write it as line 1 of the log.
 	rand.Read(al.key[:])
-	if err := al.WriteAuditKey(recps); err != nil {
-		return nil, err
+	line1, err := encryptAuditKey(al.key, recps)
+	if err != nil {
+		closeLogged(fd)
+		return nil, fmt.Errorf("encrypt audit key: %w", err)
+	}
+	if _, err := fd.Write(line1); err != nil {
+		closeLogged(fd)
+		return nil, fmt.Errorf("write audit key line: %w", err)
+	}
+	if err := fd.Sync(); err != nil {
+		closeLogged(fd)
+		return nil, fmt.Errorf("sync audit log: %w", err)
 	}
 
 	al.aead, err = chacha20poly1305.New(al.key[:])
@@ -591,6 +583,9 @@ func (al *AuditLog) Close() error {
 	al.aead = nil
 	al.key = [32]byte{}
 	al.closed = true
+	if al.fd == nil {
+		return nil
+	}
 	return al.fd.Close()
 }
 
@@ -645,6 +640,13 @@ func (al *AuditLog) AddEntry(signer Signer, e *auditEntry, verify func() error) 
 	return aes, nil
 }
 
+// AsJSON encodes the audit log as JSON to the specified writer
+func (al *AuditLog) AsJSON(w io.Writer) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(al)
+}
+
 func (al *AuditLog) Iterate(fn func(idx int, entry *auditEntrySigned) error) error {
 	if al.closed {
 		return os.ErrClosed
@@ -659,12 +661,7 @@ func (al *AuditLog) Iterate(fn func(idx int, entry *auditEntrySigned) error) err
 	return nil
 }
 
-func loadAuditKey(path string, ids Identities) ([]byte, error) {
-	data, err := ReadFileLimited(path, 1024*1024)
-	if err != nil {
-		return nil, fmt.Errorf("read audit key file: %w", err)
-	}
-
+func loadAuditKey(data []byte, ids Identities) ([]byte, error) {
 	r, err := age.Decrypt(bytes.NewReader(data), ids.AgeIdentities()...)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt audit key (no matching identity?): %w", err)
@@ -676,45 +673,119 @@ func loadAuditKey(path string, ids Identities) ([]byte, error) {
 	}
 
 	if len(key) != chacha20poly1305.KeySize {
-		return nil, fmt.Errorf("audit key is not %d byte", chacha20poly1305.KeySize)
+		return nil, fmt.Errorf("audit key is not %d bytes", chacha20poly1305.KeySize)
 	}
 
 	return key, nil
 }
 
-// LoadAuditLog reads the audit log from disk and gives you an handle to operate on it.
-// It does NOT verify the log yet. Call Verify() for that.
-func LoadAuditLog(sesamDir string, ids Identities) (*AuditLog, error) {
-	if err := ensureRekeyTmpFiles(sesamDir); err != nil {
-		return nil, fmt.Errorf("recover from interrupted rotation: %w", err)
+// loadAuditLogFile parses a log.jsonl file and returns the populated AuditLog.
+// The returned struct has fd=nil; callers that need to append must open their own fd.
+func loadAuditLogFile(logPath string, ids Identities) (*AuditLog, error) {
+	//nolint:gosec
+	fd, err := os.Open(logPath)
+	if err != nil {
+		return nil, err
 	}
 
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl.crypt")
-	keyPath := filepath.Join(sesamDir, ".sesam", "audit", "key.age")
-	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
+	defer closeLogged(fd)
 
-	key, err := loadAuditKey(keyPath, ids)
+	info, err := fd.Stat()
+	if err != nil {
+		return nil, err
+	}
+	// Reject audit logs bigger than 512M.
+	if info.Size() > 512*1024*1024 {
+		return nil, fmt.Errorf("audit log too big (> 512M). Please consider opening a bug report")
+	}
+
+	al := &AuditLog{}
+
+	scanner := bufio.NewScanner(fd)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+	// Line 1: base64-encoded age-encrypted key.
+	if !scanner.Scan() {
+		return nil, fmt.Errorf("audit log is empty (missing key line)")
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scanning audit log failed: %w", err)
+	}
+
+	keyB64 := scanner.Bytes()
+	keyRaw := make([]byte, base64.RawStdEncoding.DecodedLen(len(keyB64)))
+	n, err := base64.RawStdEncoding.Decode(keyRaw, keyB64)
+	if err != nil {
+		return nil, fmt.Errorf("base64 decode key line: %w", err)
+	}
+	key, err := loadAuditKey(keyRaw[:n], ids)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load audit key: %w", err)
 	}
-
-	aead, err := chacha20poly1305.New(key)
+	copy(al.key[:], key)
+	al.aead, err = chacha20poly1305.New(key)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize chacha20poly1305: %w", err)
+		return nil, fmt.Errorf("init aead: %w", err)
 	}
+
+	// Lines 2+: encrypted entries. Nonce = SeqID = len(Entries)+1 before each append.
+	decBuf := make([]byte, 64*1024)   // base64 decode target, grown as needed
+	plainBuf := make([]byte, 16*1024) // AEAD plaintext target, grown by Open
+	nonce := make([]byte, al.aead.NonceSize())
+	lineNumber := 0
+	for scanner.Scan() {
+		lineNumber++
+		entryB64 := scanner.Bytes()
+
+		needed := base64.RawStdEncoding.DecodedLen(len(entryB64))
+		if needed > len(decBuf) {
+			decBuf = make([]byte, needed*2)
+		}
+		n, err := base64.RawStdEncoding.Decode(decBuf, entryB64)
+		if err != nil {
+			return nil, fmt.Errorf("base64 decode line %d: %w", lineNumber, err)
+		}
+
+		binary.BigEndian.PutUint64(nonce, uint64(len(al.Entries)+1))
+		jsonData, err := al.aead.Open(plainBuf[:0], nonce, decBuf[:n], nil)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt line %d: %w", lineNumber, err)
+		}
+
+		var entry auditEntrySigned
+		if err := json.Unmarshal(jsonData, &entry); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal line %d: %w", lineNumber, err)
+		}
+		al.Entries = append(al.Entries, entry)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan log: %w", err)
+	}
+
+	return al, nil
+}
+
+// LoadAuditLog reads the audit log from disk and gives you a handle to operate on it.
+// It does NOT verify the log yet. Call Verify() for that.
+func LoadAuditLog(sesamDir string, ids Identities) (*AuditLog, error) {
+	cleanupAuditTmp(sesamDir)
+
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
+	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
+
+	al, err := loadAuditLogFile(logPath, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	al.SesamDir = sesamDir
 
 	initData, err := ReadFileLimited(initPath, 256)
 	if err != nil {
 		return nil, err
 	}
-
-	al := AuditLog{
-		SesamDir: sesamDir,
-		InitHash: strings.TrimSpace(string(initData)),
-		aead:     aead,
-	}
-
-	copy(al.key[:], key)
+	al.InitHash = strings.TrimSpace(string(initData))
 
 	//nolint:gosec
 	al.fd, err = os.OpenFile(logPath, os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
@@ -722,56 +793,7 @@ func LoadAuditLog(sesamDir string, ids Identities) (*AuditLog, error) {
 		return nil, err
 	}
 
-	info, err := al.fd.Stat()
-	if err != nil {
-		closeLogged(al.fd)
-		return nil, err
-	}
-
-	// Reject audit logs bigger than 512M.
-	// In some later release we need to figure a way
-	// to compress such large logs if that ever becomes a problem.
-	if info.Size() > 512*1024*1024 {
-		closeLogged(al.fd)
-		return nil, fmt.Errorf("audit log too big (> 512M). Please consider opening a bug report")
-	}
-
-	lineNumber := 1
-	lineBuf := make([]byte, 16*1024)
-	scanner := bufio.NewScanner(al.fd)
-	for scanner.Scan() {
-		base64Entry := scanner.Text()
-		encEntryData, err := base64.RawStdEncoding.DecodeString(base64Entry)
-		if err != nil {
-			closeLogged(al.fd)
-			return nil, fmt.Errorf("base64 decode line %d: %w", lineNumber, err)
-		}
-
-		nonce := make([]byte, aead.NonceSize())
-		binary.BigEndian.PutUint64(nonce, uint64(lineNumber))
-		jsonData, err := aead.Open(lineBuf[:0], nonce, encEntryData, nil)
-		if err != nil {
-			closeLogged(al.fd)
-			return nil, fmt.Errorf("decrypt line %d: %w", lineNumber, err)
-		}
-
-		var entry auditEntrySigned
-		if err := json.Unmarshal(jsonData, &entry); err != nil {
-			closeLogged(al.fd)
-			return nil, fmt.Errorf("failed to unmarshal line %d: %w", lineNumber, err)
-		}
-
-		al.Entries = append(al.Entries, entry)
-		lineNumber++
-	}
-
-	// Seek to end so subsequent writes append after the last good entry.
-	if _, err := al.fd.Seek(0, io.SeekEnd); err != nil {
-		closeLogged(al.fd)
-		return nil, fmt.Errorf("failed to seek to end: %w", err)
-	}
-
-	return &al, nil
+	return al, nil
 }
 
 // BuildRootHash will produce a combined hash ("Root Hash") out of all
@@ -779,7 +801,7 @@ func LoadAuditLog(sesamDir string, ids Identities) (*AuditLog, error) {
 // (a bit similar like a merkle tree, just not with hierarchy)
 //
 // Side effect: This will sort `sigs`
-func buildRootHash(sigs []*secretSignature) string {
+func buildRootHash(sigs []*secretFooter) string {
 	sort.Slice(sigs, func(i, j int) bool {
 		return sigs[i].RevealedPath < sigs[j].RevealedPath
 	})
@@ -791,4 +813,20 @@ func buildRootHash(sigs []*secretSignature) string {
 	}
 
 	return hashData(b.Bytes())
+}
+
+// ShowAuditLog decrypts the audit log at path and writes it as JSON to w.
+// path may be an arbitrary file path (e.g. a git temp-file blob) - sesamDir
+// is not used for key lookup.
+func ShowAuditLog(ids Identities, path string, w io.Writer) (bool, error) {
+	al, err := loadAuditLogFile(path, ids)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+
+		return true, err
+	}
+
+	return true, al.AsJSON(w)
 }

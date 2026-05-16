@@ -200,6 +200,21 @@ func TestMemoryKeyringAddSignPubKeyMultipleUsers(t *testing.T) {
 	require.Equal(t, "bob", who)
 }
 
+func TestAllRecipients(t *testing.T) {
+	kr := EmptyKeyring()
+	alice := newTestUser(t, "alice")
+	bob := newTestUser(t, "bob")
+	kr.AddRecipient("alice", alice.Recipient)
+	kr.AddRecipient("bob", bob.Recipient)
+
+	recps := AllRecipients(kr)
+	require.Len(t, recps, 2)
+}
+
+func TestAllRecipientsEmpty(t *testing.T) {
+	require.Empty(t, AllRecipients(EmptyKeyring()))
+}
+
 func TestMemoryKeyringListUsers(t *testing.T) {
 	kr := EmptyKeyring()
 	alice := newTestUser(t, "alice")

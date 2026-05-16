@@ -11,9 +11,9 @@ import (
 
 // TestIntegrationInitAndRegular mirrors the two-phase flow in main.go:
 //
-//  1. "init" — create repo, generate sign key, init audit log, add a secret,
+//  1. "init" - create repo, generate sign key, init audit log, add a secret,
 //     seal everything, store.
-//  2. "regular" — load audit log, verify, resolve identity → user, load sign
+//  2. "regular" - load audit log, verify, resolve identity → user, load sign
 //     key, build manager, run integrity check, seal + reveal.
 func TestIntegrationInitAndRegular(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
@@ -59,8 +59,8 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 
 	gitCommitAll(t, repo, "add secret and seal")
 
-	agePath := filepath.Join(sesamDir, ".sesam", "objects", secretPath+".age")
-	require.FileExists(t, agePath)
+	sesamPath := filepath.Join(sesamDir, ".sesam", "objects", secretPath+".sesam")
+	require.FileExists(t, sesamPath)
 
 	// Remove plaintext to simulate a fresh clone.
 	os.Remove(filepath.Join(sesamDir, secretPath))
@@ -283,8 +283,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	}), nil)
 	require.NoError(t, err)
 
-	os.Remove(filepath.Join(sesamDir, ".sesam", "objects", "secrets", "token.age"))
-	os.Remove(signaturePath(sesamDir, "secrets/token"))
+	os.Remove(filepath.Join(sesamDir, ".sesam", "objects", "secrets", "token.sesam"))
 
 	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailSeal{
 		RootHash:    buildRootHash(nil),

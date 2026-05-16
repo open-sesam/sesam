@@ -171,7 +171,7 @@ func TestResolveRecipientForgeIds(t *testing.T) {
 
 func TestResolveRecipientGitlabIsPassthrough(t *testing.T) {
 	// GitLab uses JSON for keys (not the plain authorized_keys format) so it is
-	// temporarily disabled — gitlab: args pass through unchanged.
+	// temporarily disabled - gitlab: args pass through unchanged.
 	arg := "gitlab:testuser"
 	got, err := ResolveRecipient(context.Background(), "/tmp", arg, CacheModeNone)
 	require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestResolveCachedLinkNonHTTPS(t *testing.T) {
 }
 
 func TestResolveCachedLinkCacheMiss(t *testing.T) {
-	// No cache, no network — should try to download and fail (no real server).
+	// No cache, no network - should try to download and fail (no real server).
 	sesamDir := testRepo(t)
 	_, err := resolveCachedLink(context.Background(), sesamDir, "https://192.0.2.1/nonexistent", CacheModeNone)
 	require.Error(t, err, "should fail when cache misses and download fails")
@@ -234,7 +234,7 @@ func TestResolveCachedLinkCacheMiss(t *testing.T) {
 func TestResolveRecipientFile(t *testing.T) {
 	dir := t.TempDir()
 
-	// ResolveRecipient does NOT strip "file://" — it calls os.ReadFile with the literal
+	// ResolveRecipient does NOT strip "file://" - it calls os.ReadFile with the literal
 	// "file://..." string. To avoid leaking a "file:" directory into the working directory,
 	// create the literal path structure inside the temp dir and run the test from there.
 	literalDir := filepath.Join(dir, "sub")
@@ -307,7 +307,7 @@ func TestParseAndResolveRecipientsEmpty(t *testing.T) {
 }
 
 func TestResolveRecipientHTTPSDownload(t *testing.T) {
-	// Test the live download path with a real HTTPS test server — but pre-cache
+	// Test the live download path with a real HTTPS test server - but pre-cache
 	// the response so resolveCachedLink returns immediately without dialing.
 	user := newTestUser(t, "alice")
 	sesamDir := testRepo(t)
@@ -320,6 +320,48 @@ func TestResolveRecipientHTTPSDownload(t *testing.T) {
 	got, err := ResolveRecipient(context.Background(), sesamDir, url, CacheModeRead)
 	require.NoError(t, err)
 	require.Equal(t, []string{user.Recipient.String()}, got)
+}
+
+func TestResolveCachedLinkHTTPDownloadSuccess(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "age1keydata")
+	}))
+	defer srv.Close()
+
+	sesamDir := testRepo(t)
+	got, err := resolveCachedLink(context.Background(), sesamDir, srv.URL+"/keys", CacheModeNone, srv.Client())
+	require.NoError(t, err)
+	require.Equal(t, []string{"age1keydata"}, got)
+}
+
+func TestResolveCachedLinkHTTPDownloadAndCache(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "age1cached-fresh")
+	}))
+	defer srv.Close()
+
+	sesamDir := testRepo(t)
+	url := srv.URL + "/keys"
+
+	got, err := resolveCachedLink(context.Background(), sesamDir, url, CacheModeWrite, srv.Client())
+	require.NoError(t, err)
+	require.Equal(t, []string{"age1cached-fresh"}, got)
+
+	data, err := os.ReadFile(cachePath(sesamDir, url))
+	require.NoError(t, err)
+	require.Contains(t, string(data), "age1cached-fresh")
+}
+
+func TestResolveCachedLinkHTTP4xx(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	sesamDir := testRepo(t)
+	_, err := resolveCachedLink(context.Background(), sesamDir, srv.URL+"/keys", CacheModeNone, srv.Client())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "404")
 }
 
 func TestIdentitiesRecipientStrings(t *testing.T) {

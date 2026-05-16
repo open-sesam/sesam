@@ -1,0 +1,40 @@
+# Verify that git diff shows plaintext JSON diffs for the sesam audit log.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+# Init sesam and commit the baseline audit log.
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Modify a secret and re-seal. This appends a new entry to the audit log.
+cp modified_readme.md README.md
+exec sesam seal
+
+# Sanity-check: the audit log is modified, textconv is configured.
+exec git status --short
+stdout '.sesam/audit/log.jsonl'
+exec git config --local diff.sesam-diff.textconv
+stdout 'sesam show'
+exec git check-attr diff -- .sesam/audit/log.jsonl
+stdout 'sesam-diff'
+
+# sesam show decrypts and outputs the current log as JSON.
+exec sesam show .sesam/audit/log.jsonl
+stdout '"operation"'
+
+# Without textconv, git shows raw encrypted (base64) lines, not decrypted JSON.
+exec git diff HEAD --no-textconv -- .sesam/audit/log.jsonl
+! stdout '"operation"'
+
+# git diff HEAD shows a JSON diff: the new seal entry appears as added lines.
+exec git diff HEAD -- .sesam/audit/log.jsonl
+stdout '"operation"'
+stdout '"seal"'
+
+-- modified_readme.md --
+# modified readme
+
+This is the new content after the change.

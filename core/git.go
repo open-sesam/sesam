@@ -1,10 +1,12 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
@@ -49,6 +51,10 @@ func verifyInitFileUnchanged(sesamDir string) error {
 		},
 	})
 	if err != nil {
+		if errors.Is(err, plumbing.ErrReferenceNotFound) {
+			// No commits yet - treat as commitCount==0 (fine during sesam init).
+			return nil
+		}
 		return fmt.Errorf("git log failed: %w", err)
 	}
 

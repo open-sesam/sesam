@@ -33,7 +33,7 @@ func renderCommandRef(w io.Writer, root *cli.Command) error {
 		writeCommand(w, sub, []string{root.Name}, 3)
 	}
 
-	_, _ = fmt.Fprintf(w, "\n> `*` — required flag\n")
+	_, _ = fmt.Fprintf(w, "\n> `*` - required flag\n")
 	return nil
 }
 
@@ -75,7 +75,7 @@ func writeFlagTable(w io.Writer, flags []cli.Flag) {
 				v := dg.GetValue()
 				// GetValue() wraps strings in quotes; strip them.
 				v = strings.Trim(v, `"`)
-				// Skip zero-value booleans — false is always the implicit default.
+				// Skip zero-value booleans - false is always the implicit default.
 				if v != "false" {
 					defVal = v
 				}

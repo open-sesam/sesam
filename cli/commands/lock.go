@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -29,13 +30,13 @@ func withRepoLock(sesamDir string, fn func() error) error {
 		return err
 	}
 
-	defer func() error {
+	defer func() {
 		err = acquired.Unlock()
 		if err != nil {
-			return fmt.Errorf("failed to unlock repository: %w", err)
+			slog.Error("failed to unlock repository", slog.Any("err", err))
 		}
-		return nil
 	}()
+
 	return fn()
 }
 

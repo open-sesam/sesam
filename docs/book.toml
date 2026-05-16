@@ -20,7 +20,7 @@ font-size = "0.9em"
 separator = " • "
 date-format = "%Y-%m-%d"
 time-format = "%H:%M:%S"
-branch = "feat/docs"
+branch = "main"
 hyperlink = true         # make hash/branch clickable when possible
 
 # optional timezone handling
@@ -38,4 +38,8 @@ additional-css = [
   "./mdbook-admonish.css",
   "theme/sesam.css",
 ]
-additional-js = ["theme/pagetoc.js", "theme/sidebar-logo.js", "theme/theme-switch.js"]
+additional-js = [
+  "theme/pagetoc.js",
+  "theme/sidebar-logo.js",
+  "theme/theme-switch.js",
+]

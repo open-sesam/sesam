@@ -22,12 +22,12 @@ tasks:
   test:
     desc: Run go tests
     cmds:
-      - go run gotest.tools/gotestsum@v1.10.1 -- -parallel 20 ./...
+      - go run gotest.tools/gotestsum@v1.10.1 --format testname -- -parallel 20 ./...
 
   coverage:
     desc: Run go tests with coverage report
     cmds:
-      - go test -v ./... -coverprofile=coverage.out
+      - go test -coverpkg=./... -coverprofile=coverage.out ./...
       - go tool cover -func=coverage.out
       - go tool cover -html=coverage.out
 
@@ -58,4 +58,5 @@ tasks:
   setup-docs:
     desc: Setup dependency for docs
     cmds:
-      - cargo install mdbook@0.4.52 mdbook-admonish@1.18.0 mdbook-gitinfo@1.2.0 mdbook-pagetoc@0.2.2
+      - command -v cargo-binstall || cargo install cargo-binstall
+      - cargo binstall --no-confirm mdbook@0.4.52 mdbook-admonish@1.18.0 mdbook-gitinfo@1.2.0 mdbook-pagetoc@0.2.2

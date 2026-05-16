@@ -1,10 +1,16 @@
 package core
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
+
+	"filippo.io/age"
+	"github.com/google/renameio"
 )
 
 // SecretManager is the high level API to manage secrets,
@@ -69,25 +75,7 @@ func BuildSecretManager(
 }
 
 func (sm *SecretManager) cryptPath(path string) string {
-	return filepath.Join(sm.SesamDir, ".sesam", "objects", path+".age")
-}
-
-func (sm *SecretManager) sigPath(path string) string {
-	return filepath.Join(sm.SesamDir, ".sesam", "objects", path+".sig.json")
-}
-
-func (sm *SecretManager) cryptWriter(path string) (*os.File, string, error) {
-	cryptPath := sm.cryptPath(path)
-
-	// TODO: Move that to an init module and add a .donotdelete file in it so that git does not kill it.
-	// .sesam/tmp should be also part of gitignore
-	if err := os.MkdirAll(filepath.Dir(cryptPath), 0o700); err != nil {
-		return nil, "", err
-	}
-
-	//nolint:gosec
-	fd, err := os.Create(cryptPath)
-	return fd, cryptPath, err
+	return filepath.Join(sm.SesamDir, ".sesam", "objects", path+".sesam")
 }
 
 func (sm *SecretManager) tmpDir() string {
@@ -139,7 +127,7 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 
 // SealAll seals all kown secrets.
 func (sm *SecretManager) SealAll() error {
-	sigs := make([]*secretSignature, 0, len(sm.secrets))
+	sigs := make([]*secretFooter, 0, len(sm.secrets))
 
 	for _, secret := range sm.secrets {
 		sig, err := secret.Seal(sm.Signer.UserName())
@@ -193,10 +181,74 @@ func (sm *SecretManager) RemoveSecret(revealedPath string) error {
 		return err
 	}
 
-	if err := os.RemoveAll(sm.sigPath(revealedPath)); err != nil {
-		return err
-	}
-
 	sm.secrets = slices.Delete(sm.secrets, idx, idx+1)
 	return nil
+}
+
+// ShowSecret outputs the secret content of `path` to `dst`.
+// It uses `ids` to decrypt it.
+//
+// `path` can be a path of an encrypted file (.sesam) or a revealed path.
+//
+// NOTE: This is primarily used to calculate content diffs. For performance reasons
+// it does not verify signatures - this requires parsing all of the audit log.
+func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bool, error) {
+	if !strings.HasSuffix(path, ".sesam") {
+		if err := validSecretPath(sesamDir, path); err == nil {
+			// user apparently gave the direct revealed path. Let's map it to the
+			// actual object file as a convenience feature.
+			path = filepath.Join(".sesam", "objects", path+".sesam")
+		}
+	}
+
+	//nolint:gosec
+	srcFd, err := os.Open(path)
+	if err != nil {
+		// assume it's not something we can "show"
+		return false, nil
+	}
+
+	defer closeLogged(srcFd)
+
+	_, _, err = revealStream(srcFd, dst, ids.AgeIdentities())
+	return true, err
+}
+
+// RevealBlob decrypts src and writes the plaintext to sesamDir/revealedPath.
+//
+// revealedPath is the repo-relative plain path (e.g. "secrets/token"), derived
+// by the caller from git's %f argument so no footer read-back is needed.
+//
+// Returns (true, nil) on success. Returns (false, nil) when the caller is not
+// a recipient - the blob is not meant for them and is silently skipped.
+//
+// This function should only be called for quick decryption (i.e. git diff or smudge)
+// and when we only have access to the encrypted file and not the audit log.
+// For most cases, uses SecretManager.
+func RevealBlob(sesamDir string, ids Identities, src io.ReadSeeker, revealedPath string) (bool, error) {
+	dstPath := filepath.Join(sesamDir, revealedPath)
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
+		return false, fmt.Errorf("creating revealed dir: %w", err)
+	}
+
+	tmpDir := filepath.Join(sesamDir, ".sesam", "tmp")
+	dst, err := renameio.TempFile(tmpDir, dstPath)
+	if err != nil {
+		return false, fmt.Errorf("creating temp file: %w", err)
+	}
+	defer func() { _ = dst.Cleanup() }()
+
+	_, _, err = revealStream(src, dst, ids.AgeIdentities())
+	if err != nil {
+		var noMatch *age.NoIdentityMatchError
+		if errors.As(err, &noMatch) {
+			// count as no error, checking out old state is a best effort.
+			return false, nil
+		}
+
+		return false, err
+	}
+
+	_ = dst.Chmod(0o600)
+	return true, dst.CloseAtomicallyReplace()
 }
