@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
@@ -27,7 +28,7 @@ func HandleTell(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("missing group: pass --group at least once")
 	}
 
-	return withManagers(sesamDir, cmd.StringSlice("identity"), cmd.Duration("lock-timeout"), func(mgr *runtimeManagers) error {
+	return withManagers(sesamDir, cmd.StringSlice("identity"), cmd.Duration("lock-timeout"), core.NewInteractivePluginUI(), func(mgr *runtimeManagers) error {
 		if err := mgr.User.TellUser(ctx, user, recipients, groups); err != nil {
 			return fmt.Errorf("failed to add user: %w", err)
 		}
@@ -45,7 +46,7 @@ func HandleKill(_ context.Context, cmd *cli.Command) error {
 
 	user := cmd.String("user")
 
-	return withManagers(sesamDir, cmd.StringSlice("identity"), cmd.Duration("lock-timeout"), func(mgr *runtimeManagers) error {
+	return withManagers(sesamDir, cmd.StringSlice("identity"), cmd.Duration("lock-timeout"), core.NewInteractivePluginUI(), func(mgr *runtimeManagers) error {
 		if err := mgr.User.KillUsers(user); err != nil {
 			return fmt.Errorf("failed to remove user: %w", err)
 		}

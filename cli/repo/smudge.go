@@ -417,7 +417,7 @@ func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring,
 		return nil, nil, fmt.Errorf("decrypt audit log from index: %w", err)
 	}
 	kr := core.EmptyKeyring()
-	state, err := core.VerifyChain(al, kr)
+	state, err := core.VerifyChain(al, kr, core.NewNonInteractivePluginUI())
 	if err != nil {
 		return nil, nil, fmt.Errorf("verify audit chain (index version): %w", err)
 	}
@@ -430,7 +430,7 @@ func loadAuditViewFromWorktree(sesamDir string, ids core.Identities) (core.Keyri
 		return nil, nil, fmt.Errorf("load audit log: %w", err)
 	}
 	kr := core.EmptyKeyring()
-	state, err := core.VerifyChain(al, kr)
+	state, err := core.VerifyChain(al, kr, core.NewNonInteractivePluginUI())
 	if err != nil {
 		return nil, nil, fmt.Errorf("verify audit chain: %w", err)
 	}

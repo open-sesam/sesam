@@ -6,6 +6,7 @@ import (
 	"os"
 
 	clirepo "github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
@@ -35,7 +36,7 @@ func HandleSmudge(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("need at least one identity")
 	}
 
-	ids, err := loadIdentitiesKeyringOnly(identityPaths, keyringFingerprint)
+	ids, err := loadIdentitiesKeyringOnly(identityPaths, keyringFingerprint, core.NewNonInteractivePluginUI())
 	if err != nil {
 		return err
 	}

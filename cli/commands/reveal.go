@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
@@ -15,7 +16,7 @@ func HandleReveal(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return withManagers(sesamDir, cmd.StringSlice("identity"), cmd.Duration("lock-timeout"), func(mgr *runtimeManagers) error {
+	return withManagers(sesamDir, cmd.StringSlice("identity"), cmd.Duration("lock-timeout"), core.NewInteractivePluginUI(), func(mgr *runtimeManagers) error {
 		if err := mgr.Secret.RevealAll(); err != nil {
 			return fmt.Errorf("failed to reveal secrets: %w", err)
 		}

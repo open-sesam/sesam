@@ -17,7 +17,7 @@ func HandleVerify(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	auditLog, keyring, vstate, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"))
+	auditLog, keyring, vstate, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"), core.NewInteractivePluginUI())
 	if err != nil {
 		return err
 	}
@@ -41,7 +41,8 @@ func HandleID(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	auditLog, keyring, _, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"))
+	pluginUI := core.NewInteractivePluginUI()
+	auditLog, keyring, _, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"), pluginUI)
 	if err != nil {
 		return err
 	}
@@ -49,7 +50,7 @@ func HandleID(_ context.Context, cmd *cli.Command) error {
 		_ = auditLog.Close()
 	}()
 
-	identities, err := loadIdentities(cmd.StringSlice("identity"), "sesam.identity.runtime")
+	identities, err := loadIdentities(cmd.StringSlice("identity"), "sesam.identity.runtime", pluginUI)
 	if err != nil {
 		return err
 	}
@@ -83,9 +84,9 @@ func HandleApply(_ context.Context, _ *cli.Command) error {
 	return handleStub("apply")
 }
 
-func loadVerifiedState(sesamDir string, identityPaths []string) (*core.AuditLog, core.Keyring, *core.VerifiedState, error) {
+func loadVerifiedState(sesamDir string, identityPaths []string, pluginUI *core.PluginUI) (*core.AuditLog, core.Keyring, *core.VerifiedState, error) {
 	keyring := core.EmptyKeyring()
-	identities, err := loadIdentities(identityPaths, "sesam.identity.runtime")
+	identities, err := loadIdentities(identityPaths, "sesam.identity.runtime", pluginUI)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -95,7 +96,7 @@ func loadVerifiedState(sesamDir string, identityPaths []string) (*core.AuditLog,
 		return nil, nil, nil, fmt.Errorf("failed to load audit log: %w", err)
 	}
 
-	vstate, err := core.Verify(auditLog, keyring)
+	vstate, err := core.Verify(auditLog, keyring, pluginUI)
 	if err != nil {
 		_ = auditLog.Close()
 		return nil, nil, nil, fmt.Errorf("failed to verify audit log: %w", err)
