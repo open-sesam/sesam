@@ -19,11 +19,14 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version-file: 'go.mod'
           cache: true
-      
+
       - name: Set up Task
         uses: go-task/setup-task@v2
+
+      - name: Lint
+        run: task lint
 
       - name: Run tests
         run: task test
@@ -31,7 +34,7 @@ jobs:
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
-          version: latest
+          version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
