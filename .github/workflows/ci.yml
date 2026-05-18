@@ -21,17 +21,11 @@ jobs:
     - name: Set up Task
       uses: go-task/setup-task@v2
 
-    - name: Install dependencies
-      run: go mod download
-      
     - name: Lint
       run: task lint
 
     - name: Vet
       run: go vet ./...
-
-    - name: Test
-      run: task test
 
     - name: Generate coverage report
       run: task coverage
@@ -44,3 +38,9 @@ jobs:
 
     - name: Build
       run: task build
+
+    - name: Upload binary artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: sesam
+        path: sesam
