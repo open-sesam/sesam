@@ -34,10 +34,14 @@ jobs:
     - name: Test
       run: go test -v -race -coverprofile=coverage.out ./...
 
-    - name: Upload coverage
-      uses: codecov/codecov-action@v4
+    - name: Generate coverage report
+      run: go tool cover -html=coverage.out -o coverage.html
+
+    - name: Upload coverage artifact
+      uses: actions/upload-artifact@v7
       with:
-        files: coverage.out
+        name: coverage-report
+        path: coverage.html
 
     - name: Build
       run: go build -o bin/app .
