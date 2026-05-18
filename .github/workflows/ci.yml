@@ -18,30 +18,29 @@ jobs:
         go-version: '1.26'
         cache: true
 
+    - name: Set up Task
+      uses: go-task/setup-task@v2
+
     - name: Install dependencies
       run: go mod download
-
+      
     - name: Lint
-      uses: golangci/golangci-lint-action@v9
-      with:
-        version: latest
-        install-mode: goinstall
-        args: "-c linter.yml"
+      run: task lint
 
     - name: Vet
       run: go vet ./...
 
     - name: Test
-      run: go test -v -race -coverprofile=coverage.out ./...
+      run: task test
 
     - name: Generate coverage report
-      run: go tool cover -html=coverage.out -o coverage.html
+      run: task coverage
 
     - name: Upload coverage artifact
       uses: actions/upload-artifact@v7
       with:
         name: coverage-report
-        path: coverage.html
+        path: coverage.out
 
     - name: Build
-      run: go build -o bin/app .
+      run: task build
