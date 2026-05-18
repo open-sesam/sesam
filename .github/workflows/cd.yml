@@ -21,9 +21,12 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
+      
+      - name: Set up Task
+        uses: go-task/setup-task@v2
 
       - name: Run tests
-        run: go test ./...
+        run: task test
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
