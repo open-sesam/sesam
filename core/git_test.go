@@ -19,7 +19,8 @@ func TestVerifyInitFileUnchangedNoCommitsTouchingInit(t *testing.T) {
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0o600))
 
-	require.NoError(t, verifyInitFileUnchanged(sesamDir))
+	_, err := verifyInitFileUnchanged(sesamDir)
+	require.NoError(t, err)
 }
 
 func TestVerifyInitFileUnchangedOneCommit(t *testing.T) {
@@ -29,7 +30,8 @@ func TestVerifyInitFileUnchangedOneCommit(t *testing.T) {
 	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0o600))
 	gitCommitAll(t, repo, "init commit")
 
-	require.NoError(t, verifyInitFileUnchanged(sesamDir))
+	_, err := verifyInitFileUnchanged(sesamDir)
+	require.NoError(t, err)
 }
 
 func TestVerifyInitFileUnchangedMultipleCommits(t *testing.T) {
@@ -43,7 +45,7 @@ func TestVerifyInitFileUnchangedMultipleCommits(t *testing.T) {
 	require.NoError(t, os.WriteFile(initPath, []byte("hash2"), 0o600))
 	gitCommitAll(t, repo, "tampered commit")
 
-	err := verifyInitFileUnchanged(sesamDir)
+	_, err := verifyInitFileUnchanged(sesamDir)
 	require.Error(t, err, "should detect init file modification")
 }
 
@@ -58,18 +60,20 @@ func TestVerifyInitFileUnchangedMultipleCommitsUnchanged(t *testing.T) {
 	writeSecret(t, sesamDir, "other.txt", "data")
 	gitCommitAll(t, repo, "second commit")
 
-	require.NoError(t, verifyInitFileUnchanged(sesamDir), "init was not changed across commits")
+	_, err := verifyInitFileUnchanged(sesamDir)
+	require.NoError(t, err, "init was not changed across commits")
 }
 
 func TestVerifyInitFileUnchangedNotAGitRepo(t *testing.T) {
 	sesamDir := testRepo(t) // no git init
 
-	err := verifyInitFileUnchanged(sesamDir)
+	_, err := verifyInitFileUnchanged(sesamDir)
 	require.Error(t, err, "should fail for non-git directory")
 }
 
 func TestVerifyInitFileUnchangedNoCommitsAtAll(t *testing.T) {
 	sesamDir, _ := testGitRepo(t)
 	// Zero commits - repo.Log() returns ErrReferenceNotFound, treated as "fine during init".
-	require.NoError(t, verifyInitFileUnchanged(sesamDir))
+	_, err := verifyInitFileUnchanged(sesamDir)
+	require.NoError(t, err)
 }

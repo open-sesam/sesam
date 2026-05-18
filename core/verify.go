@@ -460,7 +460,7 @@ func VerifyChain(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState,
 // (.sesam/audit/init) and the latest seal's root-hash against the on-disk
 // secret footers. See [VerifyChain] for pluginUI semantics.
 func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, error) {
-	if err := verifyInitFileUnchanged(log.SesamDir); err != nil {
+	if _, err := verifyInitFileUnchanged(log.SesamDir); err != nil {
 		return nil, fmt.Errorf("init file check: %w", err)
 	}
 
