@@ -9,13 +9,20 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      
+    concurrency:
+      group: ci-${{ github.ref }}
+      cancel-in-progress: true
+      
     steps:
     - uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.26'
+        go-version-file: 'go.mod'
         cache: true
 
     - name: Set up Task
@@ -23,9 +30,6 @@ jobs:
 
     - name: Lint
       run: task lint
-
-    - name: Vet
-      run: go vet ./...
 
     - name: Generate coverage report
       run: task coverage
