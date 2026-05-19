@@ -75,7 +75,17 @@ func newStringPubKey(s string) stringPubKey {
 func (spk stringPubKey) Equal(o comparablePublicKey) bool {
 	ospk, ok := o.(stringPubKey)
 	if !ok {
-		return false
+		// comparablePublicKey is embedded in Recipient,
+		// so calling Equal() on that makes `o` a recipient
+		orecp, ok := o.(*Recipient)
+		if !ok {
+			return false
+		}
+
+		ospk, ok = orecp.comparablePublicKey.(stringPubKey)
+		if !ok {
+			return false
+		}
 	}
 
 	return subtle.ConstantTimeCompare([]byte(spk), []byte(ospk)) == 1
@@ -362,7 +372,7 @@ func IdentityToUser(id *Identity, userToPub map[string]Recipients) (string, erro
 
 	for userName, recps := range userToPub {
 		for _, recp := range recps {
-			if ownPub.Equal(recp.comparablePublicKey) {
+			if ownPub.Equal(recp) {
 				matchCount++
 				matchedUser = userName
 				matchedRecipient = recp

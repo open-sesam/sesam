@@ -65,7 +65,7 @@ type ForgeReport struct {
 
 // VerifyForgeIds checks the public keys of all users and will re-fetch the source they were from.
 // Difference to the current state will be highlighted in the returned ForgeReport.
-func VerifyForgeIds(ctx context.Context, vstate *VerifiedState, kr Keyring) *ForgeReport {
+func VerifyForgeIds(ctx context.Context, vstate *VerifiedState, kr Keyring, pluginUI *PluginUI) *ForgeReport {
 	currUserMap := make(map[string]Recipients)
 	for user, recps := range kr.ListUsers() {
 		currUserMap[user] = slices.Clone(recps)
@@ -90,7 +90,7 @@ func VerifyForgeIds(ctx context.Context, vstate *VerifiedState, kr Keyring) *For
 			defer wg.Done()
 
 			for job := range jobsCh {
-				newRecps, err := ParseAndResolveRecipients(ctx, []string{string(job.Source)})
+				newRecps, err := ParseAndResolveRecipients(ctx, []string{string(job.Source)}, pluginUI)
 				if err != nil {
 					mapMu.Lock()
 					errMap[job.User] = append(errMap[job.User], ForgeReportError{
@@ -111,14 +111,14 @@ func VerifyForgeIds(ctx context.Context, vstate *VerifiedState, kr Keyring) *For
 
 	seen := make(map[job]bool)
 	for _, user := range vstate.Users {
-		for _, pubKey := range user.Recps.UserPubKeys() {
-			if pubKey.Source == KeySourceManual {
+		for _, recp := range user.Recps {
+			if recp.Source == KeySourceManual {
 				// if specified in the config, there is no need to check the remote state.
 				continue
 			}
 
 			j := job{
-				Source: pubKey.Source,
+				Source: recp.Source,
 				User:   user.Name,
 			}
 
@@ -133,6 +133,22 @@ func VerifyForgeIds(ctx context.Context, vstate *VerifiedState, kr Keyring) *For
 	wg.Wait()
 
 	report := ForgeReport{}
+	for _, errResults := range errMap {
+		report.Errored = append(report.Errored, errResults...)
+
+		// delete those from currUserMap so that we later only have those that were deleted.
+		for _, errResult := range errResults {
+			currRecps, ok := currUserMap[errResult.User]
+			if !ok {
+				continue
+			}
+
+			currUserMap[errResult.User] = slices.DeleteFunc(currRecps, func(recp *Recipient) bool {
+				return recp.Source == errResult.Source
+			})
+		}
+	}
+
 	for user, newPubKeys := range newUserMap {
 		for _, newPubKey := range newPubKeys {
 			currRecps, ok := currUserMap[user]
@@ -171,10 +187,6 @@ func VerifyForgeIds(ctx context.Context, vstate *VerifiedState, kr Keyring) *For
 				PubKey: leftOverPubKey,
 			})
 		}
-	}
-
-	for _, errResults := range errMap {
-		report.Errored = append(report.Errored, errResults...)
 	}
 
 	sortByUser := func(i, j ForgeReportEntry) int {
