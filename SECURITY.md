@@ -109,7 +109,7 @@ We use the following severity levels, aligned with
 
 Security advisories are published via:
 
-- [GitHub Security Advisories](../../security/advisories) for this repository
+- [GitHub Security Advisories](./security/advisories) for this repository
 - Release notes in [`CHANGELOG.md`](./CHANGELOG.md)
 
 We recommend watching this repository for releases to receive timely notifications.
