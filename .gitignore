@@ -7,3 +7,5 @@ sesam
 /core/file:/tmp
 /coverage.out
 /docs/book
+.idea/
+
