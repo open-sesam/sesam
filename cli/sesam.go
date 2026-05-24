@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/open-sesam/sesam/cli/commands"
 	"github.com/urfave/cli/v3"
@@ -69,8 +70,24 @@ func Main(args []string) error {
 				Usage:  "Move a secret to a different path",
 			}, {
 				Name:   "list",
-				Action: commands.HandleList,
-				Usage:  "List known secrets and metadata",
+				Flags:  flagsListSecrets,
+				Usage:  "List entities",
+				Action: func(_ context.Context, _ *cli.Command) error {
+					return fmt.Errorf("missing list target: use `sesam list secrets` or `sesam list users`")
+				},
+				Commands: []*cli.Command{
+					{
+						Name:   "secrets",
+						Flags:  flagsListSecrets,
+						Action: commands.HandleListSecrets,
+						Usage:  "List known secrets and metadata",
+					}, {
+						Name:   "users",
+						Flags:  flagsListUsers,
+						Action: commands.HandleListUsers,
+						Usage:  "List persons, groups, and access",
+					},
+				},
 			}, {
 				Name:   "apply",
 				Hidden: true,
@@ -88,6 +105,8 @@ func Main(args []string) error {
 				Usage:  "Remove a person from a group",
 			}, {
 				Name:   "list-users",
+				Flags:  flagsListUsers,
+				Hidden: true,
 				Action: commands.HandleListUsers,
 				Usage:  "List persons, groups, and access",
 			}, {

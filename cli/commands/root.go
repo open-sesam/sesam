@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	clirepo "github.com/open-sesam/sesam/cli/repo"
@@ -18,18 +17,13 @@ func HandleVerify(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	auditLog, keyring, vstate, err := loadVerifiedState(sesamDir)
+	auditLog, keyring, vstate, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"))
 	if err != nil {
 		return err
 	}
 	defer func() {
 		_ = auditLog.Close()
 	}()
-
-	if vstate.SealRequiredSeqID != 0 {
-		fmt.Printf("verify ok (seal required after seq_id=%d)\n", vstate.SealRequiredSeqID)
-		return nil
-	}
 
 	report := core.VerifyIntegrity(sesamDir, vstate, keyring)
 	if !report.OK() {
@@ -47,7 +41,7 @@ func HandleID(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	auditLog, keyring, _, err := loadVerifiedState(sesamDir)
+	auditLog, keyring, _, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"))
 	if err != nil {
 		return err
 	}
@@ -84,48 +78,19 @@ func HandleUndo(_ context.Context, _ *cli.Command) error {
 	return handleStub("undo")
 }
 
-// HandleListUsers lists users, groups, and access bindings.
-func HandleListUsers(_ context.Context, cmd *cli.Command) error {
-	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
-	if err != nil {
-		return err
-	}
-
-	auditLog, _, vstate, err := loadVerifiedState(sesamDir)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = auditLog.Close()
-	}()
-
-	if len(vstate.Users) == 0 {
-		fmt.Println("no users")
-		return nil
-	}
-
-	users := append([]core.VerifiedUser(nil), vstate.Users...)
-	sort.Slice(users, func(i, j int) bool {
-		return users[i].Name < users[j].Name
-	})
-
-	for _, user := range users {
-		groups := append([]string(nil), user.Groups...)
-		sort.Strings(groups)
-		fmt.Printf("%s\tgroups=%s\n", user.Name, commaJoined(groups))
-	}
-
-	return nil
-}
-
 // HandleApply applies config changes to audit and metadata state.
 func HandleApply(_ context.Context, _ *cli.Command) error {
 	return handleStub("apply")
 }
 
-func loadVerifiedState(sesamDir string) (*core.AuditLog, core.Keyring, *core.VerifiedState, error) {
+func loadVerifiedState(sesamDir string, identityPaths []string) (*core.AuditLog, core.Keyring, *core.VerifiedState, error) {
 	keyring := core.EmptyKeyring()
-	auditLog, err := core.LoadAuditLog(sesamDir)
+	identities, err := loadIdentities(identityPaths, "sesam.identity.runtime")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	auditLog, err := core.LoadAuditLog(sesamDir, identities)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to load audit log: %w", err)
 	}

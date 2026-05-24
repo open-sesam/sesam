@@ -10,9 +10,11 @@ import (
 	"github.com/gofrs/flock"
 )
 
-const defaultRepoLockTimeout = 5 * time.Second
+func withRepoLock(sesamDir string, timeout time.Duration, fn func() error) error {
+	if timeout <= 0 {
+		return fmt.Errorf("invalid lock timeout %s: must be > 0", timeout)
+	}
 
-func withRepoLock(sesamDir string, fn func() error) error {
 	lockPath := filepath.Join(sesamDir, ".sesam", "lock")
 	lockDir := filepath.Dir(lockPath)
 
@@ -24,7 +26,7 @@ func withRepoLock(sesamDir string, fn func() error) error {
 		return fmt.Errorf("failed to access lock directory %s: %w", lockDir, err)
 	}
 
-	acquired, err := acquireRepoLock(lockPath, defaultRepoLockTimeout)
+	acquired, err := acquireRepoLock(lockPath, timeout)
 	if err != nil {
 		return err
 	}
