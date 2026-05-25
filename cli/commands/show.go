@@ -6,14 +6,14 @@ import (
 	"os"
 	"path/filepath"
 
-	clirepo "github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/cli/repo"
 	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
 // HandleShow decrypts a secret and writes it to stdout.
 func HandleShow(ctx context.Context, cmd *cli.Command) error {
-	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
+	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}

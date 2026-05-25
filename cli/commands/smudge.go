@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	clirepo "github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/cli/repo"
 	"github.com/urfave/cli/v3"
 )
 
@@ -25,7 +25,7 @@ import (
 // In both modes the encrypted blob passes through to stdout unchanged (the
 // working-tree .sesam file stays encrypted) and the plaintext is decrypted
 // to the embedded RevealedPath as a side effect. The sesamDir is derived
-// from the per-request pathname (see clirepo.splitObjectPath) so the
+// from the per-request pathname (see repo.splitObjectPath) so the
 // handler works whether .sesam lives at the worktree root or in a subdir.
 // Reveal failures are logged but do not fail the smudge - aborting the git
 // checkout would be worse than a stale or missing revealed file.
@@ -45,10 +45,10 @@ func HandleSmudge(ctx context.Context, cmd *cli.Command) error {
 		// Instead we are called per-file. This is slower and has the drawback
 		// that we do not cleanup revealed files that are not in the current index.
 		path := cmd.Args().Get(0)
-		return clirepo.RunOneShotSmudge(ids, path, os.Stdin, os.Stdout)
+		return repo.RunOneShotSmudge(ids, path, os.Stdin, os.Stdout)
 	}
 
-	handler := &clirepo.FilterProcessHandler{
+	handler := &repo.FilterProcessHandler{
 		Identities:    ids,
 		IdentityPaths: identityPaths,
 	}
