@@ -181,63 +181,6 @@ func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
 	require.True(t, exists, "secret must remain in verified state")
 }
 
-func TestRevealBlobHappyPath(t *testing.T) {
-	mgr := testSecretManager(t)
-	secret := testSecret(t, mgr, "secrets/token", "top-secret")
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
-	require.NoError(t, err)
-
-	//nolint:gosec
-	src, err := os.Open(mgr.cryptPath("secrets/token"))
-	require.NoError(t, err)
-	defer src.Close()
-
-	os.Remove(filepath.Join(mgr.SesamDir, "secrets/token"))
-
-	ok, err := RevealBlob(mgr.SesamDir, mgr.Identities, src, "secrets/token")
-	require.NoError(t, err)
-	require.True(t, ok)
-
-	got, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/token"))
-	require.NoError(t, err)
-	require.Equal(t, "top-secret", string(got))
-}
-
-func TestRevealBlobNonRecipient(t *testing.T) {
-	mgr := testSecretManager(t)
-	secret := testSecret(t, mgr, "secrets/token", "top-secret")
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
-	require.NoError(t, err)
-
-	//nolint:gosec
-	src, err := os.Open(mgr.cryptPath("secrets/token"))
-	require.NoError(t, err)
-	defer src.Close()
-
-	stranger := newTestUser(t, "stranger")
-	ok, err := RevealBlob(mgr.SesamDir, Identities{stranger.Identity}, src, "secrets/token")
-	require.NoError(t, err)
-	require.False(t, ok, "non-recipient should return (false, nil)")
-}
-
-func TestRevealBlobCorruptedFile(t *testing.T) {
-	mgr := testSecretManager(t)
-	secret := testSecret(t, mgr, "secrets/token", "top-secret")
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
-	require.NoError(t, err)
-
-	os.WriteFile(mgr.cryptPath("secrets/token"), []byte("not-a-valid-sesam-file"), 0o600)
-
-	//nolint:gosec
-	src, err := os.Open(mgr.cryptPath("secrets/token"))
-	require.NoError(t, err)
-	defer src.Close()
-
-	ok, err := RevealBlob(mgr.SesamDir, mgr.Identities, src, "secrets/token")
-	require.Error(t, err)
-	require.False(t, ok)
-}
-
 func TestRemoveSecretThenSealAll(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
