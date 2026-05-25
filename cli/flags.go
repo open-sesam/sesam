@@ -1,6 +1,12 @@
 package cli
 
-import "github.com/urfave/cli/v3"
+import (
+	"time"
+
+	"github.com/urfave/cli/v3"
+)
+
+const flagUser = "user"
 
 // flagsGeneral are shared by most top-level commands.
 //
@@ -26,12 +32,18 @@ var flagsGeneral = []cli.Flag{
 		Usage:   "Directory where .sesam lives",
 		Sources: cli.EnvVars("SESAM_DIR"),
 	},
+	&cli.DurationFlag{
+		Name:    "lock-timeout",
+		Value:   5 * time.Second,
+		Usage:   "Repository lock wait timeout (e.g. 5s, 30s, 2m)",
+		Sources: cli.EnvVars("SESAM_LOCK_TIMEOUT"),
+	},
 }
 
 // flagsInit are specific to repository bootstrap.
 var flagsInit = []cli.Flag{
 	&cli.StringFlag{
-		Name:     "user",
+		Name:     flagUser,
 		Required: true,
 		Usage:    "Initial admin user name",
 	},
@@ -42,15 +54,29 @@ var flagsInit = []cli.Flag{
 }
 
 // flagsSeal contains optional controls for sealing.
-var flagsSeal = []cli.Flag{}
+var flagsSeal = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "clean",
+		Usage: "Delete revealed secret files after successful seal",
+	},
+}
 
 // flagsReveal contains optional controls for reveal.
 var flagsReveal = []cli.Flag{}
 
+// flagsAdd contains controls for adding secrets.
+var flagsAdd = []cli.Flag{
+	&cli.StringSliceFlag{
+		Name:     "group",
+		Required: true,
+		Usage:    "Group assignment for the secret (repeatable)",
+	},
+}
+
 // flagsTell contains controls for adding users.
 var flagsTell = []cli.Flag{
 	&cli.StringFlag{
-		Name:     "user",
+		Name:     flagUser,
 		Required: true,
 		Usage:    "User name to add",
 	},
@@ -69,9 +95,25 @@ var flagsTell = []cli.Flag{
 // flagsKill contains controls for removing users.
 var flagsKill = []cli.Flag{
 	&cli.StringFlag{
-		Name:     "user",
+		Name:     flagUser,
 		Required: true,
 		Usage:    "User name to remove",
+	},
+}
+
+// flagsListSecrets contains output controls for secret listing.
+var flagsListSecrets = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "json",
+		Usage: "Print output as JSON",
+	},
+}
+
+// flagsListUsers contains output controls for user listing.
+var flagsListUsers = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "json",
+		Usage: "Print output as JSON",
 	},
 }
 

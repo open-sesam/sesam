@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,4 +28,14 @@ func expandHomeDir(path string) (string, error) {
 	default:
 		return path, nil
 	}
+}
+
+func printJSON(value any) error {
+	payload, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal json output: %w", err)
+	}
+
+	fmt.Println(string(payload))
+	return nil
 }

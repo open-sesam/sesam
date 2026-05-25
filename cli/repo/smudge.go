@@ -42,8 +42,8 @@ type FilterProcessHandler struct {
 // worktree (git always passes the path relative to the worktree root, and
 // the prefix before `.sesam/objects/` is the sesamDir).
 const (
-	objectsSegment = ".sesam/objects/"
 	sesamSuffix    = ".sesam"
+	objectsSegment = sesamSuffix + "/objects/"
 )
 
 // errProtocol marks a violation of the pkt-line filter protocol. Reaching this

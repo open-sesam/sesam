@@ -151,6 +151,15 @@ type DetailInit struct {
 	Admin DetailUserTell `json:"admin"`
 }
 
+// UserPubKey stores a pub key and from which source it was derived
+type UserPubKey struct {
+	// Actual encoded key material
+	Key string `json:"key"`
+
+	// The source where this key was from (e.g. "github:user" or "config")
+	Source KeySource `json:"source"`
+}
+
 // DetailUserTell describes a newly added user.
 //
 // Verification:
@@ -177,7 +186,7 @@ type DetailUserTell struct {
 	Groups []string `json:"group"`
 
 	// PubKeys of that user over time.
-	PubKeys []string `json:"pub_key"`
+	PubKeys []UserPubKey `json:"pub_keys"`
 
 	// SignPubKeys of that user.
 	// This should most likely just be one,
@@ -277,14 +286,14 @@ type DetailSeal struct {
 //
 // In all cases verify would complain about it and warn an user about Eve.
 type AuditLog struct {
-	Entries []auditEntrySigned `json:"entries"`
+	Entries []auditEntrySigned
 
 	// SesamDir is the dir in which .sesam resides.
-	SesamDir string `json:"-"`
+	SesamDir string
 
 	// The hash from the .sesam/audit/init file.
 	// It should be the same hash as the prev_hash of the 2nd entry.
-	InitHash string `json:"-"`
+	InitHash string
 
 	// file descriptor for adding new entries.
 	fd *os.File `json:"-"`
@@ -586,6 +595,7 @@ func (al *AuditLog) Close() error {
 	if al.fd == nil {
 		return nil
 	}
+
 	return al.fd.Close()
 }
 
@@ -673,7 +683,7 @@ func loadAuditKey(data []byte, ids Identities) ([]byte, error) {
 	}
 
 	if len(key) != chacha20poly1305.KeySize {
-		return nil, fmt.Errorf("audit key is not %d bytes", chacha20poly1305.KeySize)
+		return nil, fmt.Errorf("audit key is not %d byte", chacha20poly1305.KeySize)
 	}
 
 	return key, nil
@@ -694,6 +704,7 @@ func loadAuditLogFile(logPath string, ids Identities) (*AuditLog, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	// Reject audit logs bigger than 512M.
 	if info.Size() > 512*1024*1024 {
 		return nil, fmt.Errorf("audit log too big (> 512M). Please consider opening a bug report")
