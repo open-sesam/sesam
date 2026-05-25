@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/open-sesam/sesam/cli/repo"
 	"github.com/open-sesam/sesam/core"
@@ -30,7 +29,7 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 		return err
 	}
 
-	initialUser := strings.TrimSpace(cmd.String("user"))
+	initialUser := cmd.String("user")
 	if initialUser == "" {
 		return fmt.Errorf("failed to determine initial user, please pass --user")
 	}
@@ -51,7 +50,7 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 		return err
 	}
 
-	return withRepoLock(sesamDir, func() error {
+	return withRepoLock(sesamDir, cmd.Duration("lock-timeout"), func() error {
 		configPath := repo.ResolveConfigPath(sesamDir, cmd.String("config"), cmd.IsSet("config"))
 		if err := repo.CreateInitialConfig(
 			configPath,

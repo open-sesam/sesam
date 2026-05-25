@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	clirepo "github.com/open-sesam/sesam/cli/repo"
@@ -18,19 +17,21 @@ func HandleVerify(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return withManagers(sesamDir, cmd.StringSlice("identity"), func(mgr *runtimeManagers) error {
-		report := core.VerifyIntegrity(
-			sesamDir,
-			mgr.Secret.State,
-			mgr.Secret.Keyring,
-		)
-		if !report.OK() {
-			return fmt.Errorf("integrity check failed: %s", report.String())
-		}
+	auditLog, keyring, vstate, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = auditLog.Close()
+	}()
 
-		fmt.Println("verify ok")
-		return nil
-	})
+	report := core.VerifyIntegrity(sesamDir, vstate, keyring)
+	if !report.OK() {
+		return fmt.Errorf("integrity check failed: %s", report.String())
+	}
+
+	fmt.Println("verify ok")
+	return nil
 }
 
 // HandleID identifies the current user from configured identities.
@@ -40,18 +41,26 @@ func HandleID(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return withManagers(sesamDir, cmd.StringSlice("identity"), func(mgr *runtimeManagers) error {
-		whoami, _, err := identityToUser(
-			mgr.Secret.Identities,
-			mgr.Secret.Keyring.ListUsers(),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to identify current user: %w", err)
-		}
+	auditLog, keyring, _, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = auditLog.Close()
+	}()
 
-		fmt.Println(whoami)
-		return nil
-	})
+	identities, err := loadIdentities(cmd.StringSlice("identity"), "sesam.identity.runtime")
+	if err != nil {
+		return err
+	}
+
+	whoami, _, err := identityToUser(identities, keyring.ListUsers())
+	if err != nil {
+		return fmt.Errorf("failed to identify current user: %w", err)
+	}
+
+	fmt.Println(whoami)
+	return nil
 }
 
 // HandleServer starts the optional sesam API server.
@@ -69,33 +78,30 @@ func HandleUndo(_ context.Context, _ *cli.Command) error {
 	return handleStub("undo")
 }
 
-// HandleListUsers lists users, groups, and access bindings.
-func HandleListUsers(_ context.Context, cmd *cli.Command) error {
-	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
-	if err != nil {
-		return err
-	}
-
-	return withManagers(sesamDir, cmd.StringSlice("identity"), func(mgr *runtimeManagers) error {
-		vstate := mgr.Secret.State
-		users := append([]core.VerifiedUser(nil), vstate.Users...)
-		sort.Slice(users, func(i, j int) bool {
-			return users[i].Name < users[j].Name
-		})
-
-		for _, user := range users {
-			groups := append([]string(nil), user.Groups...)
-			sort.Strings(groups)
-			fmt.Printf("%s\tgroups=%s\n", user.Name, commaJoined(groups))
-		}
-
-		return nil
-	})
-}
-
 // HandleApply applies config changes to audit and metadata state.
 func HandleApply(_ context.Context, _ *cli.Command) error {
 	return handleStub("apply")
+}
+
+func loadVerifiedState(sesamDir string, identityPaths []string) (*core.AuditLog, core.Keyring, *core.VerifiedState, error) {
+	keyring := core.EmptyKeyring()
+	identities, err := loadIdentities(identityPaths, "sesam.identity.runtime")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	auditLog, err := core.LoadAuditLog(sesamDir, identities)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load audit log: %w", err)
+	}
+
+	vstate, err := core.Verify(auditLog, keyring)
+	if err != nil {
+		_ = auditLog.Close()
+		return nil, nil, nil, fmt.Errorf("failed to verify audit log: %w", err)
+	}
+
+	return auditLog, keyring, vstate, nil
 }
 
 func commaJoined(values []string) string {

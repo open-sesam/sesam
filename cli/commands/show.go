@@ -30,7 +30,7 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 	// TODO: Options to either force resolution as audit, user, secret, ...
 	// TODO: Show secret metadata (access list)
 	object := cmd.StringArg("object")
-	return withRepoLock(sesamDir, func() error {
+	return withRepoLock(sesamDir, cmd.Duration("lock-timeout"), func() error {
 		switch {
 		case filepath.Base(object) == "log.jsonl":
 			ok, err := core.ShowAuditLog(ids, object, os.Stdout)

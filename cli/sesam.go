@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -82,11 +83,6 @@ func Main(args []string) error {
 				Usage:  "Move a secret to a different path",
 			},
 			{
-				Name:   "list",
-				Action: commands.HandleList,
-				Usage:  "List known secrets and metadata",
-			},
-			{
 				Name:   "apply",
 				Hidden: true,
 				Action: commands.HandleApply,
@@ -124,6 +120,27 @@ func Main(args []string) error {
 					&cli.StringArg{
 						Name:      "object",
 						UsageText: "<object>",
+					},
+				},
+			},
+			{
+				Name:  "list",
+				Flags: flagsListSecrets,
+				Usage: "List entities",
+				Action: func(_ context.Context, _ *cli.Command) error {
+					return fmt.Errorf("missing list target: use `sesam list secrets` or `sesam list users`")
+				},
+				Commands: []*cli.Command{
+					{
+						Name:   "secrets",
+						Flags:  flagsListSecrets,
+						Action: commands.HandleListSecrets,
+						Usage:  "List known secrets and metadata",
+					}, {
+						Name:   "users",
+						Flags:  flagsListUsers,
+						Action: commands.HandleListUsers,
+						Usage:  "List persons, groups, and access",
 					},
 				},
 			},

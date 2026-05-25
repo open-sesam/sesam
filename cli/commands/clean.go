@@ -2,8 +2,13 @@ package commands
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	clirepo "github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
@@ -22,4 +27,16 @@ func HandleClean(_ context.Context, cmd *cli.Command) error {
 	}
 
 	return clirepo.Cleanup(repo, sesamDir, cmd.StringSlice("identity")...)
+}
+
+// TODO: Figure out where this is used?
+func deleteRevealedSecrets(sesamDir string, secrets []core.VerifiedSecret) error {
+	for _, secret := range secrets {
+		revealedPath := filepath.Join(sesamDir, secret.RevealedPath)
+		if err := os.Remove(revealedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("failed to delete %s: %w", secret.RevealedPath, err)
+		}
+	}
+
+	return nil
 }

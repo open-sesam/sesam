@@ -161,14 +161,28 @@ func TestMainWiredReadCommands(t *testing.T) {
 	}
 
 	for _, args := range [][]string{
-		{"sesam", "verify", "--sesam-dir", repoRoot},
+		{"sesam", "verify", "--sesam-dir", repoRoot, "--identity", identityPath},
 		{"sesam", "id", "--sesam-dir", repoRoot, "--identity", identityPath},
-		{"sesam", "list", "--sesam-dir", repoRoot},
-		{"sesam", "list-users", "--sesam-dir", repoRoot},
+		{"sesam", "list", "secrets", "--sesam-dir", repoRoot, "--identity", identityPath},
+		{"sesam", "list-users", "--sesam-dir", repoRoot, "--identity", identityPath},
 	} {
 		if err := Main(args); err != nil {
 			t.Fatalf("command %q failed: %v", strings.Join(args[1:], " "), err)
 		}
+	}
+}
+
+func TestMainListRequiresTarget(t *testing.T) {
+	repoRoot := makeTempDir(t)
+	initGitRepo(t, repoRoot)
+
+	err := Main([]string{"sesam", "list", "--sesam-dir", repoRoot})
+	if err == nil {
+		t.Fatal("expected list without target to fail")
+	}
+
+	if !strings.Contains(err.Error(), "missing list target") {
+		t.Fatalf("expected missing-target error, got: %v", err)
 	}
 }
 
@@ -294,7 +308,7 @@ func TestMainSealDeleteRevealed(t *testing.T) {
 		"seal",
 		"--sesam-dir", repoRoot,
 		"--identity", identityPath,
-		"--delete-revealed",
+		"--clean",
 	})
 	if err != nil {
 		t.Fatalf("seal failed: %v", err)
@@ -354,8 +368,29 @@ func TestMainVerifyFindsSesamDirFromNestedPath(t *testing.T) {
 		t.Fatalf("failed to chdir to nested path: %v", err)
 	}
 
-	err = Main([]string{"sesam", "verify"})
+	err = Main([]string{"sesam", "verify", "--identity", identityPath})
 	if err != nil {
 		t.Fatalf("verify failed from nested path: %v", err)
+	}
+}
+
+func TestMainRejectsInvalidLockTimeout(t *testing.T) {
+	repoDir := makeTempDir(t)
+	initGitRepo(t, repoDir)
+	identityPath := writeIdentityFile(t, repoDir)
+
+	err := Main([]string{
+		"sesam",
+		"--lock-timeout", "0s",
+		"seal",
+		"--sesam-dir", repoDir,
+		"--identity", identityPath,
+	})
+	if err == nil {
+		t.Fatal("expected invalid lock-timeout error")
+	}
+
+	if !strings.Contains(err.Error(), "must be > 0") {
+		t.Fatalf("expected lock-timeout validation error, got: %v", err)
 	}
 }
