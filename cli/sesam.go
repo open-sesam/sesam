@@ -69,9 +69,9 @@ func Main(args []string) error {
 				Action: commands.HandleMove,
 				Usage:  "Move a secret to a different path",
 			}, {
-				Name:   "list",
-				Flags:  flagsListSecrets,
-				Usage:  "List entities",
+				Name:  "list",
+				Flags: flagsListSecrets,
+				Usage: "List entities",
 				Action: func(_ context.Context, _ *cli.Command) error {
 					return fmt.Errorf("missing list target: use `sesam list secrets` or `sesam list users`")
 				},

@@ -10,7 +10,7 @@ import (
 	"github.com/gofrs/flock"
 )
 
-func withRepoLock(sesamDir string, timeout time.Duration, fn func() error) error {
+func withRepoLock(sesamDir string, timeout time.Duration, fn func() error) (err error) {
 	if timeout <= 0 {
 		return fmt.Errorf("invalid lock timeout %s: must be > 0", timeout)
 	}
@@ -31,14 +31,15 @@ func withRepoLock(sesamDir string, timeout time.Duration, fn func() error) error
 		return err
 	}
 
-	defer func() error {
-		err = acquired.Unlock()
-		if err != nil {
-			return fmt.Errorf("failed to unlock repository: %w", err)
+	defer func() {
+		unlockErr := acquired.Unlock()
+		if unlockErr != nil && err == nil {
+			err = fmt.Errorf("failed to unlock repository: %w", unlockErr)
 		}
-		return nil
 	}()
-	return fn()
+
+	err = fn()
+	return err
 }
 
 func acquireRepoLock(lockPath string, timeout time.Duration) (*flock.Flock, error) {

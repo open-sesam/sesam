@@ -6,6 +6,8 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+const flagUser = "user"
+
 // flagsGeneral are shared by most top-level commands.
 //
 // They describe the operator identity and repository/config roots.
@@ -41,7 +43,7 @@ var flagsGeneral = []cli.Flag{
 // flagsInit are specific to repository bootstrap.
 var flagsInit = []cli.Flag{
 	&cli.StringFlag{
-		Name:     "user",
+		Name:     flagUser,
 		Required: true,
 		Usage:    "Initial admin user name",
 	},
@@ -74,7 +76,7 @@ var flagsAdd = []cli.Flag{
 // flagsTell contains controls for adding users.
 var flagsTell = []cli.Flag{
 	&cli.StringFlag{
-		Name:     "user",
+		Name:     flagUser,
 		Required: true,
 		Usage:    "User name to add",
 	},
@@ -93,7 +95,7 @@ var flagsTell = []cli.Flag{
 // flagsKill contains controls for removing users.
 var flagsKill = []cli.Flag{
 	&cli.StringFlag{
-		Name:     "user",
+		Name:     flagUser,
 		Required: true,
 		Usage:    "User name to remove",
 	},

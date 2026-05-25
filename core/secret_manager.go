@@ -134,7 +134,8 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 		newAuditEntry(sm.Signer.UserName(), &DetailSecretChange{
 			RevealedPath: revealedPath,
 			Groups:       groups,
-		}))
+		}),
+	)
 }
 
 // SealAll seals all kown secrets.
