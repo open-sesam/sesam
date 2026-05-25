@@ -144,7 +144,10 @@ func (mgr *initSecretManager) Close() error {
 
 	err := mgr.auditLog.Close()
 	mgr.auditLog = nil
-	return fmt.Errorf("failed to close audit log: %w", err)
+	if err != nil {
+		return fmt.Errorf("failed to close audit log: %w", err)
+	}
+	return nil
 }
 
 // buildInitialSecretManager bootstraps audit/keyring state for init-time actions.
