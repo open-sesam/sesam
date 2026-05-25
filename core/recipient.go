@@ -39,8 +39,6 @@ const KeySourceManual KeySource = "manual"
 type Recipient struct {
 	age.Recipient
 	comparablePublicKey
-	// Source is in-memory only; serialization goes through MarshalJSON
-	// onto a UserPubKey.
 	Source KeySource `json:"-"`
 }
 
