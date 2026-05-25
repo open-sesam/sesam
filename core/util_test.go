@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -47,7 +48,7 @@ func TestValidUserName(t *testing.T) {
 	}
 
 	for _, name := range valid {
-		require.NoError(t, validUserName(name), "should accept %q", name)
+		require.NoError(t, ValidUserName(name), "should accept %q", name)
 	}
 }
 
@@ -72,7 +73,7 @@ func TestValidUserNameRejects(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Error(t, validUserName(tc.input), "should reject %q", tc.input)
+			require.Error(t, ValidUserName(tc.input), "should reject %q", tc.input)
 		})
 	}
 }
@@ -81,6 +82,17 @@ type failCloser struct{}
 
 func (fc failCloser) Close() error {
 	return errors.New("close failed")
+}
+
+func TestValidSecretPathFormatSesamSubdir(t *testing.T) {
+	// A relative path that points inside .sesam/ must be rejected.
+	err := validSecretPathFormat(".", filepath.Join(".sesam", "signkeys", "admin.age"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), ".sesam")
+}
+
+func TestValidSecretPathFormatNormalPath(t *testing.T) {
+	require.NoError(t, validSecretPathFormat(".", "secrets/db_password"))
 }
 
 func TestCloseLoggedNoError(t *testing.T) {

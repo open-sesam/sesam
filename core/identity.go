@@ -96,6 +96,15 @@ func (ids Identities) AgeIdentities() []age.Identity {
 	return ageIds
 }
 
+func (ids Identities) RecipientStrings() []string {
+	strs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		strs = append(strs, id.pub.String())
+	}
+
+	return strs
+}
+
 func sshKeyToIdentity(rawKey any) (*Identity, error) {
 	// NOTE: This is the same as agessh.ParseIdentities(), but without the parsing..
 	// If age ever extends the list of supported ssh keys we have to intervene here.
@@ -246,7 +255,7 @@ func (kpp *KeyringPassphraseProvider) ReadPassphrase() ([]byte, error) {
 // - There is no public key for this user.
 // - There are several matching users (techically possible, but disencouraged).
 // - We failed to test the relation by a quick test of encrypt/decrypt.
-func IdentityToUser(id *Identity, userToPub map[string][]*Recipient) (string, error) {
+func IdentityToUser(id *Identity, userToPub map[string]Recipients) (string, error) {
 	ownPub := id.Public()
 
 	var matchCount int

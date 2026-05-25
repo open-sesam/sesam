@@ -39,10 +39,10 @@ func BuildUserManager(
 
 func (um *UserManager) TellUser(
 	ctx context.Context,
-	user, pubKeySpec string,
+	user string, pubKeySpecs []string,
 	groups []string,
 ) error {
-	if err := validUserName(user); err != nil {
+	if err := ValidUserName(user); err != nil {
 		return fmt.Errorf("invalid user name: %w", err)
 	}
 
@@ -54,29 +54,21 @@ func (um *UserManager) TellUser(
 		return fmt.Errorf("re-adding user not yet supported")
 	}
 
-	// TODO: We should allow more than one public key here.
-
-	// core.ResolveRecipient and core.ParseRecipient only has to be done once per user add.
-	// init means adding an initial user, so assume we get the public key here via the config or something.
-	rawPubKey, err := ResolveRecipient(
-		ctx,
-		um.sesamDir,
-		pubKeySpec,
-		CacheModeReadWrite,
-	)
+	recps, err := ParseAndResolveRecipients(ctx, um.sesamDir, pubKeySpecs)
 	if err != nil {
-		return fmt.Errorf("failed to resolve recipient %s: %w", pubKeySpec, err)
+		return err
 	}
 
-	recp, err := ParseRecipient(rawPubKey)
-	if err != nil {
-		return fmt.Errorf("failed to parse recipient %s: %w", rawPubKey, err)
+	// audit key needs to be accessible by all recipients
+	allRecps := AllRecipients(um.state.keyring)
+	if err := um.log.WriteAuditKey(allRecps); err != nil {
+		return err
 	}
 
 	newUserSigner, err := GenerateSignKey(
 		um.sesamDir,
 		user,
-		recp.Recipient,
+		recps.AgeRecipients(),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to generate signing key: %w", err)
@@ -91,7 +83,7 @@ func (um *UserManager) TellUser(
 		newAuditEntry(um.signer.UserName(), &DetailUserTell{
 			User:        user,
 			Groups:      groups,
-			PubKeys:     []string{recp.String()},
+			PubKeys:     recps.Strings(),
 			SignPubKeys: []string{newUserSignKeyStr},
 		}),
 	)
@@ -116,47 +108,43 @@ func (um *UserManager) KillUsers(user string) error {
 		return err
 	}
 
+	// audit log needs to be re-encrypted with a fresh key to keep out the deleted user.
+	allRecps := AllRecipients(um.state.keyring)
+	if err := um.log.RotateKey(um.signer, allRecps); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 // InitAdminUser has to be called on init to create the initial user.
 func InitAdminUser(
 	ctx context.Context,
-	sesamDir, user, pubKeySpec string,
+	sesamDir, user string, pubKeySpecs []string,
 ) (Signer, *AuditLog, error) {
-	rawPubKey, err := ResolveRecipient(
-		ctx,
-		sesamDir,
-		pubKeySpec,
-		CacheModeReadWrite,
-	)
+	recps, err := ParseAndResolveRecipients(ctx, sesamDir, pubKeySpecs)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to resolve recipient %s: %w", pubKeySpec, err)
-	}
-
-	recp, err := ParseRecipient(rawPubKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse recipient %s: %w", rawPubKey, err)
+		return nil, nil, err
 	}
 
 	signer, err := GenerateSignKey(
 		sesamDir,
 		user,
-		recp.Recipient,
+		recps.AgeRecipients(),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate signing key: %w", err)
 	}
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	auditLog, err := InitAuditLog(".", signer, DetailUserTell{
+	auditLog, err := InitAuditLog(sesamDir, signer, recps, DetailUserTell{
 		User:        signer.UserName(),
 		Groups:      []string{"admin"},
-		PubKeys:     []string{recp.String()},
+		PubKeys:     recps.Strings(),
 		SignPubKeys: []string{signKeyStr},
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to ini audit log: %w", err)
+		return nil, nil, fmt.Errorf("failed to init audit log: %w", err)
 	}
 
 	return signer, auditLog, nil

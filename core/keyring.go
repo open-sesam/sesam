@@ -31,18 +31,18 @@ type Keyring interface {
 	Recipients(users []string) Recipients
 
 	// ListUsers() returns all users and recipients.
-	ListUsers() map[string][]*Recipient
+	ListUsers() map[string]Recipients
 }
 
 // MemoryKeyring is a simple Keyring implementation that holds public keys in memory only.
 type MemoryKeyring struct {
-	recipients map[string][]*Recipient
+	recipients map[string]Recipients
 	signPubs   map[string][][]byte
 }
 
 func EmptyKeyring() *MemoryKeyring {
 	return &MemoryKeyring{
-		recipients: make(map[string][]*Recipient),
+		recipients: make(map[string]Recipients),
 		signPubs:   make(map[string][][]byte),
 	}
 }
@@ -147,6 +147,16 @@ func (mk *MemoryKeyring) Recipients(users []string) Recipients {
 	return recps
 }
 
-func (mk *MemoryKeyring) ListUsers() map[string][]*Recipient {
+func (mk *MemoryKeyring) ListUsers() map[string]Recipients {
 	return mk.recipients
+}
+
+// AllRecipients returns all active recipients known in the system
+func AllRecipients(kr Keyring) Recipients {
+	var recps Recipients
+	for _, userRecps := range kr.ListUsers() {
+		recps = append(recps, userRecps...)
+	}
+
+	return recps
 }

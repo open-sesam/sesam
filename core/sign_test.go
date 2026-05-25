@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"filippo.io/age"
 	"github.com/stretchr/testify/require"
 )
 
@@ -12,7 +13,7 @@ func TestGenerateAndLoadSignKey(t *testing.T) {
 	sesamDir := testRepo(t)
 	user := newTestUser(t, "alice")
 
-	signer, err := GenerateSignKey(sesamDir, "alice", user.Recipient.Recipient)
+	signer, err := GenerateSignKey(sesamDir, "alice", []age.Recipient{user.Recipient.Recipient})
 	require.NoError(t, err)
 	require.Equal(t, "alice", signer.UserName())
 
@@ -45,7 +46,7 @@ func TestLoadSignKeyWrongIdentity(t *testing.T) {
 	bob := newTestUser(t, "bob")
 
 	// Generate key encrypted to alice.
-	_, err := GenerateSignKey(sesamDir, "alice", alice.Recipient.Recipient)
+	_, err := GenerateSignKey(sesamDir, "alice", []age.Recipient{alice.Recipient.Recipient})
 	require.NoError(t, err)
 
 	// Try loading with bob's identity — should fail to decrypt.
@@ -102,7 +103,7 @@ func TestSignCrossDomain(t *testing.T) {
 	sesamDir := testRepo(t)
 	user := newTestUser(t, "alice")
 
-	signer, err := GenerateSignKey(sesamDir, "alice", user.Recipient.Recipient)
+	signer, err := GenerateSignKey(sesamDir, "alice", []age.Recipient{user.Recipient.Recipient})
 	require.NoError(t, err)
 	require.Equal(t, "alice", signer.UserName())
 

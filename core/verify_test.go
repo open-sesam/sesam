@@ -55,7 +55,7 @@ func TestVerifyInitNegative(t *testing.T) {
 		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
 		tell := admin.DetailUserTell([]string{"dev"})
-		al, err := InitAuditLog(sesamDir, admin.Signer, tell)
+		al, err := InitAuditLog(sesamDir, admin.Signer, Recipients{admin.Recipient}, tell)
 		require.NoError(t, err)
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
@@ -717,7 +717,7 @@ func TestEndToEndStoreLoadVerify(t *testing.T) {
 		RootHash: "test-root-hash", FilesSealed: 1,
 	}), nil)
 
-	loaded, err := LoadAuditLog(sesamDir)
+	loaded, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.NoError(t, err)
 
 	state := verifyState(t, loaded, EmptyKeyring())

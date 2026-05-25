@@ -134,7 +134,8 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 		newAuditEntry(sm.Signer.UserName(), &DetailSecretChange{
 			RevealedPath: revealedPath,
 			Groups:       groups,
-		}))
+		}),
+	)
 }
 
 // SealAll seals all kown secrets.
@@ -142,7 +143,6 @@ func (sm *SecretManager) SealAll() error {
 	sigs := make([]*secretSignature, 0, len(sm.secrets))
 
 	for _, secret := range sm.secrets {
-		fmt.Println("SEAL", secret.RevealedPath)
 		sig, err := secret.Seal(sm.Signer.UserName())
 		if err != nil {
 			return fmt.Errorf("seal of %s failed: %w", secret.RevealedPath, err)
@@ -163,7 +163,6 @@ func (sm *SecretManager) SealAll() error {
 // RevealAll reveals all known secrets.
 func (sm *SecretManager) RevealAll() error {
 	for _, secret := range sm.secrets {
-		fmt.Println("REVEAL", secret.RevealedPath)
 		if err := secret.Reveal(); err != nil {
 			return fmt.Errorf("failed to reveal %s: %w", secret.RevealedPath, err)
 		}

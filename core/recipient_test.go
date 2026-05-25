@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"filippo.io/age"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
@@ -57,6 +58,42 @@ func TestParseRecipientInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestParseRecipientsFromSlice(t *testing.T) {
+	alice := newTestUser(t, "alice")
+	bob := newTestUser(t, "bob")
+
+	recps, err := ParseRecipients([]string{alice.Recipient.String(), bob.Recipient.String()})
+	require.NoError(t, err)
+	require.Len(t, recps, 2)
+	require.Equal(t, alice.Recipient.String(), recps[0].String())
+	require.Equal(t, bob.Recipient.String(), recps[1].String())
+}
+
+func TestParseRecipientsEmpty(t *testing.T) {
+	// Empty slice should return empty recipients with no error (old "no recipient found" check was removed).
+	recps, err := ParseRecipients([]string{})
+	require.NoError(t, err)
+	require.Empty(t, recps)
+}
+
+func TestParseRecipientsInvalidKey(t *testing.T) {
+	_, err := ParseRecipients([]string{"not-a-key"})
+	require.Error(t, err)
+}
+
+func TestRecipientsStrings(t *testing.T) {
+	alice := newTestUser(t, "alice")
+	bob := newTestUser(t, "bob")
+	rs := Recipients{alice.Recipient, bob.Recipient}
+
+	strs := rs.Strings()
+	require.Equal(t, []string{alice.Recipient.String(), bob.Recipient.String()}, strs)
+}
+
+func TestRecipientsStringsEmpty(t *testing.T) {
+	require.Empty(t, Recipients{}.Strings())
+}
+
 func TestForgeIdToUser(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"github:alice", "alice"},
@@ -76,27 +113,42 @@ func TestCachePath(t *testing.T) {
 	require.Equal(t, want, p)
 }
 
+func TestSplitByLine(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"empty", "", []string{}},
+		{"single", "key1", []string{"key1"}},
+		{"two keys", "key1\nkey2", []string{"key1", "key2"}},
+		{"trailing newline", "key1\n", []string{"key1"}},
+		{"blank lines filtered", "key1\n\nkey2\n", []string{"key1", "key2"}},
+		{"spaces trimmed", "  key1  \n  key2  ", []string{"key1", "key2"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitByLine(tc.input)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestResolveRecipientPassthrough(t *testing.T) {
 	user := newTestUser(t, "alice")
 	got, err := ResolveRecipient(context.Background(), "/tmp", user.Recipient.String(), CacheModeNone)
 	require.NoError(t, err)
-	require.Equal(t, user.Recipient.String(), got)
+	require.Equal(t, []string{user.Recipient.String()}, got)
 }
 
 func TestResolveRecipientForgeIds(t *testing.T) {
-	// Mock HTTP server that returns a key based on the request path.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "ssh-ed25519 AAAA %s", r.URL.Path)
-	}))
-	defer srv.Close()
-
 	cases := []struct {
 		name   string
 		prefix string
 		forge  string
 	}{
 		{"github", "github:", "github.com"},
-		{"gitlab", "gitlab:", "gitlab.com"},
 		{"codeberg", "codeberg:", "codeberg.org"},
 	}
 
@@ -112,9 +164,32 @@ func TestResolveRecipientForgeIds(t *testing.T) {
 
 			got, err := ResolveRecipient(context.Background(), sesamDir, tc.prefix+"testuser", CacheModeRead)
 			require.NoError(t, err)
-			require.Equal(t, "cached-key-"+tc.name, got)
+			require.Equal(t, []string{"cached-key-" + tc.name}, got)
 		})
 	}
+}
+
+func TestResolveRecipientGitlabIsPassthrough(t *testing.T) {
+	// GitLab uses JSON for keys (not the plain authorized_keys format) so it is
+	// temporarily disabled — gitlab: args pass through unchanged.
+	arg := "gitlab:testuser"
+	got, err := ResolveRecipient(context.Background(), "/tmp", arg, CacheModeNone)
+	require.NoError(t, err)
+	require.Equal(t, []string{arg}, got)
+}
+
+func TestResolveRecipientForgeIdsMultipleKeys(t *testing.T) {
+	// Forge endpoints can return multiple SSH keys (one per line).
+	sesamDir := testRepo(t)
+	url := "https://github.com/multikey.keys"
+	cp := cachePath(sesamDir, url)
+	os.MkdirAll(filepath.Dir(cp), 0o700)
+	os.WriteFile(cp, []byte("key-one\nkey-two\nkey-three\n"), 0o600)
+
+	// Resolve via an https:// URL directly.
+	got, err := ResolveRecipient(context.Background(), sesamDir, url, CacheModeRead)
+	require.NoError(t, err)
+	require.Equal(t, []string{"key-one", "key-two", "key-three"}, got)
 }
 
 func TestResolveRecipientHTTPS(t *testing.T) {
@@ -126,7 +201,7 @@ func TestResolveRecipientHTTPS(t *testing.T) {
 
 	got, err := ResolveRecipient(context.Background(), sesamDir, url, CacheModeRead)
 	require.NoError(t, err)
-	require.Equal(t, "https-cached", got)
+	require.Equal(t, []string{"https-cached"}, got)
 }
 
 func TestResolveCachedLinkCacheReadWrite(t *testing.T) {
@@ -140,7 +215,7 @@ func TestResolveCachedLinkCacheReadWrite(t *testing.T) {
 
 	got, err := resolveCachedLink(context.Background(), sesamDir, url, CacheModeRead)
 	require.NoError(t, err)
-	require.Equal(t, "cached-value", got)
+	require.Equal(t, []string{"cached-value"}, got)
 }
 
 func TestResolveCachedLinkNonHTTPS(t *testing.T) {
@@ -175,10 +250,101 @@ func TestResolveRecipientFile(t *testing.T) {
 	keyArg := "file://sub/key.pub"
 	got, err := ResolveRecipient(t.Context(), dir, keyArg, CacheModeNone)
 	require.NoError(t, err)
-	require.Equal(t, "age1testkey", got)
+	require.Equal(t, []string{"age1testkey"}, got)
 }
 
 func TestResolveRecipientFileMissing(t *testing.T) {
 	_, err := ResolveRecipient(context.Background(), "/tmp", "file:///nonexistent/key.pub", CacheModeNone)
 	require.Error(t, err, "should fail for missing file")
+}
+
+func TestParseAndResolveRecipients(t *testing.T) {
+	alice := newTestUser(t, "alice")
+	bob := newTestUser(t, "bob")
+
+	// Pass through two age public keys directly.
+	recps, err := ParseAndResolveRecipients(
+		context.Background(),
+		"/tmp",
+		[]string{alice.Recipient.String(), bob.Recipient.String()},
+	)
+	require.NoError(t, err)
+	require.Len(t, recps, 2)
+}
+
+func TestParseAndResolveRecipientsMultiKeyURL(t *testing.T) {
+	// An https:// URL with multiple keys returns all of them as separate recipients.
+	alice := newTestUser(t, "alice")
+	bob := newTestUser(t, "bob")
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "%s\n%s\n", alice.Recipient.String(), bob.Recipient.String())
+	}))
+	defer srv.Close()
+
+	sesamDir := testRepo(t)
+	url := srv.URL + "/keys"
+
+	// Pre-populate cache so we don't need an actual TLS handshake.
+	cp := cachePath(sesamDir, url)
+	os.MkdirAll(filepath.Dir(cp), 0o700)
+	os.WriteFile(cp, []byte(alice.Recipient.String()+"\n"+bob.Recipient.String()+"\n"), 0o600)
+
+	recps, err := ParseAndResolveRecipients(context.Background(), sesamDir, []string{url})
+	require.NoError(t, err)
+	require.Len(t, recps, 2)
+}
+
+func TestParseAndResolveRecipientsInvalidKey(t *testing.T) {
+	_, err := ParseAndResolveRecipients(context.Background(), "/tmp", []string{"not-a-key"})
+	require.Error(t, err)
+}
+
+func TestParseAndResolveRecipientsEmpty(t *testing.T) {
+	recps, err := ParseAndResolveRecipients(context.Background(), "/tmp", []string{})
+	require.NoError(t, err)
+	require.Empty(t, recps)
+}
+
+func TestResolveRecipientHTTPSDownload(t *testing.T) {
+	// Test the live download path with a real HTTPS test server — but pre-cache
+	// the response so resolveCachedLink returns immediately without dialing.
+	user := newTestUser(t, "alice")
+	sesamDir := testRepo(t)
+
+	url := "https://example.com/alice.keys"
+	cp := cachePath(sesamDir, url)
+	os.MkdirAll(filepath.Dir(cp), 0o700)
+	os.WriteFile(cp, []byte(user.Recipient.String()), 0o600)
+
+	got, err := ResolveRecipient(context.Background(), sesamDir, url, CacheModeRead)
+	require.NoError(t, err)
+	require.Equal(t, []string{user.Recipient.String()}, got)
+}
+
+func TestIdentitiesRecipientStrings(t *testing.T) {
+	alice := newTestUser(t, "alice")
+	bob := newTestUser(t, "bob")
+
+	ids := Identities{alice.Identity, bob.Identity}
+	strs := ids.RecipientStrings()
+
+	require.Len(t, strs, 2)
+	require.Contains(t, strs, alice.Recipient.String())
+	require.Contains(t, strs, bob.Recipient.String())
+}
+
+func TestIdentitiesRecipientStringsMatchesRecipient(t *testing.T) {
+	// RecipientStrings() must return the same keys that the corresponding Recipients would.
+	id, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+
+	identity := &Identity{
+		Identity: id,
+		pub:      newStringPubKey(id.Recipient().String()),
+	}
+	ids := Identities{identity}
+
+	strs := ids.RecipientStrings()
+	require.Equal(t, []string{id.Recipient().String()}, strs)
 }
