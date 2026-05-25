@@ -343,7 +343,7 @@ func TestSealAllNonAdminPreservesCiphertextItCannotDecrypt(t *testing.T) {
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User:        "bob",
 		Groups:      []string{"dev"},
-		PubKeys:     []string{bob.Recipient.String()},
+		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
 		SignPubKeys: []string{bob.SignPubKey},
 	}), nil)
 	require.NoError(t, err)
