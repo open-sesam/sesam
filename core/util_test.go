@@ -2,6 +2,8 @@ package core
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -47,7 +49,7 @@ func TestValidUserName(t *testing.T) {
 	}
 
 	for _, name := range valid {
-		require.NoError(t, validUserName(name), "should accept %q", name)
+		require.NoError(t, ValidUserName(name), "should accept %q", name)
 	}
 }
 
@@ -72,7 +74,7 @@ func TestValidUserNameRejects(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Error(t, validUserName(tc.input), "should reject %q", tc.input)
+			require.Error(t, ValidUserName(tc.input), "should reject %q", tc.input)
 		})
 	}
 }
@@ -83,9 +85,49 @@ func (fc failCloser) Close() error {
 	return errors.New("close failed")
 }
 
+func TestValidSecretPathFormatSesamSubdir(t *testing.T) {
+	// A relative path that points inside .sesam/ must be rejected.
+	err := validSecretPathFormat(".", filepath.Join(".sesam", "signkeys", "admin.age"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), ".sesam")
+}
+
+func TestValidSecretPathFormatNormalPath(t *testing.T) {
+	require.NoError(t, validSecretPathFormat(".", "secrets/db_password"))
+}
+
 func TestCloseLoggedNoError(t *testing.T) {
 	// Should not panic.
 	require.NotPanics(t, func() {
 		closeLogged(failCloser{})
 	})
+}
+
+func TestReadFileLimitedTooLarge(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "toobig")
+	require.NoError(t, err)
+	_, err = f.Write([]byte("hello world"))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	_, err = ReadFileLimited(f.Name(), 5)
+	require.Error(t, err, "should fail when file exceeds limit")
+	require.Contains(t, err.Error(), "would be limited")
+}
+
+func TestReadFileLimitedExactSize(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "exact")
+	require.NoError(t, err)
+	_, err = f.Write([]byte("hello"))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	data, err := ReadFileLimited(f.Name(), 5)
+	require.NoError(t, err)
+	require.Equal(t, []byte("hello"), data)
+}
+
+func TestReadFileLimitedMissing(t *testing.T) {
+	_, err := ReadFileLimited("/nonexistent/path", 100)
+	require.Error(t, err)
 }

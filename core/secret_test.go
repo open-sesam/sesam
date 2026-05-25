@@ -52,9 +52,8 @@ func TestSealAndReveal(t *testing.T) {
 	require.NotEmpty(t, sig.Hash)
 	require.NotEmpty(t, sig.Signature)
 
-	// Check files were created.
+	// Check file was created.
 	require.FileExists(t, mgr.cryptPath("secrets/db_password"))
-	require.FileExists(t, signaturePath(mgr.SesamDir, "secrets/db_password"))
 
 	// Remove plaintext, then reveal and compare.
 	plainPath := filepath.Join(mgr.SesamDir, "secrets/db_password")
@@ -105,7 +104,11 @@ func TestSealCreatesSignatureFile(t *testing.T) {
 	_, err := secret.Seal("testuser")
 	require.NoError(t, err)
 
-	sigDesc, err := readStoredSignature(mgr.SesamDir, "config/api_key")
+	sigs, err := readAllSignatures(mgr.SesamDir)
+	require.NoError(t, err)
+	require.Len(t, sigs, 1)
+
+	sigDesc := sigs[0]
 	require.NoError(t, err)
 	require.Equal(t, "config/api_key", sigDesc.RevealedPath)
 	require.Equal(t, "testuser", sigDesc.SealedBy)
@@ -118,7 +121,7 @@ func TestRevealDetectsCorruptedCiphertext(t *testing.T) {
 	_, err := secret.Seal("testuser")
 	require.NoError(t, err)
 
-	// Corrupt the .age file contents.
+	// Corrupt the .sesam file contents.
 	os.WriteFile(mgr.cryptPath("secrets/token"), []byte("corrupted-ciphertext"), 0o600)
 
 	err = secret.Reveal()
@@ -198,18 +201,18 @@ func TestRevealMissingAgeFile(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestRevealMissingSigFile(t *testing.T) {
+func TestRevealMissingFooter(t *testing.T) {
 	mgr := testSecretManager(t)
-	secret := testSecret(t, mgr, "secrets/nosig", "data")
+	secret := testSecret(t, mgr, "secrets/nofooter", "data")
 
 	_, err := secret.Seal("testuser")
 	require.NoError(t, err)
 
-	// Remove only the .sig.json, keep the .age.
-	os.Remove(signaturePath(mgr.SesamDir, "secrets/nosig"))
+	// Overwrite the .sesam file with content that has no newline footer.
+	os.WriteFile(mgr.cryptPath("secrets/nofooter"), []byte("no-footer-here"), 0o600)
 
 	err = secret.Reveal()
-	require.Error(t, err, "reveal should fail when .sig.json is missing")
+	require.Error(t, err, "reveal should fail when footer is missing")
 }
 
 func TestSealRevealLargeFile(t *testing.T) {
@@ -286,8 +289,11 @@ func TestReadStoredSignatureRoundtrip(t *testing.T) {
 	expected, err := secret.Seal("testuser")
 	require.NoError(t, err)
 
-	got, err := readStoredSignature(mgr.SesamDir, "secrets/roundtrip")
+	sigs, err := readAllSignatures(mgr.SesamDir)
 	require.NoError(t, err)
+	require.Len(t, sigs, 1)
+
+	got := sigs[0]
 	require.Equal(t, expected.RevealedPath, got.RevealedPath)
 	require.Equal(t, expected.Hash, got.Hash)
 	require.Equal(t, expected.Signature, got.Signature)

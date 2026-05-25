@@ -11,10 +11,10 @@ import (
 	"strings"
 )
 
-// validUserName checks that a user name is safe for use in file paths and log entries.
+// ValidUserName checks that a user name is safe for use in file paths and log entries.
 // Only lowercase alphanumeric characters, hyphens and underscores are allowed.
 // The name must not be empty and must not exceed 64 characters.
-func validUserName(name string) error {
+func ValidUserName(name string) error {
 	if name == "" {
 		return fmt.Errorf("user name must not be empty")
 	}
@@ -43,6 +43,10 @@ func validSecretPathFormat(sesamDir string, revealedPath string) error {
 
 	if strings.Contains(revealedPath, "..") {
 		return fmt.Errorf("path may not include '..': %s", revealedPath)
+	}
+
+	if strings.HasPrefix(revealedPath, filepath.Join(sesamDir, ".sesam")) {
+		return fmt.Errorf("secret path may not live in .sesam: %s", revealedPath)
 	}
 
 	return nil
@@ -83,11 +87,24 @@ func closeLogged(fd io.Closer) {
 	}
 }
 
-func readFileLimited(path string, size int64) ([]byte, error) {
+// TODO: Add WriteAgeFile() and ReadAgeFile() utils
+
+func ReadFileLimited(path string, size int64) ([]byte, error) {
 	//nolint:gosec
 	fd, err := os.Open(path)
 	if err != nil {
 		return nil, err
+	}
+
+	info, err := fd.Stat()
+	if err != nil {
+		_ = fd.Close()
+		return nil, err
+	}
+
+	if is := info.Size(); is > size {
+		_ = fd.Close()
+		return nil, fmt.Errorf("file would be limited: %s: %d > %d", path, is, size)
 	}
 
 	//nolint:errcheck

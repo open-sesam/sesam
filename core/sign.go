@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -55,7 +54,7 @@ func (es *ed25519Signer) UserName() string {
 
 // LoadSignKey will load a signer specific to a user and decrypt it via `userIdentity`
 func LoadSignKey(sesamDir, user string, userIdentity age.Identity) (Signer, error) {
-	if err := validUserName(user); err != nil {
+	if err := ValidUserName(user); err != nil {
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
 
@@ -67,7 +66,7 @@ func LoadSignKey(sesamDir, user string, userIdentity age.Identity) (Signer, erro
 		return nil, fmt.Errorf("failed to load sign key %s: %w", signKeyPath, err)
 	}
 
-	dr, err := age.Decrypt(io.LimitReader(cryptedSignPrivKeyFd, 1024), userIdentity)
+	dr, err := age.Decrypt(io.LimitReader(cryptedSignPrivKeyFd, 16*1024), userIdentity)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt header of signing key: %w", err)
 	}
@@ -101,8 +100,8 @@ func LoadSignKey(sesamDir, user string, userIdentity age.Identity) (Signer, erro
 }
 
 // GenerateSignKey will generate a new ed25519 signing key only accessible to `userRecipient`
-func GenerateSignKey(sesamDir, user string, userRecipient age.Recipient) (Signer, error) {
-	if err := validUserName(user); err != nil {
+func GenerateSignKey(sesamDir, user string, userRecipient []age.Recipient) (Signer, error) {
+	if err := ValidUserName(user); err != nil {
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
 
@@ -117,7 +116,7 @@ func GenerateSignKey(sesamDir, user string, userRecipient age.Recipient) (Signer
 	}
 
 	ageBuf := &bytes.Buffer{}
-	wc, err := age.Encrypt(ageBuf, userRecipient)
+	wc, err := age.Encrypt(ageBuf, userRecipient...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt signing key: %w", err)
 	}
@@ -142,37 +141,11 @@ func GenerateSignKey(sesamDir, user string, userRecipient age.Recipient) (Signer
 	}, nil
 }
 
-func signaturePath(sesamDir, revealedPath string) string {
-	return filepath.Join(sesamDir, ".sesam", "objects", revealedPath+".sig.json")
-}
-
-// ReadStoredSignature will open the signature file belonging to `revealedPath`.
-// You will get an error if it has not been sealed yet.
-func readStoredSignature(sesamDir, revealedPath string) (secretSignature, error) {
-	sigPath := signaturePath(sesamDir, revealedPath)
-
-	//nolint:gosec
-	sigFd, err := os.Open(sigPath)
-	if err != nil {
-		return secretSignature{}, fmt.Errorf("failed to open signature json: %w", err)
-	}
-
-	defer closeLogged(sigFd)
-
-	var sigDesc secretSignature
-	dec := json.NewDecoder(io.LimitReader(sigFd, 1024))
-	if err := dec.Decode(&sigDesc); err != nil {
-		return secretSignature{}, fmt.Errorf("failed to decode signature json %s: %w", sigPath, err)
-	}
-
-	return sigDesc, nil
-}
-
-// ReadAllSignatures finds all .sig.json files under .sesam/objects/ and parses them.
-func readAllSignatures(sesamDir string) ([]secretSignature, error) {
+// readAllSignatures finds all .sesam files under .sesam/objects/ and parses their signature footers.
+func readAllSignatures(sesamDir string) ([]secretFooter, error) {
 	objectsDir := filepath.Join(sesamDir, ".sesam", "objects")
 
-	var sigs []secretSignature
+	var sigs []secretFooter
 	if _, err := os.Stat(objectsDir); os.IsNotExist(err) {
 		// might happen if we're in the init phase
 		return sigs, nil
@@ -183,24 +156,23 @@ func readAllSignatures(sesamDir string) ([]secretSignature, error) {
 			return err
 		}
 
-		if d.IsDir() || !strings.HasSuffix(path, ".sig.json") {
+		if d.IsDir() || !strings.HasSuffix(path, ".sesam") {
 			return nil
 		}
 
 		//nolint:gosec
-		sigFd, err := os.Open(path)
+		fd, err := os.Open(path)
 		if err != nil {
 			return fmt.Errorf("failed to open signature json %s: %w", path, err)
 		}
-		defer closeLogged(sigFd)
+		defer closeLogged(fd)
 
-		var sig secretSignature
-		dec := json.NewDecoder(io.LimitReader(sigFd, 2048))
-		if err := dec.Decode(&sig); err != nil {
-			return fmt.Errorf("failed to decode signature json %s: %w", path, err)
+		_, sigDesc, err := readSignature(fd)
+		if err != nil {
+			return err
 		}
 
-		sigs = append(sigs, sig)
+		sigs = append(sigs, *sigDesc)
 		return nil
 	})
 

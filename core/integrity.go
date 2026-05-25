@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"golang.org/x/crypto/sha3"
 )
@@ -60,108 +59,96 @@ func verifyIntegritySingleSecret(
 	sesamDir string,
 	vs VerifiedSecret,
 	report *IntegrityReport,
-	diskAgeFiles map[string]bool,
-	diskSigMap map[string]*secretSignature,
+	diskSigMap map[string]*secretFooter,
 	kr Keyring,
 ) {
 	sig, hasSig := diskSigMap[vs.RevealedPath]
-	if !hasSig {
-		report.add(vs.RevealedPath, "missing .sig.json file")
-	}
-
-	// Remove from maps so we can detect extras.
 	defer delete(diskSigMap, vs.RevealedPath)
-	defer delete(diskAgeFiles, vs.RevealedPath)
 
-	// Check .age file exists and hash matches.
-	agePath := filepath.Join(sesamDir, ".sesam", "objects", vs.RevealedPath+".age")
-
-	//nolint:gosec
-	ageFd, err := os.Open(agePath)
-	if err != nil {
-		report.add(vs.RevealedPath, fmt.Sprintf("missing .age file: %v", err))
+	if !hasSig {
+		report.add(vs.RevealedPath, "missing .sesam file")
 		return
 	}
 
-	defer closeLogged(ageFd)
+	sesamPath := filepath.Join(sesamDir, ".sesam", "objects", vs.RevealedPath+".sesam")
+
+	//nolint:gosec
+	fd, err := os.Open(sesamPath)
+	if err != nil {
+		report.add(vs.RevealedPath, fmt.Sprintf("failed to open .sesam file: %v", err))
+		return
+	}
+
+	defer closeLogged(fd)
+
+	ageRd, _, err := readSignature(fd)
+	if err != nil {
+		report.add(vs.RevealedPath, fmt.Sprintf("failed to read .sesam footer: %v", err))
+		return
+	}
 
 	h := sha3.New256()
-	if _, err := io.Copy(h, ageFd); err != nil {
-		report.add(vs.RevealedPath, fmt.Sprintf("failed to hash .age file: %v", err))
+	if _, err := io.Copy(h, ageRd); err != nil {
+		report.add(vs.RevealedPath, fmt.Sprintf("failed to hash .sesam file: %v", err))
 		return
 	}
 
 	_, _ = h.Write([]byte(vs.RevealedPath))
 	computedHash := MulticodeEncode(h.Sum(nil), MhSHA3_256)
 
-	if hasSig && computedHash != sig.Hash {
+	if computedHash != sig.Hash {
 		report.add(vs.RevealedPath, fmt.Sprintf(
-			"hash mismatch: .sig.json says %s, .age file says %s",
+			"hash mismatch: footer says %s, computed says %s",
 			sig.Hash, computedHash,
 		))
 	}
 
-	// Verify the signature in .sig.json.
-	if hasSig {
-		hashBytes, _, err := multicodeDecode(sig.Hash)
-		if err != nil {
-			report.add(vs.RevealedPath, fmt.Sprintf("failed to decode hash: %v", err))
-		} else if _, err := kr.Verify(
-			SesamDomainSignSecretTag,
-			hashBytes,
-			sig.Signature,
-			sig.SealedBy,
-		); err != nil {
-			report.add(vs.RevealedPath, fmt.Sprintf("invalid signature: %v", err))
-		}
+	hashBytes, _, err := multicodeDecode(sig.Hash)
+	if err != nil {
+		report.add(vs.RevealedPath, fmt.Sprintf("failed to decode hash: %v", err))
+		return
+	}
+
+	if _, err := kr.Verify(SesamDomainSignSecretTag, hashBytes, sig.Signature, sig.SealedBy); err != nil {
+		report.add(vs.RevealedPath, fmt.Sprintf("invalid signature: %v", err))
 	}
 }
 
 // VerifyIntegrity performs a deep integrity check comparing the verified state
 // against the actual files on disk. It checks:
 //
-//   - Every secret in the state has a .sig.json and .age file on disk.
-//   - The .age file hash matches the hash in .sig.json.
-//   - The signature in .sig.json is valid.
-//   - No extra .sig.json or .age files exist that are not in the state.
+//   - Every secret in the state has a .sesam file on disk.
+//   - The age ciphertext hash matches the hash in the footer.
+//   - The footer signature is valid.
+//   - No extra .sesam files exist that are not in the state.
 //   - The RootHash from the latest seal matches.
 //
 // All errors are collected, not returned early.
 func VerifyIntegrity(sesamDir string, state *VerifiedState, kr Keyring) *IntegrityReport {
 	report := &IntegrityReport{}
 
-	// Read all .sig.json files from disk.
 	diskSigs, err := readAllSignatures(sesamDir)
 	if err != nil {
 		report.add("", fmt.Sprintf("failed to read signatures: %v", err))
 		return report
 	}
 
-	diskSigMap := make(map[string]*secretSignature, len(diskSigs))
+	diskSigMap := make(map[string]*secretFooter, len(diskSigs))
 	for idx := range diskSigs {
 		diskSigMap[diskSigs[idx].RevealedPath] = &diskSigs[idx]
 	}
 
-	// Collect all .age files on disk to detect extras.
-	diskAgeFiles := collectAgeFiles(sesamDir)
-
-	// Check every secret in the verified state.
 	for _, vs := range state.Secrets {
-		verifyIntegritySingleSecret(sesamDir, vs, report, diskAgeFiles, diskSigMap, kr)
+		verifyIntegritySingleSecret(sesamDir, vs, report, diskSigMap, kr)
 	}
 
-	// Any remaining entries are files not tracked in the state.
+	// Any remaining entries are .sesam files not tracked in the state.
 	for path := range diskSigMap {
-		report.add(path, "extra .sig.json file not in verified state")
+		report.add(path, "extra .sesam file not in verified state")
 	}
 
-	for path := range diskAgeFiles {
-		report.add(path, "extra .age file not in verified state")
-	}
-
-	// RootHash check ties it all together.
 	if state.LastSealRootHash != "" {
-		sigPtrs := make([]*secretSignature, 0, len(diskSigs))
+		sigPtrs := make([]*secretFooter, 0, len(diskSigs))
 		for idx := range diskSigs {
 			sigPtrs = append(sigPtrs, &diskSigs[idx])
 		}
@@ -176,30 +163,4 @@ func VerifyIntegrity(sesamDir string, state *VerifiedState, kr Keyring) *Integri
 	}
 
 	return report
-}
-
-// collectAgeFiles walks .sesam/objects/ and returns a map of revealedPath -> true
-// for every .age file found.
-func collectAgeFiles(sesamDir string) map[string]bool {
-	objectsDir := filepath.Join(sesamDir, ".sesam", "objects")
-	result := make(map[string]bool)
-
-	_ = filepath.WalkDir(objectsDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".age") {
-			//nolint:nilerr
-			return nil
-		}
-
-		rel, err := filepath.Rel(objectsDir, path)
-		if err != nil {
-			//nolint:nilerr
-			return nil
-		}
-
-		revealedPath := strings.TrimSuffix(rel, ".age")
-		result[revealedPath] = true
-		return nil
-	})
-
-	return result
 }

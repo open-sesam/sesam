@@ -38,6 +38,7 @@ func newTestUser(t *testing.T, name string) *testUser {
 	recp := &Recipient{
 		Recipient:           ageID.Recipient(),
 		comparablePublicKey: id.pub,
+		Source:              KeySourceManual,
 	}
 
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -61,7 +62,7 @@ func (tu *testUser) DetailUserTell(groups []string) DetailUserTell {
 	return DetailUserTell{
 		User:        tu.Name,
 		Groups:      groups,
-		PubKeys:     []string{tu.Recipient.String()},
+		PubKeys:     []UserPubKey{{Key: tu.Recipient.String(), Source: KeySourceManual}},
 		SignPubKeys: []string{tu.SignPubKey},
 	}
 }
@@ -100,7 +101,29 @@ func testKeyring(t *testing.T, users ...*testUser) *MemoryKeyring {
 func initAuditLog(t *testing.T, sesamDir string, admin *testUser) *AuditLog {
 	t.Helper()
 
-	al, err := InitAuditLog(sesamDir, admin.Signer, admin.DetailUserTell([]string{"admin"}))
+	al, err := InitAuditLog(
+		sesamDir,
+		admin.Signer,
+		Recipients{admin.Recipient},
+		admin.DetailUserTell([]string{"admin"}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return al
+}
+
+// loadAuditLog loads an existing audit log using the given users' identities.
+func loadAuditLog(t *testing.T, sesamDir string, users ...*testUser) *AuditLog {
+	t.Helper()
+
+	ids := make(Identities, 0, len(users))
+	for _, u := range users {
+		ids = append(ids, u.Identity)
+	}
+
+	al, err := LoadAuditLog(sesamDir, ids)
 	if err != nil {
 		t.Fatal(err)
 	}

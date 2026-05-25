@@ -149,7 +149,7 @@ func TestIdentityToUser(t *testing.T) {
 	bob := newTestUser(t, "bob")
 
 	t.Run("single match", func(t *testing.T) {
-		userToPub := map[string][]*Recipient{
+		userToPub := map[string]Recipients{
 			"alice": {alice.Recipient},
 			"bob":   {bob.Recipient},
 		}
@@ -159,7 +159,7 @@ func TestIdentityToUser(t *testing.T) {
 	})
 
 	t.Run("no match", func(t *testing.T) {
-		userToPub := map[string][]*Recipient{
+		userToPub := map[string]Recipients{
 			"bob": {bob.Recipient},
 		}
 		_, err := IdentityToUser(alice.Identity, userToPub)
@@ -168,7 +168,7 @@ func TestIdentityToUser(t *testing.T) {
 	})
 
 	t.Run("multiple matches", func(t *testing.T) {
-		userToPub := map[string][]*Recipient{
+		userToPub := map[string]Recipients{
 			"alice": {alice.Recipient},
 			"clone": {alice.Recipient},
 		}
@@ -178,7 +178,7 @@ func TestIdentityToUser(t *testing.T) {
 	})
 
 	t.Run("empty map", func(t *testing.T) {
-		_, err := IdentityToUser(alice.Identity, map[string][]*Recipient{})
+		_, err := IdentityToUser(alice.Identity, map[string]Recipients{})
 		require.Error(t, err)
 	})
 }

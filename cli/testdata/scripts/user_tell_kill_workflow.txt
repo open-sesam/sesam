@@ -1,0 +1,40 @@
+# Verify that sesam tell adds a user (key re-wrapped) and kill removes them
+# (key rotated), and that the audit log remains intact throughout.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Sanity check: admin can already show the audit log.
+exec sesam show .sesam/audit/log.jsonl
+stdout '"operation"'
+stdout '"init"'
+
+# Tell: add bob as a dev. Passes bob's public key as recipient.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+
+# The audit log now has the user.tell entry.
+exec sesam show .sesam/audit/log.jsonl
+stdout '"user.tell"'
+stdout '"bob"'
+
+# Bob's identity can now decrypt the audit log key (WriteAuditKey ran).
+exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl
+stdout '"user.tell"'
+stdout '"bob"'
+
+# Kill: remove bob. This rotates the key so bob loses access.
+exec sesam kill --user bob
+
+# Admin can still load the log and sees the kill entry.
+exec sesam show .sesam/audit/log.jsonl
+stdout '"user.kill"'
+stdout '"bob"'
+
+# Bob can no longer decrypt the log (key was rotated out).
+! exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl
+

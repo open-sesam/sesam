@@ -1,9 +1,11 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -73,7 +75,7 @@ func TestParseDetailWrongType(t *testing.T) {
 	_, err := parseDetail[DetailInit](signed)
 	require.NoError(t, err)
 
-	// Now try to parse as a different type — should fail.
+	// Now try to parse as a different type - should fail.
 	_, err = parseDetail[DetailSeal](signed)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not *")
@@ -98,7 +100,7 @@ func TestAddEntryChaining(t *testing.T) {
 	e := newAuditEntry("admin", &DetailUserTell{
 		User:        "bob",
 		Groups:      []string{"dev"},
-		PubKeys:     []string{bob.Recipient.String()},
+		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
 		SignPubKeys: []string{bob.SignPubKey},
 	})
 
@@ -131,13 +133,13 @@ func TestStoreAndLoad(t *testing.T) {
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User:        "bob",
 		Groups:      []string{"dev"},
-		PubKeys:     []string{bob.Recipient.String()},
+		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
 		SignPubKeys: []string{bob.SignPubKey},
 	}), nil)
 	require.NoError(t, err)
 
 	require.NoError(t, al.Close())
-	loaded, err := LoadAuditLog(sesamDir)
+	loaded, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.NoError(t, err)
 	require.Len(t, loaded.Entries, len(al.Entries))
 	require.Equal(t, al.InitHash, loaded.InitHash)
@@ -150,50 +152,52 @@ func TestStoreAndLoad(t *testing.T) {
 
 func TestLoadMissingInitFile(t *testing.T) {
 	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
 	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
-	require.NoError(t, os.WriteFile(logPath, []byte(`{"entries":[]}`), 0o600))
+	require.NoError(t, os.WriteFile(logPath, nil, 0o600))
 
-	_, err := LoadAuditLog(sesamDir)
+	_, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.Error(t, err)
 }
 
 func TestLoadMissingLogFile(t *testing.T) {
 	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0o600))
 
-	_, err := LoadAuditLog(sesamDir)
+	_, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
 	require.Error(t, err)
 }
 
-func TestLoadCorruptTrailingEntry(t *testing.T) {
+// TestLoadCorruptTrailingEntryRejected: with the encrypted log we no longer
+// auto-truncate partial trailing entries - any line that fails to decrypt
+// must surface as an error instead of silently being discarded.
+func TestLoadCorruptTrailingEntryRejected(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 	require.NoError(t, al.Close())
 
-	// Append garbage after the valid entry to simulate a crash mid-write.
+	// Append a base64-shaped but bogus line to the encrypted log.
 	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o600)
 	require.NoError(t, err)
-	_, err = f.WriteString(`{"operation":"seal","changed_by":"adm`)
+	_, err = f.WriteString("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n")
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	// Should recover: truncate the partial entry and load the valid one.
-	loaded, err := LoadAuditLog(sesamDir)
-	require.NoError(t, err)
-	require.Len(t, loaded.Entries, 1, "should have the one valid init entry")
-	require.NoError(t, loaded.Close())
+	_, err = LoadAuditLog(sesamDir, Identities{admin.Identity})
+	require.Error(t, err, "garbage trailing entry should be rejected, not truncated")
 }
 
 func TestBuildRootHash(t *testing.T) {
 	t.Run("order independent", func(t *testing.T) {
-		sigs1 := []*secretSignature{
+		sigs1 := []*secretFooter{
 			{RevealedPath: "b", Hash: "hash-b"},
 			{RevealedPath: "a", Hash: "hash-a"},
 		}
-		sigs2 := []*secretSignature{
+		sigs2 := []*secretFooter{
 			{RevealedPath: "a", Hash: "hash-a"},
 			{RevealedPath: "b", Hash: "hash-b"},
 		}
@@ -205,8 +209,8 @@ func TestBuildRootHash(t *testing.T) {
 	})
 
 	t.Run("different content produces different hash", func(t *testing.T) {
-		h1 := buildRootHash([]*secretSignature{{RevealedPath: "a", Hash: "hash-a"}})
-		h2 := buildRootHash([]*secretSignature{{RevealedPath: "a", Hash: "hash-different"}})
+		h1 := buildRootHash([]*secretFooter{{RevealedPath: "a", Hash: "hash-a"}})
+		h2 := buildRootHash([]*secretFooter{{RevealedPath: "a", Hash: "hash-different"}})
 		require.NotEqual(t, h1, h2)
 	})
 
@@ -216,7 +220,7 @@ func TestBuildRootHash(t *testing.T) {
 	})
 
 	t.Run("single sig", func(t *testing.T) {
-		h := buildRootHash([]*secretSignature{{RevealedPath: "a", Hash: "h"}})
+		h := buildRootHash([]*secretFooter{{RevealedPath: "a", Hash: "h"}})
 		require.NotEmpty(t, h)
 	})
 }
@@ -291,7 +295,7 @@ func TestIterateStopsOnError(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []string{bob.Recipient.String()}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
 	}), nil)
 
 	var count int
@@ -320,4 +324,38 @@ func TestAuditEntrySignedString(t *testing.T) {
 	s := signed.String()
 	require.NotEmpty(t, s)
 	require.Contains(t, s, "abc")
+}
+
+func TestShowAuditLogSuccess(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+	require.NoError(t, al.Close())
+
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
+	var buf bytes.Buffer
+	ok, err := ShowAuditLog(Identities{admin.Identity}, logPath, &buf)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.True(t, strings.Contains(buf.String(), `"operation"`))
+	require.True(t, strings.Contains(buf.String(), `"init"`))
+}
+
+func TestShowAuditLogNotFound(t *testing.T) {
+	ok, err := ShowAuditLog(Identities{}, "/nonexistent/log.jsonl", &bytes.Buffer{})
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+func TestShowAuditLogWrongIdentity(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+	require.NoError(t, al.Close())
+
+	stranger := newTestUser(t, "stranger")
+	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
+	ok, err := ShowAuditLog(Identities{stranger.Identity}, logPath, &bytes.Buffer{})
+	require.True(t, ok)
+	require.Error(t, err, "wrong identity should fail to decrypt audit key")
 }

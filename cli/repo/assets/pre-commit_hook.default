@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+# This script should be used before each commit to verify the state of secrets
+sesam_dir="$(git config --local --get sesam.dir 2>/dev/null || true)"
+if [ -z "$sesam_dir" ]; then
+  sesam_dir="."
+fi
+
+if [ ! -d "$sesam_dir/.sesam" ]; then
+  printf '%s\n' "sesam pre-commit: .sesam not found under '$sesam_dir'" >&2
+  exit 1
+fi
+
+if ! command -v sesam >/dev/null 2>&1; then
+  printf '%s\n' "sesam pre-commit: 'sesam' binary not found in PATH" >&2
+  exit 1
+fi
+
+cd "$sesam_dir"
+sesam verify --sesam-dir .

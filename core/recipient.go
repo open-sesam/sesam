@@ -3,12 +3,12 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,26 +17,40 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// KeySource records where a public key originally came from. It is
+// stored alongside the key itself in the audit log so that a later
+// `verify --forge` can refetch and compare against the recorded value.
+//
+// Valid values are either KeySourceManual (the key was given verbatim
+// in the config) or one of the spec forms understood by
+// ResolveRecipient (e.g. "github:alice", "https://example.com/k.pub",
+// "file:///path/to/k.pub").
+type KeySource string
+
+// KeySourceManual marks a key that was provided directly as raw key
+// material in the config, rather than resolved from a forge id, URL,
+// or file path. All other source values describe a specific way how
+// the key was retrieved and (potentially) could be retrieved again.
+const KeySourceManual KeySource = "manual"
+
 // Recipient is the public part of an Identity.
 // It is called "Recipient" because it references a person that
 // is later to decrypt a secret.
 type Recipient struct {
 	age.Recipient
 	comparablePublicKey
+	Source KeySource `json:"-"`
+}
+
+func (r *Recipient) MarshalJSON() ([]byte, error) {
+	return json.Marshal(UserPubKey{
+		Key:    r.String(),
+		Source: r.Source,
+	})
 }
 
 // Recipients is a helper to manage several recipients
 type Recipients []*Recipient
-
-// CacheMode defines what to do with downloaded public keys.
-type CacheMode int
-
-const (
-	CacheModeNone = CacheMode(1 << iota)
-	CacheModeRead
-	CacheModeWrite
-	CacheModeReadWrite = CacheModeRead | CacheModeWrite
-)
 
 func (rs Recipients) AgeRecipients() []age.Recipient {
 	ageRecps := make([]age.Recipient, 0, len(rs))
@@ -47,119 +61,119 @@ func (rs Recipients) AgeRecipients() []age.Recipient {
 	return ageRecps
 }
 
+func (rs Recipients) UserPubKeys() []UserPubKey {
+	upks := make([]UserPubKey, 0, len(rs))
+	for _, recp := range rs {
+		upks = append(upks, UserPubKey{
+			Key:    recp.String(),
+			Source: recp.Source,
+		})
+	}
+
+	return upks
+}
+
 func forgeIdToUser(arg string) string {
 	_, user, _ := strings.Cut(arg, ":")
 	return strings.TrimSpace(user)
 }
 
-// ResolveRecipient will handle special recipient types like forge-id
-// (github:user, ...), links and paths. All other recipients are passed through.
+// maxKeyMaterialSize bounds the bytes we accept from a single forge
+// fetch or local key file. Forge endpoints can return several keys at
+// once (one per line), which is why this is generous.
+const maxKeyMaterialSize = 32 * 1024
+
+// ResolveRecipient handles special recipient spec forms (forge ids
+// like "github:user", "https://..." links, and "file://..." paths).
+// All other inputs are returned verbatim and recorded as
+// KeySourceManual.
 //
-// It will return the cleaned version that can be given to ParseRecipient().
-// Links and forge-id will be cached in `sesamDir`.
-func ResolveRecipient(ctx context.Context, sesamDir string, arg string, cacheMode CacheMode) (string, error) {
+// The returned source records the spec form so that the caller can
+// store it in the audit log alongside the resolved key material.
+func ResolveRecipient(ctx context.Context, pubKeySpec string) ([]string, KeySource, error) {
+	var forgeURL string
 	switch {
-	case strings.HasPrefix(arg, "github:"):
-		url := fmt.Sprintf("https://github.com/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
-		return resolveCachedLink(ctx, sesamDir, url, cacheMode)
-	case strings.HasPrefix(arg, "gitlab:"):
-		url := fmt.Sprintf("https://gitlab.com/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
-		return resolveCachedLink(ctx, sesamDir, url, cacheMode)
-	case strings.HasPrefix(arg, "codeberg:"):
-		url := fmt.Sprintf("https://codeberg.org/%s.keys", url.QueryEscape(forgeIdToUser(arg)))
-		return resolveCachedLink(ctx, sesamDir, url, cacheMode)
-	case strings.HasPrefix(arg, "https://"):
-		return resolveCachedLink(ctx, sesamDir, arg, cacheMode)
-	case strings.HasPrefix(arg, "file://"):
-		path := strings.TrimPrefix(arg, "file://")
-		if err := validSecretPath(sesamDir, path); err != nil {
-			return "", fmt.Errorf("invalid file:// path (%s): %w", arg, err)
-		}
+	case strings.HasPrefix(pubKeySpec, "github:"):
+		forgeURL = fmt.Sprintf("https://github.com/%s.keys", url.QueryEscape(forgeIdToUser(pubKeySpec)))
+	case strings.HasPrefix(pubKeySpec, "gitlab:"):
+		forgeURL = fmt.Sprintf("https://gitlab.com/%s.keys", url.QueryEscape(forgeIdToUser(pubKeySpec)))
+	case strings.HasPrefix(pubKeySpec, "codeberg:"):
+		forgeURL = fmt.Sprintf("https://codeberg.org/%s.keys", url.QueryEscape(forgeIdToUser(pubKeySpec)))
+	case strings.HasPrefix(pubKeySpec, "https://"):
+		forgeURL = pubKeySpec
+	case strings.HasPrefix(pubKeySpec, "file://"):
+		path := strings.TrimPrefix(pubKeySpec, "file://")
 
 		//nolint:gosec
 		fd, err := os.Open(path)
 		if err != nil {
-			return "", fmt.Errorf("failed to open %s: %w", arg, err)
+			return nil, "", fmt.Errorf("failed to open %s: %w", pubKeySpec, err)
 		}
 
 		defer closeLogged(fd)
 
-		data, err := io.ReadAll(io.LimitReader(fd, 4096))
+		data, err := io.ReadAll(io.LimitReader(fd, maxKeyMaterialSize))
 		if err != nil {
-			return "", fmt.Errorf("failed to read %s: %w", arg, err)
+			return nil, "", fmt.Errorf("failed to read %s: %w", pubKeySpec, err)
 		}
 
-		return string(data), nil
+		return []string{string(data)}, KeySource(pubKeySpec), nil
 	default:
-		// pass through:
-		return arg, nil
+		// pass through, assume it was directly specified in the config.
+		return []string{pubKeySpec}, KeySourceManual, nil
 	}
+
+	keys, err := resolveLink(ctx, forgeURL)
+	return keys, KeySource(pubKeySpec), err
 }
 
-func cachePath(sesamDir, url string) string {
-	return filepath.Join(sesamDir, ".sesam", "links", strings.ReplaceAll(url, "/", "_"))
+func splitByLine(s string) []string {
+	lines := []string{}
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		lines = append(lines, line)
+	}
+
+	return lines
 }
 
-// TODO: implement command to check if links and forge-ids are out-dated? Maybe part of verify?
-
-// resolveCachedLink will download the specified `url` and write it to a cache under `sesamDir`.
-// If the cached response is already available, then it is returned directly.
-func resolveCachedLink(ctx context.Context, sesamDir, url string, cacheMode CacheMode) (string, error) {
+// resolveLink downloads the public-key material at the given https URL.
+func resolveLink(ctx context.Context, url string, client ...*http.Client) ([]string, error) {
 	if !strings.HasPrefix(url, "https://") {
 		// we should not download public keys over http:// or whatever.
 		// https is not ideal either, so links should be noted in the docs to be difficult from a security perspective.
-		return "", fmt.Errorf("unsupported protocol scheme: %s", url)
-	}
-
-	cachePath := cachePath(sesamDir, url)
-
-	if cacheMode&CacheModeRead > 0 {
-		//nolint:gosec
-		data, err := os.ReadFile(cachePath)
-		if err == nil {
-			return string(data), nil
-		}
+		return nil, fmt.Errorf("unsupported protocol scheme: %s", url)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to build request: %w", err)
+		return nil, fmt.Errorf("failed to build request: %w", err)
 	}
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
+	var hc *http.Client
+	if len(client) > 0 && client[0] != nil {
+		hc = client[0]
+	} else {
+		hc = &http.Client{Timeout: 30 * time.Second}
 	}
 
-	resp, err := client.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to download %s: %w", url, err)
+		return nil, fmt.Errorf("failed to download %s: %w", url, err)
 	}
 	defer closeLogged(resp.Body)
 
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("%s failed with code %d", url, resp.StatusCode)
+		return nil, fmt.Errorf("%s failed with code %d", url, resp.StatusCode)
 	}
 
-	// Limit response size so cannot be DoS'd by large responses:
-	const maxSize = 32 * 1024
-
-	tr := io.LimitReader(resp.Body, maxSize)
-	if cacheMode&CacheModeWrite > 0 {
-		_ = os.MkdirAll(filepath.Dir(cachePath), 0o700)
-
-		//nolint:gosec
-		cacheFd, err := os.Create(cachePath)
-		if err != nil {
-			return "", fmt.Errorf("failed to create cache path: %w", err)
-		}
-
-		defer closeLogged(cacheFd)
-		tr = io.TeeReader(tr, cacheFd)
-	}
-
+	tr := io.LimitReader(resp.Body, maxKeyMaterialSize)
 	buf := bytes.Buffer{}
 	_, err = io.Copy(&buf, tr)
-	return buf.String(), err
+	return splitByLine(buf.String()), err
 }
 
 // ParseRecipient will turn a public key to a recipient that age can understand.
@@ -208,5 +222,45 @@ func ParseRecipient(arg string) (*Recipient, error) {
 	return &Recipient{
 		Recipient:           r,
 		comparablePublicKey: spk,
+		Source:              KeySourceManual,
 	}, err
+}
+
+// ParseRecipients parses one or more newline-separated recipient keys.
+func ParseRecipients(recps []string) (Recipients, error) {
+	var recipients Recipients
+
+	for _, recp := range recps {
+		recp, err := ParseRecipient(recp)
+		if err != nil {
+			return nil, err
+		}
+
+		recipients = append(recipients, recp)
+	}
+
+	return recipients, nil
+}
+
+func ParseAndResolveRecipients(ctx context.Context, pubKeySpecs []string) (Recipients, error) {
+	recps := make(Recipients, 0, len(pubKeySpecs))
+	for idx, pubKeySpec := range pubKeySpecs {
+		rawPubKeys, source, err := ResolveRecipient(ctx, pubKeySpec)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve recipient %s (#%d): %w", pubKeySpec, idx, err)
+		}
+
+		subRecps, err := ParseRecipients(rawPubKeys)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse recipient %s (#%d): %w", rawPubKeys, idx, err)
+		}
+
+		for i := range subRecps {
+			subRecps[i].Source = source
+		}
+
+		recps = append(recps, subRecps...)
+	}
+
+	return recps, nil
 }
