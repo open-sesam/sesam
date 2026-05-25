@@ -4,17 +4,22 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docs/**'
-      - '.github/workflows/docs.yml'
+      - "docs/**"
+      - "cli/**"
+      - "Taskfile.yml"
+      - ".github/workflows/docs.yml"
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -27,23 +32,33 @@ jobs:
         with:
           fetch-depth: 0 # needed for mdbook-gitinfo
 
+      - uses: cargo-bins/cargo-binstall@v1.18.1
+
       - name: Cache cargo binaries
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin
-          key: mdbook-${{ runner.os }}-mdbook0.4.44-admonish-pagetoc-gitinfo
+          key: mdbook-${{ runner.os }}-${{ hashFiles('.github/workflows/docs.yml') }}
 
       - name: Install mdBook and preprocessors
         run: |
-          command -v mdbook || cargo install mdbook@0.4.44
-          command -v mdbook-admonish || cargo install mdbook-admonish
-          command -v mdbook-pagetoc || cargo install mdbook-pagetoc
-          command -v mdbook-gitinfo || cargo install mdbook-gitinfo
+          cargo binstall --no-confirm mdbook@0.4.52 mdbook-admonish@1.18.0 mdbook-pagetoc@0.2.2
+          curl -sSL https://github.com/CompEng0001/mdbook-gitinfo/releases/download/v1.2.0/mdbook-gitinfo-linux \
+            -o ~/.cargo/bin/mdbook-gitinfo
+          chmod +x ~/.cargo/bin/mdbook-gitinfo
+
+      - name: Cache mdbook build
+        id: book-cache
+        uses: actions/cache@v4
+        with:
+          path: docs/book
+          key: book-${{ runner.os }}-${{ hashFiles('docs/src/**', 'docs/book.toml', 'docs/theme/**') }}-${{ github.sha }}
+          restore-keys: |
+            book-${{ runner.os }}-${{ hashFiles('docs/src/**', 'docs/book.toml', 'docs/theme/**') }}-
 
       - name: Build docs
-        run: |
-          cd docs
-          mdbook build
+        if: steps.book-cache.outputs.cache-hit != 'true'
+        run: cd docs && mdbook build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

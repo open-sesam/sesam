@@ -5,16 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
-	clirepo "github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/cli/repo"
 	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
 // HandleShow decrypts a secret and writes it to stdout.
 func HandleShow(ctx context.Context, cmd *cli.Command) error {
-	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
+	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}
@@ -31,7 +30,7 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 	// TODO: Options to either force resolution as audit, user, secret, ...
 	// TODO: Show secret metadata (access list)
 	object := cmd.StringArg("object")
-	return withRepoLock(sesamDir, 5*time.Second, func() error {
+	return withRepoLock(sesamDir, cmd.Duration("lock-timeout"), func() error {
 		switch {
 		case filepath.Base(object) == "log.jsonl":
 			ok, err := core.ShowAuditLog(ids, object, os.Stdout)
@@ -47,12 +46,12 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 			}
 
 			// NOTE: This gets expensive, so do it last:
-			_, um, err := buildManagers(sesamDir, identityPaths)
+			mgrs, err := buildManagers(sesamDir, identityPaths)
 			if err != nil {
 				return err
 			}
 
-			ok, err = um.ShowUser(object, os.Stdout)
+			ok, err = mgrs.User.ShowUser(object, os.Stdout)
 			if ok {
 				return err
 			}

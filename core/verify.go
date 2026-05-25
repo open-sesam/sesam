@@ -216,7 +216,7 @@ func verifyUserTell(log *AuditLog, state *VerifiedState, entry *auditEntrySigned
 // registerUser adds a user's keys to the keyring and state.
 // Shared by verifyInit (initial admin) and verifyUserTell.
 func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error {
-	if err := validUserName(tell.User); err != nil {
+	if err := ValidUserName(tell.User); err != nil {
 		return fmt.Errorf("invalid user name %q: %w", tell.User, err)
 	}
 

@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      
+    concurrency:
+      group: ci-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+      
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: 'go.mod'
+        cache: true
+
+    - name: Set up Task
+      uses: go-task/setup-task@v2
+
+    - name: Lint
+      run: task lint
+
+    - name: Generate coverage report
+      run: task coverage
+
+    - name: Upload coverage artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: coverage-report
+        path: coverage.out
+
+    - name: Build
+      run: task build
+
+    - name: Upload binary artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: sesam
+        path: sesam

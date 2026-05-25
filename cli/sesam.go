@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -51,42 +52,39 @@ func Main(args []string) error {
 				Usage:  "Decrypt all secrets available to the current user",
 			},
 			{
-				Name:   "server",
-				Action: commands.HandleServer,
-				Usage:  "Run the secret serving API",
-			},
-			{
 				Name:   "log",
+				Hidden: true,
 				Action: commands.HandleLog,
 				Usage:  "Show the audit log of secret changes",
 			},
 			{
 				Name:   "undo",
+				Hidden: true,
 				Action: commands.HandleUndo,
 				Usage:  "Restore secrets from an earlier revision",
 			},
 			{
-				Name:   "add",
-				Action: commands.HandleAdd,
-				Usage:  "Add a secret file or directory",
+				Name:      "add",
+				Flags:     flagsAdd,
+				ArgsUsage: "<path>",
+				Action:    commands.HandleAdd,
+				Usage:     "Add a secret file or directory",
 			},
 			{
-				Name:   "rm",
-				Action: commands.HandleRemove,
-				Usage:  "Remove a secret file or directory",
+				Name:      "rm",
+				ArgsUsage: "<path>",
+				Action:    commands.HandleRemove,
+				Usage:     "Remove a secret file or directory",
 			},
 			{
 				Name:   "mv",
+				Hidden: true,
 				Action: commands.HandleMove,
 				Usage:  "Move a secret to a different path",
 			},
 			{
-				Name:   "list",
-				Action: commands.HandleList,
-				Usage:  "List known secrets and metadata",
-			},
-			{
 				Name:   "apply",
+				Hidden: true,
 				Action: commands.HandleApply,
 				Usage:  "Apply config differences to audit log and metadata",
 			},
@@ -126,6 +124,27 @@ func Main(args []string) error {
 				},
 			},
 			{
+				Name:  "list",
+				Flags: flagsListSecrets,
+				Usage: "List entities",
+				Action: func(_ context.Context, _ *cli.Command) error {
+					return fmt.Errorf("missing list target: use `sesam list secrets` or `sesam list users`")
+				},
+				Commands: []*cli.Command{
+					{
+						Name:   "secrets",
+						Flags:  flagsListSecrets,
+						Action: commands.HandleListSecrets,
+						Usage:  "List known secrets and metadata",
+					}, {
+						Name:   "users",
+						Flags:  flagsListUsers,
+						Action: commands.HandleListUsers,
+						Usage:  "List persons, groups, and access",
+					},
+				},
+			},
+			{
 				Name:   "smudge",
 				Hidden: true,
 				Action: commands.HandleSmudge,
@@ -138,19 +157,23 @@ func Main(args []string) error {
 			},
 			{
 				Name:   "rotate",
+				Hidden: true,
 				Action: commands.HandleRotate,
 				Usage:  "Plan and execute secret rotation",
 				Commands: []*cli.Command{
 					{
 						Name:   "plan",
+						Hidden: true,
 						Action: commands.HandleRotatePlan,
 						Usage:  "Show the rotation and exchange plan",
 					}, {
 						Name:   "exec",
+						Hidden: true,
 						Action: commands.HandleRotateExec,
 						Usage:  "Execute the planned rotation",
 					}, {
 						Name:   "todo",
+						Hidden: true,
 						Action: commands.HandleRotateTodo,
 						Usage:  "Show rotation tasks and follow-up status",
 					},

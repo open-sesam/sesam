@@ -44,7 +44,7 @@ func (um *UserManager) TellUser(
 	user string, pubKeySpecs []string,
 	groups []string,
 ) error {
-	if err := validUserName(user); err != nil {
+	if err := ValidUserName(user); err != nil {
 		return fmt.Errorf("invalid user name: %w", err)
 	}
 

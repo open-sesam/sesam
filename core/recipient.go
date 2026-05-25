@@ -173,7 +173,6 @@ func resolveLink(ctx context.Context, url string, client ...*http.Client) ([]str
 	}
 
 	tr := io.LimitReader(resp.Body, maxKeyMaterialSize)
-
 	buf := bytes.Buffer{}
 	_, err = io.Copy(&buf, tr)
 	return splitByLine(buf.String()), err
