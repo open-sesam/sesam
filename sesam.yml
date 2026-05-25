@@ -22,9 +22,10 @@ config:
       # - ...as link
       # - ...as local path (can be used for larger keys)
       #
-      # Forge-ids and links (e.g. to keyservers) are downloaded once by the admin and stored in the repo (under .sesam/keys/).
-      # They are monitored on user or group changes, whenever the link/forge contents change, we will emit
-      # a warning and the admin has to check whether that link is still valid.
+      # Forge-ids and links (e.g. to keyservers) are resolved once when the user
+      # is added (`sesam tell`); the resolved key material and its origin are
+      # then stored, signed, in the audit log. `sesam verify --forge` re-fetches
+      # the live response and warns when it has drifted from the recorded value.
       pub: github:sahib
     - name: s.gruenewald@germanbionic.com
       desc: Sören Grünewald

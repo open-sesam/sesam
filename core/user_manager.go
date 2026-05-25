@@ -56,7 +56,7 @@ func (um *UserManager) TellUser(
 		return fmt.Errorf("re-adding user not yet supported")
 	}
 
-	recps, err := ParseAndResolveRecipients(ctx, um.sesamDir, pubKeySpecs)
+	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func (um *UserManager) TellUser(
 		newAuditEntry(um.signer.UserName(), &DetailUserTell{
 			User:        user,
 			Groups:      groups,
-			PubKeys:     recps.Strings(),
+			PubKeys:     recps.UserPubKeys(),
 			SignPubKeys: []string{newUserSignKeyStr},
 		}),
 	)
@@ -137,7 +137,7 @@ func InitAdminUser(
 	ctx context.Context,
 	sesamDir, user string, pubKeySpecs []string,
 ) (Signer, *AuditLog, error) {
-	recps, err := ParseAndResolveRecipients(ctx, sesamDir, pubKeySpecs)
+	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -155,7 +155,7 @@ func InitAdminUser(
 	auditLog, err := InitAuditLog(sesamDir, signer, recps, DetailUserTell{
 		User:        signer.UserName(),
 		Groups:      []string{"admin"},
-		PubKeys:     recps.Strings(),
+		PubKeys:     recps.UserPubKeys(),
 		SignPubKeys: []string{signKeyStr},
 	})
 	if err != nil {

@@ -9,10 +9,10 @@ import (
 
 // VerifiedUser is a user that has been verified by the audit log.
 type VerifiedUser struct {
-	Name       string   `json:"name"`
-	Groups     []string `json:"groups"`
-	SignPubKey []string `json:"sign_pub_key"`
-	PubKeys    []string `json:"pub_keys"`
+	Name       string     `json:"name"`
+	Groups     []string   `json:"groups"`
+	SignPubKey []string   `json:"sign_pub_key"`
+	Recps      Recipients `json:"recipients"`
 }
 
 // VerifiedSecret is a secret verified by the audit log.
@@ -249,19 +249,22 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s may not have more than 10 public keys", tell.User)
 	}
 
+	var recps Recipients
 	for _, pubKey := range tell.PubKeys {
-		recp, err := ParseRecipient(pubKey)
+		recp, err := ParseRecipient(pubKey.Key)
 		if err != nil {
 			return fmt.Errorf("bad public key %v", pubKey)
 		}
 
+		recp.Source = pubKey.Source
 		kr.AddRecipient(tell.User, recp)
+		recps = append(recps, recp)
 	}
 
 	state.Users = append(state.Users, VerifiedUser{
 		Name:       tell.User,
 		SignPubKey: tell.SignPubKeys,
-		PubKeys:    tell.PubKeys,
+		Recps:      recps,
 		Groups:     deduplicate(tell.Groups),
 	})
 
