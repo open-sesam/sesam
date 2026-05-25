@@ -9,6 +9,7 @@ Manage encrypted secrets in git repositories
 | `--identity`, `-i` |  | `SESAM_ID`, `SESAM_IDENTITY` | Path to the age identity (can be given several times) |
 | `--config`, `-c` | `sesam.yml` | `SESAM_CONFIG` | Path to the sesam config file |
 | `--sesam-dir`, `-r`, `--repo` | `.` | `SESAM_DIR` | Directory where .sesam lives |
+| `--lock-timeout` | `5s` | `SESAM_LOCK_TIMEOUT` | Repository lock wait timeout (e.g. 5s, 30s, 2m) |
 
 ## Commands
 
@@ -33,41 +34,25 @@ Identify the current user by age identity
 
 Encrypt and sign changed secrets
 
+| Flag | Default | Env | Description |
+|------|---------|-----|-------------|
+| `--clean` |  |  | Delete revealed secret files after successful seal |
+
 ### `sesam reveal`
 
 Decrypt all secrets available to the current user
-
-### `sesam server`
-
-Run the secret serving API
-
-### `sesam log`
-
-Show the audit log of secret changes
-
-### `sesam undo`
-
-Restore secrets from an earlier revision
 
 ### `sesam add`
 
 Add a secret file or directory
 
+| Flag | Default | Env | Description |
+|------|---------|-----|-------------|
+| `--group` `*` |  |  | Group assignment for the secret (repeatable) |
+
 ### `sesam rm`
 
 Remove a secret file or directory
-
-### `sesam mv`
-
-Move a secret to a different path
-
-### `sesam list`
-
-List known secrets and metadata
-
-### `sesam apply`
-
-Apply config differences to audit log and metadata
 
 ### `sesam tell`
 
@@ -91,21 +76,37 @@ Remove a person from a group
 
 List persons, groups, and access
 
-### `sesam rotate`
+### `sesam show`
 
-Plan and execute secret rotation
+Show objects managed by sesam
 
-#### `sesam rotate plan`
+### `sesam list`
 
-Show the rotation and exchange plan
+List entities
 
-#### `sesam rotate exec`
+| Flag | Default | Env | Description |
+|------|---------|-----|-------------|
+| `--json` |  |  | Print output as JSON |
 
-Execute the planned rotation
+#### `sesam list secrets`
 
-#### `sesam rotate todo`
+List known secrets and metadata
 
-Show rotation tasks and follow-up status
+| Flag | Default | Env | Description |
+|------|---------|-----|-------------|
+| `--json` |  |  | Print output as JSON |
+
+#### `sesam list users`
+
+List persons, groups, and access
+
+| Flag | Default | Env | Description |
+|------|---------|-----|-------------|
+| `--json` |  |  | Print output as JSON |
+
+### `sesam clean`
+
+Remove revealed plaintext and other untracked files from the sesam directory
 
 
-> `*` — required flag
+> `*` - required flag

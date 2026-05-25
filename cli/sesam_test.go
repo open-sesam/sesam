@@ -318,7 +318,7 @@ func TestMainSealDeleteRevealed(t *testing.T) {
 		t.Fatalf("expected revealed secret to be deleted, got err=%v", err)
 	}
 
-	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "objects", secretPath+".age"))
+	assertPathExists(t, filepath.Join(repoRoot, ".sesam", "objects", secretPath+".sesam"))
 }
 
 func TestMainVerifyFindsSesamDirFromNestedPath(t *testing.T) {

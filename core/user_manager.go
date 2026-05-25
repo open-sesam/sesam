@@ -2,8 +2,10 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -54,13 +56,14 @@ func (um *UserManager) TellUser(
 		return fmt.Errorf("re-adding user not yet supported")
 	}
 
-	recps, err := ParseAndResolveRecipients(ctx, um.sesamDir, pubKeySpecs)
+	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs)
 	if err != nil {
 		return err
 	}
 
-	// audit key needs to be accessible by all recipients
-	allRecps := AllRecipients(um.state.keyring)
+	// audit key needs to be accessible by all recipients, including the new user.
+	// FeedEntry hasn't run yet so the new user isn't in the keyring; add explicitly.
+	allRecps := append(AllRecipients(um.state.keyring), recps...)
 	if err := um.log.WriteAuditKey(allRecps); err != nil {
 		return err
 	}
@@ -83,10 +86,22 @@ func (um *UserManager) TellUser(
 		newAuditEntry(um.signer.UserName(), &DetailUserTell{
 			User:        user,
 			Groups:      groups,
-			PubKeys:     recps.Strings(),
+			PubKeys:     recps.UserPubKeys(),
 			SignPubKeys: []string{newUserSignKeyStr},
 		}),
 	)
+}
+
+func (um *UserManager) ShowUser(user string, dst io.Writer) (bool, error) {
+	u, ok := um.state.UserExists(user)
+	if ok {
+		// convert u to json
+		enc := json.NewEncoder(dst)
+		enc.SetIndent("", "  ")
+		return true, enc.Encode(u)
+	}
+
+	return false, nil
 }
 
 func (um *UserManager) KillUsers(user string) error {
@@ -122,7 +137,7 @@ func InitAdminUser(
 	ctx context.Context,
 	sesamDir, user string, pubKeySpecs []string,
 ) (Signer, *AuditLog, error) {
-	recps, err := ParseAndResolveRecipients(ctx, sesamDir, pubKeySpecs)
+	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -140,7 +155,7 @@ func InitAdminUser(
 	auditLog, err := InitAuditLog(sesamDir, signer, recps, DetailUserTell{
 		User:        signer.UserName(),
 		Groups:      []string{"admin"},
-		PubKeys:     recps.Strings(),
+		PubKeys:     recps.UserPubKeys(),
 		SignPubKeys: []string{signKeyStr},
 	})
 	if err != nil {

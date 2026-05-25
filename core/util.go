@@ -96,7 +96,16 @@ func ReadFileLimited(path string, size int64) ([]byte, error) {
 		return nil, err
 	}
 
-	// TODO: stat and check if file is too big, if yes, then warn.
+	info, err := fd.Stat()
+	if err != nil {
+		_ = fd.Close()
+		return nil, err
+	}
+
+	if is := info.Size(); is > size {
+		_ = fd.Close()
+		return nil, fmt.Errorf("file would be limited: %s: %d > %d", path, is, size)
+	}
 
 	//nolint:errcheck
 	defer fd.Close()

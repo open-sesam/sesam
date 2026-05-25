@@ -22,12 +22,12 @@ tasks:
   test:
     desc: Run go tests
     cmds:
-      - go run gotest.tools/gotestsum@v1.10.1 -- -parallel 20 ./...
+      - go run gotest.tools/gotestsum@v1.10.1 --format testname -- -parallel 20 ./...
 
   coverage:
     desc: Run go tests with coverage report
     cmds:
-      - go test -v ./... -coverprofile=coverage.out
+      - go test -coverpkg=./... -coverprofile=coverage.out ./...
       - go tool cover -func=coverage.out
       - go tool cover -html=coverage.out
 
@@ -36,7 +36,8 @@ tasks:
   lint:
     desc: Run the linter
     cmds:
-      - go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2 run -c linter.yml
+      - pkill -9 -f golangci || true
+      - go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run -c linter.yml
 
   docgen:
     desc: Generate CLI reference markdown from live command tree

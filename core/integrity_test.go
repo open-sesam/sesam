@@ -1,8 +1,8 @@
 package core
 
 import (
+	"bytes"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,7 +19,7 @@ func integritySetup(t *testing.T) (*SecretManager, *VerifiedState) {
 		Secrets: []VerifiedSecret{
 			{RevealedPath: "secrets/db", AccessGroups: []string{"admin"}},
 		},
-		LastSealRootHash: buildRootHash([]*secretSignature{sig}),
+		LastSealRootHash: buildRootHash([]*secretFooter{sig}),
 	}
 
 	return mgr, state
@@ -31,20 +31,12 @@ func TestIntegrityAllGood(t *testing.T) {
 	require.True(t, report.OK(), "expected no errors, got: %s", report.String())
 }
 
-func TestIntegrityMissingSigFile(t *testing.T) {
-	mgr, state := integritySetup(t)
-	os.Remove(signaturePath(mgr.SesamDir, "secrets/db"))
-
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
-	require.False(t, report.OK(), "should detect missing .sig.json")
-}
-
-func TestIntegrityMissingAgeFile(t *testing.T) {
+func TestIntegrityMissingFile(t *testing.T) {
 	mgr, state := integritySetup(t)
 	os.Remove(mgr.cryptPath("secrets/db"))
 
 	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
-	require.False(t, report.OK(), "should detect missing .age file")
+	require.False(t, report.OK(), "should detect missing .sesam file")
 }
 
 func TestIntegrityCorruptedAgeFile(t *testing.T) {
@@ -55,26 +47,16 @@ func TestIntegrityCorruptedAgeFile(t *testing.T) {
 	require.False(t, report.OK(), "should detect hash mismatch")
 }
 
-func TestIntegrityExtraSigFile(t *testing.T) {
+func TestIntegrityExtraFile(t *testing.T) {
 	mgr, state := integritySetup(t)
 
-	extraSigPath := signaturePath(mgr.SesamDir, "secrets/extra")
-	require.NoError(t, os.MkdirAll(filepath.Dir(extraSigPath), 0o700))
-	require.NoError(t, os.WriteFile(extraSigPath, []byte(`{"path":"secrets/extra","hash":"x","signature":"y","sealed_by":"z"}`), 0o600))
+	// Seal an extra secret that is not registered in state.
+	extra := testSecret(t, mgr, "secrets/extra", "extra-content")
+	_, err := extra.Seal("testuser")
+	require.NoError(t, err)
 
 	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
-	require.False(t, report.OK(), "should detect extra .sig.json")
-}
-
-func TestIntegrityExtraAgeFile(t *testing.T) {
-	mgr, state := integritySetup(t)
-
-	extraAgePath := filepath.Join(mgr.SesamDir, ".sesam", "objects", "secrets", "extra.age")
-	require.NoError(t, os.MkdirAll(filepath.Dir(extraAgePath), 0o700))
-	require.NoError(t, os.WriteFile(extraAgePath, []byte("extra"), 0o600))
-
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
-	require.False(t, report.OK(), "should detect extra .age file")
+	require.False(t, report.OK(), "should detect extra .sesam file not in state")
 }
 
 func TestIntegrityRootHashMismatch(t *testing.T) {
@@ -96,7 +78,7 @@ func TestIntegrityNoSeal(t *testing.T) {
 func TestIntegrityMultipleSecrets(t *testing.T) {
 	mgr := testSecretManager(t)
 
-	var sigs []*secretSignature
+	var sigs []*secretFooter
 	var secrets []VerifiedSecret
 	for _, p := range []string{"secrets/a", "secrets/b", "secrets/c"} {
 		s := testSecret(t, mgr, p, "content-"+p)
@@ -118,6 +100,37 @@ func TestIntegrityMultipleSecrets(t *testing.T) {
 	require.NoError(t, os.WriteFile(mgr.cryptPath("secrets/b"), []byte("bad"), 0o600))
 	report = VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect corruption in one of multiple secrets")
+}
+
+func TestIntegrityHashMismatch(t *testing.T) {
+	mgr, state := integritySetup(t)
+
+	sesamPath := mgr.cryptPath("secrets/db")
+	data, err := os.ReadFile(sesamPath)
+	require.NoError(t, err)
+
+	// Flip a byte in the age ciphertext (before the trailing JSON footer).
+	lastNL := bytes.LastIndexByte(data, '\n')
+	require.Greater(t, lastNL, 0)
+	data[0] ^= 0xFF
+	require.NoError(t, os.WriteFile(sesamPath, data, 0o600))
+
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	require.False(t, report.OK(), "should detect hash mismatch")
+	require.Contains(t, report.String(), "hash mismatch")
+}
+
+func TestIntegrityBadSignature(t *testing.T) {
+	mgr, state := integritySetup(t)
+
+	// Replace the keyring with a fresh key for the same user name — hash matches
+	// but the signature cannot be verified against the new key.
+	other := newTestUser(t, "testuser")
+	mgr.Keyring = testKeyring(t, other)
+
+	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	require.False(t, report.OK(), "should detect invalid signature")
+	require.Contains(t, report.String(), "invalid signature")
 }
 
 func TestIntegrityReportString(t *testing.T) {

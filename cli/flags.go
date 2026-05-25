@@ -116,3 +116,5 @@ var flagsListUsers = []cli.Flag{
 		Usage: "Print output as JSON",
 	},
 }
+
+var flagsShow = []cli.Flag{}

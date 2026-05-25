@@ -38,6 +38,7 @@ func newTestUser(t *testing.T, name string) *testUser {
 	recp := &Recipient{
 		Recipient:           ageID.Recipient(),
 		comparablePublicKey: id.pub,
+		Source:              KeySourceManual,
 	}
 
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -61,7 +62,7 @@ func (tu *testUser) DetailUserTell(groups []string) DetailUserTell {
 	return DetailUserTell{
 		User:        tu.Name,
 		Groups:      groups,
-		PubKeys:     []string{tu.Recipient.String()},
+		PubKeys:     []UserPubKey{{Key: tu.Recipient.String(), Source: KeySourceManual}},
 		SignPubKeys: []string{tu.SignPubKey},
 	}
 }

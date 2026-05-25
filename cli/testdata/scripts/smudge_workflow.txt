@@ -1,0 +1,45 @@
+# Verify that git checkout triggers the smudge filter, which reveals the secret
+# to its plaintext path as a side effect - specifically when checking out an
+# older commit whose encrypted blob differs from the current working tree.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Sanity-check: smudge filter is configured to use sesam.
+exec git config --local filter.sesam-filter.smudge
+stdout 'sesam smudge'
+
+# Long-running filter process is configured for git 2.11+; the legacy
+# smudge/clean keys remain as a fallback for older git versions.
+exec git config --local filter.sesam-filter.process
+stdout 'sesam smudge'
+
+# Modify the secret and seal it, then commit - this produces a second blob.
+cp modified_readme.md README.md
+exec sesam seal
+exec git add -A
+exec git commit -m 'update readme'
+
+# Confirm the working tree now contains the modified content.
+exec cat README.md
+stdout 'modified readme'
+! stdout 'sesam bootstrap'
+
+# Check out the OLD encrypted object from the first commit.
+# Git calls smudge with the old blob; smudge must reveal the original plaintext.
+exec git checkout HEAD~1 -- .sesam/objects/README.md.sesam
+
+# README.md must now have the original content from the first commit.
+exec cat README.md
+stdout 'sesam bootstrap'
+! stdout 'modified readme'
+
+-- modified_readme.md --
+# modified readme
+
+This is the new content after the change.
