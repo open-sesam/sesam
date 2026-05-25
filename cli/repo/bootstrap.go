@@ -17,6 +17,8 @@ import (
 
 const initRootFileThreshold = 25
 
+const gitDir = ".git"
+
 //go:embed assets/gitignore.default
 var gitignoreTemplate string
 
@@ -68,7 +70,7 @@ func ResolveSesamDir(sesamPath string) (string, error) {
 	worktreeRoot := filepath.Clean(wt.Filesystem.Root())
 	current := absPath
 	for {
-		if _, err := os.Stat(filepath.Join(current, ".sesam")); err == nil {
+		if _, err := os.Stat(filepath.Join(current, sesamSuffix)); err == nil {
 			return current, nil
 		}
 
@@ -88,7 +90,7 @@ func ResolveSesamDir(sesamPath string) (string, error) {
 
 func IsInitialized(sesamRoot string) error {
 	configPath := filepath.Join(sesamRoot, "sesam.yml")
-	sesamDir := filepath.Join(sesamRoot, ".sesam")
+	sesamDir := filepath.Join(sesamRoot, sesamSuffix)
 
 	if _, err := os.Stat(configPath); err == nil {
 		return fmt.Errorf("repository already has sesam config at %s", configPath)
@@ -136,7 +138,7 @@ func countRepoFiles(root string) (int, error) {
 
 		if d.IsDir() {
 			name := d.Name()
-			if name == ".git" || name == ".sesam" {
+			if name == gitDir || name == sesamSuffix {
 				return filepath.SkipDir
 			}
 			return nil
@@ -157,10 +159,10 @@ func countRepoFiles(root string) (int, error) {
 
 func EnsureSesamDirs(sesamDir string) error {
 	dirs := []string{
-		filepath.Join(sesamDir, ".sesam"),
-		filepath.Join(sesamDir, ".sesam", "signkeys"),
-		filepath.Join(sesamDir, ".sesam", "tmp"),
-		filepath.Join(sesamDir, ".sesam", "bin"),
+		filepath.Join(sesamDir, sesamSuffix),
+		filepath.Join(sesamDir, sesamSuffix, "signkeys"),
+		filepath.Join(sesamDir, sesamSuffix, "tmp"),
+		filepath.Join(sesamDir, sesamSuffix, "bin"),
 	}
 
 	for _, dir := range dirs {
@@ -173,12 +175,12 @@ func EnsureSesamDirs(sesamDir string) error {
 		return err
 	}
 
-	slog.Info("initialized sesam directory", slog.String("path", filepath.Join(sesamDir, ".sesam")))
+	slog.Info("initialized sesam directory", slog.String("path", filepath.Join(sesamDir, sesamSuffix)))
 	return nil
 }
 
 func EnsureTmpKeepFile(sesamDir string) error {
-	keepPath := filepath.Join(sesamDir, ".sesam", "tmp", ".gitkeep")
+	keepPath := filepath.Join(sesamDir, sesamSuffix, "tmp", ".gitkeep")
 	if _, err := os.Stat(keepPath); os.IsNotExist(err) {
 		if err := renameio.WriteFile(keepPath, []byte("\n"), 0o600); err != nil {
 			return fmt.Errorf("failed to create %s: %w", keepPath, err)
@@ -437,7 +439,7 @@ func resolveGitDir(sesamDir string) (string, error) {
 		return "", fmt.Errorf("failed to access git worktree: %w", err)
 	}
 
-	gitPath := filepath.Join(wt.Filesystem.Root(), ".git")
+	gitPath := filepath.Join(wt.Filesystem.Root(), gitDir)
 
 	info, err := os.Stat(gitPath)
 	if err != nil {
@@ -472,7 +474,7 @@ func resolveGitDir(sesamDir string) (string, error) {
 }
 
 func EnsureGitSesamShim(sesamDir string) error {
-	shimPath := filepath.Join(sesamDir, ".sesam", "bin", "git-sesam")
+	shimPath := filepath.Join(sesamDir, sesamSuffix, "bin", "git-sesam")
 	if _, err := os.Stat(shimPath); err == nil {
 		slog.Info("git-sesam shim already exists", slog.String("path", shimPath))
 		return nil
@@ -511,7 +513,7 @@ func EnsureSesamReadme(sesamDir string) error {
 
 func StageInitFiles(sesamDir, configPath string) error {
 	files := []string{
-		filepath.Join(sesamDir, ".sesam"),
+		filepath.Join(sesamDir, sesamSuffix),
 		configPath,
 		filepath.Join(sesamDir, ".gitignore"),
 		filepath.Join(sesamDir, ".gitattributes"),
