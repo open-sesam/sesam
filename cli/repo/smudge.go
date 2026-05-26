@@ -7,19 +7,23 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 	"github.com/google/renameio"
 	"github.com/open-sesam/sesam/core"
 )
 
 // FilterProcessHandler decrypts blobs as part of the long-running git filter
-// protocol. Identities are loaded by the caller before Run is invoked, so
-// key/passphrase work is amortised across all blobs in a single git
-// operation. A nil/empty Identities slice means no reveal is attempted;
-// smudge requests are still answered and the encrypted blob passes through.
+// protocol. Identities, Keyring and Authorize are loaded by the caller
+// before Run is invoked, so key/passphrase work and audit-log parsing are
+// amortised across all blobs in a single git operation - and so a session
+// can never silently degrade to "no auth check" because of a missing audit
+// log: the caller's LoadAuditView decides up-front whether to proceed.
 //
 // The sesamDir is derived per-blob from the pathname header (see
 // splitObjectPath) so the handler also works when .sesam lives in a
@@ -29,10 +33,28 @@ import (
 // points inside the worktree is excluded from Cleanup so users who store
 // their age key inside the repo don't lose it on checkout.
 type FilterProcessHandler struct {
+	// SesamDir is the directory containing `.sesam/` (resolved via
+	// clirepo.ResolveSesamDir from --sesam-dir / SESAM_DIR). The same
+	// path drives audit-log loading, working-tree cleanup, and the
+	// destination for revealed plaintext.
+	SesamDir string
+
 	Identities    core.Identities
 	IdentityPaths []string
 
-	cleaned bool // true once Cleanup has run for this session
+	// Keyring is used by reveal to verify the ed25519 signature on the
+	// sealed file footer. Loaded by the caller via LoadAuditView so the
+	// filter session can fail-fast if the audit log can't be read,
+	// rather than silently skipping the check per-blob.
+	Keyring core.Keyring
+
+	// Authorize reports whether the user named in the sealed file
+	// footer is allowed to have sealed revealedPath under the audit
+	// log's state at session start. Caller-supplied (alongside Keyring)
+	// for the same fail-fast reason.
+	Authorize func(user, revealedPath string) bool
+
+	cleaned bool
 }
 
 // objectsSegment and sesamSuffix bracket the encrypted-blob path that git
@@ -95,46 +117,6 @@ func (h *FilterProcessHandler) Run(ctx context.Context, stdin io.Reader, stdout 
 	}
 
 	return ctx.Err()
-}
-
-// RunOneShotSmudge handles a single git smudge invocation: stream src to dst
-// while spilling the same bytes to a temp file, then decrypt the spilled
-// blob to the plaintext path. objectPath is git's repo-relative pathname
-// (as passed via %f) - same derivation rules as the long-running handler.
-//
-// .gitattributes scopes the smudge filter to sesam objects, so a malformed
-// objectPath is treated as a hard error rather than something to recover
-// from. Reveal failures (seek, RevealBlob) are still tolerated with a warn
-// log - aborting `git checkout` over one undecryptable file is worse than a
-// stale plaintext.
-func RunOneShotSmudge(ids core.Identities, objectPath string, src io.Reader, dst io.Writer) error {
-	sesamDir, revealedPath, isObject := splitObjectPath(objectPath)
-	if !isObject {
-		return fmt.Errorf("not a path sesam smudge can handle: %v", objectPath)
-	}
-
-	spill, err := openSpillFile(sesamDir)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = spill.Cleanup() }()
-
-	if _, err := io.Copy(io.MultiWriter(dst, spill), src); err != nil {
-		return fmt.Errorf("streaming stdin: %w", err)
-	}
-
-	if _, err := spill.Seek(0, io.SeekStart); err != nil {
-		slog.Warn("smudge: failed to seek spill", slog.String("path", objectPath), slog.String("err", err.Error()))
-		return nil
-	}
-	revealed, err := core.RevealBlob(sesamDir, ids, spill, revealedPath)
-	switch {
-	case err != nil:
-		slog.Warn("smudge: could not reveal", slog.String("path", objectPath), slog.String("err", err.Error()))
-	case !revealed:
-		slog.Debug("smudge: not a recipient, skipping reveal", slog.String("path", objectPath))
-	}
-	return nil
 }
 
 // splitObjectPath splits a worktree-relative encrypted-object pathname into
@@ -277,24 +259,23 @@ func readHeaders(scanner *pktline.Scanner) (map[string]string, bool, error) {
 // warn log - aborting `git checkout` over one undecryptable file is worse
 // than a stale plaintext.
 func (h *FilterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, encoder *pktline.Encoder, pathname string) error {
-	if err := writeStatus(encoder, "success"); err != nil {
-		return err
-	}
-
-	sesamDir, revealedPath, isObject := splitObjectPath(pathname)
+	_, revealedPath, isObject := splitObjectPath(pathname)
 	if !isObject {
 		return fmt.Errorf("not a path sesam smudge can handle: %v", pathname)
 	}
 
 	if !h.cleaned {
-		// can only clean once we got the sesamDir once.
 		h.cleaned = true
-		if err := cleanWorktree(sesamDir, h.IdentityPaths); err != nil {
+		if err := cleanWorktree(h.SesamDir, h.IdentityPaths); err != nil {
 			slog.Warn("smudge: cleanup failed", slog.String("err", err.Error()))
 		}
 	}
 
-	spill, err := openSpillFile(sesamDir)
+	if err := writeStatus(encoder, "success"); err != nil {
+		return err
+	}
+
+	spill, err := openSpillFile(h.SesamDir)
 	if err != nil {
 		return err
 	}
@@ -337,15 +318,123 @@ func (h *FilterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 		return nil
 	}
 
-	// TODO: Pass a reader here that takes the chunks directly?
-	revealed, err := core.RevealBlob(sesamDir, h.Identities, spill, revealedPath)
+	revealed, err := core.RevealBlob(
+		h.SesamDir,
+		h.Identities,
+		spill,
+		revealedPath,
+		h.Keyring,
+		h.Authorize,
+	)
+
+	var authErr *core.BadSealerError
 	switch {
+	case errors.As(err, &authErr):
+		// The plaintext landed (RevealBlob returns true on auth
+		// errors); we just shout into stderr so the user sees the
+		// mismatch in their `git checkout` output. Hard-failing
+		// would block history bisects of pre-fix commits where the
+		// killed-user re-seal never happened.
+		slog.Error(
+			"smudge: sealer is not in the access list - decrypting anyway, run `sesam verify --all` to confirm intent",
+			slog.String("path", pathname),
+			slog.String("sealer", authErr.SealedBy),
+		)
 	case err != nil:
 		slog.Warn("smudge: could not reveal", slog.String("path", pathname), slog.String("err", err.Error()))
 	case !revealed:
 		slog.Debug("smudge: not a recipient, skipping reveal", slog.String("path", pathname))
 	}
 	return nil
+}
+
+// LoadAuditView reads the audit log (preferring the git **index** copy -
+// consistent with the target tree even mid-checkout, since git updates the
+// index before invoking the filter - and falling back to the working-tree
+// copy) and returns the keyring + sealer-authorization predicate the
+// smudge filter needs to verify each revealed blob.
+//
+// Callers must invoke this before constructing FilterProcessHandler so a
+// filter session never silently degrades to "no auth check" because the
+// audit log was unavailable.
+func LoadAuditView(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
+	kr, authorize, err := loadAuditViewFromIndex(sesamDir, ids)
+	if err == nil {
+		return kr, authorize, nil
+	}
+	slog.Debug(
+		"smudge: audit log not loadable from git index; falling back to working tree",
+		slog.String("err", err.Error()),
+	)
+
+	// Working-tree copy may lag the in-progress checkout (git writes
+	// files in unspecified order), but it's the only remaining source
+	// when the index lookup is unavailable.
+	kr, authorize, wtErr := loadAuditViewFromWorktree(sesamDir, ids)
+	if wtErr != nil {
+		return nil, nil, fmt.Errorf("load audit view (index and worktree both failed): %w", errors.Join(err, wtErr))
+	}
+	return kr, authorize, nil
+}
+
+func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
+	repo, err := OpenGitRepo(sesamDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open git repo at %q: %w", sesamDir, err)
+	}
+	idx, err := repo.Storer.Index()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read git index: %w", err)
+	}
+
+	// Index entries are repo-root-relative with forward slashes.
+	// sesamDir is the same shape (resolved from --sesam-dir, default
+	// "."); path.Join collapses "." correctly when sesam lives at the
+	// worktree root.
+	auditPath := path.Join(sesamDir, ".sesam/audit/log.jsonl")
+
+	blobIdx := slices.IndexFunc(idx.Entries, func(e *index.Entry) bool {
+		return e.Name == auditPath
+	})
+
+	if blobIdx < 0 {
+		return nil, nil, fmt.Errorf("audit log not in git index at %q", auditPath)
+	}
+
+	blobHash := idx.Entries[blobIdx].Hash
+	blob, err := repo.BlobObject(blobHash)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read audit log blob %s: %w", blobHash, err)
+	}
+	rd, err := blob.Reader()
+	if err != nil {
+		return nil, nil, fmt.Errorf("open audit log blob: %w", err)
+	}
+	defer func() { _ = rd.Close() }()
+
+	al, err := core.LoadAuditLogFromReader(rd, ids)
+	if err != nil {
+		return nil, nil, fmt.Errorf("decrypt audit log from index: %w", err)
+	}
+	kr := core.EmptyKeyring()
+	state, err := core.VerifyChain(al, kr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("verify audit chain (index version): %w", err)
+	}
+	return kr, state.SealerAuthorized, nil
+}
+
+func loadAuditViewFromWorktree(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
+	al, err := core.LoadAuditLog(sesamDir, ids)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load audit log: %w", err)
+	}
+	kr := core.EmptyKeyring()
+	state, err := core.VerifyChain(al, kr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("verify audit chain: %w", err)
+	}
+	return kr, state.SealerAuthorized, nil
 }
 
 // cleanWorktree removes stale untracked files from sesamDir, excluding the

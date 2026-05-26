@@ -52,7 +52,7 @@ func validSecretPathFormat(sesamDir string, revealedPath string) error {
 	return nil
 }
 
-func validSecretPath(sesamDir string, revealedPath string) error {
+func validSecretPath(sesamDir, revealedPath string) error {
 	if err := validSecretPathFormat(sesamDir, revealedPath); err != nil {
 		return err
 	}

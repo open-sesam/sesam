@@ -118,6 +118,19 @@ func (s *VerifiedState) UsersForSecret(revealedPath string) []string {
 	return users
 }
 
+// SealerAuthorized reports whether `user` is allowed to seal `revealedPath`,
+// i.e. whether the secret exists in the verified state and `user` has
+// access to it via group membership. Used by reveal- and integrity-time
+// checks to detect substitution attacks where a known signer produces a
+// footer for a path they never had access to.
+func (s *VerifiedState) SealerAuthorized(user, revealedPath string) bool {
+	secret, ok := s.SecretExists(revealedPath)
+	if !ok {
+		return false
+	}
+	return s.UserHasAccess(user, secret.AccessGroups)
+}
+
 func (s *VerifiedState) UserForGroups(groups []string) []string {
 	users := make([]string, 0)
 	groupMap := groupsToMap(groups)
@@ -414,6 +427,26 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) er
 	state.SealRequiredSeqID = 0
 	state.LastSealRootHash = sealDetails.RootHash
 	return nil
+}
+
+// VerifyChain replays the audit log into a fresh VerifiedState without the
+// expensive disk-side checks done by Verify (init-file unchanged across git
+// history, root-hash of all .sesam files on disk). This is what callers
+// that already trust the file source need - notably the git smudge filter,
+// which reads the audit log from the consistent git index and only wants
+// per-file sealed_by enforcement.
+//
+// Use Verify when you also want disk and git-history consistency
+// (`sesam reveal`, `sesam verify --all`).
+func VerifyChain(log *AuditLog, kr Keyring) (*VerifiedState, error) {
+	state := VerifiedState{
+		auditLog: log,
+		keyring:  kr,
+	}
+	if err := verify(&state); err != nil {
+		return nil, err
+	}
+	return &state, nil
 }
 
 func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {

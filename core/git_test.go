@@ -70,6 +70,6 @@ func TestVerifyInitFileUnchangedNotAGitRepo(t *testing.T) {
 
 func TestVerifyInitFileUnchangedNoCommitsAtAll(t *testing.T) {
 	sesamDir, _ := testGitRepo(t)
-	// Zero commits — repo.Log() returns ErrReferenceNotFound, treated as "fine during init".
+	// Zero commits - repo.Log() returns ErrReferenceNotFound, treated as "fine during init".
 	require.NoError(t, verifyInitFileUnchanged(sesamDir))
 }

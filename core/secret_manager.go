@@ -84,6 +84,19 @@ func (sm *SecretManager) cryptPath(path string) string {
 	return filepath.Join(sm.objectsDir(), path+".sesam")
 }
 
+// refreshRecipients re-derives the recipient list for every managed
+// secret from the current state and keyring. The list of secrets itself
+// is not touched - that is owned by AddSecret/RemoveSecret. This is the
+// hook that user-membership changes (tell/kill) call before SealAll, so
+// the swap captures the new keyring rather than the stale one cached at
+// BuildSecretManager time.
+func (sm *SecretManager) refreshRecipients() {
+	for i := range sm.secrets {
+		users := sm.State.UsersForSecret(sm.secrets[i].RevealedPath)
+		sm.secrets[i].Recipients = sm.Keyring.Recipients(users)
+	}
+}
+
 func (sm *SecretManager) tmpDir() string {
 	return filepath.Join(sm.SesamDir, ".sesam", "tmp")
 }
@@ -240,7 +253,7 @@ func (sm *SecretManager) SealAll() error {
 
 	sigs := make([]*secretFooter, 0, len(sm.secrets))
 	for _, s := range sm.secrets {
-		sig, err := sm.stageSecret(s, stage)
+		sig, _, err := sm.stageSecret(s, stage)
 		if err != nil {
 			return fmt.Errorf("stage %s: %w", s.RevealedPath, err)
 		}
@@ -300,33 +313,49 @@ func (sm *SecretManager) SealAll() error {
 // the plaintext is missing we copy the existing ciphertext from the live
 // objects/ tree so the file survives the swap. It is an error if neither
 // is available.
-func (sm *SecretManager) stageSecret(s secret, stageRoot string) (*secretFooter, error) {
+func (sm *SecretManager) stageSecret(s secret, stageRoot string) (*secretFooter, bool, error) {
 	stageDest := filepath.Join(stageRoot, s.RevealedPath+".sesam")
 	if err := os.MkdirAll(filepath.Dir(stageDest), 0o700); err != nil {
-		return nil, fmt.Errorf("create stage subdir: %w", err)
+		return nil, false, fmt.Errorf("create stage subdir: %w", err)
 	}
 
 	plainPath := filepath.Join(sm.SesamDir, s.RevealedPath)
 	switch _, err := os.Stat(plainPath); {
 	case err == nil:
-		return s.Seal(stageDest, sm.Signer.UserName())
+		// Good-citizen guard: an honest client refuses to produce a
+		// footer it knows the verifier will reject. The "preserve
+		// existing ciphertext" branch below does not hit this because
+		// it does not change SealedBy.
+		sealer := sm.Signer.UserName()
+		if sm.State.SealerAuthorized(sealer, s.RevealedPath) {
+			sig, err := s.Seal(stageDest, sealer)
+			return sig, true, err
+		}
+
+		slog.Warn(
+			"ignoring path because user is not authorized",
+			slog.String("user", sealer),
+			slog.String("path", s.RevealedPath),
+		)
 	case !os.IsNotExist(err):
-		return nil, fmt.Errorf("stat plaintext: %w", err)
+		return nil, false, fmt.Errorf("stat plaintext: %w", err)
 	}
 
 	// No plaintext: preserve the existing ciphertext if we have one.
 	existing := sm.cryptPath(s.RevealedPath)
 	if !pathExists(existing) {
-		return nil, fmt.Errorf(
+		return nil, false, fmt.Errorf(
 			"no plaintext at %q and no existing ciphertext at %q to preserve",
 			plainPath, existing,
 		)
 	}
 
 	if err := copyFile(existing, stageDest); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return readSecretFooter(stageDest)
+
+	sig, err := readSecretFooter(stageDest)
+	return sig, false, err
 }
 
 func readSecretFooter(path string) (*secretFooter, error) {
@@ -389,6 +418,8 @@ func (sm *SecretManager) RemoveSecret(revealedPath string) error {
 //
 // NOTE: This is primarily used to calculate content diffs. For performance reasons
 // it does not verify signatures - this requires parsing all of the audit log.
+// As a consequence it also does not check whether the sealer was authorized
+// to seal this path. Use `sesam reveal` or `sesam verify --all` for that.
 func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bool, error) {
 	if !strings.HasSuffix(path, ".sesam") {
 		if err := validSecretPath(sesamDir, path); err == nil {
@@ -416,13 +447,29 @@ func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bo
 // revealedPath is the repo-relative plain path (e.g. "secrets/token"), derived
 // by the caller from git's %f argument so no footer read-back is needed.
 //
+// When `kr` is non-nil the footer signature is verified against the keyring,
+// and when `authorize` is also non-nil the named sealer is checked against
+// the predicate (see VerifiedState.SealerAuthorized). Both nil preserves
+// the historical "decrypt and ask no questions" behaviour, which is what
+// low-level test fixtures need when no audit log is available.
+//
 // Returns (true, nil) on success. Returns (false, nil) when the caller is not
 // a recipient - the blob is not meant for them and is silently skipped.
 //
-// This function should only be called for quick decryption (i.e. git diff or smudge)
-// and when we only have access to the encrypted file and not the audit log.
-// For most cases, uses SecretManager.
-func RevealBlob(sesamDir string, ids Identities, src io.ReadSeeker, revealedPath string) (bool, error) {
+// On *AuthorizationError the decryption succeeded but the sealer was not in
+// the access list. The plaintext is still landed (`true` is returned) and
+// the typed error is propagated so callers can pick a policy: the smudge
+// filter logs the mismatch and treats it as success; CLI tools may prefer
+// to refuse. This split lets `git checkout` survive history written before
+// the auth check shipped while still surfacing the deviation loudly.
+func RevealBlob(
+	sesamDir string,
+	ids Identities,
+	src io.ReadSeeker,
+	revealedPath string,
+	kr Keyring,
+	authorize func(user, path string) bool,
+) (bool, error) {
 	dstPath := filepath.Join(sesamDir, revealedPath)
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
 		return false, fmt.Errorf("creating revealed dir: %w", err)
@@ -435,15 +482,33 @@ func RevealBlob(sesamDir string, ids Identities, src io.ReadSeeker, revealedPath
 	}
 	defer func() { _ = dst.Cleanup() }()
 
-	_, _, err = revealStream(src, dst, ids.AgeIdentities())
-	if err != nil {
+	var revealErr error
+	if kr != nil {
+		revealErr = revealStreamAndVerify(src, dst, ids.AgeIdentities(), kr, authorize)
+	} else {
+		_, _, revealErr = revealStream(src, dst, ids.AgeIdentities())
+	}
+
+	if revealErr != nil {
 		var noMatch *age.NoIdentityMatchError
-		if errors.As(err, &noMatch) {
+		if errors.As(revealErr, &noMatch) {
 			// count as no error, checking out old state is a best effort.
 			return false, nil
 		}
 
-		return false, err
+		var authErr *BadSealerError
+		if errors.As(revealErr, &authErr) {
+			// Decryption succeeded; only the policy check failed. Land
+			// the plaintext and propagate the typed error - the caller
+			// decides whether to warn or refuse.
+			_ = dst.Chmod(0o600)
+			if closeErr := dst.CloseAtomicallyReplace(); closeErr != nil {
+				return false, closeErr
+			}
+			return true, revealErr
+		}
+
+		return false, revealErr
 	}
 
 	_ = dst.Chmod(0o600)

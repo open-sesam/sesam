@@ -32,7 +32,7 @@ func HandleTell(ctx context.Context, cmd *cli.Command) error {
 			return fmt.Errorf("failed to add user: %w", err)
 		}
 
-		return mgr.Secret.SealAll()
+		return nil
 	})
 }
 
@@ -50,6 +50,6 @@ func HandleKill(_ context.Context, cmd *cli.Command) error {
 			return fmt.Errorf("failed to remove user: %w", err)
 		}
 
-		return mgr.Secret.SealAll()
+		return nil
 	})
 }

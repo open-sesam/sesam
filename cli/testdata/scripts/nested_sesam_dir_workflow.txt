@@ -1,0 +1,42 @@
+# Verify that `sesam init --sesam-dir <subdir>` writes git-config driver
+# entries that carry the `--sesam-dir=<subdir>` flag. Git invokes those
+# drivers with cwd = worktree root, so without the flag they would fail
+# to find the nested `.sesam/` tree.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+mkdir sub
+exec sesam init --user admin --sesam-dir sub
+
+# Each driver line in .git/config must carry --sesam-dir=sub so the binary
+# resolves the nested .sesam/ when git invokes it from the worktree root.
+exec git config --local filter.sesam-filter.process
+stdout '^sesam --sesam-dir=sub smudge$'
+
+exec git config --local diff.sesam-diff.textconv
+stdout '^sesam --sesam-dir=sub show$'
+
+exec git config --local merge.sesam-merge.driver
+stdout '^sesam --sesam-dir=sub audit merge %O %A %B %L %P$'
+
+# End-to-end: commit the init, drop both the revealed README and the
+# sealed blob, then check the blob back out. Removing the blob forces git
+# to update it (vs a no-op when the worktree already matches HEAD), which
+# is what actually triggers the smudge filter. The filter is invoked by
+# git with cwd = worktree root and pathname = sub/.sesam/objects/README.md.sesam;
+# it must use the --sesam-dir=sub bake-in to find the audit log and write
+# the plaintext back to sub/README.md.
+exec git add -A
+exec git commit -m 'init sesam'
+
+rm sub/README.md
+rm sub/.sesam/objects/README.md.sesam
+! exists sub/README.md
+! exists sub/.sesam/objects/README.md.sesam
+
+exec git checkout HEAD -- sub/.sesam/objects/README.md.sesam
+exists sub/.sesam/objects/README.md.sesam
+exec cat sub/README.md
+stdout 'sesam bootstrap'

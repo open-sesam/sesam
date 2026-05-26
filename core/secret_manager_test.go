@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -181,6 +182,143 @@ func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
 	require.True(t, exists, "secret must remain in verified state")
 }
 
+func TestRevealBlobHappyPath(t *testing.T) {
+	mgr := testSecretManager(t)
+	secret := testSecret(t, mgr, "secrets/token", "top-secret")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	require.NoError(t, err)
+
+	//nolint:gosec
+	src, err := os.Open(mgr.cryptPath("secrets/token"))
+	require.NoError(t, err)
+	defer src.Close()
+
+	os.Remove(filepath.Join(mgr.SesamDir, "secrets/token"))
+
+	ok, err := RevealBlob(mgr.SesamDir, mgr.Identities, src, "secrets/token", nil, nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/token"))
+	require.NoError(t, err)
+	require.Equal(t, "top-secret", string(got))
+}
+
+func TestRevealBlobNonRecipient(t *testing.T) {
+	mgr := testSecretManager(t)
+	secret := testSecret(t, mgr, "secrets/token", "top-secret")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	require.NoError(t, err)
+
+	//nolint:gosec
+	src, err := os.Open(mgr.cryptPath("secrets/token"))
+	require.NoError(t, err)
+	defer src.Close()
+
+	stranger := newTestUser(t, "stranger")
+	ok, err := RevealBlob(mgr.SesamDir, Identities{stranger.Identity}, src, "secrets/token", nil, nil)
+	require.NoError(t, err)
+	require.False(t, ok, "non-recipient should return (false, nil)")
+}
+
+func TestRevealBlobCorruptedFile(t *testing.T) {
+	mgr := testSecretManager(t)
+	secret := testSecret(t, mgr, "secrets/token", "top-secret")
+	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	require.NoError(t, err)
+
+	os.WriteFile(mgr.cryptPath("secrets/token"), []byte("not-a-valid-sesam-file"), 0o600)
+
+	//nolint:gosec
+	src, err := os.Open(mgr.cryptPath("secrets/token"))
+	require.NoError(t, err)
+	defer src.Close()
+
+	ok, err := RevealBlob(mgr.SesamDir, mgr.Identities, src, "secrets/token", nil, nil)
+	require.Error(t, err)
+	require.False(t, ok)
+}
+
+// RevealBlob's policy split: an authorize-mismatch must NOT swallow the
+// plaintext. The smudge filter relies on this to keep `git checkout`
+// non-blocking against history written before the auth check shipped -
+// the typed *AuthorizationError lets the caller pick a policy.
+func TestRevealBlobAuthMismatchLandsPlaintext(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	bob := newTestUser(t, "bob")
+	kr := testKeyring(t, admin, bob)
+
+	state := &VerifiedState{
+		Users: []VerifiedUser{
+			{Name: "admin", Groups: []string{"admin"}},
+			{Name: "bob", Groups: []string{"dev"}},
+		},
+		Secrets: []VerifiedSecret{
+			{RevealedPath: "secrets/admin-only", AccessGroups: []string{"admin"}},
+		},
+	}
+
+	// Admin seals the secret normally.
+	adminMgr := &SecretManager{
+		SesamDir:   sesamDir,
+		Identities: Identities{admin.Identity},
+		Signer:     admin.Signer,
+		Keyring:    kr,
+		State:      state,
+	}
+	writeSecret(t, sesamDir, "secrets/admin-only", "real payload")
+	legit := &secret{
+		Mgr:          adminMgr,
+		RevealedPath: "secrets/admin-only",
+		Recipients:   kr.Recipients([]string{"admin", "bob"}),
+	}
+	cryptPath := adminMgr.cryptPath("secrets/admin-only")
+	_, err := legit.Seal(cryptPath, "admin")
+	require.NoError(t, err)
+
+	// Bob substitutes the file (bypasses the seal-time guard, which
+	// honest clients run but a patched client would not).
+	bobMgr := &SecretManager{SesamDir: sesamDir, Signer: bob.Signer}
+	writeSecret(t, sesamDir, "secrets/admin-only", "bob's substituted payload")
+	bad := &secret{
+		Mgr:          bobMgr,
+		RevealedPath: "secrets/admin-only",
+		Recipients:   kr.Recipients([]string{"admin", "bob"}),
+	}
+	_, err = bad.Seal(cryptPath, "bob")
+	require.NoError(t, err)
+
+	// Reveal via RevealBlob with kr+authorize wired up. Bob's name in
+	// `sealed_by` is cryptographically valid (real bob signature) but
+	// the access list does not include bob.
+	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/admin-only")))
+	src, err := os.Open(cryptPath)
+	require.NoError(t, err)
+	defer src.Close()
+
+	ok, err := RevealBlob(
+		sesamDir,
+		Identities{admin.Identity},
+		src,
+		"secrets/admin-only",
+		kr,
+		state.SealerAuthorized,
+	)
+	require.True(t, ok, "plaintext must still land - smudge needs this")
+	var authErr *BadSealerError
+	require.True(t, errors.As(err, &authErr), "expected *AuthorizationError, got %T: %v", err, err)
+	require.Equal(t, "bob", authErr.SealedBy)
+	require.Equal(t, "secrets/admin-only", authErr.Path)
+
+	// And the plaintext is the substituted bytes - the user can see
+	// what was substituted, which combined with the loud log is the
+	// signal they need to act.
+	got, err := os.ReadFile(filepath.Join(sesamDir, "secrets/admin-only"))
+	require.NoError(t, err)
+	require.Equal(t, "bob's substituted payload", string(got))
+}
+
 func TestRemoveSecretThenSealAll(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
@@ -236,6 +374,44 @@ func TestSealAllMultiple(t *testing.T) {
 	for _, p := range []string{"secrets/a", "secrets/b"} {
 		require.FileExists(t, mgr.cryptPath(p))
 	}
+}
+
+// A non-admin who does not have access to a secret must not be able to
+// seal it via the normal path. The seal-time guard catches this even in
+// honest clients - the cryptographic defense lives in revealStreamAndVerify.
+func TestSealRejectsUnauthorizedUser(t *testing.T) {
+	mgr := sealedSecretManager(t) // admin-only secrets/test
+
+	bob := newTestUser(t, "bob")
+	_, err := mgr.AuditLog.AddEntry(mgr.Signer, newAuditEntry("admin", &DetailUserTell{
+		User: "bob", Groups: []string{"dev"},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+	}), nil)
+	require.NoError(t, err)
+	require.NoError(t, verify(mgr.State))
+
+	bobMgr, err := BuildSecretManager(
+		mgr.SesamDir, Identities{bob.Identity}, bob.Signer,
+		mgr.Keyring, mgr.AuditLog, mgr.State,
+	)
+	require.NoError(t, err)
+
+	// Bob has plaintext on disk (left over from sealedSecretManager)
+	// but no access to secrets/test. SealAll must refuse.
+	err = bobMgr.SealAll()
+	require.NoError(t, err)
+
+	tmpDir, err := os.MkdirTemp("", "")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	_, wasSealed, err := bobMgr.stageSecret(secret{
+		Mgr:          mgr,
+		RevealedPath: "secrets/test",
+	}, tmpDir)
+
+	require.NoError(t, err)
+	require.False(t, wasSealed)
 }
 
 func TestSealAllCleansStageAndMarker(t *testing.T) {
