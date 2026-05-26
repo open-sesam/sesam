@@ -276,7 +276,7 @@ func (sm *SecretManager) SealAll() error {
 	}
 	swapped = true
 
-	// Audit entry FIRST - keeps the swap-vs-log window as small as
+	// Audit entry FIRST — keeps the swap-vs-log window as small as
 	// possible. Old objects are now in `stage` and will be reaped below.
 	if err := sm.State.FeedEntry(
 		sm.Signer,
