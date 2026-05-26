@@ -144,7 +144,10 @@ func GenerateSignKey(sesamDir, user string, userRecipient []age.Recipient) (Sign
 // readAllSignatures finds all .sesam files under .sesam/objects/ and parses their signature footers.
 func readAllSignatures(sesamDir string) ([]secretFooter, error) {
 	objectsDir := filepath.Join(sesamDir, ".sesam", "objects")
+	return readAllSignaturesForDir(objectsDir)
+}
 
+func readAllSignaturesForDir(objectsDir string) ([]secretFooter, error) {
 	var sigs []secretFooter
 	if _, err := os.Stat(objectsDir); os.IsNotExist(err) {
 		// might happen if we're in the init phase
