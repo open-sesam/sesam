@@ -431,65 +431,62 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) er
 	return nil
 }
 
-// recoverIncompleteSeal cleans up after a SealAll that crashed.
+// recoverIncompleteSeal finishes (or rolls back) a SealAll that crashed.
 //
-// On-disk markers we may find:
+// SealAll's ordering is: stage -> audit entry -> swap -> reap old stage.
+// The audit entry is the commit point: once it lands, the new state is
+// final and recovery must reach it; before it lands, the staged work is
+// discardable.
 //
-//	.sesam/seal-stage   - either a half-built staging dir (pre-swap) or
-//	                      the OLD objects tree awaiting GC (post-swap)
-//	.sesam/seal-marker  - written before the swap, removed after the audit entry
+// On the next load we hash both .sesam/seal-stage and .sesam/objects and
+// compare them against the latest seal's RootHash in the audit log:
 //
-// Whatever the cause, removing both is safe: objects/ is left as whichever
-// tree the last successful swap committed, and Verify will catch any
-// remaining log/disk RootHash divergence on the next load.
-//
-// The "marker present, stage missing" case is not expected with the
-// current ordering (stage GC is the very last step of SealAll). We still
-// surface it as a warning in case it happens via some out-of-band edit.
+//   - no seal entry yet or live matches the log -> stage is leftover, drop it.
+//   - stage matches the log -> swap was pending, finish it.
+//   - neither matches -> the log committed a state nothing on disk holds.
+//     Cannot reconcile; bail and let the user investigate.
 func recoverIncompleteSeal(sesamDir string, vstate *VerifiedState) error {
 	stageDir := filepath.Join(sesamDir, ".sesam", "seal-stage")
 	objectsDir := filepath.Join(sesamDir, ".sesam", "objects")
 
-	stageExists := pathExists(stageDir)
-	if !stageExists {
-		// nothing to do
+	if !pathExists(stageDir) {
 		return nil
+	}
+
+	objectSigs, err := readAllSignaturesForDir(objectsDir)
+	if err != nil {
+		return err
+	}
+	objectsRootHash := buildRootHash(objectSigs)
+
+	if vstate.LastSealRootHash == "" {
+		// Crashed during the very first SealAll, before any audit entry
+		// was written. Stage holds uncommitted work; discard it.
+		return os.RemoveAll(stageDir)
+	}
+
+	if vstate.LastSealRootHash == objectsRootHash {
+		// Audit entry written and swap done, just stage dir not yet deleted.
+		return os.RemoveAll(stageDir)
 	}
 
 	stageSigs, err := readAllSignaturesForDir(stageDir)
 	if err != nil {
 		return err
 	}
-	objectSigs, err := readAllSignaturesForDir(objectsDir)
-	if err != nil {
-		return err
-	}
+	stageRootHash := buildRootHash(stageSigs)
 
-	// TODO: Just silly helper - remove by streamlining
-	f := func(sigs []secretFooter) []*secretFooter {
-		out := make([]*secretFooter, 0, len(sigs))
-		for idx := range sigs {
-			out = append(out, &sigs[idx])
+	if vstate.LastSealRootHash == stageRootHash {
+		// Audit entry written, but stage not yet swapped. Finish it,
+		// then reap the now-old tree that lands back in stage.
+		if err := atomicSwapDirs(stageDir, objectsDir); err != nil {
+			return err
 		}
-
-		return out
-	}
-
-	stageRootHash := buildRootHash(f(stageSigs))
-	objectsRootHash := buildRootHash(f(objectSigs))
-
-	if vstate.LastSealRootHash == objectsRootHash || vstate.LastSealRootHash == "" {
-		// Audit entry written and swap done, just stage dir not yet deleted.
-		// (or we did never a stage yet)
 		return os.RemoveAll(stageDir)
 	}
 
-	if vstate.LastSealRootHash == stageRootHash {
-		// Audit entry written, but stage not yet swapped. We need to swap it now.
-		return atomicSwapDirs(stageDir, objectsDir)
-	}
-
-	// NOTE: This could happen if we crash and then the stage dir gets modified.
+	// Log committed a state that exists neither in stage nor in objects.
+	// Likely cause: the stage dir was modified out-of-band after the crash.
 	return fmt.Errorf(
 		"seal recover: root hash mismatch between stage dir (%s) and audit log (%s)",
 		stageRootHash,
@@ -532,9 +529,9 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 		return nil, err
 	}
 
-	// Recover from a possibly crashed previous SealAll. This always nukes
-	// the staging dir; the marker file is left in place if the swap already
-	// happened so the user can be informed about the inconsistency.
+	// Reconcile disk with the log: finish a pending swap or drop a
+	// stale staging dir from a previously crashed SealAll. Runs after
+	// verify(state) so the log (and thus LastSealRootHash) is trusted.
 	if err := recoverIncompleteSeal(log.SesamDir, &state); err != nil {
 		return nil, err
 	}
@@ -546,12 +543,7 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 			return nil, fmt.Errorf("reading signatures for root hash check: %w", err)
 		}
 
-		sigPtrs := make([]*secretFooter, len(sigs))
-		for i := range sigs {
-			sigPtrs[i] = &sigs[i]
-		}
-
-		diskRootHash := buildRootHash(sigPtrs)
+		diskRootHash := buildRootHash(sigs)
 		if diskRootHash != state.LastSealRootHash {
 			return nil, fmt.Errorf(
 				"root hash mismatch: log says %s, disk says %s",
