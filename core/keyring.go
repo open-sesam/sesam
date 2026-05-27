@@ -60,9 +60,6 @@ func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) {
 		return
 	}
 
-	// TODO: Here we can figure out if we've seen this key already.
-	//       Or we do that in a separate function for a more report like style.
-	//       Same can be done for signing keys.
 	mk.recipients[user] = append(recps, recp)
 }
 
