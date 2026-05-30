@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/repo"
 	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )

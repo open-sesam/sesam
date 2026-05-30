@@ -28,7 +28,7 @@ var gitattributesTemplate string
 //go:embed assets/pre-commit_hook.default
 var preCommitHookTemplate string
 
-//go:embed assets/Readme.default
+//go:embed assets/README.default
 var sesamReadmeTemplate string
 
 //go:embed assets/config.default
@@ -561,7 +561,11 @@ func EnsureGitSesamShim(sesamDir string) error {
 		return fmt.Errorf("failed to create git-sesam shim at %s: %w", shimPath, err)
 	}
 
-	slog.Info("created git-sesam shim", slog.String("path", shimPath), slog.String("hint", "add .sesam/bin to your PATH"))
+	slog.Info(
+		"created git-sesam shim",
+		slog.String("path", shimPath),
+		slog.String("hint", "add .sesam/bin to your PATH"),
+	)
 	return nil
 }
 

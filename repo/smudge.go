@@ -34,9 +34,9 @@ import (
 // their age key inside the repo don't lose it on checkout.
 type FilterProcessHandler struct {
 	// SesamDir is the directory containing `.sesam/` (resolved via
-	// clirepo.ResolveSesamDir from --sesam-dir / SESAM_DIR). The same
-	// path drives audit-log loading, working-tree cleanup, and the
-	// destination for revealed plaintext.
+	// ResolveSesamDir from --sesam-dir / SESAM_DIR). The same path drives
+	// audit-log loading, working-tree cleanup, and the destination for revealed
+	// plaintext.
 	SesamDir string
 
 	Identities    core.Identities

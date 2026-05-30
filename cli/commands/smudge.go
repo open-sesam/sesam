@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/open-sesam/sesam/cli/repo"
 	"github.com/open-sesam/sesam/core"
+	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
 
