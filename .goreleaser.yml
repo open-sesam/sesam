@@ -32,6 +32,22 @@ archives:
       - goos: windows
         formats: [zip]
 
+dockers_v2:
+  - images:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}"
+    tags:
+      - "{{ .Tag }}"
+      - "{{ if not .IsNightly }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    annotations:
+      "org.opencontainers.image.version":  "{{ .Version }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.source":   "{{ .GitURL }}"
+      "org.opencontainers.image.created":  "{{ .Date }}"
+    disable: "{{ .IsSnapshot }}"
+
 changelog:
   sort: asc
   filters:
