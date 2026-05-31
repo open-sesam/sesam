@@ -27,6 +27,9 @@ var sesamReadmeTemplate string
 //go:embed assets/config.default
 var configTemplate string
 
+//go:embed assets/git-sesam.bin
+var gitSesamShim string
+
 // resolveSesamDirAndGit resolves the sesam repository root and opens the git repository
 // closes to it.
 //
@@ -381,8 +384,7 @@ func ensureGitSesamShim(sesamDir string) error {
 		return fmt.Errorf("failed to create shim directory for %s: %w", shimPath, err)
 	}
 
-	script := "#!/bin/sh\nexec sesam \"$@\"\n"
-	if err := renameio.WriteFile(shimPath, []byte(script), 0o755); err != nil {
+	if err := renameio.WriteFile(shimPath, []byte(gitSesamShim), 0o755); err != nil {
 		return fmt.Errorf("failed to create git-sesam shim at %s: %w", shimPath, err)
 	}
 
