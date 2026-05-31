@@ -350,7 +350,7 @@ func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bo
 	}
 
 	//nolint:gosec
-	srcFd, err := os.Open(path)
+	srcFd, err := os.Open(filepath.Join(sesamDir, path))
 	if err != nil {
 		// assume it's not something we can "show"
 		return false, nil

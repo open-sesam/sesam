@@ -321,6 +321,45 @@ func TestLoadAuditViewFromIndex_HappyPath(t *testing.T) {
 	}))
 }
 
+// Regression: loadAuditView must actually read the audit log from the git
+// INDEX, not the worktree. Before the InitHash fix, loadAuditViewFromIndex
+// always failed VerifyChain (missing InitHash) and silently fell back to
+// the worktree copy — defeating the "view consistent with the target tree"
+// purpose. We diverge the two views by mutating the worktree audit log
+// (telling Bob) without staging it; if the function picks worktree, Bob
+// shows up in the resulting keyring.
+func TestLoadAuditView_PrefersIndexOverWorktree(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+
+	dir, r := bootstrapRepo(t, admin)
+	gitCommitAll(t, dir, "init sesam") // index = worktree = admin only
+
+	// Diverge: mutate the worktree audit log (UserTell appends to
+	// .sesam/audit/log.jsonl on disk). The git index still carries only
+	// the admin-only version.
+	require.NoError(t, r.UserTell(t.Context(),
+		"bob", []string{bob.Recipient}, []string{"dev"}))
+	require.NoError(t, r.Close())
+
+	ids, err := LoadIdentities([]string{admin.Path}, RepoOpts{})
+	require.NoError(t, err)
+
+	require.NoError(t, withWorkingDir(dir, func() error {
+		kr, _, err := loadAuditView(".", ids)
+		require.NoError(t, err)
+
+		users := kr.ListUsers()
+		require.Contains(t, users, "admin")
+		require.NotContains(t, users, "bob",
+			"loadAuditView must read from the git INDEX (admin only); "+
+				"if bob is present the function silently fell back to the "+
+				"worktree copy — the InitHash fix in "+
+				"loadAuditViewFromIndex has regressed")
+		return nil
+	}))
+}
+
 // loadAuditView is the high-level entry point: index first, worktree as a
 // fallback. Here both succeed (index path returns first), so we cover the
 // happy-path arm.

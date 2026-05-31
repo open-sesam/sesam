@@ -11,8 +11,10 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -27,6 +29,8 @@ const defaultLockTimeout = 30 * time.Second
 // keyringFingerprint is the OS-keyring entry name used to cache the runtime
 // passphrase of encrypted age identities.
 const keyringFingerprint = "sesam.identity.runtime"
+
+var ErrClosed = errors.New("sesam repo is closed")
 
 // Repo is a handle to a sesam repo. See package-level docs for lifetime
 // semantics.
@@ -77,13 +81,14 @@ func (opts RepoOpts) pluginUI() *core.PluginUI {
 	return core.NewNonInteractivePluginUI()
 }
 
-// LoadIdentities reads the user's age identity files. It is the cheap
-// startup step — it does NOT load the audit log or any managers, and is
-// suitable for tools like `sesam show` that are invoked as a git textconv
-// during `git diff`, where loading the audit log per blob would be
-// prohibitively expensive.
+// LoadIdentities reads the user's age identity files.
 func LoadIdentities(identityPaths []string, opts RepoOpts) (core.Identities, error) {
-	return loadIdentities(identityPaths, keyringFingerprint, opts.pluginUI())
+	idLoader := loadIdentities
+	if !opts.Interactive {
+		idLoader = loadIdentitiesKeyringOnly
+	}
+
+	return idLoader(identityPaths, keyringFingerprint, opts.pluginUI())
 }
 
 // ResolveSesamDir resolves the sesam repository root. It walks up from
@@ -119,6 +124,10 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 	defer func() {
 		if !success {
 			_ = r.Close()
+
+			// cleanup half created state:
+			_ = os.RemoveAll(sesamDir)
+			_ = os.RemoveAll("sesam.yml")
 		}
 	}()
 
@@ -219,7 +228,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 		return nil, err
 	}
 
-	identities, err := loadIdentities(ids, keyringFingerprint, r.pluginUI)
+	identities, err := LoadIdentities(ids, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -278,9 +287,16 @@ func (r *Repo) SesamDir() string {
 	return r.sesamDir
 }
 
+func (r *Repo) isClosed() bool {
+	return r.auditLog == nil
+}
+
 // Close releases the on-disk lock and closes the audit log. Safe to call
 // multiple times. The first non-nil error is returned.
 func (r *Repo) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	var firstErr error
 	if r.auditLog != nil {
 		if err := r.auditLog.Close(); err != nil {
@@ -311,6 +327,10 @@ func (r *Repo) ListUsers() ([]core.VerifiedUser, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.isClosed() {
+		return nil, ErrClosed
+	}
+
 	return append([]core.VerifiedUser(nil), r.vstate.Users...), nil
 }
 
@@ -319,6 +339,10 @@ func (r *Repo) ListSecrets() ([]core.VerifiedSecret, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.isClosed() {
+		return nil, ErrClosed
+	}
+
 	return append([]core.VerifiedSecret(nil), r.vstate.Secrets...), nil
 }
 
@@ -326,6 +350,10 @@ func (r *Repo) ListSecrets() ([]core.VerifiedSecret, error) {
 func (r *Repo) RevealAll() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
 
 	if err := r.secret.RevealAll(); err != nil {
 		return fmt.Errorf("failed to reveal secrets: %w", err)
@@ -338,6 +366,10 @@ func (r *Repo) SealAll() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.isClosed() {
+		return ErrClosed
+	}
+
 	if err := r.secret.SealAll(); err != nil {
 		return fmt.Errorf("failed to seal secrets: %w", err)
 	}
@@ -346,7 +378,13 @@ func (r *Repo) SealAll() error {
 
 type CleanOpts struct {
 	Aggressive bool
-	CheckFunc  func(path string) (bool, error)
+
+	// CheckFunc is called for every path that should be cleaned.
+	// Return true to allow, false to disallow.
+	// Return errors immediately stops cleaning.
+	//
+	// NOTE: This is holding a mutex. Calling other repo API will deadlock.
+	CheckFunc func(path string) (bool, error)
 }
 
 // Clean removes stale plaintext from the worktree.
@@ -365,6 +403,10 @@ type CleanOpts struct {
 func (r *Repo) Clean(ctx context.Context, opts CleanOpts) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
 
 	if opts.Aggressive {
 		return CleanAggressive(
@@ -401,6 +443,10 @@ func (r *Repo) ShowUser(name string, out io.Writer) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.isClosed() {
+		return false, ErrClosed
+	}
+
 	return r.user.ShowUser(name, out)
 }
 
@@ -410,6 +456,10 @@ func (r *Repo) ShowUser(name string, out io.Writer) (bool, error) {
 func (r *Repo) UserTell(ctx context.Context, user string, recipients, groups []string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
 
 	if err := r.user.TellUser(ctx, user, recipients, groups); err != nil {
 		return fmt.Errorf("failed to add user: %w", err)
@@ -422,6 +472,10 @@ func (r *Repo) UserTell(ctx context.Context, user string, recipients, groups []s
 func (r *Repo) UserKill(user string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
 
 	if err := r.user.KillUsers(user); err != nil {
 		return fmt.Errorf("failed to remove user: %w", err)
@@ -442,6 +496,10 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string) error {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
 
 	return withWorkingDir(r.sesamDir, func() error {
 		for _, revealedPath := range revealedPaths {
@@ -518,6 +576,10 @@ func (r *Repo) Verify(opts VerifyOptions) (*VerifyReport, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.isClosed() {
+		return nil, ErrClosed
+	}
+
 	report := &VerifyReport{}
 
 	if opts.Integrity {
@@ -537,6 +599,10 @@ func (r *Repo) Verify(opts VerifyOptions) (*VerifyReport, error) {
 func (r *Repo) Whoami() (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return "", ErrClosed
+	}
 
 	whoami, _, err := identityToUser(r.identities, r.keyring.ListUsers())
 	if err != nil {

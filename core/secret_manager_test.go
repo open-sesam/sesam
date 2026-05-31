@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -615,5 +616,37 @@ func TestShowSecretRevealedPathConvenience(t *testing.T) {
 	ok, err := ShowSecret(mgr.SesamDir, mgr.Identities, "secrets/tok", &buf)
 	require.NoError(t, err)
 	require.True(t, ok)
+	require.Equal(t, "content123", buf.String())
+}
+
+// ShowSecret must resolve a revealed path against its sesamDir argument,
+// not against the caller's current working directory. The previous
+// implementation did `filepath.Join(".sesam", "objects", path+".sesam")`
+// (relative), so the lookup silently failed whenever cwd != sesamDir —
+// e.g. when a user typed `sesam --sesam-dir=.. show README.md` from a
+// subdirectory of the worktree.
+func TestShowSecretResolvesAgainstSesamDirNotCWD(t *testing.T) {
+	mgr := testSecretManager(t)
+	s := testSecret(t, mgr, "secrets/tok", "content123")
+	_, err := s.Seal(s.Mgr.cryptPath(s.RevealedPath), "testuser")
+	require.NoError(t, err)
+
+	// Chdir into a sibling of sesamDir so the relative ".sesam/objects"
+	// join would fail without the sesamDir-aware fix.
+	elsewhere := t.TempDir()
+	require.NotEqual(t, mgr.SesamDir, elsewhere)
+
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(elsewhere))
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	fmt.Println("CWD", elsewhere)
+	fmt.Println("DIR", mgr.SesamDir)
+	var buf bytes.Buffer
+	ok, err := ShowSecret(mgr.SesamDir, mgr.Identities, "secrets/tok", &buf)
+	require.NoError(t, err)
+	require.True(t, ok,
+		"ShowSecret must find the object via sesamDir even when cwd differs")
 	require.Equal(t, "content123", buf.String())
 }
