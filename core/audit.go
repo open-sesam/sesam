@@ -286,14 +286,14 @@ type DetailSeal struct {
 //
 // In all cases verify would complain about it and warn an user about Eve.
 type AuditLog struct {
-	Entries []auditEntrySigned
+	Entries []auditEntrySigned `json:"entries"`
 
 	// SesamDir is the dir in which .sesam resides.
-	SesamDir string
+	SesamDir string `json:"-"`
 
 	// The hash from the .sesam/audit/init file.
 	// It should be the same hash as the prev_hash of the 2nd entry.
-	InitHash string
+	InitHash string `json:"-"`
 
 	// file descriptor for adding new entries.
 	fd *os.File `json:"-"`

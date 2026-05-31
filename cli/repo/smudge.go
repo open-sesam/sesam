@@ -390,8 +390,9 @@ func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring,
 	// Index entries are repo-root-relative with forward slashes.
 	// sesamDir is the same shape (resolved from --sesam-dir, default
 	// "."); path.Join collapses "." correctly when sesam lives at the
-	// worktree root.
-	auditPath := path.Join(sesamDir, ".sesam/audit/log.jsonl")
+	// worktree root. ToSlash guards against an OS-native --sesam-dir
+	// (e.g. "sub\dir" on Windows), which path.Join would not normalize.
+	auditPath := path.Join(filepath.ToSlash(sesamDir), ".sesam/audit/log.jsonl")
 
 	blobIdx := slices.IndexFunc(idx.Entries, func(e *index.Entry) bool {
 		return e.Name == auditPath
