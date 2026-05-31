@@ -58,7 +58,7 @@ func validSecretPath(sesamDir, revealedPath string) error {
 	}
 
 	absRevealedPath := filepath.Join(sesamDir, revealedPath)
-	revealedPath = filepath.Clean(absRevealedPath)
+	absRevealedPath = filepath.Clean(absRevealedPath)
 	info, err := os.Stat(absRevealedPath)
 	if err != nil {
 		return fmt.Errorf("failed to stat %s: %w", absRevealedPath, err)

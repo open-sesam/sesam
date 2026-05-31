@@ -126,8 +126,8 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 			_ = r.Close()
 
 			// cleanup half created state:
-			_ = os.RemoveAll(sesamDir)
-			_ = os.RemoveAll("sesam.yml")
+			_ = os.RemoveAll(filepath.Join(resolvedDir, ".sesam"))
+			_ = os.RemoveAll(filepath.Join(resolvedDir, "sesam.yml"))
 		}
 	}()
 

@@ -3,7 +3,6 @@ package core
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -641,8 +640,6 @@ func TestShowSecretResolvesAgainstSesamDirNotCWD(t *testing.T) {
 	require.NoError(t, os.Chdir(elsewhere))
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
-	fmt.Println("CWD", elsewhere)
-	fmt.Println("DIR", mgr.SesamDir)
 	var buf bytes.Buffer
 	ok, err := ShowSecret(mgr.SesamDir, mgr.Identities, "secrets/tok", &buf)
 	require.NoError(t, err)
