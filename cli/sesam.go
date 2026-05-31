@@ -63,12 +63,6 @@ func Main(args []string) error {
 				Usage:  "Show the audit log of secret changes",
 			},
 			{
-				Name:   "undo",
-				Hidden: true,
-				Action: commands.HandleUndo,
-				Usage:  "Restore secrets from an earlier revision",
-			},
-			{
 				Name:      "add",
 				Flags:     flagsAdd,
 				ArgsUsage: "<path>",
@@ -80,12 +74,6 @@ func Main(args []string) error {
 				ArgsUsage: "<path>",
 				Action:    commands.WithRepo(commands.HandleRemove),
 				Usage:     "Remove a secret file or directory",
-			},
-			{
-				Name:   "mv",
-				Hidden: true,
-				Action: commands.HandleMove,
-				Usage:  "Move a secret to a different path",
 			},
 			{
 				Name:   "apply",
@@ -106,11 +94,6 @@ func Main(args []string) error {
 				Usage:  "Remove a person from a group",
 			},
 			{
-				Name:   "list-users",
-				Action: commands.WithRepo(commands.HandleListUsers),
-				Usage:  "List persons, groups, and access",
-			},
-			{
 				Name:   "docgen",
 				Hidden: true,
 				Action: commands.HandleDocGen,
@@ -129,9 +112,10 @@ func Main(args []string) error {
 				},
 			},
 			{
-				Name:  "list",
-				Flags: flagsListSecrets,
-				Usage: "List entities",
+				Name:    "list",
+				Aliases: []string{"ls"},
+				Flags:   flagsListSecrets,
+				Usage:   "List entities",
 				Action: func(_ context.Context, _ *cli.Command) error {
 					return fmt.Errorf("missing list target: use `sesam list secrets` or `sesam list users`")
 				},

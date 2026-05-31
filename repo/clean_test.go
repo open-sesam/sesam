@@ -189,7 +189,7 @@ func TestRecursiveRmEmptyDirs(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(tmpDir, path), nil, 0o700))
 			}
 
-			emptyDirs, err := recursiveRmEmptyDirs(tmpDir, tc.Except)
+			emptyDirs, err := recursiveRmEmptyDirs(tmpDir, tc.Except, nil)
 			require.NoError(t, err)
 			require.Equal(t, tc.ExpectedToDelete, emptyDirs)
 		})

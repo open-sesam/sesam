@@ -1,0 +1,43 @@
+# Verify the --dry-run, --quiet, and --aggressive flags on `sesam clean`.
+#
+# `leak-src.txt` is force-added to git (sesam's .gitignore would otherwise
+# block it) so the test can re-create the leaked plaintext between scenarios.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec git add -f leak-src.txt
+exec git commit -m 'add leak source'
+
+# --- scenario 1: --dry-run prints but does not delete ---
+exec cp leak-src.txt leaked.txt
+exec sesam clean --dry-run
+stdout 'leaked\.txt'
+exists leaked.txt
+
+# --- scenario 2: --quiet stays silent and deletes ---
+exec sesam clean --quiet
+! stdout '.+'
+! exists leaked.txt
+
+# --- scenario 3: without --aggressive, files inside .sesam/ survive ---
+mkdir -p .sesam/tmp/scratch
+exec cp leak-src.txt .sesam/tmp/scratch/spill
+exec cp leak-src.txt leaked.txt
+exec sesam clean
+! exists leaked.txt
+exists .sesam/tmp/scratch/spill
+
+# --- scenario 4: --aggressive also wipes untracked files inside .sesam/ ---
+exec cp leak-src.txt leaked.txt
+exec sesam clean --aggressive
+! exists leaked.txt
+! exists .sesam/tmp/scratch/spill
+
+-- leak-src.txt --
+leaked plaintext

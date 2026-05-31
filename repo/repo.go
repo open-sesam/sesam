@@ -332,17 +332,19 @@ type CleanOpts struct {
 	CheckFunc  func(path string) (bool, error)
 }
 
-// Clean removes every file under the sesam directory that git does not
-// track. It opens the git repository at sesamDir but does NOT load the
-// audit log or acquire the on-disk lock — Clean is a recovery operation
-// that must work even when the audit log is partially broken (e.g. after
-// a manual `git rm` of a sealed object).
+// Clean removes stale plaintext from the worktree.
 //
-// If aggressive is true it will also delete files inside the sesam
-// directory itself that are not tracked by git.
-// checkFn, when non-nil, is called for every path Clean wants to delete:
-// return (true, nil) to allow, (false, nil) to skip, or a non-nil error
-// to abort.
+// In the default (non-aggressive) mode, Clean only deletes the revealed
+// plaintexts that sesam itself produced (the paths recorded in the audit
+// log). This is what `sesam seal --clean` does after sealing.
+//
+// With opts.Aggressive set, Clean delegates to CleanAggressive and removes
+// every untracked file in the worktree — including stale scratch state
+// inside `.sesam/` — roughly `git clean -fdx`.
+//
+// opts.CheckFunc, when non-nil, is called for every path Clean wants to
+// delete: return (true, nil) to allow, (false, nil) to skip, or a non-nil
+// error to abort.
 func (r *Repo) Clean(ctx context.Context, opts CleanOpts) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -367,7 +369,7 @@ func (r *Repo) Clean(ctx context.Context, opts CleanOpts) error {
 	_, err := recursiveRmEmptyDirs(r.sesamDir, map[string]bool{
 		sesamSuffix: true,
 		gitSuffix:   true,
-	})
+	}, opts.CheckFunc)
 
 	return err
 }

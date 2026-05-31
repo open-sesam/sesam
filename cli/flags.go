@@ -72,7 +72,7 @@ var flagsClean = []cli.Flag{
 	},
 	&cli.BoolFlag{
 		Name:  "quiet",
-		Usage: "Do print files",
+		Usage: "Don't print files",
 	},
 }
 
