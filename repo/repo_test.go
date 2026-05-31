@@ -1,0 +1,456 @@
+package repo
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+// --- Init / Load lifecycle -------------------------------------------------
+
+func TestInit_Negative(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+
+	cases := []struct {
+		name    string
+		user    string
+		dirFn   func(t *testing.T) string
+		wantErr string
+	}{
+		{
+			name:    "invalid user name",
+			user:    "not a valid name",
+			dirFn:   freshGitRepo,
+			wantErr: "invalid initial user",
+		},
+		{
+			name: "already initialized",
+			user: "admin",
+			dirFn: func(t *testing.T) string {
+				return bootstrappedDir(t, admin)
+			},
+			wantErr: "already has sesam",
+		},
+		{
+			name: "not a git repo",
+			user: "admin",
+			dirFn: func(t *testing.T) string {
+				return t.TempDir() // no `git init`
+			},
+			wantErr: "no git repository",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := tc.dirFn(t)
+			_, err := Init(context.Background(), dir, tc.user, []string{admin.Path}, RepoOpts{})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+func TestLoad_Negative(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+
+	cases := []struct {
+		name    string
+		dirFn   func(t *testing.T) string
+		idPaths []string
+		wantErr string
+	}{
+		{
+			name:    "no .sesam dir",
+			dirFn:   freshGitRepo,
+			idPaths: []string{admin.Path},
+			wantErr: "sesam directory missing",
+		},
+		{
+			name: "no identity supplied",
+			dirFn: func(t *testing.T) string {
+				return bootstrappedDir(t, admin)
+			},
+			idPaths: nil,
+			wantErr: "at least one --identity",
+		},
+		{
+			name:    "non-existent dir",
+			dirFn:   func(t *testing.T) string { return filepath.Join(t.TempDir(), "missing") },
+			idPaths: []string{admin.Path},
+			wantErr: "failed to access repo path",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(tc.dirFn(t), tc.idPaths, RepoOpts{})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+func TestRepo_SesamDir(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	got, err := filepath.EvalSymlinks(r.SesamDir())
+	require.NoError(t, err)
+	want, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestRepo_Close_Idempotent(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	_, r := bootstrapRepo(t, admin)
+
+	require.NoError(t, r.Close(), "first close")
+	require.NoError(t, r.Close(), "second close is a no-op")
+}
+
+// --- Listing ---------------------------------------------------------------
+
+func TestRepo_ListUsersAndSecrets_AfterInit(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	_, r := bootstrapRepo(t, admin)
+
+	users, err := r.ListUsers()
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	require.Equal(t, "admin", users[0].Name)
+	require.Contains(t, users[0].Groups, "admin")
+
+	secrets, err := r.ListSecrets()
+	require.NoError(t, err)
+	require.Len(t, secrets, 1, "init seeds the README.md secret")
+	require.Equal(t, "README.md", secrets[0].RevealedPath)
+}
+
+// --- Whoami ----------------------------------------------------------------
+
+func TestRepo_Whoami(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	_, r := bootstrapRepo(t, admin)
+
+	got, err := r.Whoami()
+	require.NoError(t, err)
+	require.Equal(t, "admin", got)
+}
+
+func TestRepo_Whoami_UnknownIdentity(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	stranger := writeTestIdentity(t, "stranger")
+
+	dir := bootstrappedDir(t, admin)
+	r, err := Load(dir, []string{stranger.Path}, RepoOpts{})
+	require.Error(t, err, "Load should refuse an identity that cannot decrypt the audit log")
+	require.Contains(t, err.Error(), "failed to load audit log")
+	require.Nil(t, r)
+}
+
+// --- Secret CRUD -----------------------------------------------------------
+
+func TestRepo_SecretAdd_RejectsBadInputs(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	_, r := bootstrapRepo(t, admin)
+
+	cases := []struct {
+		name    string
+		paths   []string
+		groups  []string
+		wantErr string
+	}{
+		{
+			name:    "no paths",
+			paths:   nil,
+			groups:  []string{"admin"},
+			wantErr: "missing secret path",
+		},
+		{
+			name:    "no groups",
+			paths:   []string{"secret.txt"},
+			groups:  nil,
+			wantErr: "missing group",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := r.SecretAdd(tc.paths, tc.groups)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+func TestRepo_SecretAddRemove_RoundTrip(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	plaintext := filepath.Join(dir, "secrets", "api.token")
+	require.NoError(t, os.MkdirAll(filepath.Dir(plaintext), 0o700))
+	require.NoError(t, os.WriteFile(plaintext, []byte("hunter2\n"), 0o600))
+
+	require.NoError(t, r.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}))
+
+	secrets, err := r.ListSecrets()
+	require.NoError(t, err)
+	require.Len(t, secrets, 2, "README.md (from init) + the newly added secret")
+
+	var paths []string
+	for _, s := range secrets {
+		paths = append(paths, s.RevealedPath)
+	}
+	require.Contains(t, paths, "secrets/api.token")
+
+	require.NoError(t, r.SecretRemove([]string{"secrets/api.token"}))
+	secrets, err = r.ListSecrets()
+	require.NoError(t, err)
+	require.Len(t, secrets, 1, "only README.md remains")
+	require.Equal(t, "README.md", secrets[0].RevealedPath)
+}
+
+func TestRepo_SecretRemove_RejectsEmpty(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	_, r := bootstrapRepo(t, admin)
+
+	err := r.SecretRemove(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing secret path")
+}
+
+// --- User management ------------------------------------------------------
+
+func TestRepo_UserTell_AddsUserAndReSeals(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+
+	_, r := bootstrapRepo(t, admin)
+
+	err := r.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"developers"})
+	require.NoError(t, err)
+
+	users, err := r.ListUsers()
+	require.NoError(t, err)
+	names := make([]string, 0, len(users))
+	for _, u := range users {
+		names = append(names, u.Name)
+	}
+	require.ElementsMatch(t, []string{"admin", "bob"}, names)
+}
+
+func TestRepo_UserKill_RemovesUser(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+
+	_, r := bootstrapRepo(t, admin)
+	require.NoError(t, r.UserTell(context.Background(),
+		bob.Name, []string{bob.Recipient}, []string{"developers"}))
+
+	require.NoError(t, r.UserKill(bob.Name))
+
+	users, err := r.ListUsers()
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	require.Equal(t, "admin", users[0].Name)
+}
+
+// --- ShowUser --------------------------------------------------------------
+
+func TestRepo_ShowUser(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	_, r := bootstrapRepo(t, admin)
+
+	cases := []struct {
+		name   string
+		target string
+		wantOk bool
+		check  func(t *testing.T, payload string)
+	}{
+		{
+			name:   "existing user",
+			target: "admin",
+			wantOk: true,
+			check: func(t *testing.T, payload string) {
+				var got map[string]any
+				require.NoError(t, json.Unmarshal([]byte(payload), &got))
+				require.Equal(t, "admin", got["name"])
+			},
+		},
+		{
+			name:   "unknown user",
+			target: "nobody",
+			wantOk: false,
+			check:  func(t *testing.T, payload string) { require.Empty(t, payload) },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			ok, err := r.ShowUser(tc.target, &buf)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantOk, ok)
+			tc.check(t, buf.String())
+		})
+	}
+}
+
+// --- Verify ----------------------------------------------------------------
+
+func TestRepo_Verify_IntegrityOK(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	_, r := bootstrapRepo(t, admin)
+
+	report, err := r.Verify(VerifyOptions{Integrity: true})
+	require.NoError(t, err)
+	require.NotNil(t, report.Integrity)
+	require.True(t, report.Integrity.OK(), report.Integrity.String())
+	require.True(t, report.OK())
+}
+
+func TestRepo_Verify_NoChecksMeansOK(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	_, r := bootstrapRepo(t, admin)
+
+	report, err := r.Verify(VerifyOptions{})
+	require.NoError(t, err)
+	require.Nil(t, report.Integrity, "no checks requested → no Integrity report")
+	require.True(t, report.OK())
+}
+
+func TestVerifyReport_OK(t *testing.T) {
+	cases := []struct {
+		name string
+		rep  *VerifyReport
+		want bool
+	}{
+		{"nil report is OK", nil, true},
+		{"empty report is OK", &VerifyReport{}, true},
+		// We can't easily construct a failing IntegrityReport from outside
+		// core, but we can at least cover the nil/empty arms here.
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.rep.OK())
+		})
+	}
+}
+
+// --- Seal / Reveal / DeleteRevealed ---------------------------------------
+
+func TestRepo_SealReveal_RoundTrip(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	revealed := filepath.Join(dir, "README.md")
+	original, err := os.ReadFile(revealed)
+	require.NoError(t, err)
+
+	require.NoError(t, os.Remove(revealed))
+	require.False(t, fileExists(t, revealed), "plaintext removed before reveal")
+
+	require.NoError(t, r.RevealAll())
+	got, err := os.ReadFile(revealed)
+	require.NoError(t, err)
+	require.Equal(t, original, got, "RevealAll restores the original plaintext")
+
+	require.NoError(t, r.SealAll(), "SealAll on an already-sealed tree is a no-op")
+}
+
+// --- Clean (method dispatch) ----------------------------------------------
+
+func TestRepo_Clean_SoftRemovesOnlyTrackedRevealed(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	revealed := filepath.Join(dir, "README.md")
+	require.True(t, fileExists(t, revealed))
+
+	leaked := filepath.Join(dir, "leaked.txt")
+	require.NoError(t, os.WriteFile(leaked, []byte("noise"), 0o600))
+
+	require.NoError(t, r.Clean(context.Background(), CleanOpts{Aggressive: false}))
+	require.False(t, fileExists(t, revealed), "known revealed plaintext is removed")
+	require.True(t, fileExists(t, leaked), "untracked unknown file survives soft clean")
+}
+
+func TestRepo_Clean_AggressiveAlsoWipesUnknownUntracked(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	leaked := filepath.Join(dir, "leaked.txt")
+	require.NoError(t, os.WriteFile(leaked, []byte("noise"), 0o600))
+
+	require.NoError(t, r.Clean(context.Background(), CleanOpts{Aggressive: true}))
+	require.False(t, fileExists(t, leaked), "aggressive walks the worktree index")
+}
+
+// --- LoadIdentities / ResolveSesamDir (cheap helpers) ----------------------
+
+func TestLoadIdentities_RequiresAtLeastOnePath(t *testing.T) {
+	_, err := LoadIdentities(nil, RepoOpts{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "at least one --identity")
+}
+
+func TestLoadIdentities_RoundTrip(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+
+	ids, err := LoadIdentities([]string{admin.Path}, RepoOpts{})
+	require.NoError(t, err)
+	require.Len(t, ids, 1)
+	require.Equal(t, []string{admin.Recipient}, ids.RecipientStrings())
+}
+
+func TestResolveSesamDir(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, _ := bootstrapRepo(t, admin)
+
+	subdir := filepath.Join(dir, "deep", "nested")
+	require.NoError(t, os.MkdirAll(subdir, 0o700))
+
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"worktree root", dir},
+		{"nested subdir walks upward", subdir},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ResolveSesamDir(tc.in)
+			require.NoError(t, err)
+			gotResolved, err := filepath.EvalSymlinks(got)
+			require.NoError(t, err)
+			wantResolved, err := filepath.EvalSymlinks(dir)
+			require.NoError(t, err)
+			require.Equal(t, wantResolved, gotResolved)
+		})
+	}
+}
+
+// --- RepoOpts helpers ------------------------------------------------------
+
+func TestRepoOpts_LockTimeoutDefault(t *testing.T) {
+	require.Equal(t, defaultLockTimeout, RepoOpts{}.lockTimeout())
+	require.Equal(t, defaultLockTimeout, RepoOpts{LockTimeout: 0}.lockTimeout())
+	require.Equal(t, defaultLockTimeout, RepoOpts{LockTimeout: -1}.lockTimeout())
+
+	const custom = 7 * 1_000_000_000 // 7s as time.Duration
+	require.EqualValues(t, custom, RepoOpts{LockTimeout: custom}.lockTimeout())
+}
+
+func TestRepoOpts_PluginUI(t *testing.T) {
+	require.NotNil(t, RepoOpts{}.pluginUI(), "non-interactive default")
+	require.NotNil(t, RepoOpts{Interactive: true}.pluginUI(), "interactive variant")
+}

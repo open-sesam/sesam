@@ -418,6 +418,34 @@ func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring,
 	if err != nil {
 		return nil, nil, fmt.Errorf("decrypt audit log from index: %w", err)
 	}
+
+	// LoadAuditLogFromReader doesn't touch the filesystem, so InitHash
+	// (normally read from `.sesam/audit/init` by LoadAuditLog) is empty.
+	// Pull it from the index too — without it, verifyInit reports a bogus
+	// truncation error and the whole index path silently degrades to the
+	// worktree fallback.
+	initPath := path.Join(sesamDir, ".sesam/audit/init")
+	initIdx := slices.IndexFunc(idx.Entries, func(e *index.Entry) bool {
+		return e.Name == initPath
+	})
+	if initIdx < 0 {
+		return nil, nil, fmt.Errorf("audit init file not in git index at %q", initPath)
+	}
+	initBlob, err := repo.BlobObject(idx.Entries[initIdx].Hash)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read audit init blob %s: %w", idx.Entries[initIdx].Hash, err)
+	}
+	initRd, err := initBlob.Reader()
+	if err != nil {
+		return nil, nil, fmt.Errorf("open audit init blob: %w", err)
+	}
+	initData, err := io.ReadAll(initRd)
+	_ = initRd.Close()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read audit init blob: %w", err)
+	}
+	al.InitHash = strings.TrimSpace(string(initData))
+
 	kr := core.EmptyKeyring()
 	state, err := core.VerifyChain(al, kr, core.NewNonInteractivePluginUI())
 	if err != nil {

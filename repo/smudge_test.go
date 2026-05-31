@@ -286,3 +286,58 @@ func TestFilterProcessUnknownCommandReturnsStatusError(t *testing.T) {
 		require.Fail(t, "expected status=error response, got %q", resp)
 	}
 }
+
+// loadAuditViewFromIndex reads the audit log from the **staged** copy in
+// the git index, not the worktree — this is what `sesam smudge` uses so the
+// view is consistent with the tree git is about to check out.
+//
+// The function expects sesamDir in the same shape as the smudge filter
+// produces it from splitObjectPath: relative to the worktree root (".",
+// "subdir", …), because git index entries are repo-root-relative. So the
+// happy-path test cds into the worktree and passes ".".
+func TestLoadAuditViewFromIndex_HappyPath(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+	require.NoError(t, r.Close(), "release the lock before we open git again")
+
+	gitCommitAll(t, dir, "init sesam")
+
+	ids, err := LoadIdentities([]string{admin.Path}, RepoOpts{})
+	require.NoError(t, err)
+
+	require.NoError(t, withWorkingDir(dir, func() error {
+		kr, authorize, err := loadAuditViewFromIndex(".", ids)
+		require.NoError(t, err)
+		require.NotNil(t, kr)
+		require.NotNil(t, authorize)
+
+		require.Contains(t, kr.ListUsers(), "admin",
+			"admin must be in the index-derived keyring")
+		require.True(t, authorize("admin", "README.md"),
+			"admin must be authorized to seal the bootstrap README")
+		require.False(t, authorize("nobody", "README.md"),
+			"unknown sealer must not be authorized")
+		return nil
+	}))
+}
+
+// loadAuditView is the high-level entry point: index first, worktree as a
+// fallback. Here both succeed (index path returns first), so we cover the
+// happy-path arm.
+func TestLoadAuditView_PrefersIndex(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+	require.NoError(t, r.Close())
+	gitCommitAll(t, dir, "init sesam")
+
+	ids, err := LoadIdentities([]string{admin.Path}, RepoOpts{})
+	require.NoError(t, err)
+
+	require.NoError(t, withWorkingDir(dir, func() error {
+		kr, authorize, err := loadAuditView(".", ids)
+		require.NoError(t, err)
+		require.Contains(t, kr.ListUsers(), "admin")
+		require.True(t, authorize("admin", "README.md"))
+		return nil
+	}))
+}

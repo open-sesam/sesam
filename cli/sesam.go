@@ -50,10 +50,10 @@ func Main(args []string) error {
 				Usage:  "Encrypt and sign changed secrets",
 			},
 			{
-				Name:    "reveal",
-				Aliases: []string{"open"},
+				Name:    "open",
+				Aliases: []string{"reveal"},
 				Flags:   flagsReveal,
-				Action:  commands.WithRepo(commands.HandleReveal),
+				Action:  commands.WithRepo(commands.HandleOpen),
 				Usage:   "Decrypt all secrets available to the current user",
 			},
 			{
