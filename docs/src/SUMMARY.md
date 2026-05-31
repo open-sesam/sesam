@@ -4,7 +4,6 @@
 
 - [What is Sesam?](./whatis.md)
 - [Installation](./installation.md)
-- [Changelog](./changelog.md)
 - [Roadmap](./roadmap.md)
 
 # Basic Usage

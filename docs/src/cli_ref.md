@@ -38,7 +38,7 @@ Encrypt and sign changed secrets
 |------|---------|-----|-------------|
 | `--clean` |  |  | Delete revealed secret files after successful seal |
 
-### `sesam reveal`
+### `sesam open`
 
 Decrypt all secrets available to the current user
 
@@ -72,10 +72,6 @@ Remove a person from a group
 |------|---------|-----|-------------|
 | `--user` `*` |  |  | User name to remove |
 
-### `sesam list-users`
-
-List persons, groups, and access
-
 ### `sesam show`
 
 Show objects managed by sesam
@@ -107,6 +103,12 @@ List persons, groups, and access
 ### `sesam clean`
 
 Remove revealed plaintext and other untracked files from the sesam directory
+
+| Flag | Default | Env | Description |
+|------|---------|-----|-------------|
+| `--aggressive` |  |  | Also delete other untracked files (similar to `git clean -fdx`) |
+| `--dry-run` |  |  | Do not actually delete, just print what would be deleted |
+| `--quiet` |  |  | Don't print files |
 
 
 > `*` - required flag
