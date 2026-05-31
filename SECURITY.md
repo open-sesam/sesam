@@ -58,9 +58,6 @@ The following are **out of scope**:
 2. Click **Report a vulnerability**.
 3. Fill in the form with the details below and submit.
 
-We will acknowledge your report within **48 hours** and aim to provide a triage assessment
-within **5 business days**.
-
 ### What to include
 
 Please provide as much of the following as possible:
