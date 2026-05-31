@@ -1,0 +1,33 @@
+# Verify that `sesam init` installs a `git sesam` alias in the repo's local
+# git config so users can drive sesam through git without any PATH plumbing.
+# The shell prefix `!` tells git to run the value as a shell command instead
+# of looking for a `git-sesam` binary on PATH.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Alias must be written to the local config (init never touches ~/.gitconfig).
+exec git config --local alias.sesam
+stdout '^!sesam$'
+
+# `git sesam id` resolves through the alias and prints the current user.
+exec git sesam id
+stdout '^admin$'
+
+# Subcommand routing works (multi-word verbs + secondary args).
+exec git sesam list secrets
+stdout 'README\.md'
+stdout 'admin'
+
+# A freshly-initialized repo passes `verify`.
+exec git sesam verify
+stdout '^verify ok$'
+
+# Extra flags pass through the alias intact.
+exec git sesam list secrets --json
+stdout '"RevealedPath": "README.md"'

@@ -1,0 +1,45 @@
+# Verify the --dry-run, --quiet, and --aggressive flags on `sesam clean`.
+#
+# Default `sesam clean` loads the Repo and removes only sesam-known revealed
+# plaintexts (the paths recorded in the audit log; here just README.md after
+# init). `sesam clean --aggressive` skips the Repo load and instead walks the
+# worktree, removing every untracked file (still skipping `.sesam/`).
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# README.md is the only revealed plaintext sesam knows about after init.
+exists README.md
+
+# --- scenario 1: --dry-run prints the known plaintext but does not delete it.
+exec sesam clean --dry-run
+stdout 'README\.md'
+exists README.md
+
+# --- scenario 2: --quiet stays silent and deletes the known plaintext.
+exec sesam clean --quiet
+! stdout '.+'
+! exists README.md
+
+# An arbitrary untracked file in the worktree is invisible to the default
+# (soft) clean because sesam only acts on paths it has recorded.
+cp leaked.txt leaked.txt
+exec sesam reveal
+exec sesam clean
+exists leaked.txt
+
+# --- scenario 3: --aggressive walks the worktree and wipes leaked.txt too,
+#                 still skipping the contents of `.sesam/`.
+mkdir -p .sesam/tmp/scratch
+exec cp leaked.txt .sesam/tmp/scratch/spill
+exec sesam clean --aggressive --quiet
+! exists leaked.txt
+exists .sesam/tmp/scratch/spill
+
+-- leaked.txt --
+leaked plaintext

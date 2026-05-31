@@ -18,6 +18,7 @@ func TestMain(m *testing.M) {
 				os.Exit(1)
 			}
 		},
+		"age-plugin-sesamtest": RunMockPlugin,
 	})
 }
 
@@ -63,6 +64,17 @@ func TestWorkflows(t *testing.T) {
 			if _, err := writeIdentity("BOB"); err != nil {
 				return err
 			}
+
+			// Plugin identity for the mock age-plugin-sesamtest binary
+			// registered via TestMain. Used by plugin_workflow.txt to
+			// exercise the full age plugin protocol against a fake plugin
+			// instead of a real YubiKey.
+			pluginKeyPath := filepath.Join(idDir, "PLUGIN.age")
+			if err := os.WriteFile(pluginKeyPath, []byte(MockPluginIdentityFile()), 0o600); err != nil {
+				return err
+			}
+			e.Setenv("PLUGIN_KEY", pluginKeyPath)
+			e.Setenv("PLUGIN_PUBKEY", MockPluginRecipient())
 
 			// SESAM_ID points to admin's key so all commands run as admin by default.
 			e.Setenv("SESAM_ID", filepath.Join(idDir, "ADMIN.age"))

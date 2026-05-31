@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 )
 
@@ -44,6 +46,7 @@ type VerifiedState struct {
 
 	auditLog *AuditLog
 	keyring  Keyring
+	pluginUI *PluginUI
 }
 
 func (vu *VerifiedUser) IsAdmin() bool {
@@ -264,7 +267,7 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 
 	var recps Recipients
 	for _, pubKey := range tell.PubKeys {
-		recp, err := ParseRecipient(pubKey.Key)
+		recp, err := ParseRecipient(pubKey.Key, state.pluginUI)
 		if err != nil {
 			return fmt.Errorf("bad public key %v", pubKey)
 		}
@@ -429,6 +432,69 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) er
 	return nil
 }
 
+// recoverIncompleteSeal finishes (or rolls back) a SealAll that crashed.
+//
+// SealAll's ordering is: stage -> audit entry -> swap -> reap old stage.
+// The audit entry is the commit point: once it lands, the new state is
+// final and recovery must reach it; before it lands, the staged work is
+// discardable.
+//
+// On the next load we hash both .sesam/seal-stage and .sesam/objects and
+// compare them against the latest seal's RootHash in the audit log:
+//
+//   - no seal entry yet or live matches the log -> stage is leftover, drop it.
+//   - stage matches the log -> swap was pending, finish it.
+//   - neither matches -> the log committed a state nothing on disk holds.
+//     Cannot reconcile; bail and let the user investigate.
+func recoverIncompleteSeal(sesamDir string, vstate *VerifiedState) error {
+	stageDir := filepath.Join(sesamDir, ".sesam", "seal-stage")
+	objectsDir := filepath.Join(sesamDir, ".sesam", "objects")
+
+	if !pathExists(stageDir) {
+		return nil
+	}
+
+	objectSigs, err := readAllSignaturesForDir(objectsDir)
+	if err != nil {
+		return err
+	}
+	objectsRootHash := buildRootHash(objectSigs)
+
+	if vstate.LastSealRootHash == "" {
+		// Crashed during the very first SealAll, before any audit entry
+		// was written. Stage holds uncommitted work; discard it.
+		return os.RemoveAll(stageDir)
+	}
+
+	if vstate.LastSealRootHash == objectsRootHash {
+		// Audit entry written and swap done, just stage dir not yet deleted.
+		return os.RemoveAll(stageDir)
+	}
+
+	stageSigs, err := readAllSignaturesForDir(stageDir)
+	if err != nil {
+		return err
+	}
+	stageRootHash := buildRootHash(stageSigs)
+
+	if vstate.LastSealRootHash == stageRootHash {
+		// Audit entry written, but stage not yet swapped. Finish it,
+		// then reap the now-old tree that lands back in stage.
+		if err := atomicSwapDirs(stageDir, objectsDir); err != nil {
+			return err
+		}
+		return os.RemoveAll(stageDir)
+	}
+
+	// Log committed a state that exists neither in stage nor in objects.
+	// Likely cause: the stage dir was modified out-of-band after the crash.
+	return fmt.Errorf(
+		"seal recover: root hash mismatch between stage dir (%s) and audit log (%s)",
+		stageRootHash,
+		vstate.LastSealRootHash,
+	)
+}
+
 // VerifyChain replays the audit log into a fresh VerifiedState without the
 // expensive disk-side checks done by Verify (init-file unchanged across git
 // history, root-hash of all .sesam files on disk). This is what callers
@@ -438,10 +504,16 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) er
 //
 // Use Verify when you also want disk and git-history consistency
 // (`sesam reveal`, `sesam verify --all`).
-func VerifyChain(log *AuditLog, kr Keyring) (*VerifiedState, error) {
+// VerifyChain replays the audit log and returns the derived VerifiedState.
+// pluginUI is used to construct plugin.Recipient objects when a user's public
+// key is a plugin recipient; the stored *PluginUI travels with each Recipient
+// and is consulted at seal-time if the plugin asks for user interaction. Pass
+// nil to default to a non-interactive UI (plugins will refuse to prompt).
+func VerifyChain(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, error) {
 	state := VerifiedState{
 		auditLog: log,
 		keyring:  kr,
+		pluginUI: pluginUI,
 	}
 	if err := verify(&state); err != nil {
 		return nil, err
@@ -449,8 +521,11 @@ func VerifyChain(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 	return &state, nil
 }
 
-func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
-	if err := verifyInitFileUnchanged(log.SesamDir); err != nil {
+// Verify is like VerifyChain but additionally checks the trust-anchor file
+// (.sesam/audit/init) and the latest seal's root-hash against the on-disk
+// secret footers. See [VerifyChain] for pluginUI semantics.
+func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, error) {
+	if _, err := verifyInitFileUnchanged(log.SesamDir); err != nil {
 		return nil, fmt.Errorf("init file check: %w", err)
 	}
 
@@ -458,9 +533,17 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 	state := VerifiedState{
 		auditLog: log,
 		keyring:  kr,
+		pluginUI: pluginUI,
 	}
 
 	if err := verify(&state); err != nil {
+		return nil, err
+	}
+
+	// Reconcile disk with the log: finish a pending swap or drop a
+	// stale staging dir from a previously crashed SealAll. Runs after
+	// verify(state) so the log (and thus LastSealRootHash) is trusted.
+	if err := recoverIncompleteSeal(log.SesamDir, &state); err != nil {
 		return nil, err
 	}
 
@@ -471,12 +554,7 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 			return nil, fmt.Errorf("reading signatures for root hash check: %w", err)
 		}
 
-		sigPtrs := make([]*secretFooter, len(sigs))
-		for i := range sigs {
-			sigPtrs[i] = &sigs[i]
-		}
-
-		diskRootHash := buildRootHash(sigPtrs)
+		diskRootHash := buildRootHash(sigs)
 		if diskRootHash != state.LastSealRootHash {
 			return nil, fmt.Errorf(
 				"root hash mismatch: log says %s, disk says %s",

@@ -82,6 +82,32 @@ $ sesam id --json
 }
 ```
 
+### Encrypted identities
+
+Both `ssh` and `age` support encrypting keys at rest. To unlock them before use we have to ask the user what the passphrase is. 
+This can be done either:
+
+1. By asking the user directly on terminal when we detect such a key.
+2. By reading the passphrase from the OS keyring (e.g. where it was stored from last time)
+3. By using a `askpass` program like `ssh-askpass`, `systemd-askpass` or similar that may ask the user via alternative UI.
+
+For option 3 you need a compatible program installed and have set any of those variables to the name of the program, so `sesam` knows what to call:
+
+- `SESAM_ASKPASS` (or `--askpass` global option) - use this if you want to 
+- `GIT_ASKPASS` - used in `git` context.
+- `SSH_ASKPASS` - used in `git` and `ssh` context.
+
+This is especially important if you want to use the git integration from an IDE - here `sesam` won't have a terminal it can use.
+We also honor the related `*_ASKPASS_REQUIRED` variable (i.e. `SESAM_ASKPASS_REQUIRED`, `GIT_ASKPASS_REQUIRED`, `SSH_ASKPASS_REQUIRED`) which can be set to the one those values:
+
+- `never`: Never ask via `askpass`. Disables it effectively.
+- `prefer`:  If possible, use the graphical interface.
+- `force`: Use it even if have a terminal available that we could ask from.
+
+You don't need to set it though, we will use a sensible default.
+
 ## Recipients
 
 Every user of `sesam` has at least one **recipient**. Think of it as the public part to the identity. While only you possess your **identity**, everyone has access to all **recipients**.
+
+

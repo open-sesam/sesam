@@ -61,6 +61,21 @@ var flagsSeal = []cli.Flag{
 	},
 }
 
+var flagsClean = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "aggressive",
+		Usage: "Also delete other untracked files (similar to `git clean -fdx`)",
+	},
+	&cli.BoolFlag{
+		Name:  "dry-run",
+		Usage: "Do not actually delete, just print what would be deleted",
+	},
+	&cli.BoolFlag{
+		Name:  "quiet",
+		Usage: "Don't print files",
+	},
+}
+
 // flagsReveal contains optional controls for reveal.
 var flagsReveal = []cli.Flag{}
 

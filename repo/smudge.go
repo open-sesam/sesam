@@ -18,12 +18,12 @@ import (
 	"github.com/open-sesam/sesam/core"
 )
 
-// FilterProcessHandler decrypts blobs as part of the long-running git filter
+// filterProcessHandler decrypts blobs as part of the long-running git filter
 // protocol. Identities, Keyring and Authorize are loaded by the caller
 // before Run is invoked, so key/passphrase work and audit-log parsing are
 // amortised across all blobs in a single git operation - and so a session
 // can never silently degrade to "no auth check" because of a missing audit
-// log: the caller's LoadAuditView decides up-front whether to proceed.
+// log: the caller's loadAuditView decides up-front whether to proceed.
 //
 // The sesamDir is derived per-blob from the pathname header (see
 // splitObjectPath) so the handler also works when .sesam lives in a
@@ -32,18 +32,18 @@ import (
 // IdentityPaths lists the key files loaded as Identities. Any path that
 // points inside the worktree is excluded from Cleanup so users who store
 // their age key inside the repo don't lose it on checkout.
-type FilterProcessHandler struct {
+type filterProcessHandler struct {
 	// SesamDir is the directory containing `.sesam/` (resolved via
-	// clirepo.ResolveSesamDir from --sesam-dir / SESAM_DIR). The same
-	// path drives audit-log loading, working-tree cleanup, and the
-	// destination for revealed plaintext.
+	// ResolveSesamDir from --sesam-dir / SESAM_DIR). The same path drives
+	// audit-log loading, working-tree cleanup, and the destination for revealed
+	// plaintext.
 	SesamDir string
 
 	Identities    core.Identities
 	IdentityPaths []string
 
 	// Keyring is used by reveal to verify the ed25519 signature on the
-	// sealed file footer. Loaded by the caller via LoadAuditView so the
+	// sealed file footer. Loaded by the caller via loadAuditView so the
 	// filter session can fail-fast if the audit log can't be read,
 	// rather than silently skipping the check per-blob.
 	Keyring core.Keyring
@@ -65,6 +65,7 @@ type FilterProcessHandler struct {
 // the prefix before `.sesam/objects/` is the sesamDir).
 const (
 	sesamSuffix    = ".sesam"
+	gitSuffix      = ".git"
 	objectsSegment = sesamSuffix + "/objects/"
 )
 
@@ -80,7 +81,7 @@ var errProtocol = errors.New("filter protocol violation")
 // then a request/response loop that runs until git closes stdin. We advertise
 // only the `smudge` capability - clean is identity for sesam (the working-tree
 // blob stays encrypted) so git falls back to the legacy `clean = cat` config.
-func (h *FilterProcessHandler) Run(ctx context.Context, stdin io.Reader, stdout io.Writer) error {
+func (h *filterProcessHandler) Run(ctx context.Context, stdin io.Reader, stdout io.Writer) error {
 	scanner := pktline.NewScanner(stdin)
 	encoder := pktline.NewEncoder(stdout)
 
@@ -258,7 +259,7 @@ func readHeaders(scanner *pktline.Scanner) (map[string]string, bool, error) {
 // failures further along (seek, RevealBlob) are still tolerated with a
 // warn log - aborting `git checkout` over one undecryptable file is worse
 // than a stale plaintext.
-func (h *FilterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, encoder *pktline.Encoder, pathname string) error {
+func (h *filterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, encoder *pktline.Encoder, pathname string) error {
 	_, revealedPath, isObject := splitObjectPath(pathname)
 	if !isObject {
 		return fmt.Errorf("not a path sesam smudge can handle: %v", pathname)
@@ -348,16 +349,16 @@ func (h *FilterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 	return nil
 }
 
-// LoadAuditView reads the audit log (preferring the git **index** copy -
+// loadAuditView reads the audit log (preferring the git **index** copy -
 // consistent with the target tree even mid-checkout, since git updates the
 // index before invoking the filter - and falling back to the working-tree
 // copy) and returns the keyring + sealer-authorization predicate the
 // smudge filter needs to verify each revealed blob.
 //
-// Callers must invoke this before constructing FilterProcessHandler so a
+// Callers must invoke this before constructing filterProcessHandler so a
 // filter session never silently degrades to "no auth check" because the
 // audit log was unavailable.
-func LoadAuditView(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
+func loadAuditView(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
 	kr, authorize, err := loadAuditViewFromIndex(sesamDir, ids)
 	if err == nil {
 		return kr, authorize, nil
@@ -378,7 +379,7 @@ func LoadAuditView(sesamDir string, ids core.Identities) (core.Keyring, func(use
 }
 
 func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
-	repo, err := OpenGitRepo(sesamDir)
+	repo, err := openGitRepo(sesamDir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open git repo at %q: %w", sesamDir, err)
 	}
@@ -390,8 +391,9 @@ func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring,
 	// Index entries are repo-root-relative with forward slashes.
 	// sesamDir is the same shape (resolved from --sesam-dir, default
 	// "."); path.Join collapses "." correctly when sesam lives at the
-	// worktree root.
-	auditPath := path.Join(sesamDir, ".sesam/audit/log.jsonl")
+	// worktree root. ToSlash guards against an OS-native --sesam-dir
+	// (e.g. "sub\dir" on Windows), which path.Join would not normalize.
+	auditPath := path.Join(filepath.ToSlash(sesamDir), ".sesam/audit/log.jsonl")
 
 	blobIdx := slices.IndexFunc(idx.Entries, func(e *index.Entry) bool {
 		return e.Name == auditPath
@@ -416,8 +418,36 @@ func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring,
 	if err != nil {
 		return nil, nil, fmt.Errorf("decrypt audit log from index: %w", err)
 	}
+
+	// LoadAuditLogFromReader doesn't touch the filesystem, so InitHash
+	// (normally read from `.sesam/audit/init` by LoadAuditLog) is empty.
+	// Pull it from the index too — without it, verifyInit reports a bogus
+	// truncation error and the whole index path silently degrades to the
+	// worktree fallback.
+	initPath := path.Join(sesamDir, ".sesam/audit/init")
+	initIdx := slices.IndexFunc(idx.Entries, func(e *index.Entry) bool {
+		return e.Name == initPath
+	})
+	if initIdx < 0 {
+		return nil, nil, fmt.Errorf("audit init file not in git index at %q", initPath)
+	}
+	initBlob, err := repo.BlobObject(idx.Entries[initIdx].Hash)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read audit init blob %s: %w", idx.Entries[initIdx].Hash, err)
+	}
+	initRd, err := initBlob.Reader()
+	if err != nil {
+		return nil, nil, fmt.Errorf("open audit init blob: %w", err)
+	}
+	initData, err := io.ReadAll(initRd)
+	_ = initRd.Close()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read audit init blob: %w", err)
+	}
+	al.InitHash = strings.TrimSpace(string(initData))
+
 	kr := core.EmptyKeyring()
-	state, err := core.VerifyChain(al, kr)
+	state, err := core.VerifyChain(al, kr, core.NewNonInteractivePluginUI())
 	if err != nil {
 		return nil, nil, fmt.Errorf("verify audit chain (index version): %w", err)
 	}
@@ -430,22 +460,72 @@ func loadAuditViewFromWorktree(sesamDir string, ids core.Identities) (core.Keyri
 		return nil, nil, fmt.Errorf("load audit log: %w", err)
 	}
 	kr := core.EmptyKeyring()
-	state, err := core.VerifyChain(al, kr)
+	state, err := core.VerifyChain(al, kr, core.NewNonInteractivePluginUI())
 	if err != nil {
 		return nil, nil, fmt.Errorf("verify audit chain: %w", err)
 	}
 	return kr, state.SealerAuthorized, nil
 }
 
-// cleanWorktree removes stale untracked files from sesamDir, excluding the
-// given identity file paths. It is called at most once per filter session
-// (guarded by FilterProcessHandler.cleaned).
-func cleanWorktree(sesamDir string, identityPaths []string) error {
-	repo, err := OpenGitRepo(sesamDir)
+// RunSmudgeFilter is the entry point for the git smudge filter. It does NOT
+// acquire the on-disk repo lock — git already serializes the worktree, and
+// taking the lock during a checkout would deadlock against any sesam
+// invocation that triggered the checkout. Identities are loaded keyring-only
+// (no stdin prompts) because git owns the stdin stream.
+//
+// The encrypted blob passes through `out` unchanged (the working-tree
+// .sesam file stays encrypted) and the plaintext is decrypted to the
+// embedded RevealedPath as a side effect. Reveal failures are logged but
+// do not fail the smudge — aborting the git checkout would be worse than a
+// stale or missing revealed file.
+func RunSmudgeFilter(ctx context.Context, sesamDir string, identityPaths []string, in io.Reader, out io.Writer) error {
+	if len(identityPaths) == 0 {
+		return fmt.Errorf("need at least one identity")
+	}
+
+	resolvedDir, err := resolveSesamDir(sesamDir)
 	if err != nil {
 		return err
 	}
-	return Cleanup(repo, sesamDir, identityPaths...)
+
+	ids, err := loadIdentitiesKeyringOnly(identityPaths, keyringFingerprint, core.NewNonInteractivePluginUI())
+	if err != nil {
+		return err
+	}
+
+	// A filter session that can't verify the audit log must fail-fast:
+	// silently degrading to "decrypt without auth check" would defeat the
+	// sealer-authorization check on every blob in the session.
+	kr, authorize, err := loadAuditView(resolvedDir, ids)
+	if err != nil {
+		return fmt.Errorf("load audit view for smudge filter: %w", err)
+	}
+
+	handler := &filterProcessHandler{
+		SesamDir:      resolvedDir,
+		Identities:    ids,
+		IdentityPaths: identityPaths,
+		Keyring:       kr,
+		Authorize:     authorize,
+	}
+
+	return handler.Run(ctx, in, out)
+}
+
+// cleanWorktree removes stale untracked files from sesamDir, excluding the
+// given identity file paths. It is called at most once per filter session
+// (guarded by filterProcessHandler.cleaned).
+func cleanWorktree(sesamDir string, identityPaths []string) error {
+	repo, err := openGitRepo(sesamDir)
+	if err != nil {
+		return err
+	}
+
+	allowFn := func(path string) (bool, error) {
+		return true, nil
+	}
+
+	return cleanup(repo, sesamDir, allowFn, identityPaths...)
 }
 
 // openSpillFile creates a scratch file inside sesamDir/.sesam/tmp using

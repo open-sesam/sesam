@@ -4,17 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
 
 // HandleTell adds a user/group relation and updates access.
-func HandleTell(ctx context.Context, cmd *cli.Command) error {
-	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
-	if err != nil {
-		return err
-	}
-
+func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	user := cmd.String("user")
 
 	recipients := cmd.StringSlice("recipient")
@@ -27,29 +22,10 @@ func HandleTell(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("missing group: pass --group at least once")
 	}
 
-	return withManagers(sesamDir, cmd.StringSlice("identity"), cmd.Duration("lock-timeout"), func(mgr *runtimeManagers) error {
-		if err := mgr.User.TellUser(ctx, user, recipients, groups); err != nil {
-			return fmt.Errorf("failed to add user: %w", err)
-		}
-
-		return nil
-	})
+	return r.UserTell(ctx, user, recipients, groups)
 }
 
 // HandleKill removes a user/group relation.
-func HandleKill(_ context.Context, cmd *cli.Command) error {
-	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
-	if err != nil {
-		return err
-	}
-
-	user := cmd.String("user")
-
-	return withManagers(sesamDir, cmd.StringSlice("identity"), cmd.Duration("lock-timeout"), func(mgr *runtimeManagers) error {
-		if err := mgr.User.KillUsers(user); err != nil {
-			return fmt.Errorf("failed to remove user: %w", err)
-		}
-
-		return nil
-	})
+func HandleKill(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+	return r.UserKill(cmd.String("user"))
 }

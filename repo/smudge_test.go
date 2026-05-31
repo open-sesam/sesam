@@ -15,13 +15,13 @@ import (
 )
 
 // stubKeyring and stubAuthorize satisfy the post-LoadAuditView contract on
-// FilterProcessHandler for tests that exercise the pkt-line layer only. The
+// filterProcessHandler for tests that exercise the pkt-line layer only. The
 // reveal call inside handleSmudgeRequest still runs but fails harmlessly on
 // the non-age content these tests send, so wire framing is unaffected.
 func stubKeyring() core.Keyring                    { return core.EmptyKeyring() }
 func stubAuthorize(user, revealedPath string) bool { return true }
 
-// runHandler drives FilterProcessHandler.Run with a scripted pkt-line client.
+// runHandler drives filterProcessHandler.Run with a scripted pkt-line client.
 // The client writes `clientScript` to the handler's stdin, then reads the
 // handler's stdout into `serverOutput`. The handler is given trivial Keyring
 // and Authorize stubs because these tests exercise wire framing only - real
@@ -29,7 +29,7 @@ func stubAuthorize(user, revealedPath string) bool { return true }
 func runHandler(t *testing.T, clientScript []byte) []byte {
 	t.Helper()
 
-	handler := &FilterProcessHandler{
+	handler := &filterProcessHandler{
 		Keyring:   stubKeyring(),
 		Authorize: stubAuthorize,
 	}
@@ -141,7 +141,7 @@ func TestFilterProcessClientWithoutSmudgeIsRejected(t *testing.T) {
 	// A client that only offers `clean` cannot be served by sesam; surface
 	// this as a hard error rather than silently accepting.
 	script := validHandshake(t, "clean")
-	handler := &FilterProcessHandler{Keyring: stubKeyring(), Authorize: stubAuthorize}
+	handler := &filterProcessHandler{Keyring: stubKeyring(), Authorize: stubAuthorize}
 	err := handler.Run(context.Background(), bytes.NewReader(script), io.Discard)
 
 	require.ErrorIs(t, err, errProtocol)
@@ -276,7 +276,7 @@ func TestFilterProcessUnknownCommandReturnsStatusError(t *testing.T) {
 		),
 	}, nil)
 
-	handler := &FilterProcessHandler{Keyring: stubKeyring(), Authorize: stubAuthorize}
+	handler := &filterProcessHandler{Keyring: stubKeyring(), Authorize: stubAuthorize}
 	var stdout bytes.Buffer
 	err := handler.Run(context.Background(), bytes.NewReader(script), &stdout)
 
@@ -285,4 +285,98 @@ func TestFilterProcessUnknownCommandReturnsStatusError(t *testing.T) {
 	if len(resp) < 1 || resp[0] != "status=error\n" {
 		require.Fail(t, "expected status=error response, got %q", resp)
 	}
+}
+
+// loadAuditViewFromIndex reads the audit log from the **staged** copy in
+// the git index, not the worktree — this is what `sesam smudge` uses so the
+// view is consistent with the tree git is about to check out.
+//
+// The function expects sesamDir in the same shape as the smudge filter
+// produces it from splitObjectPath: relative to the worktree root (".",
+// "subdir", …), because git index entries are repo-root-relative. So the
+// happy-path test cds into the worktree and passes ".".
+func TestLoadAuditViewFromIndex_HappyPath(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+	require.NoError(t, r.Close(), "release the lock before we open git again")
+
+	gitCommitAll(t, dir, "init sesam")
+
+	ids, err := LoadIdentities([]string{admin.Path}, RepoOpts{})
+	require.NoError(t, err)
+
+	require.NoError(t, withWorkingDir(dir, func() error {
+		kr, authorize, err := loadAuditViewFromIndex(".", ids)
+		require.NoError(t, err)
+		require.NotNil(t, kr)
+		require.NotNil(t, authorize)
+
+		require.Contains(t, kr.ListUsers(), "admin",
+			"admin must be in the index-derived keyring")
+		require.True(t, authorize("admin", "README.md"),
+			"admin must be authorized to seal the bootstrap README")
+		require.False(t, authorize("nobody", "README.md"),
+			"unknown sealer must not be authorized")
+		return nil
+	}))
+}
+
+// Regression: loadAuditView must actually read the audit log from the git
+// INDEX, not the worktree. Before the InitHash fix, loadAuditViewFromIndex
+// always failed VerifyChain (missing InitHash) and silently fell back to
+// the worktree copy — defeating the "view consistent with the target tree"
+// purpose. We diverge the two views by mutating the worktree audit log
+// (telling Bob) without staging it; if the function picks worktree, Bob
+// shows up in the resulting keyring.
+func TestLoadAuditView_PrefersIndexOverWorktree(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+
+	dir, r := bootstrapRepo(t, admin)
+	gitCommitAll(t, dir, "init sesam") // index = worktree = admin only
+
+	// Diverge: mutate the worktree audit log (UserTell appends to
+	// .sesam/audit/log.jsonl on disk). The git index still carries only
+	// the admin-only version.
+	require.NoError(t, r.UserTell(t.Context(),
+		"bob", []string{bob.Recipient}, []string{"dev"}))
+	require.NoError(t, r.Close())
+
+	ids, err := LoadIdentities([]string{admin.Path}, RepoOpts{})
+	require.NoError(t, err)
+
+	require.NoError(t, withWorkingDir(dir, func() error {
+		kr, _, err := loadAuditView(".", ids)
+		require.NoError(t, err)
+
+		users := kr.ListUsers()
+		require.Contains(t, users, "admin")
+		require.NotContains(t, users, "bob",
+			"loadAuditView must read from the git INDEX (admin only); "+
+				"if bob is present the function silently fell back to the "+
+				"worktree copy — the InitHash fix in "+
+				"loadAuditViewFromIndex has regressed")
+		return nil
+	}))
+}
+
+// loadAuditView is the high-level entry point: index first, worktree as a
+// fallback. Here both succeed (index path returns first), so we cover the
+// happy-path arm.
+func TestLoadAuditView_PrefersIndex(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+	require.NoError(t, r.Close())
+	gitCommitAll(t, dir, "init sesam")
+
+	ids, err := LoadIdentities([]string{admin.Path}, RepoOpts{})
+	require.NoError(t, err)
+
+	require.NoError(t, withWorkingDir(dir, func() error {
+		kr, authorize, err := loadAuditView(".", ids)
+		require.NoError(t, err)
+		require.Contains(t, kr.ListUsers(), "admin")
+		require.True(t, authorize("admin", "README.md"))
+		return nil
+	}))
 }

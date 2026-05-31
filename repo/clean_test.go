@@ -59,7 +59,7 @@ func TestCleanupRemovesUntrackedFiles(t *testing.T) {
 	stale := filepath.Join(root, "stale-secret")
 	writeFile(t, stale, "leaked plaintext")
 
-	require.NoError(t, Cleanup(repo, root))
+	require.NoError(t, cleanup(repo, root, nil))
 
 	require.False(t, exists(t, stale), "untracked file should have been removed")
 	require.True(t, exists(t, filepath.Join(root, "sesam.yml")), "tracked file should be preserved")
@@ -74,7 +74,7 @@ func TestCleanupPreservesModifiedTrackedFiles(t *testing.T) {
 	tracked := filepath.Join(root, "sesam.yml")
 	writeFile(t, tracked, "modified by user")
 
-	require.NoError(t, Cleanup(repo, root))
+	require.NoError(t, cleanup(repo, root, nil))
 
 	require.True(t, exists(t, tracked), "modified tracked file should survive")
 	got, err := os.ReadFile(tracked)
@@ -91,7 +91,7 @@ func TestCleanupSkipsSesamAndGitDirs(t *testing.T) {
 	gitScratch := filepath.Join(root, ".git", "untracked-by-design")
 	writeFile(t, gitScratch, "git internal")
 
-	require.NoError(t, Cleanup(repo, root))
+	require.NoError(t, cleanup(repo, root, nil))
 
 	require.True(t, exists(t, sesamScratch), ".sesam contents must not be touched")
 	require.True(t, exists(t, gitScratch), ".git contents must not be touched")
@@ -105,7 +105,7 @@ func TestCleanupRemovesUntrackedInSubdir(t *testing.T) {
 	stale := filepath.Join(root, "keep", "stale.txt")
 	writeFile(t, stale, "junk")
 
-	require.NoError(t, Cleanup(repo, root))
+	require.NoError(t, cleanup(repo, root, nil))
 
 	require.False(t, exists(t, stale), "untracked file in subdir should be removed")
 	require.True(t, exists(t, filepath.Join(root, "keep", "sesam.yml")), "tracked sibling should survive")
@@ -116,7 +116,7 @@ func TestCleanupErrorsOnMissingSesamDir(t *testing.T) {
 	repo, err := git.PlainInit(root, false)
 	require.NoError(t, err)
 
-	err = Cleanup(repo, root)
+	err = cleanup(repo, root, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not a sesam directory")
 }
@@ -189,7 +189,7 @@ func TestRecursiveRmEmptyDirs(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(tmpDir, path), nil, 0o700))
 			}
 
-			emptyDirs, err := recursiveRmEmptyDirs(tmpDir, tc.Except)
+			emptyDirs, err := recursiveRmEmptyDirs(tmpDir, tc.Except, nil)
 			require.NoError(t, err)
 			require.Equal(t, tc.ExpectedToDelete, emptyDirs)
 		})
