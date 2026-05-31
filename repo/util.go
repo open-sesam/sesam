@@ -85,7 +85,8 @@ func loadIdentitiesWith(identityPaths []string, provider core.PassphraseProvider
 			return nil, fmt.Errorf("failed to read identity %s: %w", expandedPath, err)
 		}
 
-		identity, err := core.ParseIdentity(strings.TrimSpace(string(data)), provider, pluginUI)
+		prompt := fmt.Sprintf("Passphrase for %s: ", filepath.Base(expandedPath))
+		identity, err := core.ParseIdentity(strings.TrimSpace(string(data)), provider, pluginUI, prompt)
 		if err != nil {
 			return nil, err
 		}

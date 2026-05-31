@@ -13,14 +13,17 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// mockPassphraseProvider serves a fixed passphrase from memory.
+// mockPassphraseProvider serves a fixed passphrase from memory and records
+// the prompt it was last asked with so tests can assert prompt threading.
 type mockPassphraseProvider struct {
 	passphrase []byte
 	called     bool
+	lastPrompt string
 }
 
-func (m *mockPassphraseProvider) ReadPassphrase() ([]byte, error) {
+func (m *mockPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
 	m.called = true
+	m.lastPrompt = prompt
 	return m.passphrase, nil
 }
 
@@ -28,7 +31,7 @@ func TestParseIdentityAgeNative(t *testing.T) {
 	ageID, err := age.GenerateX25519Identity()
 	require.NoError(t, err)
 
-	id, err := ParseIdentity(ageID.String(), nil, nil)
+	id, err := ParseIdentity(ageID.String(), nil, nil, "")
 	require.NoError(t, err)
 	require.Equal(t, ageID.Recipient().String(), id.Public().String())
 }
@@ -37,7 +40,7 @@ func TestParseIdentityAgePQ(t *testing.T) {
 	pqID, err := age.GenerateHybridIdentity()
 	require.NoError(t, err)
 
-	id, err := ParseIdentity(pqID.String(), nil, nil)
+	id, err := ParseIdentity(pqID.String(), nil, nil, "")
 	require.NoError(t, err)
 	require.Equal(t, pqID.Recipient().String(), id.Public().String())
 }
@@ -50,7 +53,7 @@ func TestParseIdentitySSHEd25519Unencrypted(t *testing.T) {
 	require.NoError(t, err)
 
 	pemBytes := pem.EncodeToMemory(pemBlock)
-	id, err := ParseIdentity(string(pemBytes), nil, nil)
+	id, err := ParseIdentity(string(pemBytes), nil, nil, "")
 	require.NoError(t, err)
 	require.NotNil(t, id.Public())
 }
@@ -66,15 +69,33 @@ func TestParseIdentitySSHEncryptedWithPassphrase(t *testing.T) {
 	pemBytes := pem.EncodeToMemory(pemBlock)
 
 	// Should fail without a passphrase provider.
-	_, err = ParseIdentity(string(pemBytes), nil, nil)
+	_, err = ParseIdentity(string(pemBytes), nil, nil, "")
 	require.Error(t, err, "should fail without passphrase")
 
 	// Should succeed with the mock provider.
 	mock := &mockPassphraseProvider{passphrase: passphrase}
-	id, err := ParseIdentity(string(pemBytes), mock, nil)
+	id, err := ParseIdentity(string(pemBytes), mock, nil, "")
 	require.NoError(t, err)
 	require.True(t, mock.called, "passphrase provider should have been called")
 	require.NotNil(t, id.Public())
+}
+
+// The prompt argument to ParseIdentity must reach the PassphraseProvider so
+// users with multiple --identity flags can see whose passphrase is asked for.
+func TestParseIdentityForwardsPromptToProvider(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	passphrase := []byte("hunter2")
+	pemBlock, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "", passphrase)
+	require.NoError(t, err)
+	pemBytes := pem.EncodeToMemory(pemBlock)
+
+	mock := &mockPassphraseProvider{passphrase: passphrase}
+	_, err = ParseIdentity(string(pemBytes), mock, nil, "Passphrase for admin.age: ")
+	require.NoError(t, err)
+	require.Equal(t, "Passphrase for admin.age: ", mock.lastPrompt,
+		"ParseIdentity must thread the prompt to PassphraseProvider")
 }
 
 func TestParseIdentitySSHWrongPassphrase(t *testing.T) {
@@ -86,7 +107,7 @@ func TestParseIdentitySSHWrongPassphrase(t *testing.T) {
 
 	pemBytes := pem.EncodeToMemory(pemBlock)
 	mock := &mockPassphraseProvider{passphrase: []byte("wrong")}
-	_, err = ParseIdentity(string(pemBytes), mock, nil)
+	_, err = ParseIdentity(string(pemBytes), mock, nil, "")
 	require.Error(t, err, "should fail with wrong passphrase")
 }
 
@@ -94,7 +115,7 @@ func TestParseIdentityPluginRequiresPublicKeyHeader(t *testing.T) {
 	identity := plugin.EncodeIdentity("yubikey", []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
 
 	// Without # public key: header sesam can't match the identity to a user.
-	_, err := ParseIdentity(identity, nil, NewInteractivePluginUI())
+	_, err := ParseIdentity(identity, nil, NewInteractivePluginUI(), "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "public key")
 }
@@ -105,7 +126,7 @@ func TestParseIdentityPluginWithPublicKeyHeader(t *testing.T) {
 
 	file := "# created: 2026-05-16\n# public key: " + recipient + "\n" + identity + "\n"
 
-	id, err := ParseIdentity(file, nil, NewInteractivePluginUI())
+	id, err := ParseIdentity(file, nil, NewInteractivePluginUI(), "")
 	require.NoError(t, err)
 	require.Equal(t, recipient, id.Public().String())
 }
@@ -116,7 +137,7 @@ func TestParseIdentityAgeKeyWithComments(t *testing.T) {
 	require.NoError(t, err)
 
 	file := "# created: 2026-05-16\n# public key: " + ageID.Recipient().String() + "\n" + ageID.String() + "\n"
-	id, err := ParseIdentity(file, nil, nil)
+	id, err := ParseIdentity(file, nil, nil, "")
 	require.NoError(t, err)
 	require.Equal(t, ageID.Recipient().String(), id.Public().String())
 }
@@ -194,7 +215,7 @@ func TestParseIdentityInvalidInputs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseIdentity(tc.key, nil, nil)
+			_, err := ParseIdentity(tc.key, nil, nil, "")
 			require.Error(t, err)
 		})
 	}

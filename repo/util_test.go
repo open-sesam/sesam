@@ -47,7 +47,7 @@ func TestIdentityToUser(t *testing.T) {
 
 	parse := func(t *testing.T, ageID *age.X25519Identity) *core.Identity {
 		t.Helper()
-		id, err := core.ParseIdentity(ageID.String(), nil, core.NewNonInteractivePluginUI())
+		id, err := core.ParseIdentity(ageID.String(), nil, core.NewNonInteractivePluginUI(), "")
 		require.NoError(t, err)
 		return id
 	}
