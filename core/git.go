@@ -48,6 +48,11 @@ func verifyInitFileUnchangedWithRepo(sesamDir string, repo *git.Repository) (str
 		return "", fmt.Errorf("failed to compute relative path: %w", err)
 	}
 
+	// go-git always reports tree/status paths with forward slashes, even on
+	// Windows where filepath.Rel returns backslashes. Normalize so the
+	// PathFilter and status lookups below match.
+	initRel = filepath.ToSlash(initRel)
+
 	// Count how many commits touched the init file.
 	logIter, err := repo.Log(&git.LogOptions{
 		PathFilter: func(path string) bool {
