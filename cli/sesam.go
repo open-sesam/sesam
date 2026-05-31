@@ -15,6 +15,10 @@ import (
 // The command surface is intentionally broad, but only a subset is fully
 // implemented right now. Unimplemented commands return explicit errors so the
 // caller can detect feature gaps in scripts and tests.
+//
+// Commands wrapped in commands.WithRepo load a sesam Repo (acquire lock,
+// build managers, defer Close) and hand it to the handler; the wrapping
+// makes it obvious which commands need an initialized sesam repository.
 func Main(args []string) error {
 	slog.SetDefault(slog.New(newPrettyHandler(os.Stderr, slog.LevelWarn)))
 
@@ -31,25 +35,26 @@ func Main(args []string) error {
 			},
 			{
 				Name:   "verify",
-				Action: commands.HandleVerify,
+				Action: commands.WithRepo(commands.HandleVerify),
 				Usage:  "Verify sesam signatures and encryption state",
 			},
 			{
 				Name:   "id",
-				Action: commands.HandleID,
+				Action: commands.WithRepo(commands.HandleID),
 				Usage:  "Identify the current user by age identity",
 			},
 			{
 				Name:   "seal",
 				Flags:  flagsSeal,
-				Action: commands.HandleSeal,
+				Action: commands.WithRepo(commands.HandleSeal),
 				Usage:  "Encrypt and sign changed secrets",
 			},
 			{
-				Name:   "reveal",
-				Flags:  flagsReveal,
-				Action: commands.HandleReveal,
-				Usage:  "Decrypt all secrets available to the current user",
+				Name:    "reveal",
+				Aliases: []string{"open"},
+				Flags:   flagsReveal,
+				Action:  commands.WithRepo(commands.HandleReveal),
+				Usage:   "Decrypt all secrets available to the current user",
 			},
 			{
 				Name:   "log",
@@ -67,13 +72,13 @@ func Main(args []string) error {
 				Name:      "add",
 				Flags:     flagsAdd,
 				ArgsUsage: "<path>",
-				Action:    commands.HandleAdd,
+				Action:    commands.WithRepo(commands.HandleAdd),
 				Usage:     "Add a secret file or directory",
 			},
 			{
 				Name:      "rm",
 				ArgsUsage: "<path>",
-				Action:    commands.HandleRemove,
+				Action:    commands.WithRepo(commands.HandleRemove),
 				Usage:     "Remove a secret file or directory",
 			},
 			{
@@ -91,18 +96,18 @@ func Main(args []string) error {
 			{
 				Name:   "tell",
 				Flags:  flagsTell,
-				Action: commands.HandleTell,
+				Action: commands.WithRepo(commands.HandleTell),
 				Usage:  "Add a person to a group and re-encrypt affected files",
 			},
 			{
 				Name:   "kill",
 				Flags:  flagsKill,
-				Action: commands.HandleKill,
+				Action: commands.WithRepo(commands.HandleKill),
 				Usage:  "Remove a person from a group",
 			},
 			{
 				Name:   "list-users",
-				Action: commands.HandleListUsers,
+				Action: commands.WithRepo(commands.HandleListUsers),
 				Usage:  "List persons, groups, and access",
 			},
 			{
@@ -114,7 +119,7 @@ func Main(args []string) error {
 			{
 				Name:   "show",
 				Flags:  flagsShow,
-				Action: commands.HandleShow,
+				Action: commands.WithRepo(commands.HandleShow),
 				Usage:  "Show objects managed by sesam",
 				Arguments: []cli.Argument{
 					&cli.StringArg{
@@ -134,12 +139,12 @@ func Main(args []string) error {
 					{
 						Name:   "secrets",
 						Flags:  flagsListSecrets,
-						Action: commands.HandleListSecrets,
+						Action: commands.WithRepo(commands.HandleListSecrets),
 						Usage:  "List known secrets and metadata",
 					}, {
 						Name:   "users",
 						Flags:  flagsListUsers,
-						Action: commands.HandleListUsers,
+						Action: commands.WithRepo(commands.HandleListUsers),
 						Usage:  "List persons, groups, and access",
 					},
 				},
@@ -154,6 +159,7 @@ func Main(args []string) error {
 				Name:   "clean",
 				Action: commands.HandleClean,
 				Usage:  "Remove revealed plaintext and other untracked files from the sesam directory",
+				Flags:  flagsClean,
 			},
 			{
 				Name:   "rotate",

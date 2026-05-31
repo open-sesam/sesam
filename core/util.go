@@ -32,7 +32,7 @@ func ValidUserName(name string) error {
 	return nil
 }
 
-func validSecretPathFormat(sesamDir string, revealedPath string) error {
+func validSecretPathFormat(sesamDir, revealedPath string) error {
 	if len(revealedPath) == 0 {
 		return fmt.Errorf("empty file path not allowed: %s", revealedPath)
 	}

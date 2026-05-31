@@ -279,7 +279,7 @@ func scanAgeIdentity(data string) (identityLine, publicKey string) {
 		}
 	}
 
-	return
+	return identityLine, publicKey
 }
 
 // parsePluginIdentity wraps a plugin.Identity into core's Identity type.

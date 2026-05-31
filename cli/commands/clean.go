@@ -2,41 +2,34 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/open-sesam/sesam/repo"
-	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
 // HandleClean removes every file under the sesam directory that git does not
 // track. Stale revealed plaintext from earlier checkouts disappears, leaving
 // the worktree ready for a fresh smudge pass.
-func HandleClean(_ context.Context, cmd *cli.Command) error {
-	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
-	if err != nil {
-		return err
-	}
+//
+// Clean does not load the audit log or take the repo lock — it must work
+// even when the audit state is partially broken.
+func HandleClean(ctx context.Context, cmd *cli.Command) error {
+	dryRun := cmd.Bool("dry-run")
+	quiet := cmd.Bool("quiet")
 
-	gitRepo, err := repo.OpenGitRepo(sesamDir)
-	if err != nil {
-		return err
-	}
-
-	return repo.Cleanup(gitRepo, sesamDir, cmd.StringSlice("identity")...)
-}
-
-// TODO: Figure out where this is used?
-func deleteRevealedSecrets(sesamDir string, secrets []core.VerifiedSecret) error {
-	for _, secret := range secrets {
-		revealedPath := filepath.Join(sesamDir, secret.RevealedPath)
-		if err := os.Remove(revealedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("failed to delete %s: %w", secret.RevealedPath, err)
-		}
-	}
-
-	return nil
+	return repo.CleanAggressive(
+		ctx,
+		cmd.String("sesam-dir"),
+		cmd.StringSlice("identity"),
+		repo.CleanOpts{
+			Aggressive: cmd.Bool("aggressive"),
+			CheckFunc: func(path string) (bool, error) {
+				if !quiet {
+					fmt.Println(path)
+				}
+				return !dryRun, nil
+			},
+		},
+	)
 }

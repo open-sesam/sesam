@@ -13,7 +13,7 @@ task coverage    # tests with coverage report (-coverpkg=./... captures testscri
 
 ## Architecture
 
-Core logic lives in `core`. The CLI lives in `cli/` (`cli/commands/` for handlers, `cli/repo/` for git bootstrap helpers).
+Lowlevel Core logic lives in `core`. The CLI lives in `cli/` (`cli/commands/` for handlers, `repo/` for high level API).
 
 ### Two operational phases
 

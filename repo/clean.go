@@ -1,6 +1,8 @@
 package repo
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -9,7 +11,49 @@ import (
 	"slices"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/open-sesam/sesam/core"
 )
+
+// CleanAggressive does not require a fully loaded repository and is roughly equivalent to `git clean -fdx`.
+// See (*Repo).Clean() for the full docs.
+func CleanAggressive(ctx context.Context, sesamDir string, identityPaths []string, opts CleanOpts) error {
+	gr, err := openGitRepo(sesamDir)
+	if err != nil {
+		return err
+	}
+
+	return cleanup(
+		gr,
+		sesamDir,
+		opts.CheckFunc,
+		identityPaths...,
+	)
+}
+
+// deleteRevealedSecrets removes the plaintext copy on disk for every
+// VerifiedSecret in `secrets`, ignoring already-absent files.
+func deleteRevealedSecrets(sesamDir string, secrets []core.VerifiedSecret, checkFn func(path string) (bool, error)) error {
+	for _, secret := range secrets {
+		revealedPath := filepath.Join(sesamDir, secret.RevealedPath)
+
+		allow := true // default to allow
+		if checkFn != nil {
+			var err error
+			allow, err = checkFn(revealedPath)
+			if err != nil {
+				return err
+			}
+		}
+
+		if allow {
+			if err := os.Remove(revealedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("failed to delete %s: %w", secret.RevealedPath, err)
+			}
+		}
+	}
+
+	return nil
+}
 
 // recursiveRmEmptyDirs will recursively delete all empty directories in
 // `rootDir`, except they are in the `except` map. The list of deleted
@@ -74,7 +118,7 @@ func recursiveRmEmptyDirs(rootDir string, except map[string]bool) ([]string, err
 	return emptyDirs, nil
 }
 
-// Cleanup removes every file under sesamRoot that is not in the git index.
+// cleanup removes every file under sesamRoot that is not in the git index.
 // .sesam/ and .git/ are skipped entirely - sesam owns one, git owns the
 // other. The intent is to wipe stale revealed plaintext (which is gitignored
 // and therefore "untracked") before a smudge pass repopulates the worktree
@@ -85,7 +129,12 @@ func recursiveRmEmptyDirs(rootDir string, except map[string]bool) ([]string, err
 // non-regular entries are left alone. The optional exclude list holds
 // absolute paths that must not be deleted even if untracked - intended for
 // identity files that happen to live inside the worktree.
-func Cleanup(repo *git.Repository, sesamDir string, exclude ...string) error {
+func cleanup(
+	repo *git.Repository,
+	sesamDir string,
+	checkFn func(path string) (bool, error),
+	exclude ...string,
+) error {
 	var err error
 	sesamDir, err = filepath.Abs(sesamDir)
 	if err != nil {
@@ -148,11 +197,21 @@ func Cleanup(repo *git.Repository, sesamDir string, exclude ...string) error {
 			return nil
 		}
 
-		if err := os.Remove(path); err != nil { //nolint:gosec
-			return fmt.Errorf("remove %s: %w", path, err)
+		allow := true
+		if checkFn != nil {
+			allow, err = checkFn(path)
+			if err != nil {
+				return err
+			}
 		}
 
-		slog.Debug("clean: removed untracked file", slog.String("path", path))
+		if allow {
+			if err := os.Remove(path); err != nil { //nolint:gosec
+				return fmt.Errorf("remove %s: %w", path, err)
+			}
+
+			slog.Debug("clean: removed untracked file", slog.String("path", path))
+		}
 		return nil
 	}); err != nil {
 		return err

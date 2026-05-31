@@ -15,13 +15,13 @@ import (
 )
 
 // stubKeyring and stubAuthorize satisfy the post-LoadAuditView contract on
-// FilterProcessHandler for tests that exercise the pkt-line layer only. The
+// filterProcessHandler for tests that exercise the pkt-line layer only. The
 // reveal call inside handleSmudgeRequest still runs but fails harmlessly on
 // the non-age content these tests send, so wire framing is unaffected.
 func stubKeyring() core.Keyring                    { return core.EmptyKeyring() }
 func stubAuthorize(user, revealedPath string) bool { return true }
 
-// runHandler drives FilterProcessHandler.Run with a scripted pkt-line client.
+// runHandler drives filterProcessHandler.Run with a scripted pkt-line client.
 // The client writes `clientScript` to the handler's stdin, then reads the
 // handler's stdout into `serverOutput`. The handler is given trivial Keyring
 // and Authorize stubs because these tests exercise wire framing only - real
@@ -29,7 +29,7 @@ func stubAuthorize(user, revealedPath string) bool { return true }
 func runHandler(t *testing.T, clientScript []byte) []byte {
 	t.Helper()
 
-	handler := &FilterProcessHandler{
+	handler := &filterProcessHandler{
 		Keyring:   stubKeyring(),
 		Authorize: stubAuthorize,
 	}
@@ -141,7 +141,7 @@ func TestFilterProcessClientWithoutSmudgeIsRejected(t *testing.T) {
 	// A client that only offers `clean` cannot be served by sesam; surface
 	// this as a hard error rather than silently accepting.
 	script := validHandshake(t, "clean")
-	handler := &FilterProcessHandler{Keyring: stubKeyring(), Authorize: stubAuthorize}
+	handler := &filterProcessHandler{Keyring: stubKeyring(), Authorize: stubAuthorize}
 	err := handler.Run(context.Background(), bytes.NewReader(script), io.Discard)
 
 	require.ErrorIs(t, err, errProtocol)
@@ -276,7 +276,7 @@ func TestFilterProcessUnknownCommandReturnsStatusError(t *testing.T) {
 		),
 	}, nil)
 
-	handler := &FilterProcessHandler{Keyring: stubKeyring(), Authorize: stubAuthorize}
+	handler := &filterProcessHandler{Keyring: stubKeyring(), Authorize: stubAuthorize}
 	var stdout bytes.Buffer
 	err := handler.Run(context.Background(), bytes.NewReader(script), &stdout)
 

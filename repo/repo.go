@@ -1,135 +1,547 @@
+// Package repo provides the high-level sesam repository API.
+//
+// A Repo is a handle to a sesam repository on disk. Load (or Init) acquires
+// the on-disk `.sesam/lock`, opens the audit log, and builds the secret /
+// user managers — all of which stay open for the lifetime of the Repo and
+// are released by Close. Methods reuse the same managers across calls and
+// are safe to invoke concurrently from multiple goroutines (an internal
+// mutex serializes operations, since the underlying managers are not
+// goroutine-safe).
 package repo
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"path/filepath"
+	"sync"
+	"time"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/gofrs/flock"
 	"github.com/open-sesam/sesam/core"
 )
 
-// Repo is a handle to a sesam repo.
-// It contains all high-level operation one can use.
-type Repo struct{}
+const defaultLockTimeout = 30 * time.Second
 
-type LoadOptions struct {
-	// Interactive should be true when we can talk through the user via the terminal.
-	// TODO: later we should check things like ssh-askpass to allow password decryption
-	// without running in the foreground.
+// keyringFingerprint is the OS-keyring entry name used to cache the runtime
+// passphrase of encrypted age identities.
+const keyringFingerprint = "sesam.identity.runtime"
+
+// Repo is a handle to a sesam repo. See package-level docs for lifetime
+// semantics.
+type Repo struct {
+	sesamDir string
+	opts     RepoOpts
+
+	pluginUI *core.PluginUI
+	gitRepo  *git.Repository
+	lock     *flock.Flock
+
+	identityPaths []string
+	identities    core.Identities
+
+	auditLog *core.AuditLog
+	keyring  core.Keyring
+	vstate   *core.VerifiedState
+	secret   *core.SecretManager
+	user     *core.UserManager
+
+	mu sync.Mutex
+}
+
+// RepoOpts controls runtime behavior shared across all Repo operations.
+type RepoOpts struct {
+	// Interactive should be true when we can talk to the user via the terminal.
+	// TODO: later we should check things like ssh-askpass to allow password
+	// decryption without running in the foreground. Then we might need to split
+	// up options here too (one for interactive terminal and one for interactive UI)
 	Interactive bool
+
+	// LockTimeout bounds how long acquiring the on-disk repo lock waits.
+	// Zero means use the default.
+	LockTimeout time.Duration
 }
 
-// Init initializes a new sesam repository at ${sesamDir}/.sesam.
-// The `intialUserName` will be used to create the first admin user using the identities that were given.
-func Init(sesamDir string, intialUserName string, ids []string, opts LoadOptions) (*Repo, error) {
-	return nil, nil
+func (opts RepoOpts) lockTimeout() time.Duration {
+	if opts.LockTimeout <= 0 {
+		return defaultLockTimeout
+	}
+	return opts.LockTimeout
 }
 
-// Load loads an existing sesam repository at `sesamDir`.
-func Load(sesamDir string, ids []string, opts LoadOptions) (*Repo, error) {
-	return nil, nil
+func (opts RepoOpts) pluginUI() *core.PluginUI {
+	if opts.Interactive {
+		return core.NewInteractivePluginUI()
+	}
+	return core.NewNonInteractivePluginUI()
 }
 
-// Close will clean up all open resources.
+// Init initializes a new sesam repository at sesamDir.
+//
+// initialUserName becomes the first admin user; ids are paths to the admin's
+// age identity files. The sesam config is written to <sesamDir>/sesam.yml.
+// On success the returned Repo holds the on-disk lock and has the secret /
+// user managers ready for use; the caller must Close it.
+func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, opts RepoOpts) (*Repo, error) {
+	if err := core.ValidUserName(initialUserName); err != nil {
+		return nil, fmt.Errorf("invalid initial user %q: %w", initialUserName, err)
+	}
+
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := isInitialized(resolvedDir); err != nil {
+		return nil, err
+	}
+
+	r := newRepo(resolvedDir, gitRepo, ids, opts)
+	success := false
+	defer func() {
+		if !success {
+			_ = r.Close()
+		}
+	}()
+
+	identities, err := loadIdentities(ids, "sesam.id."+initialUserName, r.pluginUI)
+	if err != nil {
+		return nil, err
+	}
+	r.identities = identities
+
+	if err := ensureSesamDirs(resolvedDir); err != nil {
+		return nil, err
+	}
+
+	if err := r.acquireLock(); err != nil {
+		return nil, err
+	}
+
+	configPath := filepath.Join(resolvedDir, "sesam.yml")
+	if err := createInitialConfig(configPath, initialUserName, identities.RecipientStrings()); err != nil {
+		return nil, err
+	}
+
+	signer, auditLog, err := core.InitAdminUser(ctx, resolvedDir, initialUserName, identities.RecipientStrings(), r.pluginUI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize admin user: %w", err)
+	}
+	r.auditLog = auditLog
+
+	r.keyring = core.EmptyKeyring()
+	vstate, err := core.Verify(auditLog, r.keyring, r.pluginUI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to verify audit log: %w", err)
+	}
+	r.vstate = vstate
+
+	r.secret, err = core.BuildSecretManager(resolvedDir, identities, signer, r.keyring, auditLog, vstate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build secret manager: %w", err)
+	}
+
+	r.user, err = core.BuildUserManager(resolvedDir, signer, auditLog, vstate, r.secret)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build user manager: %w", err)
+	}
+
+	if err := ensureDefaultGitIgnore(resolvedDir); err != nil {
+		return nil, err
+	}
+	if err := ensureDefaultGitAttributes(resolvedDir); err != nil {
+		return nil, err
+	}
+	if err := ensureGitConfig(gitRepo, resolvedDir); err != nil {
+		return nil, err
+	}
+	if err := ensureGitSesamShim(resolvedDir); err != nil {
+		return nil, err
+	}
+	if err := ensureSesamReadme(resolvedDir); err != nil {
+		return nil, err
+	}
+
+	if err := withWorkingDir(resolvedDir, func() error {
+		return r.secret.AddSecret("README.md", []string{"admin"})
+	}); err != nil {
+		return nil, fmt.Errorf("failed to bootstrap readme secret: %w", err)
+	}
+
+	if err := ensureTmpKeepFile(resolvedDir); err != nil {
+		return nil, err
+	}
+
+	if err := r.secret.SealAll(); err != nil {
+		return nil, err
+	}
+
+	if err := stageInitFiles(gitRepo, resolvedDir, configPath); err != nil {
+		return nil, err
+	}
+
+	success = true
+	return r, nil
+}
+
+// Load loads an existing sesam repository at sesamDir. The on-disk repo
+// lock is held until Close.
+func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	if err != nil {
+		return nil, err
+	}
+
+	r := newRepo(resolvedDir, gitRepo, ids, opts)
+	success := false
+	defer func() {
+		if !success {
+			_ = r.Close()
+		}
+	}()
+
+	if err := r.acquireLock(); err != nil {
+		return nil, err
+	}
+
+	identities, err := loadIdentities(ids, keyringFingerprint, r.pluginUI)
+	if err != nil {
+		return nil, err
+	}
+	r.identities = identities
+
+	r.keyring = core.EmptyKeyring()
+
+	auditLog, err := core.LoadAuditLog(resolvedDir, identities)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load audit log: %w", err)
+	}
+	r.auditLog = auditLog
+
+	vstate, err := core.Verify(auditLog, r.keyring, r.pluginUI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to verify audit log: %w", err)
+	}
+	r.vstate = vstate
+
+	whoami, signIdentity, err := identityToUser(identities, r.keyring.ListUsers())
+	if err != nil {
+		return nil, fmt.Errorf("failed to map identity to user: %w", err)
+	}
+
+	signer, err := core.LoadSignKey(resolvedDir, whoami, signIdentity)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
+	}
+
+	r.secret, err = core.BuildSecretManager(resolvedDir, identities, signer, r.keyring, auditLog, vstate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build secret manager: %w", err)
+	}
+
+	r.user, err = core.BuildUserManager(resolvedDir, signer, auditLog, vstate, r.secret)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build user manager: %w", err)
+	}
+
+	success = true
+	return r, nil
+}
+
+func newRepo(sesamDir string, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
+	return &Repo{
+		sesamDir:      sesamDir,
+		opts:          opts,
+		gitRepo:       gitRepo,
+		pluginUI:      opts.pluginUI(),
+		identityPaths: ids,
+	}
+}
+
+// SesamDir returns the resolved absolute path of the sesam repository.
+func (r *Repo) SesamDir() string {
+	return r.sesamDir
+}
+
+// Close releases the on-disk lock and closes the audit log. Safe to call
+// multiple times. The first non-nil error is returned.
 func (r *Repo) Close() error {
-	return nil
+	var firstErr error
+	if r.auditLog != nil {
+		if err := r.auditLog.Close(); err != nil {
+			firstErr = fmt.Errorf("close audit log: %w", err)
+		}
+		r.auditLog = nil
+	}
+	if r.vstate != nil {
+		if err := r.vstate.Close(); err != nil {
+			firstErr = fmt.Errorf("close vstate: %w", err)
+		}
+		r.vstate = nil
+	}
+	if r.lock != nil {
+		if err := r.lock.Unlock(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("unlock repository: %w", err)
+		}
+		r.lock = nil
+	}
+	return firstErr
 }
 
-// Clean will delete all revealed files.
-// If `aggressive` is true it will also delete files in the sesam repo that are not tracked by git.
-// `checkFn` is called (if given) on each path that this function wants to delete.
-// You can return (false, nil) to prohibit deleting it, (true, nil) to allow it.
-// Any error returned by `checkFn` will cause Clean to stop.
-func (r *Repo) Clean(ctx context.Context, aggressive bool, checkFn func(path string) (bool, error)) error {
-	return nil
-}
-
-// TODO: Me might need to enricht the user type with config derived stuff like descriptions. Something for later.
+// TODO: We might need to enrich the user type with config-derived info like
+// descriptions. Something for later.
 
 // ListUsers returns a list of all users currently in the audit log.
-func (r *Repo) ListUsers() ([]*core.VerifiedUser, error) {
-	return nil, nil
+func (r *Repo) ListUsers() ([]core.VerifiedUser, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return append([]core.VerifiedUser(nil), r.vstate.Users...), nil
 }
 
-// ListSecrets return a list of secrets currently managed by sesam.
-func (r *Repo) ListSecrets() ([]*core.VerifiedSecret, error) {
-	return nil, nil
+// ListSecrets returns a list of secrets currently managed by sesam.
+func (r *Repo) ListSecrets() ([]core.VerifiedSecret, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return append([]core.VerifiedSecret(nil), r.vstate.Secrets...), nil
 }
 
-// RevealAll will reveal all secrets
+// RevealAll will reveal all secrets.
 func (r *Repo) RevealAll() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if err := r.secret.RevealAll(); err != nil {
+		return fmt.Errorf("failed to reveal secrets: %w", err)
+	}
 	return nil
 }
 
 // SealAll takes all revealed content and encrypts it to the sealed storage.
 func (r *Repo) SealAll() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if err := r.secret.SealAll(); err != nil {
+		return fmt.Errorf("failed to seal secrets: %w", err)
+	}
 	return nil
 }
 
-// Show will try to guess what `object` is and write a human readable presentation of it to `out`.
-// This is simmilar to `git show` and will produce output that can be easily diffed.
+type CleanOpts struct {
+	Aggressive bool
+	CheckFunc  func(path string) (bool, error)
+}
+
+// Clean removes every file under the sesam directory that git does not
+// track. It opens the git repository at sesamDir but does NOT load the
+// audit log or acquire the on-disk lock — Clean is a recovery operation
+// that must work even when the audit log is partially broken (e.g. after
+// a manual `git rm` of a sealed object).
+//
+// If aggressive is true it will also delete files inside the sesam
+// directory itself that are not tracked by git.
+// checkFn, when non-nil, is called for every path Clean wants to delete:
+// return (true, nil) to allow, (false, nil) to skip, or a non-nil error
+// to abort.
+func (r *Repo) Clean(ctx context.Context, opts CleanOpts) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if opts.Aggressive {
+		return CleanAggressive(
+			ctx,
+			r.sesamDir,
+			r.identityPaths,
+			opts,
+		)
+	}
+
+	if err := deleteRevealedSecrets(
+		r.sesamDir,
+		r.secret.State.Secrets,
+		opts.CheckFunc,
+	); err != nil {
+		return fmt.Errorf("failed to delete revealed secrets: %w", err)
+	}
+
+	_, err := recursiveRmEmptyDirs(r.sesamDir, map[string]bool{
+		".sesam": true,
+		".git":   true,
+	})
+
+	return err
+}
+
+// Show will try to guess what `object` is and write a human-readable
+// presentation of it to `out`. Similar to `git show`, it produces output that
+// can be easily diffed.
 func (r *Repo) Show(object string, out io.Writer) error {
-	// TODO: For audit and secrets we can do not the full load...
-	return nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// TODO: For audit and secrets we don't need the full load.
+	// TODO: Show secret metadata (access list).
+	if filepath.Base(object) == "log.jsonl" {
+		ok, err := core.ShowAuditLog(r.identities, object, out)
+		if ok {
+			return err
+		}
+		return fmt.Errorf("cannot open audit log: %s", object)
+	}
+
+	ok, err := core.ShowSecret(r.sesamDir, r.identities, object, out)
+	if ok {
+		return err
+	}
+
+	ok, err = r.user.ShowUser(object, out)
+	if ok {
+		return err
+	}
+
+	return fmt.Errorf("not sure what this is: %s", object)
 }
 
-// UserTell adds the new user to the list of valid users. It will be in `groups`
-// and the files he may access are encrypted with `recipients`.
+// UserTell adds the new user to the list of valid users. They will be in
+// `groups` and the files they may access are encrypted with `recipients`.
 // All secrets are immediately re-sealed.
-func (r *Repo) UserTell(user string, recipients []string, groups []string) error {
+func (r *Repo) UserTell(ctx context.Context, user string, recipients, groups []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if err := r.user.TellUser(ctx, user, recipients, groups); err != nil {
+		return fmt.Errorf("failed to add user: %w", err)
+	}
 	return nil
 }
 
 // UserKill removes `user` from the list of authenticated users.
 // All secrets are immediately re-sealed.
 func (r *Repo) UserKill(user string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if err := r.user.KillUsers(user); err != nil {
+		return fmt.Errorf("failed to remove user: %w", err)
+	}
 	return nil
 }
 
-// SecretAdd adds the secret at `revealedPath` to the secrets known by sesam.
-// `revealedPath` can be a directory as well, then the operation is recursive.
-// All secrets are immediately re-sealed. Pass multiple secrets if you want batching.
-func (r *Repo) SecretAdd(revealedPaths []string) error {
-	return nil
+// SecretAdd adds the secret at each path to the secrets known by sesam.
+// A path can be a directory, in which case the operation is recursive.
+// All secrets are immediately re-sealed.
+func (r *Repo) SecretAdd(revealedPaths, groups []string) error {
+	if len(revealedPaths) == 0 {
+		return fmt.Errorf("missing secret path: pass at least one path")
+	}
+	if len(groups) == 0 {
+		return fmt.Errorf("missing group: pass at least one group")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return withWorkingDir(r.sesamDir, func() error {
+		for _, revealedPath := range revealedPaths {
+			if err := r.secret.AddSecret(revealedPath, groups); err != nil {
+				return fmt.Errorf("failed to add secret %q: %w", revealedPath, err)
+			}
+		}
+		return nil
+	})
 }
 
-// SecretRemove removes the managed secret at `revealedPath`.
-// All secrets are immediately re-sealed. Pass multiple secrets if you want batching.
+// SecretRemove removes managed secrets at the given paths.
+// All secrets are immediately re-sealed.
 func (r *Repo) SecretRemove(revealedPaths []string) error {
+	if len(revealedPaths) == 0 {
+		return fmt.Errorf("missing secret path: pass at least one path")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, revealedPath := range revealedPaths {
+		if err := r.secret.RemoveSecret(revealedPath); err != nil {
+			return fmt.Errorf("failed to remove secret %q: %w", revealedPath, err)
+		}
+	}
 	return nil
 }
 
+// VerifyOptions selects which verification checks Verify should run.
 type VerifyOptions struct {
 	// Truncation checks if the audit log was truncated over the git history.
 	Truncation bool
 
 	// KeyReuse checks if different users re-use the same public keys.
-	// This should be forbidden by logic in sesam while adding for a single user,
-	// but someone could play dirty tricks (or we have a bug...)
+	// This should be forbidden by logic in sesam while adding for a single
+	// user, but someone could play dirty tricks (or we have a bug...)
 	KeyReuse bool
 
 	// ForgeCheck will check if the public keys on forge-side changed.
 	ForgeCheck bool
 
-	// Integrity checks the integrity of all files
-	// and if they match the current seal's root hash.
+	// Integrity checks the integrity of all files and whether they match the
+	// current seal's root hash.
 	Integrity bool
 }
 
+// VerifyReport carries the per-check outcome from Verify.
 type VerifyReport struct {
-	// TODO: Fill out all the different types of verifications that we have.
-	//       Requires merging a couple PRs still. Can be left empty for now.
+	// Integrity is the report from the integrity check. nil if Integrity was
+	// not requested.
+	Integrity *core.IntegrityReport
+
+	// TODO: Truncation, KeyReuse, ForgeCheck reports
 }
 
-// Verify will check the repositoryies state depending on what verification strategies are set.
-// Some verfications are hard errors (i.e. when audit log could be decrypted or is inconsistent),
-// which are returned as actual `err`.
-//
-// All other consistency checks will put their results in the returned report.
+// OK reports whether every requested check passed.
+func (rep *VerifyReport) OK() bool {
+	if rep == nil {
+		return true
+	}
+	if rep.Integrity != nil && !rep.Integrity.OK() {
+		return false
+	}
+	return true
+}
+
+// Verify will check the repository's state depending on the verification
+// strategies set in opts. Some verifications are hard errors (i.e. when the
+// audit log cannot be decrypted or is inconsistent) and are returned as
+// `err`. All other consistency checks have their results placed in the
+// returned report.
 func (r *Repo) Verify(opts VerifyOptions) (*VerifyReport, error) {
-	return &VerifyReport{}, nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	report := &VerifyReport{}
+
+	if opts.Integrity {
+		report.Integrity = core.VerifyIntegrity(r.sesamDir, r.vstate, r.keyring)
+	}
+
+	// TODO: Truncation, KeyReuse, ForgeCheck.
+	_ = opts.Truncation
+	_ = opts.KeyReuse
+	_ = opts.ForgeCheck
+
+	return report, nil
 }
 
-// Whoami returns the name of the current user determined by checking what identities were supplied.
-func (r *Repo) Whoami() string {
-	return ""
+// Whoami returns the name of the current user, determined by checking which
+// identity matches a user in the audit-log keyring.
+func (r *Repo) Whoami() (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	whoami, _, err := identityToUser(r.identities, r.keyring.ListUsers())
+	if err != nil {
+		return "", fmt.Errorf("failed to identify current user: %w", err)
+	}
+	return whoami, nil
 }
