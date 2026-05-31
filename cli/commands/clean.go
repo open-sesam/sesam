@@ -2,41 +2,58 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 
-	"github.com/open-sesam/sesam/cli/repo"
-	"github.com/open-sesam/sesam/core"
+	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
+
+func cleanCheck(path string, quiet, dryRun bool) (bool, error) {
+	if !quiet {
+		fmt.Println(path)
+	}
+	return !dryRun, nil
+}
 
 // HandleClean removes every file under the sesam directory that git does not
 // track. Stale revealed plaintext from earlier checkouts disappears, leaving
 // the worktree ready for a fresh smudge pass.
-func HandleClean(_ context.Context, cmd *cli.Command) error {
-	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
-	if err != nil {
-		return err
+//
+// Clean does not load the audit log or take the repo lock — it must work
+// even when the audit state is partially broken.
+//
+// With --aggressive, untracked files inside `.sesam/` are removed too
+// (similar to `git clean -fdx`). Without it, `.sesam/` is left alone.
+func HandleClean(ctx context.Context, cmd *cli.Command) error {
+	dryRun := cmd.Bool("dry-run")
+	quiet := cmd.Bool("quiet")
+
+	opts := repo.CleanOpts{
+		CheckFunc: func(path string) (bool, error) {
+			return cleanCheck(path, quiet, dryRun)
+		},
 	}
 
-	gitRepo, err := repo.OpenGitRepo(sesamDir)
-	if err != nil {
-		return err
+	if cmd.Bool("aggressive") {
+		return repo.CleanAggressive(
+			ctx,
+			cmd.String("sesam-dir"),
+			cmd.StringSlice("identity"),
+			opts,
+		)
 	}
 
-	return repo.Cleanup(gitRepo, sesamDir, cmd.StringSlice("identity")...)
+	return WithRepo(HandleCleanWithRepo)(ctx, cmd)
 }
 
-// TODO: Figure out where this is used?
-func deleteRevealedSecrets(sesamDir string, secrets []core.VerifiedSecret) error {
-	for _, secret := range secrets {
-		revealedPath := filepath.Join(sesamDir, secret.RevealedPath)
-		if err := os.Remove(revealedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("failed to delete %s: %w", secret.RevealedPath, err)
-		}
-	}
+func HandleCleanWithRepo(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+	dryRun := cmd.Bool("dry-run")
+	quiet := cmd.Bool("quiet")
 
-	return nil
+	return r.Clean(ctx, repo.CleanOpts{
+		Aggressive: false,
+		CheckFunc: func(path string) (bool, error) {
+			return cleanCheck(path, quiet, dryRun)
+		},
+	})
 }

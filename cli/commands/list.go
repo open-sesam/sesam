@@ -7,28 +7,18 @@ import (
 	"sort"
 	"text/tabwriter"
 
-	"github.com/open-sesam/sesam/cli/repo"
-	"github.com/open-sesam/sesam/core"
+	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
 
 // HandleListSecrets prints tracked secret metadata.
-func HandleListSecrets(_ context.Context, cmd *cli.Command) error {
-	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+func HandleListSecrets(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+	secrets, err := r.ListSecrets()
 	if err != nil {
 		return err
 	}
-
-	auditLog, _, vstate, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"), core.NewInteractivePluginUI())
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = auditLog.Close()
-	}()
 
 	if cmd.Bool("json") {
-		secrets := append([]core.VerifiedSecret(nil), vstate.Secrets...)
 		sort.Slice(secrets, func(i, j int) bool {
 			return secrets[i].RevealedPath < secrets[j].RevealedPath
 		})
@@ -40,21 +30,21 @@ func HandleListSecrets(_ context.Context, cmd *cli.Command) error {
 		return printJSON(secrets)
 	}
 
-	if len(vstate.Secrets) == 0 {
+	if len(secrets) == 0 {
 		fmt.Println("no secrets")
 		return nil
 	}
 
-	secrets := make([]string, 0, len(vstate.Secrets))
-	for _, secret := range vstate.Secrets {
+	lines := make([]string, 0, len(secrets))
+	for _, secret := range secrets {
 		groups := sortedGroups(secret.AccessGroups)
-		secrets = append(secrets, fmt.Sprintf("%s\t%s", secret.RevealedPath, commaJoined(groups)))
+		lines = append(lines, fmt.Sprintf("%s\t%s", secret.RevealedPath, commaJoined(groups)))
 	}
 
-	sort.Strings(secrets)
+	sort.Strings(lines)
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "PATH\tGROUPS")
-	for _, line := range secrets {
+	for _, line := range lines {
 		_, _ = fmt.Fprintln(tw, line)
 	}
 	if err := tw.Flush(); err != nil {
@@ -65,22 +55,13 @@ func HandleListSecrets(_ context.Context, cmd *cli.Command) error {
 }
 
 // HandleListUsers lists users, groups, and access bindings.
-func HandleListUsers(_ context.Context, cmd *cli.Command) error {
-	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+func HandleListUsers(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+	users, err := r.ListUsers()
 	if err != nil {
 		return err
 	}
-
-	auditLog, _, vstate, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"), core.NewInteractivePluginUI())
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = auditLog.Close()
-	}()
 
 	if cmd.Bool("json") {
-		users := append([]core.VerifiedUser(nil), vstate.Users...)
 		sort.Slice(users, func(i, j int) bool {
 			return users[i].Name < users[j].Name
 		})
@@ -92,12 +73,11 @@ func HandleListUsers(_ context.Context, cmd *cli.Command) error {
 		return printJSON(users)
 	}
 
-	if len(vstate.Users) == 0 {
+	if len(users) == 0 {
 		fmt.Println("no users")
 		return nil
 	}
 
-	users := append([]core.VerifiedUser(nil), vstate.Users...)
 	sort.Slice(users, func(i, j int) bool {
 		return users[i].Name < users[j].Name
 	})

@@ -66,7 +66,6 @@ func (p *PluginUI) displayMessage(name, message string) error {
 }
 
 func (p *PluginUI) requestValue(name, prompt string, secret bool) (string, error) {
-	fmt.Println("request", name, prompt, secret)
 	if !p.interactive {
 		return "", ErrNoTTY
 	}
@@ -91,7 +90,6 @@ func (p *PluginUI) requestValue(name, prompt string, secret bool) (string, error
 }
 
 func (p *PluginUI) readValue(secret bool) (string, error) {
-	fmt.Println("read", secret)
 	if secret {
 		if f, ok := p.stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
 			b, err := term.ReadPassword(int(f.Fd()))

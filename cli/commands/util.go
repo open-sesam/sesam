@@ -1,32 +1,50 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
+	"log/slog"
+
+	"github.com/open-sesam/sesam/repo"
+	"github.com/urfave/cli/v3"
 )
 
-// expandHomeDir expands "~" and "~/..." in CLI path input.
-func expandHomeDir(path string) (string, error) {
-	switch {
-	case path == "~":
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
+// RepoAction is the signature every handler that needs a live sesam Repo
+// uses. The Repo is loaded (lock + managers) by WithRepo before the handler
+// runs and is closed afterwards.
+type RepoAction func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error
 
-		return homeDir, nil
-	case strings.HasPrefix(path, "~/"):
-		homeDir, err := os.UserHomeDir()
+// WithRepo adapts a RepoAction to cli/v3's ActionFunc. It loads the repo
+// from the shared --sesam-dir / --identity / --lock-timeout flags, defers
+// Close, and surfaces Close errors:
+//   - if the handler succeeded, a Close error becomes the action's error
+//   - if the handler already failed, a Close error is logged at warn
+func WithRepo(action RepoAction) cli.ActionFunc {
+	return func(ctx context.Context, cmd *cli.Command) (err error) {
+		r, err := repo.Load(
+			cmd.String("sesam-dir"),
+			cmd.StringSlice("identity"),
+			repo.RepoOpts{
+				Interactive: true,
+				LockTimeout: cmd.Duration("lock-timeout"),
+			},
+		)
 		if err != nil {
-			return "", err
+			return err
 		}
-
-		return filepath.Join(homeDir, strings.TrimPrefix(path, "~/")), nil
-	default:
-		return path, nil
+		defer func() {
+			closeErr := r.Close()
+			if closeErr == nil {
+				return
+			}
+			if err == nil {
+				err = fmt.Errorf("close repo: %w", closeErr)
+				return
+			}
+			slog.Warn("close repo failed", slog.Any("error", closeErr))
+		}()
+		return action(ctx, cmd, r)
 	}
 }
 

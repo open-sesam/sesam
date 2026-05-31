@@ -349,6 +349,14 @@ func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bo
 		}
 	}
 
+	// Resolve relative inputs against sesamDir so the lookup works regardless
+	// of the caller's cwd. Absolute paths (e.g. mgr.cryptPath() output) are
+	// used as-is — joining two absolute paths with filepath.Join would
+	// produce a double-prefixed nonsense path.
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(sesamDir, path)
+	}
+
 	//nolint:gosec
 	srcFd, err := os.Open(path)
 	if err != nil {

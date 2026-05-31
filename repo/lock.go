@@ -1,4 +1,4 @@
-package commands
+package repo
 
 import (
 	"context"
@@ -10,36 +10,22 @@ import (
 	"github.com/gofrs/flock"
 )
 
-func withRepoLock(sesamDir string, timeout time.Duration, fn func() error) (err error) {
-	if timeout <= 0 {
-		return fmt.Errorf("invalid lock timeout %s: must be > 0", timeout)
-	}
-
-	lockPath := filepath.Join(sesamDir, ".sesam", "lock")
+// acquireLock grabs `.sesam/lock` for the lifetime of the Repo. Released by
+// Close. Requires `.sesam/` to already exist; Init creates it first.
+func (r *Repo) acquireLock() error {
+	lockPath := filepath.Join(r.sesamDir, sesamSuffix, "lock")
 	lockDir := filepath.Dir(lockPath)
 
 	if _, err := os.Stat(lockDir); err != nil {
-		if os.IsNotExist(err) {
-			return fn()
-		}
-
-		return fmt.Errorf("failed to access lock directory %s: %w", lockDir, err)
+		return fmt.Errorf("sesam directory missing at %s: %w", lockDir, err)
 	}
 
-	acquired, err := acquireRepoLock(lockPath, timeout)
+	fl, err := acquireRepoLock(lockPath, r.opts.lockTimeout())
 	if err != nil {
 		return err
 	}
-
-	defer func() {
-		unlockErr := acquired.Unlock()
-		if unlockErr != nil && err == nil {
-			err = fmt.Errorf("failed to unlock repository: %w", unlockErr)
-		}
-	}()
-
-	err = fn()
-	return err
+	r.lock = fl
+	return nil
 }
 
 func acquireRepoLock(lockPath string, timeout time.Duration) (*flock.Flock, error) {

@@ -2,31 +2,22 @@ package commands
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/open-sesam/sesam/cli/repo"
-	"github.com/open-sesam/sesam/core"
+	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
 
-// HandleSeal encrypts and signs tracked secrets via SecretManager.SealAll.
-func HandleSeal(_ context.Context, cmd *cli.Command) error {
-	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
-	if err != nil {
+// HandleSeal encrypts and signs tracked secrets via Repo.SealAll.
+func HandleSeal(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+	if err := r.SealAll(); err != nil {
 		return err
 	}
 
-	return withManagers(sesamDir, cmd.StringSlice("identity"), cmd.Duration("lock-timeout"), core.NewInteractivePluginUI(), func(mgr *runtimeManagers) error {
-		if err := mgr.Secret.SealAll(); err != nil {
-			return fmt.Errorf("failed to seal secrets: %w", err)
-		}
+	if cmd.Bool("clean") {
+		return r.Clean(ctx, repo.CleanOpts{
+			Aggressive: false,
+		})
+	}
 
-		if cmd.Bool("clean") {
-			if err := deleteRevealedSecrets(sesamDir, mgr.Secret.State.Secrets); err != nil {
-				return fmt.Errorf("failed to delete revealed secrets: %w", err)
-			}
-		}
-
-		return nil
-	})
+	return nil
 }

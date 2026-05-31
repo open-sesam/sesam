@@ -18,4 +18,9 @@ For example, an ssh key that was rotated needs to be changed in *authorized_keys
 
 In reality there is therefore no way to not rotate and exchange secrets from time to time. We gave `sesam` therefore features that help with automating this tedious process.
 
-TODO: Write.
+```admonish warning
+This feature is not yet implemented.
+
+If you like, you can have a look at the plan to implement it [here](https://github.com/open-sesam/sesam/issues/40).
+```
+

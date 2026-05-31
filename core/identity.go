@@ -45,8 +45,14 @@ type Identity struct {
 type Identities []*Identity
 
 // PassphraseProvider describes anything that can give you a password.
+//
+// `prompt` is the user-facing string a TTY or GUI passphrase prompt should
+// display. It is set per-identity by the caller so users with multiple
+// `--identity` flags can tell whose passphrase is being asked for. Providers
+// that don't display a prompt (e.g. the OS keyring lookup) may ignore it,
+// but should forward it to their fallback.
 type PassphraseProvider interface {
-	ReadPassphrase() ([]byte, error)
+	ReadPassphrase(prompt string) ([]byte, error)
 }
 
 // StdinPassphraseProvider is a simple PassphraseProvider that reads a password from stdin.
@@ -179,13 +185,18 @@ func sshKeyToIdentity(rawKey any) (*Identity, error) {
 // keys (with passphrase support via passphraseProvider). pluginUI is required
 // for plugin identities and may be nil otherwise.
 //
+// `prompt` is forwarded to the PassphraseProvider when one is needed (e.g.
+// for a passphrase-protected SSH key); it should identify which identity is
+// being unlocked so a user with multiple `--identity` flags can tell whose
+// passphrase is being asked for. Pass "" to use a generic prompt.
+//
 // age and plugin identity files commonly carry `# created:` and
 // `# public key: …` header comments (the output format of age-keygen and
 // age-plugin-yubikey). Those are tolerated; the first non-comment line is
 // taken as the identity payload. For plugin identities the `# public key: …`
 // line is the recipient encoding sesam compares against the audit log and is
 // therefore required.
-func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *PluginUI) (*Identity, error) {
+func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *PluginUI, prompt string) (*Identity, error) {
 	ageLine, recipientHint := scanAgeIdentity(key)
 
 	switch {
@@ -230,7 +241,7 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *
 		return nil, fmt.Errorf("no passphrase supplied")
 	}
 
-	passphrase, err := passphraseProvider.ReadPassphrase()
+	passphrase, err := passphraseProvider.ReadPassphrase(prompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read passphrase: %w", err)
 	}
@@ -279,7 +290,7 @@ func scanAgeIdentity(data string) (identityLine, publicKey string) {
 		}
 	}
 
-	return
+	return identityLine, publicKey
 }
 
 // parsePluginIdentity wraps a plugin.Identity into core's Identity type.
@@ -328,11 +339,14 @@ func (p *pluginIdentityWithHint) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
 	return p.inner.Unwrap(stanzas)
 }
 
-func (spp *StdinPassphraseProvider) ReadPassphrase() ([]byte, error) {
-	return readline.Password("Passphrase: ")
+func (spp *StdinPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
+	if prompt == "" {
+		prompt = "Passphrase: "
+	}
+	return readline.Password(prompt)
 }
 
-func (kpp *KeyringPassphraseProvider) ReadPassphrase() ([]byte, error) {
+func (kpp *KeyringPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
 	stored, err := keyring.Get(keyringService, kpp.KeyFingerprint)
 	if err == nil {
 		return []byte(stored), nil
@@ -342,7 +356,7 @@ func (kpp *KeyringPassphraseProvider) ReadPassphrase() ([]byte, error) {
 		return nil, fmt.Errorf("no passphrase in keyring and no fallback provider")
 	}
 
-	passphrase, err := kpp.Fallback.ReadPassphrase()
+	passphrase, err := kpp.Fallback.ReadPassphrase(prompt)
 	if err != nil {
 		return nil, err
 	}

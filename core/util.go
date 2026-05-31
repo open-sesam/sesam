@@ -32,7 +32,7 @@ func ValidUserName(name string) error {
 	return nil
 }
 
-func validSecretPathFormat(sesamDir string, revealedPath string) error {
+func validSecretPathFormat(sesamDir, revealedPath string) error {
 	if len(revealedPath) == 0 {
 		return fmt.Errorf("empty file path not allowed: %s", revealedPath)
 	}
@@ -57,14 +57,15 @@ func validSecretPath(sesamDir, revealedPath string) error {
 		return err
 	}
 
-	revealedPath = filepath.Clean(revealedPath)
-	info, err := os.Stat(revealedPath)
+	absRevealedPath := filepath.Join(sesamDir, revealedPath)
+	absRevealedPath = filepath.Clean(absRevealedPath)
+	info, err := os.Stat(absRevealedPath)
 	if err != nil {
-		return fmt.Errorf("failed to stat %s: %w", revealedPath, err)
+		return fmt.Errorf("failed to stat %s: %w", absRevealedPath, err)
 	}
 
 	if m := info.Mode(); !m.IsRegular() {
-		return fmt.Errorf("%s is not a regular file: %v", revealedPath, m)
+		return fmt.Errorf("%s is not a regular file: %v", absRevealedPath, m)
 	}
 
 	return nil
