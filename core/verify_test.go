@@ -641,7 +641,7 @@ func TestVerifyExportedWithGitRepo(t *testing.T) {
 	al := initAuditLog(t, sesamDir, admin)
 	gitCommitAll(t, repo, "init")
 
-	state, err := Verify(al, EmptyKeyring())
+	state, err := Verify(al, EmptyKeyring(), nil)
 	require.NoError(t, err)
 	require.Len(t, state.Users, 1)
 }
@@ -676,7 +676,7 @@ func TestVerifyExportedRootHashMatch(t *testing.T) {
 
 	gitCommitAll(t, repo, "full setup")
 
-	state, err := Verify(al, EmptyKeyring())
+	state, err := Verify(al, EmptyKeyring(), nil)
 	require.NoError(t, err)
 	require.Equal(t, rootHash, state.LastSealRootHash)
 }
@@ -692,7 +692,7 @@ func TestVerifyExportedRootHashMismatch(t *testing.T) {
 
 	gitCommitAll(t, repo, "init")
 
-	_, err := Verify(al, EmptyKeyring())
+	_, err := Verify(al, EmptyKeyring(), nil)
 	require.Error(t, err, "should detect root hash mismatch")
 }
 

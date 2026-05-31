@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	clirepo "github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/cli/repo"
+	"github.com/open-sesam/sesam/core"
 	"github.com/urfave/cli/v3"
 )
 
@@ -25,7 +26,7 @@ import (
 // do not fail the smudge - aborting the git checkout would be worse
 // than a stale or missing revealed file.
 func HandleSmudge(ctx context.Context, cmd *cli.Command) error {
-	sesamDir, err := clirepo.ResolveSesamDir(cmd.String("sesam-dir"))
+	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}
@@ -35,7 +36,7 @@ func HandleSmudge(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("need at least one identity")
 	}
 
-	ids, err := loadIdentitiesKeyringOnly(identityPaths, keyringFingerprint)
+	ids, err := loadIdentitiesKeyringOnly(identityPaths, keyringFingerprint, core.NewNonInteractivePluginUI())
 	if err != nil {
 		return err
 	}
@@ -44,12 +45,12 @@ func HandleSmudge(ctx context.Context, cmd *cli.Command) error {
 	// the audit log must fail-fast: silently degrading to "decrypt without
 	// auth check" would defeat the sealer-authorization check on every
 	// blob in the session.
-	kr, authorize, err := clirepo.LoadAuditView(sesamDir, ids)
+	kr, authorize, err := repo.LoadAuditView(sesamDir, ids)
 	if err != nil {
 		return fmt.Errorf("load audit view for smudge filter: %w", err)
 	}
 
-	handler := &clirepo.FilterProcessHandler{
+	handler := &repo.FilterProcessHandler{
 		SesamDir:      sesamDir,
 		Identities:    ids,
 		IdentityPaths: identityPaths,

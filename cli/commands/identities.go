@@ -21,24 +21,24 @@ func identityToUser(identities core.Identities, users map[string]core.Recipients
 // loadIdentities reads all given paths and parses all identities. Encrypted
 // identities are unlocked via the system keyring, falling back to a stdin
 // prompt when no entry exists.
-func loadIdentities(identityPaths []string, keyFingerprint string) (core.Identities, error) {
+func loadIdentities(identityPaths []string, keyFingerprint string, pluginUI *core.PluginUI) (core.Identities, error) {
 	return loadIdentitiesWith(identityPaths, &core.KeyringPassphraseProvider{
 		KeyFingerprint: keyFingerprint,
 		Fallback:       &core.StdinPassphraseProvider{},
-	})
+	}, pluginUI)
 }
 
 // loadIdentitiesKeyringOnly is like loadIdentities but never prompts on stdin.
 // It is required for the long-running smudge filter, where stdin is owned by
 // the git pkt-line protocol and a passphrase prompt would corrupt the stream.
 // If the keyring has no entry for an encrypted identity, parsing fails.
-func loadIdentitiesKeyringOnly(identityPaths []string, keyFingerprint string) (core.Identities, error) {
+func loadIdentitiesKeyringOnly(identityPaths []string, keyFingerprint string, pluginUI *core.PluginUI) (core.Identities, error) {
 	return loadIdentitiesWith(identityPaths, &core.KeyringPassphraseProvider{
 		KeyFingerprint: keyFingerprint,
-	})
+	}, pluginUI)
 }
 
-func loadIdentitiesWith(identityPaths []string, provider core.PassphraseProvider) (core.Identities, error) {
+func loadIdentitiesWith(identityPaths []string, provider core.PassphraseProvider, pluginUI *core.PluginUI) (core.Identities, error) {
 	if len(identityPaths) == 0 {
 		return nil, fmt.Errorf("at least one --identity or SESAM_ID env var required")
 	}
@@ -60,7 +60,7 @@ func loadIdentitiesWith(identityPaths []string, provider core.PassphraseProvider
 			return nil, fmt.Errorf("failed to read identity %s: %w", expandedPath, err)
 		}
 
-		identity, err := core.ParseIdentity(strings.TrimSpace(string(data)), provider)
+		identity, err := core.ParseIdentity(strings.TrimSpace(string(data)), provider, pluginUI)
 		if err != nil {
 			return nil, err
 		}

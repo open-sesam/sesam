@@ -19,7 +19,7 @@ func HandleListSecrets(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	auditLog, _, vstate, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"))
+	auditLog, _, vstate, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"), core.NewInteractivePluginUI())
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func HandleListUsers(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	auditLog, _, vstate, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"))
+	auditLog, _, vstate, err := loadVerifiedState(sesamDir, cmd.StringSlice("identity"), core.NewInteractivePluginUI())
 	if err != nil {
 		return err
 	}

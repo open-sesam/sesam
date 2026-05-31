@@ -8,9 +8,9 @@ import (
 	"github.com/open-sesam/sesam/core"
 )
 
-func withManagers(sesamDir string, identityPaths []string, lockTimeout time.Duration, fn func(*runtimeManagers) error) error {
+func withManagers(sesamDir string, identityPaths []string, lockTimeout time.Duration, pluginUI *core.PluginUI, fn func(*runtimeManagers) error) error {
 	return withRepoLock(sesamDir, lockTimeout, func() (err error) {
-		mgr, err := buildManagers(sesamDir, identityPaths)
+		mgr, err := buildManagers(sesamDir, identityPaths, pluginUI)
 		if err != nil {
 			return err
 		}
@@ -53,10 +53,11 @@ func (mgr *runtimeManagers) Close() error {
 }
 
 // buildManagers initializes runtime state for non-init operations.
-func buildManagers(sesamDir string, identityPath []string) (*runtimeManagers, error) {
+func buildManagers(sesamDir string, identityPath []string, pluginUI *core.PluginUI) (*runtimeManagers, error) {
 	identities, err := loadIdentities(
 		identityPath,
 		"sesam.identity.runtime",
+		pluginUI,
 	)
 	if err != nil {
 		return nil, err
@@ -70,7 +71,7 @@ func buildManagers(sesamDir string, identityPath []string) (*runtimeManagers, er
 	}
 
 	verifyStart := time.Now()
-	vstate, err := core.Verify(auditLog, keyring)
+	vstate, err := core.Verify(auditLog, keyring, pluginUI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}

@@ -46,6 +46,7 @@ type VerifiedState struct {
 
 	auditLog *AuditLog
 	keyring  Keyring
+	pluginUI *PluginUI
 }
 
 func (vu *VerifiedUser) IsAdmin() bool {
@@ -266,7 +267,7 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 
 	var recps Recipients
 	for _, pubKey := range tell.PubKeys {
-		recp, err := ParseRecipient(pubKey.Key)
+		recp, err := ParseRecipient(pubKey.Key, state.pluginUI)
 		if err != nil {
 			return fmt.Errorf("bad public key %v", pubKey)
 		}
@@ -503,10 +504,16 @@ func recoverIncompleteSeal(sesamDir string, vstate *VerifiedState) error {
 //
 // Use Verify when you also want disk and git-history consistency
 // (`sesam reveal`, `sesam verify --all`).
-func VerifyChain(log *AuditLog, kr Keyring) (*VerifiedState, error) {
+// VerifyChain replays the audit log and returns the derived VerifiedState.
+// pluginUI is used to construct plugin.Recipient objects when a user's public
+// key is a plugin recipient; the stored *PluginUI travels with each Recipient
+// and is consulted at seal-time if the plugin asks for user interaction. Pass
+// nil to default to a non-interactive UI (plugins will refuse to prompt).
+func VerifyChain(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, error) {
 	state := VerifiedState{
 		auditLog: log,
 		keyring:  kr,
+		pluginUI: pluginUI,
 	}
 	if err := verify(&state); err != nil {
 		return nil, err
@@ -514,8 +521,11 @@ func VerifyChain(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 	return &state, nil
 }
 
-func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
-	if err := verifyInitFileUnchanged(log.SesamDir); err != nil {
+// Verify is like VerifyChain but additionally checks the trust-anchor file
+// (.sesam/audit/init) and the latest seal's root-hash against the on-disk
+// secret footers. See [VerifyChain] for pluginUI semantics.
+func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, error) {
+	if _, err := verifyInitFileUnchanged(log.SesamDir); err != nil {
 		return nil, fmt.Errorf("init file check: %w", err)
 	}
 
@@ -523,6 +533,7 @@ func Verify(log *AuditLog, kr Keyring) (*VerifiedState, error) {
 	state := VerifiedState{
 		auditLog: log,
 		keyring:  kr,
+		pluginUI: pluginUI,
 	}
 
 	if err := verify(&state); err != nil {
