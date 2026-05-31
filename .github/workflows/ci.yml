@@ -46,20 +46,29 @@ jobs:
           name: coverage-report
           path: coverage.out
 
-      - name: Build
+      - name: Build (amd64)
         run: task build
 
-      - name: Upload binary artifact
+      - name: Build (arm64)
+        run: task build-arm
+
+      - name: Upload binary artifact (amd64)
         uses: actions/upload-artifact@v7
         with:
           name: sesam
           path: sesam
 
+      - name: Upload binary artifact (arm64)
+        uses: actions/upload-artifact@v7
+        with:
+          name: sesam-arm
+          path: sesam-arm
+
       - name: Stage binaries for Docker validation
         run: |
           mkdir -p linux/amd64 linux/arm64
           cp sesam linux/amd64/app
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o linux/arm64/app .
+          cp sesam-arm linux/arm64/app
 
       - name: Build Docker image (validation only)
         uses: docker/build-push-action@v7
