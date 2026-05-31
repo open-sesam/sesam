@@ -1,8 +1,0 @@
-#!/bin/sh
-
-if [ ! -x "$(command -v sesam)" ]; then
-  echo "sesam is not in the PATH or not executable"
-  exit 1
-fi
-
-sesam "$@"

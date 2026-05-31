@@ -172,7 +172,7 @@ func cleanup(
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if name == ".git" || name == ".sesam" {
+			if name == gitSuffix || name == sesamSuffix {
 				return filepath.SkipDir
 			}
 			return nil
@@ -220,8 +220,8 @@ func cleanup(
 	// Deleting might have created some empty dirs.
 	// Make sure we delete them too.
 	_, err = recursiveRmEmptyDirs(sesamDir, map[string]bool{
-		".sesam": true,
-		".git":   true,
+		sesamSuffix: true,
+		gitSuffix:   true,
 	})
 	return err
 }

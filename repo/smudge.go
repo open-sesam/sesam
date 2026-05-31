@@ -65,6 +65,7 @@ type filterProcessHandler struct {
 // the prefix before `.sesam/objects/` is the sesamDir).
 const (
 	sesamSuffix    = ".sesam"
+	gitSuffix      = ".git"
 	objectsSegment = sesamSuffix + "/objects/"
 )
 

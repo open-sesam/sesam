@@ -27,9 +27,6 @@ var sesamReadmeTemplate string
 //go:embed assets/config.default
 var configTemplate string
 
-//go:embed assets/git-sesam.bin
-var gitSesamShim string
-
 // resolveSesamDirAndGit resolves the sesam repository root and opens the git repository
 // closes to it.
 //
@@ -115,7 +112,6 @@ func ensureSesamDirs(sesamDir string) error {
 		filepath.Join(sesamDir, sesamSuffix),
 		filepath.Join(sesamDir, sesamSuffix, "signkeys"),
 		filepath.Join(sesamDir, sesamSuffix, "tmp"),
-		filepath.Join(sesamDir, sesamSuffix, "bin"),
 	}
 
 	for _, dir := range dirs {
@@ -208,13 +204,13 @@ func ensureGitConfig(r *git.Repository, sesamDir string) error {
 
 	mergeSection := cfg.Raw.Section("merge").Subsection("sesam-merge")
 	filterSection := cfg.Raw.Section("filter").Subsection("sesam-filter")
+	aliasSection := cfg.Raw.Section("alias")
 
 	mergeConfigured := mergeSection.Option("driver") != ""
 	processConfigured := filterSection.Option("process") != ""
+	aliasConfigured := aliasSection.Option("sesam") != ""
 
-	// Both legacy drivers and the long-running filter process are already
-	// installed; nothing to do.
-	if mergeConfigured && processConfigured {
+	if mergeConfigured && processConfigured && aliasConfigured {
 		return nil
 	}
 
@@ -230,6 +226,10 @@ func ensureGitConfig(r *git.Repository, sesamDir string) error {
 		return err
 	}
 	smudgeCmd, err := sesamCmd(r, sesamDir, "smudge")
+	if err != nil {
+		return err
+	}
+	aliasCmd, err := sesamCmd(r, sesamDir)
 	if err != nil {
 		return err
 	}
@@ -254,6 +254,14 @@ func ensureGitConfig(r *git.Repository, sesamDir string) error {
 		// handler load the audit log once per session for the
 		// sealer-vs-access check. Requires git >= 2.11 (Dec 2016).
 		filterSection.SetOption("process", smudgeCmd)
+	}
+
+	if !aliasConfigured {
+		// `!` makes git execute the value as a shell command instead of
+		// looking for `git-sesam` on PATH, so users get `git sesam ...`
+		// without any PATH plumbing. Git runs the command with cwd =
+		// worktree root, which is what sesam wants anyway.
+		aliasSection.SetOption("sesam", "!"+aliasCmd)
 	}
 
 	if err := r.SetConfig(cfg); err != nil {
@@ -368,31 +376,6 @@ func appendMissingLines(path, content string, mode os.FileMode) error {
 		return fmt.Errorf("failed to update %s: %w", path, err)
 	}
 
-	return nil
-}
-
-func ensureGitSesamShim(sesamDir string) error {
-	shimPath := filepath.Join(sesamDir, sesamSuffix, "bin", "git-sesam")
-	if _, err := os.Stat(shimPath); err == nil {
-		slog.Info("git-sesam shim already exists", slog.String("path", shimPath))
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to access git-sesam shim %s: %w", shimPath, err)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(shimPath), 0o700); err != nil {
-		return fmt.Errorf("failed to create shim directory for %s: %w", shimPath, err)
-	}
-
-	if err := renameio.WriteFile(shimPath, []byte(gitSesamShim), 0o755); err != nil {
-		return fmt.Errorf("failed to create git-sesam shim at %s: %w", shimPath, err)
-	}
-
-	slog.Info(
-		"created git-sesam shim",
-		slog.String("path", shimPath),
-		slog.String("hint", "add .sesam/bin to your PATH"),
-	)
 	return nil
 }
 

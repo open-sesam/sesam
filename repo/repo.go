@@ -156,9 +156,6 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 	if err := ensureGitConfig(gitRepo, resolvedDir); err != nil {
 		return nil, err
 	}
-	if err := ensureGitSesamShim(resolvedDir); err != nil {
-		return nil, err
-	}
 	if err := ensureSesamReadme(resolvedDir); err != nil {
 		return nil, err
 	}
@@ -368,8 +365,8 @@ func (r *Repo) Clean(ctx context.Context, opts CleanOpts) error {
 	}
 
 	_, err := recursiveRmEmptyDirs(r.sesamDir, map[string]bool{
-		".sesam": true,
-		".git":   true,
+		sesamSuffix: true,
+		gitSuffix:   true,
 	})
 
 	return err
