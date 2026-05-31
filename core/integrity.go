@@ -143,8 +143,8 @@ func VerifyIntegrity(sesamDir string, state *VerifiedState, kr Keyring) *Integri
 	}
 
 	diskSigMap := make(map[string]*secretFooter, len(diskSigs))
-	for idx := range diskSigs {
-		diskSigMap[diskSigs[idx].RevealedPath] = &diskSigs[idx]
+	for _, sig := range diskSigs {
+		diskSigMap[sig.RevealedPath] = sig
 	}
 
 	for _, vs := range state.Secrets {
@@ -157,12 +157,7 @@ func VerifyIntegrity(sesamDir string, state *VerifiedState, kr Keyring) *Integri
 	}
 
 	if state.LastSealRootHash != "" {
-		sigPtrs := make([]*secretFooter, 0, len(diskSigs))
-		for idx := range diskSigs {
-			sigPtrs = append(sigPtrs, &diskSigs[idx])
-		}
-
-		diskRootHash := buildRootHash(sigPtrs)
+		diskRootHash := buildRootHash(diskSigs)
 		if diskRootHash != state.LastSealRootHash {
 			report.add("", fmt.Sprintf(
 				"root hash mismatch: log says %s, disk says %s",
