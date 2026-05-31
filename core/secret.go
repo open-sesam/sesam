@@ -34,24 +34,22 @@ type secretFooter struct {
 	SealedBy     string `json:"sealed_by"`
 }
 
-// Seal encrypts `s` into .sesam/objects/$revealed_path.sesam
-// The `sealedByUser` is the user that initiated the seal.
-// The `tee` writer is optional and can be used to get a hold on the encrypted stream that is
-// written to the disk.
-func (s *secret) Seal(sealedByUser string) (*secretFooter, error) {
+// Seal encrypts `s` to `destPath` for `sealedByUser`. The destination
+// directory is created if missing; the write goes through a renameio temp
+// file in .sesam/tmp so the final destination is replaced atomically.
+func (s *secret) Seal(destPath, sealedByUser string) (*secretFooter, error) {
 	rd, err := os.Open(filepath.Join(s.Mgr.SesamDir, s.RevealedPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secret: %w", err)
 	}
 	defer closeLogged(rd)
 
-	cryptPath := s.Mgr.cryptPath(s.RevealedPath)
-	if err := os.MkdirAll(filepath.Dir(cryptPath), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o700); err != nil {
 		return nil, err
 	}
 
 	tmpDir := filepath.Join(s.Mgr.SesamDir, ".sesam", "tmp")
-	wc, err := renameio.TempFile(tmpDir, cryptPath)
+	wc, err := renameio.TempFile(tmpDir, destPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open encrypted file in repo: %w", err)
 	}
@@ -88,7 +86,7 @@ func (s *secret) Seal(sealedByUser string) (*secretFooter, error) {
 	sig, err := s.Mgr.Signer.Sign(SesamDomainSignSecretTag, hashBytes)
 	if err != nil {
 		_ = os.Remove(wc.Name())
-		return nil, fmt.Errorf("failed to compute signature for %s: %w", cryptPath, err)
+		return nil, fmt.Errorf("failed to compute signature for %s: %w", destPath, err)
 	}
 
 	ss := secretFooter{
@@ -192,6 +190,7 @@ func (s *secret) Reveal() error {
 		dstFd,
 		ids,
 		s.Mgr.Keyring,
+		s.Mgr.State.SealerAuthorized,
 	); err != nil {
 		return err
 	}
@@ -203,7 +202,37 @@ func (s *secret) Reveal() error {
 	return dstFd.CloseAtomicallyReplace()
 }
 
-func revealStreamAndVerify(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity, kr Keyring) error {
+// BadSealerError is returned by revealStreamAndVerify when the
+// footer's signature is cryptographically valid but the named sealer is
+// not in the access list for that path. The decryption itself
+// succeeded, so callers may choose to accept the plaintext anyway -
+// the git smudge filter does this so `git checkout` keeps working
+// against history written before the auth-check shipped.
+type BadSealerError struct {
+	SealedBy string
+	Path     string
+}
+
+func (e *BadSealerError) Error() string {
+	return fmt.Sprintf("sealer %s was not authorized to seal %s", e.SealedBy, e.Path)
+}
+
+// revealStreamAndVerify decrypts the stream in `srcFd`, then validates the footer.
+// The result is piped to `dstFd`. For decryption the identities in `ageIds` are used.
+// For verification `kr` checks if the signature fits to the encrypted content and
+// using `authorize` we can check if the user was actually allowed to seal this file
+// (to avoid having users overwrite secrets they have no access to).
+//
+// Authorization failure is returned as a typed *BadSealerError so callers
+// can distinguish "decryption succeeded, policy says no" from cryptographic
+// failures and apply different policies.
+func revealStreamAndVerify(
+	srcFd io.ReadSeeker,
+	dstFd io.Writer,
+	ageIds []age.Identity,
+	kr Keyring,
+	authorize func(user, path string) bool,
+) error {
 	sha3HashBytes, sigDesc, err := revealStream(srcFd, dstFd, ageIds)
 	if err != nil {
 		return err
@@ -215,18 +244,31 @@ func revealStreamAndVerify(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Id
 		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", computedhash, sigDesc.Hash)
 	}
 
-	if _, err := kr.Verify(
+	sealer, err := kr.Verify(
 		SesamDomainSignSecretTag,
 		sha3HashBytes,
 		sigDesc.Signature,
 		sigDesc.SealedBy,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf("signature verification failed for %s: %w", sigDesc.RevealedPath, err)
+	}
+
+	if authorize != nil && !authorize(sealer, sigDesc.RevealedPath) {
+		return &BadSealerError{SealedBy: sealer, Path: sigDesc.RevealedPath}
 	}
 
 	return nil
 }
 
+// revealStream decrypts the stream without checking the footer
+// signature or the sealer's authorization. Currently used by
+// ShowSecret (git diff textconv) where loading the audit log isn't
+// worth the latency on a read-only display path, and by RevealBlob
+// when the caller passes nil for kr/authorize. Authoritative
+// verification lives in revealStreamAndVerify (sesam reveal,
+// smudge with audit-log loaded) and VerifyIntegrity
+// (sesam verify --all).
 func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) ([]byte, *secretFooter, error) {
 	ageRd, sigDesc, err := readSignature(srcFd)
 	if err != nil {

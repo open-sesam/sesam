@@ -10,12 +10,8 @@ exec sesam init --user admin
 exec git add -A
 exec git commit -m 'init sesam'
 
-# Sanity-check: smudge filter is configured to use sesam.
-exec git config --local filter.sesam-filter.smudge
-stdout 'sesam smudge'
-
-# Long-running filter process is configured for git 2.11+; the legacy
-# smudge/clean keys remain as a fallback for older git versions.
+# Sanity-check: long-running filter process is configured (sesam requires
+# git >= 2.11, so we no longer set the legacy smudge/clean keys).
 exec git config --local filter.sesam-filter.process
 stdout 'sesam smudge'
 
@@ -32,12 +28,17 @@ stdout 'modified readme'
 
 # Check out the OLD encrypted object from the first commit.
 # Git calls smudge with the old blob; smudge must reveal the original plaintext.
-exec git checkout HEAD~1 -- .sesam/objects/README.md.sesam
+exec git checkout HEAD~1
 
 # README.md must now have the original content from the first commit.
 exec cat README.md
 stdout 'sesam bootstrap'
 ! stdout 'modified readme'
+
+# Go back to the new commit
+exec git checkout master
+exec cat README.md
+stdout 'modified readme'
 
 -- modified_readme.md --
 # modified readme

@@ -57,7 +57,7 @@ func TestReadAllSignatures(t *testing.T) {
 
 	for _, p := range []string{"secrets/a", "secrets/b", "nested/c"} {
 		s := testSecret(t, mgr, p, "content-"+p)
-		_, err := s.Seal("testuser")
+		_, err := s.Seal(s.Mgr.cryptPath(s.RevealedPath), "testuser")
 		require.NoError(t, err)
 	}
 

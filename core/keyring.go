@@ -25,7 +25,7 @@ type Keyring interface {
 	// Verify checks if `signature` fits to `data` using any of the signing keys.
 	// `userHint` will test the sign keys of this user first. It may be empty.
 	// The user that matched the signature is returned or an error.
-	Verify(domain SignDomain, data []byte, signature string, userHint string) (string, error)
+	Verify(domain SignDomain, data []byte, signature, userHint string) (string, error)
 
 	// Recipients returns all recipients for a specific set of users.
 	Recipients(users []string) Recipients
@@ -104,7 +104,7 @@ func (mk *MemoryKeyring) verifySingle(domain SignDomain, key, data []byte, signa
 	return nil
 }
 
-func (mk *MemoryKeyring) Verify(domain SignDomain, data []byte, signature string, userHint string) (string, error) {
+func (mk *MemoryKeyring) Verify(domain SignDomain, data []byte, signature, userHint string) (string, error) {
 	// With a large number of users it will be inefficient to iterate over all keys.
 	// In most cases we know which user we expect to have made the signature.
 	// In this case we can just hit this one first.

@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -12,10 +13,13 @@ func integritySetup(t *testing.T) (*SecretManager, *VerifiedState) {
 	t.Helper()
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/db", "password123")
-	sig, err := secret.Seal("testuser")
+	sig, err := secret.Seal(mgr.cryptPath(secret.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	state := &VerifiedState{
+		Users: []VerifiedUser{
+			{Name: "testuser", Groups: []string{"admin"}},
+		},
 		Secrets: []VerifiedSecret{
 			{RevealedPath: "secrets/db", AccessGroups: []string{"admin"}},
 		},
@@ -52,7 +56,7 @@ func TestIntegrityExtraFile(t *testing.T) {
 
 	// Seal an extra secret that is not registered in state.
 	extra := testSecret(t, mgr, "secrets/extra", "extra-content")
-	_, err := extra.Seal("testuser")
+	_, err := extra.Seal(mgr.cryptPath(extra.RevealedPath), "testuser")
 	require.NoError(t, err)
 
 	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
@@ -82,13 +86,16 @@ func TestIntegrityMultipleSecrets(t *testing.T) {
 	var secrets []VerifiedSecret
 	for _, p := range []string{"secrets/a", "secrets/b", "secrets/c"} {
 		s := testSecret(t, mgr, p, "content-"+p)
-		sig, err := s.Seal("testuser")
+		sig, err := s.Seal(mgr.cryptPath(s.RevealedPath), "testuser")
 		require.NoError(t, err)
 		sigs = append(sigs, sig)
 		secrets = append(secrets, VerifiedSecret{RevealedPath: p, AccessGroups: []string{"admin"}})
 	}
 
 	state := &VerifiedState{
+		Users: []VerifiedUser{
+			{Name: "testuser", Groups: []string{"admin"}},
+		},
 		Secrets:          secrets,
 		LastSealRootHash: buildRootHash(sigs),
 	}
@@ -123,7 +130,7 @@ func TestIntegrityHashMismatch(t *testing.T) {
 func TestIntegrityBadSignature(t *testing.T) {
 	mgr, state := integritySetup(t)
 
-	// Replace the keyring with a fresh key for the same user name — hash matches
+	// Replace the keyring with a fresh key for the same user name - hash matches
 	// but the signature cannot be verified against the new key.
 	other := newTestUser(t, "testuser")
 	mgr.Keyring = testKeyring(t, other)
@@ -147,6 +154,48 @@ func TestIntegrityReportString(t *testing.T) {
 		require.Contains(t, r.String(), "secrets/x")
 		require.Contains(t, r.String(), "test error")
 	})
+}
+
+// VerifyIntegrity must reject a footer where the cryptographically valid
+// sealer never had access to the secret - the same defense as on reveal,
+// applied during sesam verify --all.
+func TestIntegrityRejectsUnauthorizedSealer(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	bob := newTestUser(t, "bob")
+	kr := testKeyring(t, admin, bob)
+
+	state := &VerifiedState{
+		Users: []VerifiedUser{
+			{Name: "admin", Groups: []string{"admin"}},
+			{Name: "bob", Groups: []string{"dev"}},
+		},
+		Secrets: []VerifiedSecret{
+			{RevealedPath: "secrets/admin-only", AccessGroups: []string{"admin"}},
+		},
+	}
+
+	bobMgr := &SecretManager{
+		SesamDir: sesamDir,
+		Signer:   bob.Signer,
+	}
+
+	writeSecret(t, sesamDir, "secrets/admin-only", "bob's payload")
+	bad := &secret{
+		Mgr:          bobMgr,
+		RevealedPath: "secrets/admin-only",
+		Recipients:   kr.Recipients([]string{"admin"}),
+	}
+	cryptPath := filepath.Join(sesamDir, ".sesam", "objects", "secrets/admin-only.sesam")
+	sig, err := bad.Seal(cryptPath, "bob")
+	require.NoError(t, err)
+
+	state.LastSealRootHash = buildRootHash([]*secretFooter{sig})
+
+	report := VerifyIntegrity(sesamDir, state, kr)
+	require.False(t, report.OK())
+	require.Contains(t, report.String(), "not authorized")
+	require.Contains(t, report.String(), "bob")
 }
 
 func TestIntegrityErrorString(t *testing.T) {

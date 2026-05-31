@@ -20,7 +20,7 @@ exec git checkout HEAD -- .sesam/objects/README.md.sesam
 exec cat README.md
 stdout 'sesam bootstrap'
 
-# Remove the sealed object from git — the secret is gone from the tree.
+# Remove the sealed object from git - the secret is gone from the tree.
 exec git rm .sesam/objects/README.md.sesam
 exec git commit -m 'drop secret'
 

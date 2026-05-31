@@ -131,3 +131,51 @@ func TestReadFileLimitedMissing(t *testing.T) {
 	_, err := ReadFileLimited("/nonexistent/path", 100)
 	require.Error(t, err)
 }
+
+// On a normal filesystem (tmpfs/ext4/...) copyFile must hardlink:
+// dst should share the same inode as src. We rely on Stat().Sys() being
+// a *syscall.Stat_t on unix. The test is skipped on platforms where
+// that doesn't hold.
+func TestCopyFileHardlinksWhenPossible(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	require.NoError(t, os.WriteFile(src, []byte("payload"), 0o600))
+
+	require.NoError(t, copyFile(src, dst))
+
+	srcInfo, err := os.Stat(src)
+	require.NoError(t, err)
+	dstInfo, err := os.Stat(dst)
+	require.NoError(t, err)
+	require.True(t, os.SameFile(srcInfo, dstInfo),
+		"copyFile should hardlink when src and dst sit on the same fs")
+
+	// Sanity: contents match.
+	got, err := os.ReadFile(dst)
+	require.NoError(t, err)
+	require.Equal(t, []byte("payload"), got)
+}
+
+// When the hardlink fails (e.g. dst already exists), copyFile must fall
+// back to a byte-for-byte copy and not surface an error.
+func TestCopyFileFallsBackOnLinkFailure(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	require.NoError(t, os.WriteFile(src, []byte("payload"), 0o600))
+	require.NoError(t, os.WriteFile(dst, []byte("stale"), 0o600))
+
+	require.NoError(t, copyFile(src, dst))
+
+	got, err := os.ReadFile(dst)
+	require.NoError(t, err)
+	require.Equal(t, []byte("payload"), got)
+
+	srcInfo, err := os.Stat(src)
+	require.NoError(t, err)
+	dstInfo, err := os.Stat(dst)
+	require.NoError(t, err)
+	require.False(t, os.SameFile(srcInfo, dstInfo),
+		"fallback path should produce a fresh inode, not link to src")
+}
