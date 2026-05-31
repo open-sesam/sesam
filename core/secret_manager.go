@@ -62,11 +62,6 @@ func BuildSecretManager(
 	_ = os.RemoveAll(tmpDir)
 	_ = os.MkdirAll(tmpDir, 0o700)
 
-	// Recover from a possibly crashed previous SealAll. This always nukes
-	// the staging dir; the marker file is left in place if the swap already
-	// happened so the user can be informed about the inconsistency.
-	mgr.recoverIncompleteSeal()
-
 	for _, vsecret := range state.Secrets {
 		accessUsers := state.UsersForSecret(vsecret.RevealedPath)
 		recps := keyring.Recipients(accessUsers)
@@ -107,60 +102,6 @@ func (sm *SecretManager) objectsDir() string {
 
 func (sm *SecretManager) stageDir() string {
 	return filepath.Join(sm.SesamDir, ".sesam", "seal-stage")
-}
-
-func (sm *SecretManager) sealMarkerPath() string {
-	return filepath.Join(sm.SesamDir, ".sesam", "seal-marker")
-}
-
-// recoverIncompleteSeal cleans up after a SealAll that crashed.
-//
-// On-disk markers we may find:
-//
-//	.sesam/seal-stage   - either a half-built staging dir (pre-swap) or
-//	                      the OLD objects tree awaiting GC (post-swap)
-//	.sesam/seal-marker  - written before the swap, removed after the audit entry
-//
-// Whatever the cause, removing both is safe: objects/ is left as whichever
-// tree the last successful swap committed, and Verify will catch any
-// remaining log/disk RootHash divergence on the next load.
-//
-// The "marker present, stage missing" case is not expected with the
-// current ordering (stage GC is the very last step of SealAll). We still
-// surface it as a warning in case it happens via some out-of-band edit.
-func (sm *SecretManager) recoverIncompleteSeal() {
-	stagePath := sm.stageDir()
-	markerPath := sm.sealMarkerPath()
-
-	stageExists := pathExists(stagePath)
-	markerExists := pathExists(markerPath)
-
-	if stageExists {
-		slog.Warn(
-			"removing leftover seal-stage from a previously crashed seal",
-			slog.String("path", stagePath),
-		)
-		_ = os.RemoveAll(stagePath)
-
-		if markerExists {
-			_ = os.Remove(markerPath)
-		}
-
-		return
-	}
-
-	if markerExists {
-		//nolint:gosec
-		markerData, _ := os.ReadFile(markerPath)
-		slog.Warn(
-			"seal-marker file present without staging dir: previous `sesam seal` "+
-				"may have swapped files but failed to write the audit log entry. "+
-				"Run `sesam verify` to confirm log/disk consistency; if it fails, "+
-				"re-run `sesam seal` to commit a fresh audit entry.",
-			slog.String("expected_root_hash", strings.TrimSpace(string(markerData))),
-			slog.String("marker_path", markerPath),
-		)
-	}
 }
 
 // AddSecret adds a new secret to be managed by sesam
@@ -209,28 +150,28 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 
 // SealAll seals all known secrets.
 //
-// Strategy: stage the full new objects tree under .sesam/seal-stage, then
-// atomically swap it with .sesam/objects, then append the seal entry to
-// the audit log. If a secret has no plaintext available (typically because
-// the current user is not a recipient and therefore can't decrypt it), the
-// existing ciphertext is copied over verbatim so it survives the swap.
+// Strategy: stage the full new objects tree under .sesam/seal-stage,
+// append the seal entry to the audit log, then atomically swap stage
+// with .sesam/objects. If a secret has no plaintext available (typically
+// because the current user is not a recipient and therefore can't decrypt
+// it), the existing ciphertext is copied over verbatim so it survives the
+// swap.
 //
-// The two on-disk commit points are:
+// The audit log append is the single commit point:
 //
-//  1. atomic dir-swap (objects on disk reflect the new RootHash)
-//  2. audit log append (RootHash recorded in the log)
+//  1. stage written: nothing committed; on failure, drop the stage dir.
+//  2. audit entry appended: state is final; recovery must drive disk to it.
+//  3. swap done: disk matches the log.
 //
-// A marker file (.sesam/seal-marker) is written before the swap and removed
-// after the audit append. If the process dies between (1) and (2) the
-// marker stays on disk and BuildSecretManager surfaces a warning on the
-// next load.
+// If we crash between (2) and (3) the stage dir is left in place and
+// recoverIncompleteSeal (in Verify) finishes the swap on the next load by
+// matching stage's root hash against the audit log's RootHash.
 func (sm *SecretManager) SealAll() error {
 	stage := sm.stageDir()
 	objects := sm.objectsDir()
-	markerPath := sm.sealMarkerPath()
 
-	// Defensive: any leftover stage from a prior crash should already have
-	// been cleaned by BuildSecretManager, but rebuild a fresh one.
+	// Any leftover stage from a prior crash is normally cleaned by Verify
+	// on load, but rebuild a fresh one here defensively.
 	if err := os.RemoveAll(stage); err != nil {
 		return fmt.Errorf("clear stage dir: %w", err)
 	}
@@ -243,18 +184,11 @@ func (sm *SecretManager) SealAll() error {
 		return fmt.Errorf("create objects dir: %w", err)
 	}
 
-	swapped := false
-	defer func() {
-		// If we never committed, drop the half-built stage.
-		if !swapped {
-			_ = os.RemoveAll(stage)
-		}
-	}()
-
 	sigs := make([]*secretFooter, 0, len(sm.secrets))
 	for _, s := range sm.secrets {
 		sig, _, err := sm.stageSecret(s, stage)
 		if err != nil {
+			_ = os.RemoveAll(stage)
 			return fmt.Errorf("stage %s: %w", s.RevealedPath, err)
 		}
 		sigs = append(sigs, sig)
@@ -262,22 +196,8 @@ func (sm *SecretManager) SealAll() error {
 
 	rootHash := buildRootHash(sigs)
 
-	// Marker is the breadcrumb for "we are about to swap, audit entry not
-	// yet written". Written via renameio so a partial marker can never
-	// confuse the recovery logic.
-	if err := renameio.WriteFile(markerPath, []byte(rootHash), 0o600); err != nil {
-		return fmt.Errorf("write seal marker: %w", err)
-	}
-
-	if err := atomicSwapDirs(stage, objects); err != nil {
-		// No swap happened, so the marker is stale; remove it.
-		_ = os.Remove(markerPath)
-		return fmt.Errorf("swap stage dir into place: %w", err)
-	}
-	swapped = true
-
-	// Audit entry FIRST - keeps the swap-vs-log window as small as
-	// possible. Old objects are now in `stage` and will be reaped below.
+	// Audit entry FIRST so the log is the commit point. If this fails
+	// nothing was committed and the stage dir is just throwaway work.
 	if err := sm.State.FeedEntry(
 		sm.Signer,
 		newAuditEntry(sm.Signer.UserName(), &DetailSeal{
@@ -285,21 +205,21 @@ func (sm *SecretManager) SealAll() error {
 			FilesSealed: len(sigs),
 		}),
 	); err != nil {
-		// Marker stays so BuildSecretManager surfaces the inconsistency
-		// (disk advanced past audit log) on the next load. The old
-		// objects in `stage` are left for the recovery path to reap.
-		return fmt.Errorf("append audit seal entry (disk already swapped, marker retained): %w", err)
+		_ = os.RemoveAll(stage)
+		return fmt.Errorf("append audit seal entry: %w", err)
 	}
 
-	if err := os.Remove(markerPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove seal marker after audit entry: %w", err)
+	if err := atomicSwapDirs(stage, objects); err != nil {
+		// Audit entry already committed: leave stage in place so the
+		// next Verify can match its root hash and finish the swap.
+		return fmt.Errorf("swap stage dir into place: %w", err)
 	}
 
 	// stage now holds the OLD objects tree. Reap it last so the
 	// commit-on-disk and commit-in-log windows are not separated by an
 	// expensive recursive delete.
 	if err := os.RemoveAll(stage); err != nil {
-		// Not fatal: the next BuildSecretManager will retry the cleanup.
+		// Not fatal: the next Verify will retry the cleanup.
 		slog.Warn(
 			"failed to remove old objects after seal swap",
 			slog.String("err", err.Error()),
