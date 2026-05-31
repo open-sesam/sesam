@@ -77,6 +77,23 @@ func (opts RepoOpts) pluginUI() *core.PluginUI {
 	return core.NewNonInteractivePluginUI()
 }
 
+// LoadIdentities reads the user's age identity files. It is the cheap
+// startup step — it does NOT load the audit log or any managers, and is
+// suitable for tools like `sesam show` that are invoked as a git textconv
+// during `git diff`, where loading the audit log per blob would be
+// prohibitively expensive.
+func LoadIdentities(identityPaths []string, opts RepoOpts) (core.Identities, error) {
+	return loadIdentities(identityPaths, keyringFingerprint, opts.pluginUI())
+}
+
+// ResolveSesamDir resolves the sesam repository root. It walks up from
+// sesamPath until it finds a directory containing `.sesam/`, or returns
+// the absolute path of sesamPath unchanged if none is found (the latter
+// is used during `sesam init` before `.sesam/` exists).
+func ResolveSesamDir(sesamPath string) (string, error) {
+	return resolveSesamDir(sesamPath)
+}
+
 // Init initializes a new sesam repository at sesamDir.
 //
 // initialUserName becomes the first admin user; ids are paths to the admin's
@@ -374,34 +391,17 @@ func (r *Repo) Clean(ctx context.Context, opts CleanOpts) error {
 	return err
 }
 
-// Show will try to guess what `object` is and write a human-readable
-// presentation of it to `out`. Similar to `git show`, it produces output that
-// can be easily diffed.
-func (r *Repo) Show(object string, out io.Writer) error {
+// ShowUser writes a JSON description of the named user to `out`. The bool
+// return is true iff a user with that name was found (mirrors the underlying
+// core.UserManager.ShowUser contract). Use this for the user-info fallback
+// in `sesam show`; audit-log and secret display do NOT need a Repo and
+// should go through core.ShowAuditLog / core.ShowSecret directly, since
+// loading a Repo is prohibitively expensive on the git-diff textconv path.
+func (r *Repo) ShowUser(name string, out io.Writer) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// TODO: For audit and secrets we don't need the full load.
-	// TODO: Show secret metadata (access list).
-	if filepath.Base(object) == "log.jsonl" {
-		ok, err := core.ShowAuditLog(r.identities, object, out)
-		if ok {
-			return err
-		}
-		return fmt.Errorf("cannot open audit log: %s", object)
-	}
-
-	ok, err := core.ShowSecret(r.sesamDir, r.identities, object, out)
-	if ok {
-		return err
-	}
-
-	ok, err = r.user.ShowUser(object, out)
-	if ok {
-		return err
-	}
-
-	return fmt.Errorf("not sure what this is: %s", object)
+	return r.user.ShowUser(name, out)
 }
 
 // UserTell adds the new user to the list of valid users. They will be in

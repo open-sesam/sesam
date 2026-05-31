@@ -102,7 +102,7 @@ func Main(args []string) error {
 			{
 				Name:   "show",
 				Flags:  flagsShow,
-				Action: commands.WithRepo(commands.HandleShow),
+				Action: commands.HandleShow,
 				Usage:  "Show objects managed by sesam",
 				Arguments: []cli.Argument{
 					&cli.StringArg{
