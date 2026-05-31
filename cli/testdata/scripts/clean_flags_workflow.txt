@@ -1,7 +1,9 @@
 # Verify the --dry-run, --quiet, and --aggressive flags on `sesam clean`.
 #
-# `leak-src.txt` is force-added to git (sesam's .gitignore would otherwise
-# block it) so the test can re-create the leaked plaintext between scenarios.
+# Default `sesam clean` loads the Repo and removes only sesam-known revealed
+# plaintexts (the paths recorded in the audit log; here just README.md after
+# init). `sesam clean --aggressive` skips the Repo load and instead walks the
+# worktree, removing every untracked file (still skipping `.sesam/`).
 
 exec git init
 exec git config user.email test@sesam.dev
@@ -11,33 +13,33 @@ exec sesam init --user admin
 exec git add -A
 exec git commit -m 'init sesam'
 
-exec git add -f leak-src.txt
-exec git commit -m 'add leak source'
+# README.md is the only revealed plaintext sesam knows about after init.
+exists README.md
 
-# --- scenario 1: --dry-run prints but does not delete ---
-exec cp leak-src.txt leaked.txt
+# --- scenario 1: --dry-run prints the known plaintext but does not delete it.
 exec sesam clean --dry-run
-stdout 'leaked\.txt'
-exists leaked.txt
+stdout 'README\.md'
+exists README.md
 
-# --- scenario 2: --quiet stays silent and deletes ---
+# --- scenario 2: --quiet stays silent and deletes the known plaintext.
 exec sesam clean --quiet
 ! stdout '.+'
-! exists leaked.txt
+! exists README.md
 
-# --- scenario 3: without --aggressive, files inside .sesam/ survive ---
-mkdir -p .sesam/tmp/scratch
-exec cp leak-src.txt .sesam/tmp/scratch/spill
-exec cp leak-src.txt leaked.txt
+# An arbitrary untracked file in the worktree is invisible to the default
+# (soft) clean because sesam only acts on paths it has recorded.
+cp leaked.txt leaked.txt
+exec sesam reveal
 exec sesam clean
+exists leaked.txt
+
+# --- scenario 3: --aggressive walks the worktree and wipes leaked.txt too,
+#                 still skipping the contents of `.sesam/`.
+mkdir -p .sesam/tmp/scratch
+exec cp leaked.txt .sesam/tmp/scratch/spill
+exec sesam clean --aggressive --quiet
 ! exists leaked.txt
 exists .sesam/tmp/scratch/spill
 
-# --- scenario 4: --aggressive also wipes untracked files inside .sesam/ ---
-exec cp leak-src.txt leaked.txt
-exec sesam clean --aggressive
-! exists leaked.txt
-! exists .sesam/tmp/scratch/spill
-
--- leak-src.txt --
+-- leaked.txt --
 leaked plaintext

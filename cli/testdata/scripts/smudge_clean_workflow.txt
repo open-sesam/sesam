@@ -28,6 +28,11 @@ exec git commit -m 'drop secret'
 # revealed plaintext.
 exists README.md
 
-# sesam clean must wipe every untracked file left behind by a previous smudge.
-exec sesam clean
+# `sesam clean --aggressive` must wipe every untracked file left behind by a
+# previous smudge. We use --aggressive because the default soft clean loads a
+# Repo to compute the deletion set; after `git rm` of a sealed object the
+# audit log refers to a file that no longer exists, so the load would fail.
+# --aggressive is the recovery mode: open git, walk the worktree, delete
+# anything untracked.
+exec sesam clean --aggressive --quiet
 ! exists README.md
