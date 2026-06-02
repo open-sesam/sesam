@@ -216,9 +216,7 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, err
 	}
 
-	if err := withWorkingDir(resolvedDir, func() error {
-		return r.secret.AddSecret("README.md", []string{"admin"})
-	}); err != nil {
+	if err := r.secret.AddSecret("README.md", []string{"admin"}); err != nil {
 		return nil, fmt.Errorf("failed to bootstrap readme secret: %w", err)
 	}
 
@@ -533,14 +531,12 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string) error {
 		return ErrClosed
 	}
 
-	return withWorkingDir(r.sesamDir, func() error {
-		for _, revealedPath := range revealedPaths {
-			if err := r.secret.AddSecret(revealedPath, groups); err != nil {
-				return fmt.Errorf("failed to add secret %q: %w", revealedPath, err)
-			}
+	for _, revealedPath := range revealedPaths {
+		if err := r.secret.AddSecret(revealedPath, groups); err != nil {
+			return fmt.Errorf("failed to add secret %q: %w", revealedPath, err)
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // SecretRemove removes managed secrets at the given paths.

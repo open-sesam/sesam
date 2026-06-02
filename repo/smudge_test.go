@@ -305,20 +305,17 @@ func TestLoadAuditViewFromIndex_HappyPath(t *testing.T) {
 	ids, err := LoadIdentities([]string{admin.Path}, RepoOpts{})
 	require.NoError(t, err)
 
-	require.NoError(t, withWorkingDir(dir, func() error {
-		kr, authorize, err := loadAuditViewFromIndex(".", ids)
-		require.NoError(t, err)
-		require.NotNil(t, kr)
-		require.NotNil(t, authorize)
+	kr, authorize, err := loadAuditViewFromIndex(dir, ids)
+	require.NoError(t, err)
+	require.NotNil(t, kr)
+	require.NotNil(t, authorize)
 
-		require.Contains(t, kr.ListUsers(), "admin",
-			"admin must be in the index-derived keyring")
-		require.True(t, authorize("admin", "README.md"),
-			"admin must be authorized to seal the bootstrap README")
-		require.False(t, authorize("nobody", "README.md"),
-			"unknown sealer must not be authorized")
-		return nil
-	}))
+	require.Contains(t, kr.ListUsers(), "admin",
+		"admin must be in the index-derived keyring")
+	require.True(t, authorize("admin", "README.md"),
+		"admin must be authorized to seal the bootstrap README")
+	require.False(t, authorize("nobody", "README.md"),
+		"unknown sealer must not be authorized")
 }
 
 // Regression: loadAuditView must actually read the audit log from the git
@@ -345,19 +342,16 @@ func TestLoadAuditView_PrefersIndexOverWorktree(t *testing.T) {
 	ids, err := LoadIdentities([]string{admin.Path}, RepoOpts{})
 	require.NoError(t, err)
 
-	require.NoError(t, withWorkingDir(dir, func() error {
-		kr, _, err := loadAuditView(".", ids)
-		require.NoError(t, err)
+	kr, _, err := loadAuditView(dir, ids)
+	require.NoError(t, err)
 
-		users := kr.ListUsers()
-		require.Contains(t, users, "admin")
-		require.NotContains(t, users, "bob",
-			"loadAuditView must read from the git INDEX (admin only); "+
-				"if bob is present the function silently fell back to the "+
-				"worktree copy — the InitHash fix in "+
-				"loadAuditViewFromIndex has regressed")
-		return nil
-	}))
+	users := kr.ListUsers()
+	require.Contains(t, users, "admin")
+	require.NotContains(t, users, "bob",
+		"loadAuditView must read from the git INDEX (admin only); "+
+			"if bob is present the function silently fell back to the "+
+			"worktree copy — the InitHash fix in "+
+			"loadAuditViewFromIndex has regressed")
 }
 
 // loadAuditView is the high-level entry point: index first, worktree as a
@@ -372,11 +366,8 @@ func TestLoadAuditView_PrefersIndex(t *testing.T) {
 	ids, err := LoadIdentities([]string{admin.Path}, RepoOpts{})
 	require.NoError(t, err)
 
-	require.NoError(t, withWorkingDir(dir, func() error {
-		kr, authorize, err := loadAuditView(".", ids)
-		require.NoError(t, err)
-		require.Contains(t, kr.ListUsers(), "admin")
-		require.True(t, authorize("admin", "README.md"))
-		return nil
-	}))
+	kr, authorize, err := loadAuditView(dir, ids)
+	require.NoError(t, err)
+	require.Contains(t, kr.ListUsers(), "admin")
+	require.True(t, authorize("admin", "README.md"))
 }

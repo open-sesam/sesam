@@ -439,20 +439,3 @@ func stageInitFiles(r *git.Repository, sesamDir, configPath string) error {
 
 	return nil
 }
-
-func withWorkingDir(dir string, fn func() error) error {
-	originalDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to read current directory: %w", err)
-	}
-
-	if err := os.Chdir(dir); err != nil {
-		return fmt.Errorf("failed to switch directory to %s: %w", dir, err)
-	}
-
-	defer func() {
-		_ = os.Chdir(originalDir)
-	}()
-
-	return fn()
-}
