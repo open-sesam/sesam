@@ -45,29 +45,17 @@ Initialize sesam in the current repository
 
 **--user**="": Initial admin user name
 
-### help, h
-
-Shows a list of commands or help for one command
-
 ## verify
 
 Verify sesam signatures and encryption state
 
 **--help, -h**: show help
 
-### help, h
-
-Shows a list of commands or help for one command
-
 ## id
 
 Identify the current user by age identity
 
 **--help, -h**: show help
-
-### help, h
-
-Shows a list of commands or help for one command
 
 ## seal
 
@@ -77,19 +65,11 @@ Encrypt and sign changed secrets
 
 **--help, -h**: show help
 
-### help, h
-
-Shows a list of commands or help for one command
-
 ## open, reveal
 
 Decrypt all secrets available to the current user
 
 **--help, -h**: show help
-
-### help, h
-
-Shows a list of commands or help for one command
 
 ## add
 
@@ -99,19 +79,11 @@ Add a secret file or directory
 
 **--help, -h**: show help
 
-### help, h
-
-Shows a list of commands or help for one command
-
 ## rm
 
 Remove a secret file or directory
 
 **--help, -h**: show help
-
-### help, h
-
-Shows a list of commands or help for one command
 
 ## tell
 
@@ -125,10 +97,6 @@ Add a person to a group and re-encrypt affected files
 
 **--user**="": User name to add
 
-### help, h
-
-Shows a list of commands or help for one command
-
 ## kill
 
 Remove a person from a group
@@ -137,19 +105,11 @@ Remove a person from a group
 
 **--user**="": User name to remove
 
-### help, h
-
-Shows a list of commands or help for one command
-
 ## show
 
 Show objects managed by sesam
 
 **--help, -h**: show help
-
-### help, h
-
-Shows a list of commands or help for one command
 
 ## list, ls
 
@@ -167,10 +127,6 @@ List known secrets and metadata
 
 **--json**: Print output as JSON
 
-#### help, h
-
-Shows a list of commands or help for one command
-
 ### users
 
 List persons, groups, and access
@@ -178,14 +134,6 @@ List persons, groups, and access
 **--help, -h**: show help
 
 **--json**: Print output as JSON
-
-#### help, h
-
-Shows a list of commands or help for one command
-
-### help, h
-
-Shows a list of commands or help for one command
 
 ## clean
 
@@ -198,12 +146,4 @@ Remove revealed plaintext and other untracked files from the sesam directory
 **--help, -h**: show help
 
 **--quiet**: Don't print files
-
-### help, h
-
-Shows a list of commands or help for one command
-
-## help, h
-
-Shows a list of commands or help for one command
 
