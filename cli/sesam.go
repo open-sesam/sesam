@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/open-sesam/sesam/cli/commands"
 	"github.com/urfave/cli/v3"
@@ -20,8 +22,6 @@ import (
 // build managers, defer Close) and hand it to the handler; the wrapping
 // makes it obvious which commands need an initialized sesam repository.
 func Main(args []string) error {
-	slog.SetDefault(slog.New(newPrettyHandler(os.Stderr, slog.LevelWarn)))
-
 	app := &cli.Command{
 		Name:  "sesam",
 		Usage: "Manage encrypted secrets in git repositories",
@@ -172,5 +172,22 @@ func Main(args []string) error {
 		},
 	}
 
-	return app.Run(context.Background(), args)
+	app.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+		if cmd.Bool("no-color") {
+			// hack to make sure color is always ignored without passing it to everywhere we use termenv.
+			_ = os.Setenv("NO_COLOR", "1")
+		}
+
+		slog.SetDefault(slog.New(newPrettyHandler(os.Stderr, slog.LevelWarn)))
+		return ctx, nil
+	}
+
+	ctx, cancel := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+	)
+	defer cancel()
+
+	return app.Run(ctx, args)
 }

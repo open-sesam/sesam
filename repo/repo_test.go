@@ -49,7 +49,13 @@ func TestInit_Negative(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := tc.dirFn(t)
-			_, err := Init(context.Background(), dir, tc.user, []string{admin.Path}, RepoOpts{})
+			_, err := Init(
+				context.Background(),
+				dir,
+				tc.user,
+				[]string{admin.Path},
+				RepoInitOpts{},
+			)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantErr)
 		})

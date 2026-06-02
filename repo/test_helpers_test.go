@@ -73,7 +73,7 @@ func bootstrapRepo(t *testing.T, admin *testIdentity) (string, *Repo) {
 		dir,
 		admin.Name,
 		[]string{admin.Path},
-		RepoOpts{LockTimeout: 5 * time.Second},
+		RepoInitOpts{RepoOpts: RepoOpts{LockTimeout: 5 * time.Second}},
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = r.Close() })

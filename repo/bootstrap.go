@@ -27,8 +27,8 @@ var sesamReadmeTemplate string
 //go:embed assets/config.default
 var configTemplate string
 
-// resolveSesamDirAndGit resolves the sesam repository root and opens the git repository
-// closes to it.
+// resolveSesamDirAndGit resolves the sesam repository root and opens the git
+// repository close to it.
 //
 // It starts at sesamPath and walks upward until the git worktree root,
 // returning the first directory that contains .sesam. If none is found, it
@@ -37,6 +37,7 @@ func resolveSesamDirAndGit(sesamPath string) (string, *git.Repository, error) {
 	if strings.TrimSpace(sesamPath) == "" {
 		sesamPath = "."
 	}
+
 	absPath, err := filepath.Abs(filepath.Clean(sesamPath))
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to resolve repo path %s: %w", sesamPath, err)
@@ -196,7 +197,7 @@ func ensureDefaultGitAttributes(sesamDir string) error {
 	return appendMissingLines(gitAttributesPath, gitattributesTemplate, 0o600)
 }
 
-func ensureGitConfig(r *git.Repository, sesamDir string) error {
+func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) error {
 	cfg, err := r.ConfigScoped(gogitconfig.LocalScope)
 	if err != nil {
 		return fmt.Errorf("read local git config: %w", err)
@@ -221,28 +222,36 @@ func ensureGitConfig(r *git.Repository, sesamDir string) error {
 	if err != nil {
 		return err
 	}
+
 	textconvCmd, err := sesamCmd(r, sesamDir, "show")
 	if err != nil {
 		return err
 	}
+
 	smudgeCmd, err := sesamCmd(r, sesamDir, "smudge")
 	if err != nil {
 		return err
 	}
+
 	aliasCmd, err := sesamCmd(r, sesamDir)
 	if err != nil {
 		return err
 	}
 
 	if !mergeConfigured {
+		opts.PrintStep("  • installing merge driver...")
+
 		mergeSection.SetOption("name", "merge the audit log of sesam")
 		mergeSection.SetOption("driver", mergeCmd)
 
+		opts.PrintStep("  • installing diff driver...")
 		diffSection := cfg.Raw.Section("diff").Subsection("sesam-diff")
 		diffSection.SetOption("textconv", textconvCmd)
 	}
 
 	if !processConfigured {
+		opts.PrintStep("  • installing smudge filter...")
+
 		// required=false means a smudge failure doesn't abort
 		// `git checkout`; the encrypted bytes land instead. We rely
 		// on this to keep history bisects working when the audit log
@@ -261,6 +270,7 @@ func ensureGitConfig(r *git.Repository, sesamDir string) error {
 		// looking for `git-sesam` on PATH, so users get `git sesam ...`
 		// without any PATH plumbing. Git runs the command with cwd =
 		// worktree root, which is what sesam wants anyway.
+		opts.PrintStep("  • making sure sesam can be called as `git sesam`...")
 		aliasSection.SetOption("sesam", "!"+aliasCmd)
 	}
 

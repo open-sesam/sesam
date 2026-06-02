@@ -5,37 +5,38 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 
-	"golang.org/x/term"
-)
-
-const (
-	ansiReset  = "\033[0m"
-	ansiYellow = "\033[33m"
-	ansiRed    = "\033[31m"
+	"github.com/muesli/termenv"
 )
 
 // prettyHandler is a slog.Handler that writes human-readable output:
 //   - INFO: message and attrs only, no level label or timestamp
 //   - WARN: "WARN" prefix (yellow when writing to a terminal)
 //   - ERROR: "ERR " prefix (red when writing to a terminal)
+//
+// Colour detection (TTY, NO_COLOR, CLICOLOR) is delegated to termenv so the
+// handler stays consistent with the rest of the CLI output. The styled level
+// prefixes are precomputed: when colour is unavailable termenv emits the plain
+// label with no escape codes.
 type prettyHandler struct {
-	w     io.Writer
-	mu    sync.Mutex
-	pre   []slog.Attr
-	level slog.Level
-	color bool
+	w          io.Writer
+	mu         sync.Mutex
+	pre        []slog.Attr
+	level      slog.Level
+	errPrefix  string
+	warnPrefix string
 }
 
 func newPrettyHandler(w io.Writer, level slog.Level) *prettyHandler {
-	color := false
-	if f, ok := w.(*os.File); ok {
-		color = term.IsTerminal(int(f.Fd()))
+	out := termenv.NewOutput(w)
+	return &prettyHandler{
+		w:          w,
+		level:      level,
+		errPrefix:  out.String("ERR ").Foreground(out.Color("#800000")).String(),
+		warnPrefix: out.String("WARN").Foreground(out.Color("#808000")).String() + " ",
 	}
-	return &prettyHandler{w: w, level: level, color: color}
 }
 
 func (h *prettyHandler) Enabled(_ context.Context, l slog.Level) bool {
@@ -50,17 +51,9 @@ func (h *prettyHandler) Handle(_ context.Context, r slog.Record) error {
 
 	switch {
 	case r.Level >= slog.LevelError:
-		if h.color {
-			sb.WriteString(ansiRed + "ERR " + ansiReset)
-		} else {
-			sb.WriteString("ERR ")
-		}
+		sb.WriteString(h.errPrefix)
 	case r.Level >= slog.LevelWarn:
-		if h.color {
-			sb.WriteString(ansiYellow + "WARN" + ansiReset + " ")
-		} else {
-			sb.WriteString("WARN ")
-		}
+		sb.WriteString(h.warnPrefix)
 	}
 
 	sb.WriteString(r.Message)
@@ -83,7 +76,13 @@ func (h *prettyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	pre := make([]slog.Attr, len(h.pre)+len(attrs))
 	copy(pre, h.pre)
 	copy(pre[len(h.pre):], attrs)
-	return &prettyHandler{w: h.w, level: h.level, pre: pre, color: h.color}
+	return &prettyHandler{
+		w:          h.w,
+		level:      h.level,
+		pre:        pre,
+		errPrefix:  h.errPrefix,
+		warnPrefix: h.warnPrefix,
+	}
 }
 
 func (h *prettyHandler) WithGroup(_ string) slog.Handler {

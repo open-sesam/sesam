@@ -38,6 +38,11 @@ var flagsGeneral = []cli.Flag{
 		Usage:   "Repository lock wait timeout (e.g. 5s, 30s, 2m)",
 		Sources: cli.EnvVars("SESAM_LOCK_TIMEOUT"),
 	},
+	&cli.BoolFlag{
+		Name:    "no-color",
+		Usage:   "Disable color always",
+		Sources: cli.EnvVars("NO_COLOR"),
+	},
 }
 
 // flagsInit are specific to repository bootstrap.
