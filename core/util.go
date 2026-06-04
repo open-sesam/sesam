@@ -32,7 +32,7 @@ func ValidUserName(name string) error {
 	return nil
 }
 
-func validSecretPathFormat(sesamDir, revealedPath string) error {
+func validSecretPathFormat(_ string, revealedPath string) error {
 	if len(revealedPath) == 0 {
 		return fmt.Errorf("empty file path not allowed: %s", revealedPath)
 	}
@@ -45,7 +45,8 @@ func validSecretPathFormat(sesamDir, revealedPath string) error {
 		return fmt.Errorf("path may not include '..': %s", revealedPath)
 	}
 
-	if strings.HasPrefix(revealedPath, filepath.Join(sesamDir, ".sesam")) {
+	cleanRevealedPath := filepath.Clean(revealedPath)
+	if cleanRevealedPath == ".sesam" || strings.HasPrefix(cleanRevealedPath, ".sesam"+string(filepath.Separator)) {
 		return fmt.Errorf("secret path may not live in .sesam: %s", revealedPath)
 	}
 
@@ -57,15 +58,19 @@ func validSecretPath(sesamDir, revealedPath string) error {
 		return err
 	}
 
-	absRevealedPath := filepath.Join(sesamDir, revealedPath)
-	absRevealedPath = filepath.Clean(absRevealedPath)
-	info, err := os.Stat(absRevealedPath)
+	root, err := os.OpenRoot(sesamDir)
 	if err != nil {
-		return fmt.Errorf("failed to stat %s: %w", absRevealedPath, err)
+		return fmt.Errorf("open root %s: %w", sesamDir, err)
+	}
+	defer closeLogged(root)
+
+	info, err := root.Stat(revealedPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat %s: %w", revealedPath, err)
 	}
 
 	if m := info.Mode(); !m.IsRegular() {
-		return fmt.Errorf("%s is not a regular file: %v", absRevealedPath, m)
+		return fmt.Errorf("%s is not a regular file: %v", revealedPath, m)
 	}
 
 	return nil

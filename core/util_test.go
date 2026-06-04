@@ -87,13 +87,37 @@ func (fc failCloser) Close() error {
 
 func TestValidSecretPathFormatSesamSubdir(t *testing.T) {
 	// A relative path that points inside .sesam/ must be rejected.
-	err := validSecretPathFormat(".", filepath.Join(".sesam", "signkeys", "admin.age"))
+	err := validSecretPathFormat(t.TempDir(), filepath.Join(".sesam", "signkeys", "admin.age"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), ".sesam")
 }
 
 func TestValidSecretPathFormatNormalPath(t *testing.T) {
 	require.NoError(t, validSecretPathFormat(".", "secrets/db_password"))
+}
+
+func TestValidSecretPathAcceptsRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets", "db_password")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte("secret"), 0o600))
+
+	require.NoError(t, validSecretPath(dir, filepath.Join("secrets", "db_password")))
+}
+
+func TestValidSecretPathRejectsSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "db_password")
+	require.NoError(t, os.WriteFile(target, []byte("outside"), 0o600))
+
+	link := filepath.Join(dir, "secrets")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks not available: %v", err)
+	}
+
+	err := validSecretPath(dir, filepath.Join("secrets", "db_password"))
+	require.Error(t, err)
 }
 
 func TestCloseLoggedNoError(t *testing.T) {
