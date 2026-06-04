@@ -14,18 +14,16 @@ import (
 
 // Main builds and runs the sesam CLI command tree.
 //
-// The command surface is intentionally broad, but only a subset is fully
-// implemented right now. Unimplemented commands return explicit errors so the
-// caller can detect feature gaps in scripts and tests.
-//
 // Commands wrapped in commands.WithRepo load a sesam Repo (acquire lock,
 // build managers, defer Close) and hand it to the handler; the wrapping
 // makes it obvious which commands need an initialized sesam repository.
 func Main(args []string) error {
 	app := &cli.Command{
-		Name:  "sesam",
-		Usage: "Manage encrypted secrets in git repositories",
-		Flags: flagsGeneral,
+		Name:                   "sesam",
+		Usage:                  "Manage encrypted secrets in git repositories",
+		Flags:                  flagsGeneral,
+		EnableShellCompletion:  true,
+		UseShortOptionHandling: true,
 		Commands: []*cli.Command{
 			{
 				Name:   "init",
@@ -68,7 +66,15 @@ func Main(args []string) error {
 				Flags:     flagsAdd,
 				ArgsUsage: "<path>",
 				Action:    commands.WithRepo(commands.HandleAdd),
-				Usage:     "Add a secret file or directory",
+				Usage:     "Add a secret file or directory at `PATH`",
+				Arguments: []cli.Argument{
+					&cli.StringArgs{
+						Name:      "Path",
+						UsageText: "The path to add or change",
+						Min:       1,
+						Max:       -1,
+					},
+				},
 			},
 			{
 				Name:      "rm",
@@ -179,7 +185,18 @@ func Main(args []string) error {
 			_ = os.Setenv("NO_COLOR", "1")
 		}
 
-		slog.SetDefault(slog.New(newPrettyHandler(os.Stderr, slog.LevelWarn)))
+		logLevels := map[int]slog.Level{
+			0: slog.LevelWarn,
+			1: slog.LevelInfo,
+			2: slog.LevelDebug,
+		}
+
+		logLevel, ok := logLevels[flagsVerboseCount]
+		if !ok {
+			logLevel = slog.LevelDebug
+		}
+
+		slog.SetDefault(slog.New(newPrettyHandler(os.Stderr, logLevel)))
 		return ctx, nil
 	}
 

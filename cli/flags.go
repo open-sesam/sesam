@@ -8,6 +8,8 @@ import (
 
 const flagUser = "user"
 
+var flagsVerboseCount int
+
 // flagsGeneral are shared by most top-level commands.
 //
 // They describe the operator identity and repository/config roots.
@@ -42,6 +44,14 @@ var flagsGeneral = []cli.Flag{
 		Name:    "no-color",
 		Usage:   "Disable color always",
 		Sources: cli.EnvVars("NO_COLOR"),
+	},
+	&cli.BoolFlag{
+		Name:    "verbose",
+		Aliases: []string{"v"},
+		Usage:   "Print more log output",
+		Config: cli.BoolConfig{
+			Count: &flagsVerboseCount,
+		},
 	},
 }
 
