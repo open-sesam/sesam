@@ -531,6 +531,10 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string) error {
 		return ErrClosed
 	}
 
+	// TODO: When being outside the repo something like repo/secret.txt should also work as path.
+	//       Same when being in a sub-dir and doing "add ../secret.txt" We should resolve that here.
+	//       We should only care it is inside of the sesam dir.
+	// TODO: When walking "." then we should skip .sesam and .git
 	for _, revealedPath := range revealedPaths {
 		if err := r.secret.AddSecret(revealedPath, groups); err != nil {
 			return fmt.Errorf("failed to add secret %q: %w", revealedPath, err)
