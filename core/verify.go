@@ -152,7 +152,7 @@ outer:
 	return users
 }
 
-func (s *VerifiedState) RequireAdmin(entry *auditEntrySigned) (*VerifiedUser, error) {
+func (s *VerifiedState) RequireAdmin(entry *AuditEntrySigned) (*VerifiedUser, error) {
 	adminUser, exists := s.UserExists(entry.ChangedBy)
 	if !exists {
 		return nil, fmt.Errorf("user %s does not exist at seq_id=%d", entry.ChangedBy, entry.SeqID)
@@ -166,7 +166,7 @@ func (s *VerifiedState) RequireAdmin(entry *auditEntrySigned) (*VerifiedUser, er
 }
 
 // FeedEntry adds `entry` to audit log, then updates the state by verifying the entry.
-func (s *VerifiedState) FeedEntry(signer Signer, entry *auditEntry) error {
+func (s *VerifiedState) FeedEntry(signer Signer, entry *AuditEntry) error {
 	if _, err := s.auditLog.AddEntry(signer, entry, func() error {
 		return verify(s)
 	}); err != nil {
@@ -185,7 +185,7 @@ func groupsToMap(groups []string) map[string]bool {
 	return groupMap
 }
 
-func verifyInit(log *AuditLog, state *VerifiedState, entry *auditEntrySigned, kr Keyring) error {
+func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
 	if entry.SeqID != 1 {
 		return fmt.Errorf("init at wrong seq_id: %d (!= 1)", entry.SeqID)
 	}
@@ -211,7 +211,7 @@ func verifyInit(log *AuditLog, state *VerifiedState, entry *auditEntrySigned, kr
 	return registerUser(state, admin, kr)
 }
 
-func verifyUserTell(log *AuditLog, state *VerifiedState, entry *auditEntrySigned, kr Keyring) error {
+func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
 	tellDetails, err := parseDetail[DetailUserTell](entry)
 	if err != nil {
 		return fmt.Errorf("parse user.tell detail: %w", err)
@@ -287,7 +287,7 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 	return nil
 }
 
-func verifyUserKill(log *AuditLog, state *VerifiedState, entry *auditEntrySigned, kr Keyring) error {
+func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
 	if _, err := state.RequireAdmin(entry); err != nil {
 		return err
 	}
@@ -332,7 +332,7 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *auditEntrySigned
 	return nil
 }
 
-func verifySecretChange(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) error {
+func verifySecretChange(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
 	scd, err := parseDetail[DetailSecretChange](entry)
 	if err != nil {
 		return fmt.Errorf("parse detail: %w", err)
@@ -386,7 +386,7 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 	return nil
 }
 
-func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) error {
+func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
 	srd, err := parseDetail[DetailSecretRemove](entry)
 	if err != nil {
 		return fmt.Errorf("parse detail: %w", err)
@@ -421,7 +421,7 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *auditEntrySi
 	return nil
 }
 
-func verifySeal(log *AuditLog, state *VerifiedState, entry *auditEntrySigned) error {
+func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
 	sealDetails, err := parseDetail[DetailSeal](entry)
 	if err != nil {
 		return fmt.Errorf("parse detail: %w", err)
@@ -572,8 +572,8 @@ func verify(state *VerifiedState) error {
 	kr := state.keyring
 	newState := *state
 
-	var previousEntry *auditEntrySigned
-	err := log.Iterate(func(idx int, entry *auditEntrySigned) error {
+	var previousEntry *AuditEntrySigned
+	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
 		if entry.SeqID <= newState.VerifiedUntil {
 			return nil
 		}
@@ -583,17 +583,17 @@ func verify(state *VerifiedState) error {
 		// to verify signatures.
 		var err error
 		switch entry.Operation {
-		case opInit:
+		case OpInit:
 			err = verifyInit(log, &newState, entry, kr)
-		case opUserTell:
+		case OpUserTell:
 			err = verifyUserTell(log, &newState, entry, kr)
-		case opUserKill:
+		case OpUserKill:
 			err = verifyUserKill(log, &newState, entry, kr)
-		case opSeal:
+		case OpSeal:
 			err = verifySeal(log, &newState, entry)
-		case opSecretChange:
+		case OpSecretChange:
 			err = verifySecretChange(log, &newState, entry)
-		case opSecretRemove:
+		case OpSecretRemove:
 			err = verifySecretRemove(log, &newState, entry)
 		default:
 			err = fmt.Errorf("unexpected core.Operation: %#v", entry.Operation)

@@ -642,3 +642,14 @@ func (r *Repo) Whoami() (string, error) {
 	}
 	return whoami, nil
 }
+
+func (r *Repo) Log(fn func(e *core.AuditEntrySigned) error) error {
+	ents := r.auditLog.Entries
+	for idx := len(ents) - 1; idx >= 0; idx-- {
+		if err := fn(&ents[idx]); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

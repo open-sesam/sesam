@@ -76,7 +76,7 @@ func TestRotateKeyPreservesChain(t *testing.T) {
 	}), nil)
 	require.NoError(t, err)
 
-	pre := make([]auditEntrySigned, len(al.Entries))
+	pre := make([]AuditEntrySigned, len(al.Entries))
 	copy(pre, al.Entries)
 	preInitHash := al.InitHash
 
@@ -125,7 +125,7 @@ func TestRotateKeyAllowsContinuedAppend(t *testing.T) {
 	defer loaded.Close()
 
 	require.Len(t, loaded.Entries, 2)
-	require.Equal(t, opUserTell, loaded.Entries[1].Operation)
+	require.Equal(t, OpUserTell, loaded.Entries[1].Operation)
 }
 
 // TestRotateKeyChangesRecipientSet covers the kill scenario: the recipient

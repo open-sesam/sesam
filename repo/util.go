@@ -33,14 +33,17 @@ func expandHomeDir(path string) (string, error) {
 }
 
 func identityToUser(identities core.Identities, users map[string]core.Recipients) (string, *core.Identity, error) {
+	var lastErr error
+
 	for _, identity := range identities {
-		user, err := core.IdentityToUser(identity, users)
-		if err == nil {
+		var user string
+		user, lastErr = core.IdentityToUser(identity, users)
+		if lastErr == nil {
 			return user, identity, nil
 		}
 	}
 
-	return "", nil, fmt.Errorf("no loaded identity matches any known user")
+	return "", nil, fmt.Errorf("no loaded identity matches any known user (%w)", lastErr)
 }
 
 // loadIdentities reads all given paths and parses all identities. Encrypted

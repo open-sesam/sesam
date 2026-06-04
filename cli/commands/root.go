@@ -35,21 +35,6 @@ func HandleID(_ context.Context, _ *cli.Command, r *repo.Repo) error {
 	return nil
 }
 
-// HandleServer starts the optional sesam API server.
-func HandleServer(_ context.Context, _ *cli.Command) error {
-	return handleStub("server")
-}
-
-// HandleLog prints audit-log history.
-func HandleLog(_ context.Context, _ *cli.Command) error {
-	return handleStub("log")
-}
-
-// HandleUndo reverts secret state to a prior revision.
-func HandleUndo(_ context.Context, _ *cli.Command) error {
-	return handleStub("undo")
-}
-
 // HandleApply applies config changes to audit and metadata state.
 func HandleApply(_ context.Context, _ *cli.Command) error {
 	return handleStub("apply")

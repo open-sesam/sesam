@@ -138,3 +138,10 @@ var flagsListUsers = []cli.Flag{
 }
 
 var flagsShow = []cli.Flag{}
+
+var flagsLog = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "json",
+		Usage: "Print as JSON",
+	},
+}

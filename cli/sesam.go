@@ -59,7 +59,8 @@ func Main(args []string) error {
 			{
 				Name:   "log",
 				Hidden: true,
-				Action: commands.HandleLog,
+				Flags:  flagsLog,
+				Action: commands.WithRepo(commands.HandleLog),
 				Usage:  "Show the audit log of secret changes",
 			},
 			{

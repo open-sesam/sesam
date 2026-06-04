@@ -599,7 +599,7 @@ func TestRequireAdmin(t *testing.T) {
 		},
 	}
 
-	entry := &auditEntrySigned{auditEntry: auditEntry{ChangedBy: "alice", SeqID: 1}}
+	entry := &AuditEntrySigned{AuditEntry: AuditEntry{ChangedBy: "alice", SeqID: 1}}
 	u, err := state.RequireAdmin(entry)
 	require.NoError(t, err)
 	require.Equal(t, "alice", u.Name)
