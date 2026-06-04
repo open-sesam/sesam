@@ -77,10 +77,12 @@ and are tightly bound to the env-var injection workflow.
 | Tool | Lang | Since | Encryption | Scope | Multi-user model | Audit / rotation |
 |------|------|-------|------------|-------|------------------|------------------|
 | [**dotenvx**](https://dotenvx.com) | JavaScript | 2023 | ECIES (secp256k1) + AES-256-GCM | values inside `.env` | shared private key, distributed out of band | `dotenvx rotate`, no audit log |
+| [**fnox**](https://github.com/jdx/fnox) | Rust | 2025 | age (X25519 / SSH) or cloud KMS (AWS / Azure / GCP)⁵ | per-value in `fnox.toml`, env-inject via `fnox exec` | age recipients or KMS IAM | no audit log; rotation not documented |
 | [**varlock**](https://varlock.dev) | TypeScript | 2025 | optional / plugin-driven⁴ | `.env.schema` + values, plugin-resolved | delegated to plugins (1Password, AWS, …) | depends on plugin |
 | [**secretspec**](https://secretspec.dev) | Rust | 2025 | none (delegates to backend) | declares which secrets an app needs | delegated to backend (keyring, 1Password, AWS Secrets Manager, Vault, …) | depends on backend |
 
-⁴ varlock's primary security story is leak prevention (schema, scanning, log redaction) rather than a specific encryption scheme — encrypted local state is mentioned but not deeply documented.
+⁴ varlock's primary security story is leak prevention (schema, scanning, log redaction) rather than a specific encryption scheme — encrypted local state is mentioned but not deeply documented.  
+⁵ A jack-of-all-trades: behind one `fnox.toml` it spans encryption providers (age/SSH, AWS/Azure/GCP KMS), remote backends (Vault, 1Password, Infisical, cloud secret managers) and even short-lived credential leasing. It leans decentralized — the default age/SSH path keeps secrets git-native with no server — but can equally act as a thin client over a centralized store. Either way the unit is an individual value (per key, providers mixable), not a file.
 
 **Why these don't really compete with sesam:** the unit of management
 is environment variables consumed at runtime, not files in a repo. None

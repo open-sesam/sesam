@@ -258,6 +258,16 @@ h1, h2, h3, h4, h5, h6 {
     background: transparent !important;
 }
 
+/* --- Menu bar (header) icons ---
+   Enlarge the stock mdBook header glyphs (sidebar toggle, theme, search,
+   print and the GitHub repo link). They inherit body's 1.6rem (16px) by
+   default — FontAwesome's `.fa` is `font-size: inherit` — so anything at or
+   below 1.6rem looks unchanged. 2.4rem matches the menu title. */
+
+#menu-bar i.fa {
+    font-size: 2.4rem;
+}
+
 /* --- Arabic geometric background pattern --- */
 
 .page-wrapper .page {

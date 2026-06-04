@@ -11,6 +11,7 @@ sesam
 [--help|-h]
 [--identity|-i]=[value]
 [--lock-timeout]=[value]
+[--no-color]
 [--sesam-dir|-r|--repo]=[value]
 ```
 
@@ -29,6 +30,8 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 **--identity, -i**="": Path to the age identity (can be given several times)
 
 **--lock-timeout**="": Repository lock wait timeout (e.g. 5s, 30s, 2m) (default: 5s)
+
+**--no-color**: Disable color always
 
 **--sesam-dir, -r, --repo**="": Directory where .sesam lives (default: ".")
 
