@@ -2,10 +2,13 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 
+	json "github.com/neilotoole/jsoncolor"
+
+	"github.com/mattn/go-colorable"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
@@ -49,11 +52,15 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 }
 
 func printJSON(value any) error {
-	payload, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal json output: %w", err)
+	out := colorable.NewColorable(os.Stdout) // needed for Windows
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+
+	// IsColorTerminal checks NO_COLOR env variable
+	if json.IsColorTerminal(os.Stdout) {
+		colors := json.DefaultColors()
+		enc.SetColors(colors)
 	}
 
-	fmt.Println(string(payload))
-	return nil
+	return enc.Encode(value)
 }

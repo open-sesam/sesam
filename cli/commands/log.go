@@ -8,27 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattn/go-colorable"
 	"github.com/muesli/termenv"
 	"github.com/open-sesam/sesam/core"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
-
-	json "github.com/neilotoole/jsoncolor"
 )
 
 func HandleLogJSON(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-	out := colorable.NewColorable(os.Stdout) // needed for Windows
-	enc := json.NewEncoder(out)
-	enc.SetIndent("", "  ")
-
-	if json.IsColorTerminal(os.Stdout) && !cmd.Bool("no-color") {
-		colors := json.DefaultColors()
-		enc.SetColors(colors)
-	}
-
 	return r.Log(func(e *core.AuditEntrySigned) error {
-		return enc.Encode(e)
+		return printJSON(e)
 	})
 }
 
