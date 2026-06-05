@@ -10,7 +10,7 @@ tasks:
     aliases:
       - build-cli
     cmds:
-      - cmd: go build -o sesam .
+      - cmd: CGO_ENABLED=0 go build -ldflags "-s -w" -o sesam .
     sources:
       - ./*.go
       - ./**/*.go

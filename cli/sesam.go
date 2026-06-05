@@ -18,9 +18,20 @@ import (
 // build managers, defer Close) and hand it to the handler; the wrapping
 // makes it obvious which commands need an initialized sesam repository.
 func Main(args []string) error {
+	cli.VersionFlag = &cli.BoolFlag{
+		Name:  "version",
+		Usage: "Print the version and exit",
+	}
+
+	// Print just the banner, not the default "<name> version <v>" line.
+	cli.VersionPrinter = func(cmd *cli.Command) {
+		fmt.Fprintln(cmd.Root().Writer, cmd.Version)
+	}
+
 	app := &cli.Command{
 		Name:                   "sesam",
 		Usage:                  "Manage encrypted secrets in git repositories",
+		Version:                resolveBuildInfo().String(),
 		Flags:                  flagsGeneral,
 		EnableShellCompletion:  true,
 		UseShortOptionHandling: true,
