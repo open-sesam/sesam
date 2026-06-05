@@ -13,6 +13,7 @@ sesam
 [--lock-timeout]=[value]
 [--no-color]
 [--sesam-dir|-r|--repo]=[value]
+[--verbose|-v]
 ```
 
 **Usage**:
@@ -34,6 +35,8 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 **--no-color**: Disable color always
 
 **--sesam-dir, -r, --repo**="": Directory where .sesam lives (default: ".")
+
+**--verbose, -v**: Print more log output
 
 
 # COMMANDS
@@ -76,7 +79,7 @@ Decrypt all secrets available to the current user
 
 ## add
 
-Add a secret file or directory
+Add a secret file or directory at `PATH`
 
 **--group**="": Group assignment for the secret (repeatable)
 

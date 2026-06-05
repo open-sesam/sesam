@@ -1,0 +1,16 @@
+[tools]
+task = "3.51.1"
+go = "1.26"
+golangci-lint = "2.12.2"
+gotestsum = "1.13.0"
+gofumpt = "0.10"
+
+# changelog:
+git-cliff = "2.13.1"
+
+# docs:
+cargo-binstall = "1.19.1"
+mdbook = "0.4.52"
+"cargo:mdbook-admonish" = "1.18.0"
+"cargo:mdbook-gitinfo" = "1.2.0"
+"cargo:mdbook-pagetoc" = "0.2.2"

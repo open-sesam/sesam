@@ -1,9 +1,26 @@
 # Installation
 
-While this is in development, you can only clone the repo and run `task` to build the software.
+While this is in development, you can only clone the repo and compile it from source.
+We will update this document once binary distributions are available.
 
-```admonish note
-You need to install [task](https://taskfile.dev/) for this.
+# Compiling from source 
+
+We use [mise](https://mise.en.dev/) to manage our development tools. All you
+have to do, to have exactly the same tools in exactly the right version is to
+follow the [guide](https://mise.en.dev/getting-started.html). The TL;DR is:
+
+```bash
+$ git clone https://github.com/open-sesam/sesam.git
+$ mise install
+$ task # `sesam` will be in the top-level dir - copy it where you want to.
+```
+
+This is also the best way to start working on `sesam` if you want to open a PR.
+
+Alternatively, if you already have `go` installed:
+
+```bash
+$ go install github.com/open-sesam/sesam/cli@latest
 ```
 
 # Changelog
