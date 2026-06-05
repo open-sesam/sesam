@@ -11,6 +11,14 @@ import (
 // into Main.Version for untagged builds (e.g. 0.0.0-20260605162431-50d585884077).
 var pseudoVersion = regexp.MustCompile(`[0-9]{14}-[0-9a-f]{12}`)
 
+// describeAhead matches the "N commits past the tag" suffix that `git describe`
+// appends, e.g. the "-5-gae27c29" in "v0.1.2-5-gae27c29".
+var describeAhead = regexp.MustCompile(`-(\d+)-g[0-9a-f]+$`)
+
+// bareHash matches a plain abbreviated commit hash, i.e. the
+// `git describe --always` fallback emitted when no tag is reachable.
+var bareHash = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+
 // Build metadata. These are injected at release time via the linker, e.g.
 // See Taskfile.yml.
 //
@@ -40,10 +48,39 @@ func isReleaseVersion(v string) bool {
 	return !pseudoVersion.MatchString(v)
 }
 
+// normalizeVersion turns a raw version source (a linker-injected `git describe`
+// string, or runtime/debug's Main.Version) into the displayed version:
+//
+//	v0.1.2             -> 0.1.2         (built exactly on a tag)
+//	v0.1.2-5-gae27c29  -> 0.1.2-dev+5   (5 commits past the last tag)
+//	ae27c29            -> ""            (no tag reachable; caller falls back)
+//	""                 -> ""
+//
+// A trailing "-dirty" is dropped; dirtiness is surfaced separately in the
+// banner via buildInfo.IsDirty.
+func normalizeVersion(raw string) string {
+	raw = strings.TrimSuffix(raw, "-dirty")
+	if raw == "" {
+		return ""
+	}
+
+	if m := describeAhead.FindStringSubmatch(raw); m != nil {
+		base := strings.TrimPrefix(raw[:len(raw)-len(m[0])], "v")
+		return base + "-dev+" + m[1]
+	}
+
+	if bareHash.MatchString(raw) {
+		// `--always` fell back to a bare hash: no tag exists yet.
+		return ""
+	}
+
+	return strings.TrimPrefix(raw, "v")
+}
+
 // resolveBuildInfo merges the linker-injected values with the VCS information
 // embedded by the Go toolchain, filling in sane defaults for anything missing.
 func resolveBuildInfo() buildInfo {
-	v, c, d := version, "", ""
+	v, c, d := normalizeVersion(version), "", ""
 	var goVersion string
 	var isDirty bool
 
@@ -54,7 +91,7 @@ func resolveBuildInfo() buildInfo {
 		// `go build` reports "(devel)" or a pseudo-version, neither of which
 		// is a tag we want to show.
 		if v == "" && isReleaseVersion(bi.Main.Version) {
-			v = bi.Main.Version
+			v = normalizeVersion(bi.Main.Version)
 		}
 
 		for _, s := range bi.Settings {
@@ -75,7 +112,6 @@ func resolveBuildInfo() buildInfo {
 	if v == "" {
 		v = "0.0.0"
 	}
-	v = strings.TrimPrefix(v, "v")
 
 	if c == "" {
 		c = "unknown"
