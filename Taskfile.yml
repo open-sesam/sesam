@@ -9,8 +9,13 @@ tasks:
     desc: "Build the sesam binary"
     aliases:
       - build-cli
+    vars:
+      # Last reachable tag (+commits-since), or a bare hash when untagged.
+      # Commit and date come from the toolchain's embedded VCS stamps.
+      VERSION:
+        sh: git describe --tags --always
     cmds:
-      - cmd: CGO_ENABLED=0 go build -ldflags "-s -w" -o sesam .
+      - cmd: CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/open-sesam/sesam/cli.version={{.VERSION}}" -o sesam .
     sources:
       - ./*.go
       - ./**/*.go

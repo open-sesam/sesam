@@ -20,6 +20,7 @@ This is also the best way to start working on `sesam` if you want to open a PR.
 Alternatively, if you already have `go` installed:
 
 ```bash
+# This will not contain the build version really though:
 $ go install github.com/open-sesam/sesam/cli@latest
 ```
 

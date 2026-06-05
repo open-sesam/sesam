@@ -75,17 +75,9 @@ func Main(args []string) error {
 			{
 				Name:      "add",
 				Flags:     flagsAdd,
-				ArgsUsage: "<path>",
+				ArgsUsage: "<path> [<path>]...",
 				Action:    commands.WithRepo(commands.HandleAdd),
 				Usage:     "Add a secret file or directory at `PATH`",
-				Arguments: []cli.Argument{
-					&cli.StringArgs{
-						Name:      "Path",
-						UsageText: "The path to add or change",
-						Min:       1,
-						Max:       -1,
-					},
-				},
 			},
 			{
 				Name:      "rm",
