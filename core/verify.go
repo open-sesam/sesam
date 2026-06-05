@@ -248,13 +248,26 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s may not have more than 10 signing keys", tell.User)
 	}
 
+	seenSignPubKeys := make(map[string]string)
+	for _, user := range state.Users {
+		for _, signPubKey := range user.SignPubKey {
+			seenSignPubKeys[signPubKey] = user.Name
+		}
+	}
+
+	signPubKeyData := make([][]byte, 0, len(tell.SignPubKeys))
 	for _, signPubKey := range tell.SignPubKeys {
-		signPubKeyData, _, err := multicodeDecode(signPubKey)
+		if owner, exists := seenSignPubKeys[signPubKey]; exists {
+			return fmt.Errorf("signing key for user %s is already used by user %s", tell.User, owner)
+		}
+
+		data, _, err := multicodeDecode(signPubKey)
 		if err != nil {
 			return fmt.Errorf("bad signing key %v", signPubKey)
 		}
 
-		kr.AddSignPubKey(tell.User, signPubKeyData)
+		seenSignPubKeys[signPubKey] = tell.User
+		signPubKeyData = append(signPubKeyData, data)
 	}
 
 	if len(tell.PubKeys) == 0 {
@@ -265,6 +278,13 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s may not have more than 10 public keys", tell.User)
 	}
 
+	seenRecipients := make(map[string]string)
+	for _, user := range state.Users {
+		for _, recp := range user.Recps {
+			seenRecipients[recp.String()] = user.Name
+		}
+	}
+
 	var recps Recipients
 	for _, pubKey := range tell.PubKeys {
 		recp, err := ParseRecipient(pubKey.Key, state.pluginUI)
@@ -273,8 +293,19 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		}
 
 		recp.Source = pubKey.Source
-		kr.AddRecipient(tell.User, recp)
+		if owner, exists := seenRecipients[recp.String()]; exists {
+			return fmt.Errorf("public key for user %s is already used by user %s", tell.User, owner)
+		}
+
+		seenRecipients[recp.String()] = tell.User
 		recps = append(recps, recp)
+	}
+
+	for _, data := range signPubKeyData {
+		kr.AddSignPubKey(tell.User, data)
+	}
+	for _, recp := range recps {
+		kr.AddRecipient(tell.User, recp)
 	}
 
 	state.Users = append(state.Users, VerifiedUser{

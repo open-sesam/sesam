@@ -138,6 +138,91 @@ func TestVerifyUserTellNegative(t *testing.T) {
 
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
+
+	t.Run("duplicate recipient in same user", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+
+		bob := newTestUser(t, "bob")
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+			User:   "bob",
+			Groups: []string{"dev"},
+			PubKeys: []UserPubKey{
+				{Key: bob.Recipient.String(), Source: KeySourceManual},
+				{Key: bob.Recipient.String(), Source: KeySourceManual},
+			},
+			SignPubKeys: []string{bob.SignPubKey},
+		}), nil)
+
+		err := verifyStateFail(t, al, EmptyKeyring())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "public key")
+		require.Contains(t, err.Error(), "already used")
+	})
+
+	t.Run("duplicate recipient across users", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+
+		bob := newTestUser(t, "bob")
+		carol := newTestUser(t, "carol")
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+			User: "bob", Groups: []string{"dev"},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		}), nil)
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+			User: "carol", Groups: []string{"ops"},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{carol.SignPubKey},
+		}), nil)
+
+		err := verifyStateFail(t, al, EmptyKeyring())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "public key")
+		require.Contains(t, err.Error(), "bob")
+	})
+
+	t.Run("duplicate signing key in same user", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+
+		bob := newTestUser(t, "bob")
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+			User:        "bob",
+			Groups:      []string{"dev"},
+			PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+			SignPubKeys: []string{bob.SignPubKey, bob.SignPubKey},
+		}), nil)
+
+		err := verifyStateFail(t, al, EmptyKeyring())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "signing key")
+		require.Contains(t, err.Error(), "already used")
+	})
+
+	t.Run("duplicate signing key across users", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+
+		bob := newTestUser(t, "bob")
+		carol := newTestUser(t, "carol")
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+			User: "bob", Groups: []string{"dev"},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		}), nil)
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+			User: "carol", Groups: []string{"ops"},
+			PubKeys: []UserPubKey{{Key: carol.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		}), nil)
+
+		err := verifyStateFail(t, al, EmptyKeyring())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "signing key")
+		require.Contains(t, err.Error(), "bob")
+	})
 }
 
 // --- verifyUserKill tests ---
