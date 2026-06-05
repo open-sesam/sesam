@@ -254,7 +254,10 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 			return fmt.Errorf("bad signing key %v", signPubKey)
 		}
 
-		kr.AddSignPubKey(tell.User, signPubKeyData)
+		if err := kr.AddSignPubKey(tell.User, signPubKeyData); err != nil {
+			// will trigger on duplicate keys.
+			return err
+		}
 	}
 
 	if len(tell.PubKeys) == 0 {
@@ -273,7 +276,11 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		}
 
 		recp.Source = pubKey.Source
-		kr.AddRecipient(tell.User, recp)
+		if err := kr.AddRecipient(tell.User, recp); err != nil {
+			// will trigger on duplicate keys.
+			return err
+		}
+
 		recps = append(recps, recp)
 	}
 

@@ -91,8 +91,8 @@ func testKeyring(t *testing.T, users ...*testUser) *MemoryKeyring {
 	t.Helper()
 	kr := EmptyKeyring()
 	for _, u := range users {
-		kr.AddSignPubKey(u.Name, u.Signer.PublicKey())
-		kr.AddRecipient(u.Name, u.Recipient)
+		require.NoError(t, kr.AddSignPubKey(u.Name, u.Signer.PublicKey()))
+		require.NoError(t, kr.AddRecipient(u.Name, u.Recipient))
 	}
 
 	return kr
