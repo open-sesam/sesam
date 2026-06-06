@@ -49,6 +49,7 @@ func Main(args []string) error {
 			},
 			{
 				Name:   "id",
+				Flags:  flagsID,
 				Action: commands.WithRepo(commands.HandleID),
 				Usage:  "Identify the current user by age identity",
 				Commands: []*cli.Command{

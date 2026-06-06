@@ -159,3 +159,10 @@ var flagsLog = []cli.Flag{
 		Usage: "Print as JSON",
 	},
 }
+
+var flagsID = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "json",
+		Usage: "Print as JSON",
+	},
+}

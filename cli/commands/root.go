@@ -26,10 +26,26 @@ func HandleVerify(_ context.Context, _ *cli.Command, r *repo.Repo) error {
 }
 
 // HandleID identifies the current user from configured identities.
-func HandleID(_ context.Context, _ *cli.Command, r *repo.Repo) error {
+func HandleID(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	whoami, err := r.Whoami()
 	if err != nil {
 		return err
+	}
+
+	if cmd.Bool("json") {
+		users, err := r.ListUsers()
+		if err != nil {
+			return err
+		}
+
+		for _, user := range users {
+			if user.Name == whoami {
+				printJSON(user)
+				return nil
+			}
+		}
+
+		return fmt.Errorf("%s not in user list?", whoami)
 	}
 
 	fmt.Println(whoami)
