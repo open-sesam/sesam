@@ -58,13 +58,8 @@ var flagsGeneral = []cli.Flag{
 // flagsInit are specific to repository bootstrap.
 var flagsInit = []cli.Flag{
 	&cli.StringFlag{
-		Name:     flagUser,
-		Required: true,
-		Usage:    "Initial admin user name",
-	},
-	&cli.BoolFlag{
-		Name:  "use-root",
-		Usage: "Initialize in the selected directory even when it already contains many files",
+		Name:  flagUser,
+		Usage: "Initial admin user name",
 	},
 }
 
@@ -106,9 +101,8 @@ var flagsAdd = []cli.Flag{
 // flagsTell contains controls for adding users.
 var flagsTell = []cli.Flag{
 	&cli.StringFlag{
-		Name:     flagUser,
-		Required: true,
-		Usage:    "User name to add",
+		Name:  flagUser,
+		Usage: "User name to add",
 	},
 	&cli.StringSliceFlag{
 		Name:     "recipient",
