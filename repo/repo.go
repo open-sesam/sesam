@@ -28,10 +28,6 @@ import (
 
 const defaultLockTimeout = 30 * time.Second
 
-// keyringFingerprint is the OS-keyring entry name used to cache the runtime
-// passphrase of encrypted age identities.
-const keyringFingerprint = "sesam.identity.runtime"
-
 var ErrClosed = errors.New("sesam repo is closed")
 
 // Repo is a handle to a sesam repo. See package-level docs for lifetime
@@ -109,7 +105,7 @@ func LoadIdentities(identityPaths []string, opts RepoOpts) (core.Identities, err
 		idLoader = loadIdentitiesKeyringOnly
 	}
 
-	return idLoader(identityPaths, keyringFingerprint, opts.pluginUI())
+	return idLoader(identityPaths, opts.pluginUI())
 }
 
 func guessInitUserNameFromGitConfig(repo *git.Repository) (string, error) {
@@ -152,7 +148,7 @@ func ResolveSesamDir(sesamPath string) (string, error) {
 // and has the secret / user managers ready for use; the caller must Close it.
 //
 // The initial user's name is derived from git config (if possible) or taken from the options if given explicitly.
-func Init(ctx context.Context, sesamDir string, ids []string, opts RepoInitOpts) (*Repo, error) {
+func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitOpts) (*Repo, error) {
 	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
 	if err != nil {
 		return nil, err
@@ -178,7 +174,7 @@ func Init(ctx context.Context, sesamDir string, ids []string, opts RepoInitOpts)
 		return nil, fmt.Errorf("invalid initial user %q: %w", opts.InitialUserName, err)
 	}
 
-	r := newRepo(resolvedDir, gitRepo, ids, opts.RepoOpts)
+	r := newRepo(resolvedDir, gitRepo, idPaths, opts.RepoOpts)
 	success := false
 	defer func() {
 		if !success {
@@ -190,15 +186,13 @@ func Init(ctx context.Context, sesamDir string, ids []string, opts RepoInitOpts)
 		}
 	}()
 
-	identities, err := loadIdentities(
-		ids,
-		"sesam.id."+opts.InitialUserName,
-		r.pluginUI,
-	)
+	identities, err := loadIdentities(idPaths, r.pluginUI)
 	if err != nil {
 		return nil, err
 	}
 	r.identities = identities
+
+	opts.PrintStep("Will use identities at %q…", strings.Join(idPaths, ", "))
 
 	opts.PrintStep("Creating repo at »%s«…", filepath.Join(resolvedDir, ".sesam"))
 	if err := ensureSesamDirs(resolvedDir); err != nil {

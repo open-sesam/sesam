@@ -516,7 +516,7 @@ func RunSmudgeFilter(ctx context.Context, sesamDir string, identityPaths []strin
 		return err
 	}
 
-	ids, err := loadIdentitiesKeyringOnly(identityPaths, keyringFingerprint, core.NewNonInteractivePluginUI())
+	ids, err := loadIdentitiesKeyringOnly(identityPaths, core.NewNonInteractivePluginUI())
 	if err != nil {
 		return err
 	}

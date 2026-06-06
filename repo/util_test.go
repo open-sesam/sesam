@@ -131,11 +131,16 @@ func TestLoadIdentities_FailureModes(t *testing.T) {
 			paths:   []string{good.Path},
 			wantErr: "",
 		},
+		{
+			name:    "same identity twice is rejected",
+			paths:   []string{good.Path, good.Path},
+			wantErr: "already used",
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ids, err := loadIdentities(tc.paths, "sesam.test", core.NewNonInteractivePluginUI())
+			ids, err := loadIdentities(tc.paths, core.NewNonInteractivePluginUI())
 			if tc.wantErr != "" {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tc.wantErr)
@@ -150,11 +155,11 @@ func TestLoadIdentities_FailureModes(t *testing.T) {
 
 func TestSplitObjectPath(t *testing.T) {
 	cases := []struct {
-		name      string
-		pathname  string
-		wantOk    bool
-		wantDir   string
-		wantPath  string
+		name     string
+		pathname string
+		wantOk   bool
+		wantDir  string
+		wantPath string
 	}{
 		{
 			name:     "worktree root",

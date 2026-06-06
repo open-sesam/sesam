@@ -147,7 +147,8 @@ func TestVerifyForgeIds_DeletedKey(t *testing.T) {
 	dropKey := keyOf(t, "alice-drop")
 
 	src := writeForgeFile(t, f.Dir, "alice.pub", keepKey)
-	f.addUser(t, "alice",
+	f.addUser(
+		t, "alice",
 		recipientFromKey(t, keepKey, src),
 		recipientFromKey(t, dropKey, src),
 	)
@@ -191,7 +192,8 @@ func TestVerifyForgeIds_PartialErrorPreservesUnaffectedSources(t *testing.T) {
 	k2 := keyOf(t, "alice-k2")
 	s1 := writeForgeFile(t, f.Dir, "k1.pub", k1)
 	s2 := KeySource("file://" + filepath.Join(f.Dir, "k2-missing.pub"))
-	f.addUser(t, "alice",
+	f.addUser(
+		t, "alice",
 		recipientFromKey(t, k1, s1),
 		recipientFromKey(t, k2, s2),
 	)

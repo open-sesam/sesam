@@ -164,7 +164,8 @@ func TestFilterProcessSmudgePassthrough(t *testing.T) {
 
 	script := bytes.Join([][]byte{
 		validHandshake(t, "smudge"),
-		pktScript(t,
+		pktScript(
+			t,
 			"command=smudge\n",
 			"pathname="+objectPathname+"\n",
 			"",
@@ -194,7 +195,8 @@ func TestFilterProcessEmptyContent(t *testing.T) {
 	chdirSesamRoot(t)
 	script := bytes.Join([][]byte{
 		validHandshake(t, "smudge"),
-		pktScript(t,
+		pktScript(
+			t,
 			"command=smudge\n",
 			"pathname="+objectPathname+"\n",
 			"",
@@ -233,7 +235,8 @@ func TestFilterProcessLargeBlobIsRechunked(t *testing.T) {
 
 	script := bytes.Join([][]byte{
 		validHandshake(t, "smudge"),
-		pktScript(t,
+		pktScript(
+			t,
 			"command=smudge\n",
 			"pathname="+objectPathname+"\n",
 			"",
@@ -269,7 +272,8 @@ func TestFilterProcessUnknownCommandReturnsStatusError(t *testing.T) {
 	// point draining a content stream we are about to abandon.
 	script := bytes.Join([][]byte{
 		validHandshake(t, "smudge"),
-		pktScript(t,
+		pktScript(
+			t,
 			"command=clean\n",
 			"pathname=outside/path.txt\n",
 			"",
