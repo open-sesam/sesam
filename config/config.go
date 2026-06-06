@@ -12,10 +12,9 @@ import (
 // is no `config:` wrapper. Sub-files typically carry only `secrets:` and
 // leave general/users/groups zero, which is why every field is optional.
 type Config struct {
-	General General             `yaml:"general,omitempty"`
-	Users   []User              `yaml:"users,omitempty"`
-	Groups  map[string][]string `yaml:"groups,omitempty"`
-	Secrets []Secret            `yaml:"secrets,omitempty"`
+	Users   []User              `yaml:"users,omitempty" json:"users,omitempty"`
+	Groups  map[string][]string `yaml:"groups,omitempty" json:"groups,omitempty"`
+	Secrets []Secret            `yaml:"secrets,omitempty" json:"secrets,omitempty"`
 }
 
 // FileSource carries the parsed AST plus the decoded config for one on-disk
@@ -40,24 +39,17 @@ type FileSource struct {
 	NewIncludes []string
 }
 
-////////////////////
-// GENERAL CONFIG //
-////////////////////
-
-// General struct repesents general configuration options
-type General struct {
-	EncryptAll bool `yaml:"encrypt_all"`
-}
-
 /////////////////
 // USER CONFIG //
 /////////////////
 
 // User struct represents a single user. Multiple users can be defined
 type User struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"desc,omitempty"`
-	Pub         string `yaml:"pub,omitempty"`
+	Name        string   `yaml:"name" json:"name"`
+	Description string   `yaml:"desc,omitempty" json:"description,omitempty"`
+	Key         []string `yaml:"key,omitempty" json:"key"`
+
+	node *ast.MappingNode `yaml:"-" json:"-"` // origin AST node; nil for users added via the API since load
 }
 
 ///////////////////
@@ -92,14 +84,13 @@ func VerifySecretType(v string) error {
 // marshal time for newly-added includes; the merged Secrets list holds
 // only real secrets (Include == "").
 type Secret struct {
-	Include     string     `yaml:"include,omitempty"`
-	SecretType  SecretType `yaml:"type,omitempty"`
-	Name        string     `yaml:"name,omitempty"`
-	Path        string     `yaml:"path,omitempty"`
-	Access      []string   `yaml:"access,omitempty"`
-	Description string     `yaml:"description,omitempty"`
-	Rotate      []any      `yaml:"rotate,omitempty"`
-	Swap        []Swap     `yaml:"swap,omitempty"`
+	Include     string   `yaml:"include,omitempty" json:"include,omitempty"`
+	Name        string   `yaml:"name,omitempty" json:"name,omitempty"`
+	Path        string   `yaml:"path,omitempty" json:"path,omitempty"`
+	Access      []string `yaml:"access,omitempty" json:"access,omitempty"`
+	Description string   `yaml:"description,omitempty" json:"description,omitempty"`
+	Rotate      []any    `yaml:"rotate,omitempty" json:"rotate,omitempty"`
+	Swap        []Swap   `yaml:"swap,omitempty" json:"swap,omitempty"`
 
 	Source *FileSource      `yaml:"-" json:"-"`
 	node   *ast.MappingNode `yaml:"-" json:"-"` // origin AST node; nil for items added via the API since load

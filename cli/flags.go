@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"context"
 	"time"
 
-	"github.com/open-sesam/sesam/config"
 	"github.com/urfave/cli/v3"
 )
 
@@ -57,13 +55,6 @@ var flagsInit = []cli.Flag{
 
 var flagsModifyAddSecret = []cli.Flag{
 	&cli.StringFlag{
-		Name:  "type",
-		Usage: "Type of secret (ssh_key,password,template,custom)",
-		Action: func(_ context.Context, _ *cli.Command, v string) error {
-			return config.VerifySecretType(v)
-		},
-	},
-	&cli.StringFlag{
 		Name:     "path",
 		Required: true,
 		Usage:    "Path to the secret which should be added",
@@ -75,14 +66,14 @@ var flagsModifyAddSecret = []cli.Flag{
 	&cli.StringSliceFlag{
 		Name:  "access",
 		Usage: "Group with access to this secret (can be given multiple times) (optional)",
+		Value: []string{"admin"},
 	},
 	&cli.StringFlag{
 		Name:  "description",
 		Usage: "Description of the secret (optional)",
 	},
 	&cli.BoolFlag{
-		Name:  "own-sesam-file",
-		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file (ignored for directory paths, which always nest)",
+		Name: "own-sesam-file",
 	},
 }
 
@@ -118,6 +109,17 @@ var flagsAdd = []cli.Flag{
 		Name:     "group",
 		Required: true,
 		Usage:    "Group assignment for the secret (repeatable)",
+	},
+	&cli.BoolFlag{
+		Name:  "own-sesam-file",
+		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file",
+	},
+}
+
+var flagsRemove = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "purge",
+		Usage: "Purge removes all revealed files matching the given path from disk as well",
 	},
 }
 

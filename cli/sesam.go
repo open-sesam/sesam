@@ -71,6 +71,7 @@ func Main(args []string) error {
 			},
 			{
 				Name:      "rm",
+				Flags:     flagsRemove,
 				ArgsUsage: "<path>",
 				Action:    commands.WithRepo(commands.HandleRemove),
 				Usage:     "Remove a secret file or directory",

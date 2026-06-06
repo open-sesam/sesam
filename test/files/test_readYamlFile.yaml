@@ -1,13 +1,12 @@
-general:
-  encrypt_all: false
 users:
   - name: test_user
+    key:
+      - key
 groups:
   group1:
     - test_user
 secrets:
-  - type: password
-    name: example
+  - name: example
     path: example.txt
     access:
       - group1

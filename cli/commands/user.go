@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-sesam/sesam/config"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
 
 // HandleTell adds a user/group relation and updates access.
-func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo, configRepo *config.ConfigRepository) error {
 	user := cmd.String("user")
 
 	recipients := cmd.StringSlice("recipient")
@@ -22,10 +23,15 @@ func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return fmt.Errorf("missing group: pass --group at least once")
 	}
 
-	return r.UserTell(ctx, user, recipients, groups)
+	if err := configRepo.Tell(user, recipients, groups); err != nil {
+		return fmt.Errorf("failed to add user to config: %w", err)
+	}
+
+	return nil
+	// return r.UserTell(ctx, user, recipients, groups)
 }
 
 // HandleKill removes a user/group relation.
-func HandleKill(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+func HandleKill(_ context.Context, cmd *cli.Command, r *repo.Repo, configRepo *config.ConfigRepository) error {
 	return r.UserKill(cmd.String("user"))
 }
