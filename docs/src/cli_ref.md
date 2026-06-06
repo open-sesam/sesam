@@ -7,13 +7,14 @@ sesam - Manage encrypted secrets in git repositories
 sesam
 
 ```
-[--config|-c]=[value]
 [--help|-h]
-[--identity|-i]=[value]
+[--identity|-i|--id]=[value]
 [--lock-timeout]=[value]
 [--no-color]
+[--quiet|-q]
 [--sesam-dir|-r|--repo]=[value]
 [--verbose|-v]
+[--version]
 ```
 
 **Usage**:
@@ -24,19 +25,21 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 
 # GLOBAL OPTIONS
 
-**--config, -c**="": Path to the sesam config file (default: "sesam.yml")
-
 **--help, -h**: show help
 
-**--identity, -i**="": Path to the age identity (can be given several times)
+**--identity, -i, --id**="": Path to the age identity (can be given several times)
 
 **--lock-timeout**="": Repository lock wait timeout (e.g. 5s, 30s, 2m) (default: 5s)
 
 **--no-color**: Disable color always
 
+**--quiet, -q**: Print less log output
+
 **--sesam-dir, -r, --repo**="": Directory where .sesam lives (default: ".")
 
 **--verbose, -v**: Print more log output
+
+**--version**: Print the version and exit
 
 
 # COMMANDS
@@ -47,19 +50,37 @@ Initialize sesam in the current repository
 
 **--help, -h**: show help
 
-**--use-root**: Initialize in the selected directory even when it already contains many files
-
-**--user**="": Initial admin user name
+**--user**="": Initial admin user name (if not given, git config is used to guess)
 
 ## verify
 
 Verify sesam signatures and encryption state
 
+**--all**: Run all verifications
+
+**--forge-check**: Verify the forge public keys did not change since adding users
+
 **--help, -h**: show help
+
+**--integrity**: Check file integrity on disk
+
+**--json**: Print report as json
+
+**--key-reuse**: Double-check that no key is re-used between users
+
+**--truncate**: Verify the audit log was not truncated over history
 
 ## id
 
 Identify the current user by age identity
+
+**--help, -h**: show help
+
+**--json**: Print as JSON
+
+### clear-cache
+
+Clear cached passprhases from the keyring
 
 **--help, -h**: show help
 
@@ -81,9 +102,11 @@ Decrypt all secrets available to the current user
 
 Add a secret file or directory at `PATH`
 
-**--group**="": Group assignment for the secret (repeatable)
+**--group**="": Group assignment for the secret (repeatable) - 'admin' is implicit
 
 **--help, -h**: show help
+
+**--no-seal**: Do not run `sesam seal` after adding files - useful when batch adding
 
 ## rm
 
@@ -150,6 +173,4 @@ Remove revealed plaintext and other untracked files from the sesam directory
 **--dry-run**: Do not actually delete, just print what would be deleted
 
 **--help, -h**: show help
-
-**--quiet**: Don't print files
 
