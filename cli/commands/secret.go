@@ -10,9 +10,8 @@ import (
 
 // HandleAdd adds a secret path to sesam metadata.
 func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	revealedPath := cmd.Args().First()
-	if revealedPath == "" {
-		return fmt.Errorf("missing secret path: pass a path argument")
+	if cmd.Args().Present() {
+		return fmt.Errorf("need at least one path")
 	}
 
 	groups := normalizedGroups(cmd.StringSlice("group"))
@@ -20,7 +19,7 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return fmt.Errorf("missing group: pass --group at least once")
 	}
 
-	return r.SecretAdd([]string{revealedPath}, groups)
+	return r.SecretAdd(cmd.Args().Slice(), groups)
 }
 
 // HandleRemove removes a secret path from sesam metadata.
