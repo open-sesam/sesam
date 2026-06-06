@@ -6,7 +6,7 @@
   "$defs": {
     "pubkey": {
       "type": "string",
-      "description": "Public key of this user, either as literal, forge-id, file path or link TODO: Several keys possible?"
+      "description": "Public key of this user, either as literal, forge-id, file path or link"
     }
   },
   "type": "object",
@@ -18,52 +18,95 @@
       "minimum": 1,
       "maximum": 1
     },
-    "config": {
+    "users": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "pub"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of a user - can be email TODO: Maybe enforce mails for future uses?"
+          },
+          "desc": {
+            "type": "string",
+            "description": "Description or full name of this user"
+          },
+          "pub": {
+            "description": "Public key(s) of this user. May be given once or several times.",
+            "anyOf": [
+              {
+                "$ref": "#/$defs/pubkey"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/pubkey"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "groups": {
       "type": "object",
-      "properties": {
-        "users": {
-          "type": "array",
-          "items": {
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "description": "One of the names described in users above"
+        }
+      }
+    },
+    "secrets": {
+      "type": "array",
+      "items": {
+        "description": "Either an include of another sesam.yml or a secret definition with type and path.",
+        "oneOf": [
+          {
             "type": "object",
             "required": [
-              "name",
-              "pubkey"
+              "include"
             ],
             "properties": {
-              "name": {
+              "include": {
                 "type": "string",
-                "description": "Name of a user - can be email TODO: Maybe enforce mails for future uses?"
-              },
-              "desc": {
+                "description": "An include path to another sub sesam.yml file"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "path"
+            ],
+            "properties": {
+              "type": {
                 "type": "string",
-                "description": "Description or full name of this user"
+                "description": "What kind of secret TODO: enum with possible values?"
               },
-              "pubkey": {
-                "anyOf": [
-                  {
-                    "$ref": "#/$defs/pubkey"
-                  },
-                  {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/$defs/pubkey"
-                    }
-                  }
-                ]
+              "path": {
+                "type": "string",
+                "description": "Path to the decrypted secret"
+              },
+              "access": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "description": {
+                "type": "string",
+                "description": "Description of the secret"
               }
             }
           }
-        },
-        "groups": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "description": "One of the names described in users above"
-            }
-          }
-        }
+        ]
       }
     }
   }

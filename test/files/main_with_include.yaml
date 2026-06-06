@@ -1,0 +1,14 @@
+general:
+  encrypt_all: true
+users:
+  - name: test_user
+groups:
+  group1:
+    - test_user
+secrets:
+  - include: sub_secrets_only.yaml
+  - type: password
+    name: top
+    path: top.txt
+    access:
+      - group1

@@ -80,6 +80,10 @@ var flagsModifyAddSecret = []cli.Flag{
 		Name:  "description",
 		Usage: "Description of the secret (optional)",
 	},
+	&cli.BoolFlag{
+		Name:  "own-sesam-file",
+		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file (ignored for directory paths, which always nest)",
+	},
 }
 
 // flagsSeal contains optional controls for sealing.

@@ -1,0 +1,13 @@
+general:
+  encrypt_all: false
+users:
+  - name: test_user
+groups:
+  group1:
+    - test_user
+secrets:
+  - type: password
+    name: example
+    path: example.txt
+    access:
+      - group1

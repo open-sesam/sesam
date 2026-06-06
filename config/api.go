@@ -9,32 +9,96 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-// AddSecret appends a single secret to the main file.
-func (c *ConfigRepository) AddSecret(secret Secret) error {
-	secret.Source = c.MainFile
-	c.MainFile.Config.Secrets = append(c.MainFile.Config.Secrets, secret)
-	return nil
-}
+// TODO: remove secrets from config (remove empty sesam.yml)
+// should also remove encrypted files (only remove decrypted with flag)
 
-// AddSecretDir walks dirPath and ensures every directory it visits has its
-// own sesam.yml containing one Secret per eligible file plus an `include:`
-// for every subdirectory that itself produced a sesam.yml. The top-level
-// dirPath/sesam.yml is referenced from MainFile via a new include entry.
+// AddSecrets adds the secret(s) at path — a single file or a directory — to
+// the repository's config files.
+//
+// For a single file:
+//   - if it sits in the same directory as the main sesam.yml it is added to
+//     the main file;
+//   - if it sits in a subdirectory, ownSesamFile decides: when true a
+//     sesam.yml is created in (or reused from) the file's directory and
+//     included from the main file; when false the secret is added straight to
+//     the main file (its Path keeping the subdirectory prefix).
+//
+// For a directory: every subdirectory always gets its own sesam.yml (the
+// ownSesamFile flag is ignored for directories). Files sitting directly next
+// to the main sesam.yml are added to the main file; the rest nest under their
+// directory's sesam.yml, chained back to the main file via include entries.
 //
 // Dotfiles and the special name `.git` are skipped. Per-file metadata
 // (type/access/description) is left empty — the user fills it in afterwards.
-// Re-running on the same directory is idempotent: existing entries (matched
-// by Path / include path) are left alone, new files are appended.
-func (c *ConfigRepository) AddSecretDir(dirPath string) error {
+// Re-running is idempotent: existing entries (matched by Path / include path)
+// are left alone, new files are appended.
+func (c *ConfigRepository) AddSecrets(path string, ownSesamFile bool) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+
+	if info.IsDir() {
+		// TODO: dont ignore the ownSesamFile flag and instead add all files in subdirs to the main sesam.yml
+		return c.addSecretsDir(path)
+	}
+
+	// TODO: single secret should be added to manager here
+	return c.addSecretsFile(path, ownSesamFile)
+}
+
+// addSecretsDir walks dirPath, giving every directory its own sesam.yml, and
+// references the top-level dirPath/sesam.yml from MainFile. When dirPath is
+// the main file's own directory the recursion writes straight into MainFile,
+// so there is no include to add.
+func (c *ConfigRepository) addSecretsDir(dirPath string) error {
 	sesamPath, err := c.addSecretsRecursive(dirPath)
 	if err != nil {
 		return err
 	}
 
-	if sesamPath == "" {
+	if sesamPath == "" || sesamPath == c.MainFile.Path {
 		return nil
 	}
 
+	return c.includeFromMain(sesamPath)
+}
+
+// addSecretsFile adds one file. Files next to the main sesam.yml (or any file
+// when ownSesamFile is false) land in the main file; otherwise the file's
+// directory gets its own sesam.yml, included from the main file.
+func (c *ConfigRepository) addSecretsFile(filePath string, ownSesamFile bool) error {
+	mainDir := filepath.Dir(c.MainFile.Path)
+	fileDir := filepath.Dir(filePath)
+
+	src := c.MainFile
+	if ownSesamFile && !sameDir(fileDir, mainDir) {
+		sesamPath := filepath.Join(fileDir, "sesam.yml")
+		s, err := c.loadOrCreate(sesamPath)
+		if err != nil {
+			return err
+		}
+
+		if err := c.includeFromMain(sesamPath); err != nil {
+			return err
+		}
+
+		src = s
+	}
+
+	// Path is recorded relative to its own sesam.yml's directory.
+	rel, err := filepath.Rel(filepath.Dir(src.Path), filePath)
+	if err != nil {
+		return err
+	}
+
+	c.addSecret(src, rel)
+	return nil
+}
+
+// includeFromMain queues an include of sesamPath in MainFile, unless one is
+// already present.
+func (c *ConfigRepository) includeFromMain(sesamPath string) error {
 	incPath, err := filepath.Rel(filepath.Dir(c.MainFile.Path), sesamPath)
 	if err != nil {
 		return err
@@ -46,6 +110,28 @@ func (c *ConfigRepository) AddSecretDir(dirPath string) error {
 
 	c.appendInclude(c.MainFile, incPath)
 	return nil
+}
+
+// addSecret appends a Secret owned by src with the given relative path, unless
+// an identical entry already exists.
+func (c *ConfigRepository) addSecret(src *FileSource, relPath string) {
+	for _, s := range c.MainFile.Config.Secrets {
+		if s.Source == src && s.Path == relPath {
+			return
+		}
+	}
+
+	c.MainFile.Config.Secrets = append(c.MainFile.Config.Secrets, Secret{
+		Name:   filepath.Base(relPath),
+		Path:   relPath,
+		Source: src,
+	})
+}
+
+// sameDir reports whether a and b refer to the same directory.
+func sameDir(a, b string) bool {
+	rel, err := filepath.Rel(a, b)
+	return err == nil && rel == "."
 }
 
 // addSecretsRecursive processes one directory: recurses into subdirs first
@@ -75,6 +161,7 @@ func (c *ConfigRepository) addSecretsRecursive(dirPath string) (string, error) {
 			subDirs = append(subDirs, name)
 		} else {
 			files = append(files, name)
+			// TODO: secret should be added to manager here
 		}
 	}
 

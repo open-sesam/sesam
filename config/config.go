@@ -7,38 +7,15 @@ import (
 	"github.com/goccy/go-yaml/ast"
 )
 
-// Config holds everything under the `config:` key in a sesam YAML file.
-// Main and included files share the same shape; sub-files just leave the
-// non-secret fields zero. The `config:` wrapper is handled transparently by
-// MarshalYAML / UnmarshalYAML below, so callers work with *Config directly.
+// Config holds the top-level keys of a sesam YAML file. Every file — the
+// entry file and each transitively-included one — shares this shape: there
+// is no `config:` wrapper. Sub-files typically carry only `secrets:` and
+// leave general/users/groups zero, which is why every field is optional.
 type Config struct {
 	General General             `yaml:"general,omitempty"`
 	Users   []User              `yaml:"users,omitempty"`
 	Groups  map[string][]string `yaml:"groups,omitempty"`
 	Secrets []Secret            `yaml:"secrets,omitempty"`
-}
-
-// configAlias drops Config's custom (un)marshal methods so we can encode the
-// inner block field-by-field without recursing.
-type configAlias Config
-
-func (c Config) MarshalYAML() (any, error) {
-	return struct {
-		Config configAlias `yaml:"config"`
-	}{Config: configAlias(c)}, nil
-}
-
-func (c *Config) UnmarshalYAML(b []byte) error {
-	var w struct {
-		Config configAlias `yaml:"config"`
-	}
-
-	if err := yaml.Unmarshal(b, &w); err != nil {
-		return err
-	}
-
-	*c = Config(w.Config)
-	return nil
 }
 
 // FileSource carries the parsed AST plus the decoded config for one on-disk
@@ -80,7 +57,7 @@ type General struct {
 type User struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"desc,omitempty"`
-	Pub         string `yaml:"pub"`
+	Pub         string `yaml:"pub,omitempty"`
 }
 
 ///////////////////
@@ -124,8 +101,8 @@ type Secret struct {
 	Rotate      []any      `yaml:"rotate,omitempty"`
 	Swap        []Swap     `yaml:"swap,omitempty"`
 
-	Source *FileSource      `yaml:"-"`
-	node   *ast.MappingNode // origin AST node; nil for items added via the API since load
+	Source *FileSource      `yaml:"-" json:"-"`
+	node   *ast.MappingNode `yaml:"-" json:"-"` // origin AST node; nil for items added via the API since load
 }
 
 // Swap struct repesents the swap config of a secret. Multiple commands can be defined here

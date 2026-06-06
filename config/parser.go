@@ -153,8 +153,8 @@ func (s *FileSource) allIncludes() []string {
 	return append(paths, s.NewIncludes...)
 }
 
-// secretsNode returns the *ast.SequenceNode at root.config.secrets, or an
-// error if the structure doesn't match.
+// secretsNode returns the *ast.SequenceNode at the root's secrets: key, or
+// an error if the structure doesn't match.
 func secretsNode(root ast.Node) (*ast.SequenceNode, error) {
 	mv, err := findSecretsValue(root)
 	if err != nil {
@@ -163,40 +163,39 @@ func secretsNode(root ast.Node) (*ast.SequenceNode, error) {
 
 	seq, ok := mv.Value.(*ast.SequenceNode)
 	if !ok {
-		return nil, fmt.Errorf("expected sequence under config.secrets, got %T", mv.Value)
+		return nil, fmt.Errorf("expected sequence under secrets, got %T", mv.Value)
 	}
 
 	return seq, nil
 }
 
-// findSecretsValue returns the MappingValueNode whose key is "secrets"
-// inside the root mapping's "config:" entry, or an error if absent.
+// findSecretsValue returns the MappingValueNode whose key is "secrets" at the
+// root mapping, or an error if absent. A file whose only top-level key is
+// `secrets:` (a typical sub-file) parses to a single *ast.MappingValueNode
+// rather than an *ast.MappingNode, so both shapes are handled.
 func findSecretsValue(root ast.Node) (*ast.MappingValueNode, error) {
-	rootMap, ok := root.(*ast.MappingNode)
-	if !ok {
-		return nil, fmt.Errorf("expected mapping at root, got %T", root)
+	for _, mv := range rootMappingValues(root) {
+		if mv.Key.String() == "secrets" {
+			return mv, nil
+		}
 	}
 
-	for _, mv := range rootMap.Values {
-		if mv.Key.String() != "config" {
-			continue
-		}
+	return nil, fmt.Errorf("no secrets: key in root")
+}
 
-		cfg, ok := mv.Value.(*ast.MappingNode)
-		if !ok {
-			return nil, fmt.Errorf("expected mapping under config, got %T", mv.Value)
-		}
-
-		for _, cv := range cfg.Values {
-			if cv.Key.String() == "secrets" {
-				return cv, nil
-			}
-		}
-
-		return nil, fmt.Errorf("no secrets: key in root")
+// rootMappingValues returns the top-level key/value pairs of a YAML document
+// root, normalizing the single-key case (*ast.MappingValueNode) and the
+// multi-key case (*ast.MappingNode) into one slice. Returns nil for any other
+// node type.
+func rootMappingValues(root ast.Node) []*ast.MappingValueNode {
+	switch n := root.(type) {
+	case *ast.MappingNode:
+		return n.Values
+	case *ast.MappingValueNode:
+		return []*ast.MappingValueNode{n}
+	default:
+		return nil
 	}
-
-	return nil, fmt.Errorf("no config: key in root")
 }
 
 func includePath(m *ast.MappingNode) (string, bool) {
@@ -217,7 +216,7 @@ func includePath(m *ast.MappingNode) (string, bool) {
 // on-disk form (comments, formatting, ordering) because nothing rewrites
 // them. Only newly-added secrets (those with no origin AST node) and
 // queued NewIncludes are appended via SequenceNode.Merge. Files with a
-// nil RootNode (created in-memory by AddSecretDir for a directory that
+// nil RootNode (created in-memory by AddSecrets for a directory that
 // didn't have a sesam.yml yet) are written fresh.
 func (c *ConfigRepository) Save() error {
 	newOwned := map[*FileSource][]Secret{}
@@ -272,7 +271,7 @@ func writeFile(src *FileSource, newSecrets []Secret) error {
 
 // writeFreshFile emits a brand-new sesam.yml for a FileSource that was
 // created in-memory (RootNode == nil). The owned secrets and any queued
-// includes are written under the standard config: / secrets: shape.
+// includes are written under a top-level secrets: key.
 func writeFreshFile(src *FileSource, owned []Secret) error {
 	items := make([]Secret, 0, len(owned)+len(src.NewIncludes))
 	items = append(items, owned...)

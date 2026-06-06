@@ -3,54 +3,54 @@ version: 1
 
 # This is a demonstration file of Sesam.
 # All kinds of features are listed here, you will likely only need a fraction of them.
-config:
-  general:
-    # encrypt all files, even when no change is needed when true.
-    # This is a security consideration as only re-encrypting the files needed
-    # could tell an attacker which files where changed by whom over time.
-    # On the other hand, it is often rightfully useful to know when secrets were changed by whom.
-    - encrypt_all: false
-  users:
-    - name: c.pahl@germanbionic.com
-      desc: Chris Pahl
-      # Key is the public key of this user. It will be used to encrypt files.
-      # Decryption is only possible when you possess the fitting private key.
-      #
-      # You can specify the key either...
-      # - ...literally (as ssh key)
-      # - ...as forge id
-      # - ...as link
-      # - ...as local path (can be used for larger keys)
-      #
-      # Forge-ids and links (e.g. to keyservers) are resolved once when the user
-      # is added (`sesam tell`); the resolved key material and its origin are
-      # then stored, signed, in the audit log. `sesam verify --forge` re-fetches
-      # the live response and warns when it has drifted from the recorded value.
-      pub: github:sahib
-    - name: s.gruenewald@germanbionic.com
-      desc: Sören Grünewald
-      pub: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN5VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj sören@dahoam
-    - name: a.bablees@germanbionic.com
-      desc: Adel Bablees
-      pub: https://adel.com/key.txt
-    - name: m.alice@germanbionic.com
-      desc: Im Eve-Ill
-      pub: file://some/path/key.txt
+general:
+  # encrypt all files, even when no change is needed when true.
+  # This is a security consideration as only re-encrypting the files needed
+  # could tell an attacker which files where changed by whom over time.
+  # On the other hand, it is often rightfully useful to know when secrets were changed by whom.
+  encrypt_all: false
+users:
+  - name: c.pahl@germanbionic.com
+    desc: Chris Pahl
+    # Key is the public key of this user. It will be used to encrypt files.
+    # Decryption is only possible when you possess the fitting private key.
+    #
+    # You can specify the key either...
+    # - ...literally (as ssh key)
+    # - ...as forge id
+    # - ...as link
+    # - ...as local path (can be used for larger keys)
+    #
+    # Forge-ids and links (e.g. to keyservers) are downloaded once by the admin and stored in the repo (under .sesam/keys/).
+    # They are monitored on user or group changes, whenever the link/forge contents change, we will emit
+    # a warning and the admin has to check whether that link is still valid.
+    pub: github:sahib
+  - name: s.gruenewald@germanbionic.com
+    desc: Sören Grünewald
+    pub: ssh-ed25519
+      AAAAC3NzaC1lZDI1NTE5AAAAIN5VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
+      sören@dahoam
+  - name: a.bablees@germanbionic.com
+    desc: Adel Bablees
+    pub: https://adel.com/key.txt
+  - name: m.alice@germanbionic.com
+    desc: Im Eve-Ill
+    pub: file://some/path/key.txt
 
-  groups:
-    admin:
-      # This is the only user that by definition may change user/groups.
-      # We recommend to have at least two people here. These users also
-      # by definition have access to all files (as adding users require re-encrypting)
-      - cpahl
-    deployers:
-      - cpahl
-      - sgrünewald
+groups:
+  admin:
+    # This is the only user that by definition may change user/groups.
+    # We recommend to have at least two people here. These users also
+    # by definition have access to all files (as adding users require re-encrypting)
+    - cpahl
+  deployers:
+    - cpahl
+    - sgrünewald
 
 secrets:
   # You can include more yml files to allow nesting.
   # It is often clearer to specify secrets per directory.
-  # You may not repeat the "config" key in sub files though.
+  # Sub files share this same shape — they typically only carry a secrets: key.
   - include: platform/secrets.yml
   - include: ssh/secrets.yml
   - type: password

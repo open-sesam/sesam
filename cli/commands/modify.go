@@ -9,13 +9,16 @@ import (
 
 // HandleAddSecret adds a secret path to sesam metadata.
 func HandleAddSecret(ctx context.Context, cmd *cli.Command) error {
+	// TODO: we need to add mgr here, to be able to add secrets not only to config
 	return clirepo.AddSecret(
+		nil,
 		cmd.String("config"),
 		cmd.String("path"),
 		cmd.String("name"),
 		cmd.String("type"),
 		cmd.String("description"),
 		cmd.StringSlice("access"),
+		cmd.Bool("own-sesam-file"),
 	)
 }
 
