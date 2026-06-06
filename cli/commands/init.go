@@ -23,29 +23,25 @@ aa    ]8I  "8b,   ,aa  aa    ]8I  88,    ,88  88      88      88
 
 // HandleInit bootstraps sesam metadata in a git repository.
 func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
-	initialUser := cmd.String("user")
-	if initialUser == "" {
-		return fmt.Errorf("failed to determine initial user, please pass --user")
-	}
-
 	output := termenv.NewOutput(os.Stdout)
+	opts := repo.RepoInitOpts{
+		InitialUserName: cmd.String("user"),
+		RepoOpts: repo.RepoOpts{
+			Interactive: true,
+			LockTimeout: cmd.Duration("lock-timeout"),
+		},
+		InitStep: func(format string, args ...any) {
+			prefix := output.String("✓ ").Foreground(output.Color("#008000")).String()
+			format = prefix + format + "\n"
+			fmt.Printf(format, args...)
+		},
+	}
 
 	r, err := repo.Init(
 		ctx,
 		cmd.String("sesam-dir"),
-		initialUser,
 		cmd.StringSlice("identity"),
-		repo.RepoInitOpts{
-			RepoOpts: repo.RepoOpts{
-				Interactive: true,
-				LockTimeout: cmd.Duration("lock-timeout"),
-			},
-			InitStep: func(format string, args ...any) {
-				prefix := output.String("✓ ").Foreground(output.Color("#008000")).String()
-				format = prefix + format + "\n"
-				fmt.Printf(format, args...)
-			},
-		},
+		opts,
 	)
 	if err != nil {
 		return err

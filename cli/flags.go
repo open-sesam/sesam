@@ -59,7 +59,7 @@ var flagsGeneral = []cli.Flag{
 var flagsInit = []cli.Flag{
 	&cli.StringFlag{
 		Name:  flagUser,
-		Usage: "Initial admin user name",
+		Usage: "Initial admin user name (if not given, git config is used to guess)",
 	},
 }
 

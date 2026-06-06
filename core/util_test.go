@@ -46,6 +46,9 @@ func TestValidUserName(t *testing.T) {
 		"user_42",
 		"a",
 		"a-b-c",
+		"alice.bob",
+		"user@host",
+		"c.pohl@hermanbionic.com",
 	}
 
 	for _, name := range valid {
@@ -61,12 +64,11 @@ func TestValidUserNameRejects(t *testing.T) {
 		{"empty", ""},
 		{"dot-dot", ".."},
 		{"path traversal", "../admin"},
+		{"dot-dot in email", "a..b@host"},
 		{"slash", "alice/bob"},
 		{"backslash", `alice\bob`},
 		{"space", "alice bob"},
 		{"uppercase", "Alice"},
-		{"dot", "alice.bob"},
-		{"at sign", "user@host"},
 		{"colon", "user:name"},
 		{"unicode", "alicё"},
 		{"too long", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},

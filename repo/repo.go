@@ -16,10 +16,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
 	"github.com/gofrs/flock"
 	"github.com/open-sesam/sesam/core"
 )
@@ -70,6 +72,11 @@ type RepoOpts struct {
 type RepoInitOpts struct {
 	RepoOpts
 
+	// InitialUserName is the name of the first admin user.
+	// If empty, we try to guess it from the git config.
+	InitialUserName string
+
+	// InitStep receives logs whenever something interesting happens
 	InitStep func(fmt string, args ...any)
 }
 
@@ -105,6 +112,31 @@ func LoadIdentities(identityPaths []string, opts RepoOpts) (core.Identities, err
 	return idLoader(identityPaths, keyringFingerprint, opts.pluginUI())
 }
 
+func guessInitUserNameFromGitConfig(repo *git.Repository) (string, error) {
+	// This checks:
+	// - repo .git/config
+	// - ~/.gitconfig
+	// - /etc/gitconfig
+	cfg, err := repo.ConfigScoped(config.SystemScope)
+	if err != nil {
+		return "", fmt.Errorf("failed to read git config: %w", err)
+	}
+
+	if cfg.User.Email != "" {
+		return strings.ToLower(cfg.User.Email), nil
+	}
+
+	if cfg.User.Name != "" {
+		n := cfg.User.Name
+		n = strings.ReplaceAll(n, " ", "_")
+		n = strings.ReplaceAll(n, "/", "_")
+		n = strings.ToLower(n)
+		return n, nil
+	}
+
+	return "", fmt.Errorf("user.email is not set in git-config - please pass --user")
+}
+
 // ResolveSesamDir resolves the sesam repository root. It walks up from
 // sesamPath until it finds a directory containing `.sesam/`, or returns
 // the absolute path of sesamPath unchanged if none is found (the latter
@@ -115,15 +147,12 @@ func ResolveSesamDir(sesamPath string) (string, error) {
 
 // Init initializes a new sesam repository at sesamDir.
 //
-// initialUserName becomes the first admin user; ids are paths to the admin's
-// age identity files. The sesam config is written to <sesamDir>/sesam.yml.
-// On success the returned Repo holds the on-disk lock and has the secret /
-// user managers ready for use; the caller must Close it.
-func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, opts RepoInitOpts) (*Repo, error) {
-	if err := core.ValidUserName(initialUserName); err != nil {
-		return nil, fmt.Errorf("invalid initial user %q: %w", initialUserName, err)
-	}
-
+// ids are paths to the admin's age identity files. The sesam config is written
+// to <sesamDir>/sesam.yml. On success the returned Repo holds the on-disk lock
+// and has the secret / user managers ready for use; the caller must Close it.
+//
+// The initial user's name is derived from git config (if possible) or taken from the options if given explicitly.
+func Init(ctx context.Context, sesamDir string, ids []string, opts RepoInitOpts) (*Repo, error) {
 	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
 	if err != nil {
 		return nil, err
@@ -131,6 +160,22 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 
 	if err := isInitialized(resolvedDir); err != nil {
 		return nil, err
+	}
+
+	if opts.InitialUserName == "" {
+		opts.InitialUserName, err = guessInitUserNameFromGitConfig(gitRepo)
+		if err != nil {
+			return nil, err
+		}
+
+		opts.PrintStep(
+			"Guessed initial user's name from git-config as `%s` (use --user to override)",
+			opts.InitialUserName,
+		)
+	}
+
+	if err := core.ValidUserName(opts.InitialUserName); err != nil {
+		return nil, fmt.Errorf("invalid initial user %q: %w", opts.InitialUserName, err)
 	}
 
 	r := newRepo(resolvedDir, gitRepo, ids, opts.RepoOpts)
@@ -145,13 +190,17 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		}
 	}()
 
-	identities, err := loadIdentities(ids, "sesam.id."+initialUserName, r.pluginUI)
+	identities, err := loadIdentities(
+		ids,
+		"sesam.id."+opts.InitialUserName,
+		r.pluginUI,
+	)
 	if err != nil {
 		return nil, err
 	}
 	r.identities = identities
 
-	opts.PrintStep("creating repo at »%s«...", filepath.Join(resolvedDir, ".sesam"))
+	opts.PrintStep("Creating repo at »%s«…", filepath.Join(resolvedDir, ".sesam"))
 	if err := ensureSesamDirs(resolvedDir); err != nil {
 		return nil, err
 	}
@@ -160,17 +209,21 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, err
 	}
 
-	opts.PrintStep("creating initial sesam.yml")
+	opts.PrintStep("Creating initial sesam.yml")
 	configPath := filepath.Join(resolvedDir, "sesam.yml")
-	if err := createInitialConfig(configPath, initialUserName, identities.RecipientStrings()); err != nil {
+	if err := createInitialConfig(
+		configPath,
+		opts.InitialUserName,
+		identities.RecipientStrings(),
+	); err != nil {
 		return nil, err
 	}
 
-	opts.PrintStep("creating initial user »%s«...", initialUserName)
+	opts.PrintStep("Creating initial user »%s«…", opts.InitialUserName)
 	signer, auditLog, err := core.InitAdminUser(
 		ctx,
 		resolvedDir,
-		initialUserName,
+		opts.InitialUserName,
 		identities.RecipientStrings(),
 		r.pluginUI,
 	)
@@ -196,22 +249,22 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, fmt.Errorf("failed to build user manager: %w", err)
 	}
 
-	opts.PrintStep("adjusting .gitgnore to ignore all revealed files...")
+	opts.PrintStep("Adjusting .gitgnore to ignore all revealed files…")
 	if err := ensureDefaultGitIgnore(resolvedDir); err != nil {
 		return nil, err
 	}
 
-	opts.PrintStep("telling git when to call sesam...")
+	opts.PrintStep("Telling git when to call sesam…")
 	if err := ensureDefaultGitAttributes(resolvedDir); err != nil {
 		return nil, err
 	}
 
-	opts.PrintStep("adjusting git config...")
+	opts.PrintStep("Adjusting git config…")
 	if err := ensureGitConfig(gitRepo, resolvedDir, opts); err != nil {
 		return nil, err
 	}
 
-	opts.PrintStep("creating initial README.md as first secret...")
+	opts.PrintStep("Creating initial README.md as first secret…")
 	if err := ensureSesamReadme(resolvedDir); err != nil {
 		return nil, err
 	}
@@ -220,6 +273,7 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, fmt.Errorf("failed to bootstrap readme secret: %w", err)
 	}
 
+	opts.PrintStep("Making sure the rains come down in Africa…")
 	if err := ensureTmpKeepFile(resolvedDir); err != nil {
 		return nil, err
 	}
@@ -228,12 +282,12 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, err
 	}
 
-	opts.PrintStep("staging all files...")
+	opts.PrintStep("Staging all files…")
 	if err := stageInitFiles(gitRepo, resolvedDir, configPath); err != nil {
 		return nil, err
 	}
 
-	opts.PrintStep("welcome to...")
+	opts.PrintStep("Welcome to…")
 	success = true
 	return r, nil
 }

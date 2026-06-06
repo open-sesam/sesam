@@ -52,9 +52,8 @@ func TestInit_Negative(t *testing.T) {
 			_, err := Init(
 				context.Background(),
 				dir,
-				tc.user,
 				[]string{admin.Path},
-				RepoInitOpts{},
+				RepoInitOpts{InitialUserName: tc.user},
 			)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantErr)
