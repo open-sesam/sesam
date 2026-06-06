@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/open-sesam/sesam/core"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
@@ -33,6 +34,10 @@ func HandleID(_ context.Context, _ *cli.Command, r *repo.Repo) error {
 
 	fmt.Println(whoami)
 	return nil
+}
+
+func HandleIDClearCache(_ context.Context, _ *cli.Command) error {
+	return core.DeleteAllCachedPassphrases()
 }
 
 // HandleApply applies config changes to audit and metadata state.

@@ -51,6 +51,13 @@ func Main(args []string) error {
 				Name:   "id",
 				Action: commands.WithRepo(commands.HandleID),
 				Usage:  "Identify the current user by age identity",
+				Commands: []*cli.Command{
+					{
+						Name:   "clear-cache",
+						Usage:  "Clear cached passprhases from the keyring",
+						Action: commands.HandleIDClearCache,
+					},
+				},
 			},
 			{
 				Name:   "seal",

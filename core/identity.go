@@ -391,6 +391,11 @@ func (kpp *KeyringPassphraseProvider) ReadPassphrase(prompt string) ([]byte, err
 	return kpp.Fallback.ReadPassphrase(prompt)
 }
 
+// DeleteAllCachedPassphrases will delete all cached passphrases in the keyring.
+func DeleteAllCachedPassphrases() error {
+	return keyring.DeleteAll(keyringService)
+}
+
 // PassphraseVerified is told whether the passphrase from ReadPassphrase actually
 // unlocked the key, so the keyring holds only verified passphrases:
 //   - a freshly prompted passphrase is cached only once it is known to be correct
