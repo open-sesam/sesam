@@ -44,7 +44,7 @@ func rawPrevArg() string {
 // emit prints one completion candidate per line to the command's writer.
 func emit(w io.Writer, names ...string) {
 	for _, name := range names {
-		fmt.Fprintln(w, name)
+		_, _ = fmt.Fprintln(w, name)
 	}
 }
 
@@ -121,10 +121,12 @@ func completeSecrets(_ context.Context, cmd *cli.Command) {
 	w := cmd.Root().Writer
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".sesam") {
+			//nolint:nilerr
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
+			//nolint:nilerr
 			return nil
 		}
 		emit(w, strings.TrimSuffix(rel, ".sesam"))

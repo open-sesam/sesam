@@ -85,10 +85,15 @@ func (h *prettyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	copy(pre, h.pre)
 	copy(pre[len(h.pre):], attrs)
 
-	p := *h
-	p.mu = sync.Mutex{}
-	p.pre = pre
-	return &p
+	return &prettyHandler{
+		w:           h.w,
+		pre:         pre,
+		level:       h.level,
+		debugPrefix: h.debugPrefix,
+		infoPrefix:  h.infoPrefix,
+		warnPrefix:  h.warnPrefix,
+		errPrefix:   h.errPrefix,
+	}
 }
 
 func (h *prettyHandler) WithGroup(_ string) slog.Handler {

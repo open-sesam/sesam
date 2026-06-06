@@ -25,7 +25,7 @@ func Main(args []string) error {
 
 	// Print just the banner, not the default "<name> version <v>" line.
 	cli.VersionPrinter = func(cmd *cli.Command) {
-		fmt.Fprintln(cmd.Root().Writer, cmd.Version)
+		_, _ = fmt.Fprintln(cmd.Root().Writer, cmd.Version)
 	}
 
 	app := &cli.Command{
