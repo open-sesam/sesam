@@ -39,8 +39,6 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo, configRepo 
 		return fmt.Errorf("failed to remove secret from config: %w", err)
 	}
 
-	fmt.Printf("removed secret: %+v\n", configRepo.MainFile.Config)
-
 	return r.SecretRemove([]string{revealedPath})
 }
 

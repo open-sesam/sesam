@@ -53,30 +53,6 @@ var flagsInit = []cli.Flag{
 	},
 }
 
-var flagsModifyAddSecret = []cli.Flag{
-	&cli.StringFlag{
-		Name:     "path",
-		Required: true,
-		Usage:    "Path to the secret which should be added",
-	},
-	&cli.StringFlag{
-		Name:  "name",
-		Usage: "Name of the secret (filename if empty)",
-	},
-	&cli.StringSliceFlag{
-		Name:  "access",
-		Usage: "Group with access to this secret (can be given multiple times) (optional)",
-		Value: []string{"admin"},
-	},
-	&cli.StringFlag{
-		Name:  "description",
-		Usage: "Description of the secret (optional)",
-	},
-	&cli.BoolFlag{
-		Name: "own-sesam-file",
-	},
-}
-
 // flagsSeal contains optional controls for sealing.
 var flagsSeal = []cli.Flag{
 	&cli.BoolFlag{

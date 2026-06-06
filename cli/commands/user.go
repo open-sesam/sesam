@@ -27,8 +27,7 @@ func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo, configRepo 
 		return fmt.Errorf("failed to add user to config: %w", err)
 	}
 
-	return nil
-	// return r.UserTell(ctx, user, recipients, groups)
+	return r.UserTell(ctx, user, recipients, groups)
 }
 
 // HandleKill removes a user/group relation.
