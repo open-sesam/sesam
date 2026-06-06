@@ -53,6 +53,16 @@ func validSecretPathFormat(sesamDir, revealedPath string) error {
 		return fmt.Errorf("secret path may not live in .sesam: %s", revealedPath)
 	}
 
+	if filepath.Base(revealedPath) == "sesam.yml" {
+		return fmt.Errorf("you can't seal sesam.yml")
+	}
+
+	for _, elem := range strings.Split(revealedPath, string(filepath.Separator)) {
+		if elem == ".sesam" {
+			return fmt.Errorf("encrypting files in .sesam/ is not allowed")
+		}
+	}
+
 	return nil
 }
 

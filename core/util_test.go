@@ -98,6 +98,67 @@ func TestValidSecretPathFormatNormalPath(t *testing.T) {
 	require.NoError(t, validSecretPathFormat(".", "secrets/db_password"))
 }
 
+// sesam.yml is sesam's own config and must never be sealed as a secret,
+// regardless of which directory it lives in.
+func TestValidSecretPathFormatRejectsSesamYml(t *testing.T) {
+	cases := []string{
+		"sesam.yml",
+		filepath.Join("config", "sesam.yml"),
+		filepath.Join("a", "b", "sesam.yml"),
+	}
+
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			err := validSecretPathFormat(".", path)
+			require.Error(t, err, "should reject %q", path)
+			require.Contains(t, err.Error(), "sesam.yml")
+		})
+	}
+}
+
+// Anything living inside a .sesam directory must be rejected no matter where
+// the component appears in the path, and independent of whether sesamDir is
+// relative or absolute (the leading-prefix check alone misses both).
+func TestValidSecretPathFormatRejectsDotSesam(t *testing.T) {
+	cases := []struct {
+		name        string
+		sesamDir    string
+		revealed    string
+		wantMessage string
+	}{
+		{"leading", ".", filepath.Join(".sesam", "secret"), ".sesam"},
+		{"signkey", ".", filepath.Join(".sesam", "signkeys", "admin.age"), ".sesam"},
+		{"nested component", ".", filepath.Join("a", ".sesam", "b"), ".sesam"},
+		{"bare", ".", ".sesam", ".sesam"},
+		{"absolute sesam dir", "/repo/root", filepath.Join(".sesam", "secret"), ".sesam"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validSecretPathFormat(tc.sesamDir, tc.revealed)
+			require.Error(t, err, "should reject %q", tc.revealed)
+			require.Contains(t, err.Error(), tc.wantMessage)
+		})
+	}
+}
+
+// A regular secret path that merely mentions "sesam" must still be allowed -
+// only the exact .sesam component and sesam.yml file are forbidden.
+func TestValidSecretPathFormatAllowsLookalikes(t *testing.T) {
+	cases := []string{
+		filepath.Join("sesam", "secret"),       // dir named "sesam", not ".sesam"
+		filepath.Join("secrets", "sesam.yaml"), // .yaml, not .yml
+		"sesam.yml.bak",                        // not exactly sesam.yml
+		filepath.Join("my.sesam.dir", "x"),     // component contains, isn't, .sesam
+	}
+
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			require.NoError(t, validSecretPathFormat(".", path), "should accept %q", path)
+		})
+	}
+}
+
 func TestCloseLoggedNoError(t *testing.T) {
 	// Should not panic.
 	require.NotPanics(t, func() {
