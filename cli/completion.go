@@ -54,7 +54,7 @@ func emit(w io.Writer, names ...string) {
 // rules — short flags are hidden once the user has typed "--", and zsh/fish get
 // a trailing ":usage" — but DefaultCompleteWithFlags only ever sees cmd.Flags,
 // which is why we reimplement it here to fold in cmd.Root().Flags.
-func completeFlags(cmd *cli.Command) {
+func completeFlags(_ context.Context, cmd *cli.Command) {
 	last := rawPrevArg()
 	cur := strings.TrimLeft(last, "-")
 	shell := os.Getenv("SHELL")
@@ -101,9 +101,9 @@ func completeFlags(cmd *cli.Command) {
 // nothing for the argument itself so the shell script runs its own file
 // completion (zsh: `_files`); flag completion is delegated to the library. Use
 // it for commands that take a brand-new path, e.g. `sesam add`.
-func completeFiles(_ context.Context, cmd *cli.Command) {
+func completeFiles(ctx context.Context, cmd *cli.Command) {
 	if strings.HasPrefix(rawPrevArg(), "-") {
-		completeFlags(cmd)
+		completeFlags(ctx, cmd)
 	}
 }
 
@@ -111,9 +111,9 @@ func completeFiles(_ context.Context, cmd *cli.Command) {
 // secrets that already exist on disk. Candidates are globbed straight from
 // .sesam/objects, so no decryption (and no passphrase prompt) is needed. Use it
 // for commands that operate on existing secrets, e.g. `sesam rm`/`open`/`show`.
-func completeSecrets(_ context.Context, cmd *cli.Command) {
+func completeSecrets(ctx context.Context, cmd *cli.Command) {
 	if strings.HasPrefix(rawPrevArg(), "-") {
-		completeFlags(cmd)
+		completeFlags(ctx, cmd)
 		return
 	}
 
@@ -137,7 +137,7 @@ func completeSecrets(_ context.Context, cmd *cli.Command) {
 // completeUsers completes the value of --user with the names of users that have
 // a signing key on disk (.sesam/signkeys/<user>.age) — again no decryption
 // needed. Otherwise it delegates to flag completion. Use it for `sesam kill`.
-func completeUsers(_ context.Context, cmd *cli.Command) {
+func completeUsers(ctx context.Context, cmd *cli.Command) {
 	prev := rawPrevArg()
 	if prev == "--"+flagUser || prev == "-"+flagUser {
 		root := filepath.Join(cmd.String("sesam-dir"), ".sesam", "signkeys")
@@ -151,6 +151,6 @@ func completeUsers(_ context.Context, cmd *cli.Command) {
 		return
 	}
 	if strings.HasPrefix(prev, "-") {
-		completeFlags(cmd)
+		completeFlags(ctx, cmd)
 	}
 }

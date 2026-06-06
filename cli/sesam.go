@@ -56,7 +56,7 @@ func Main(args []string) error {
 				Commands: []*cli.Command{
 					{
 						Name:   "clear-cache",
-						Usage:  "Clear cached passprhases from the keyring",
+						Usage:  "Clear cached passphrases from the keyring",
 						Action: commands.HandleIDClearCache,
 					},
 				},
@@ -107,7 +107,7 @@ func Main(args []string) error {
 				Name:          "tell",
 				Flags:         flagsTell,
 				Action:        commands.WithRepo(commands.HandleTell),
-				ShellComplete: completeUsers,
+				ShellComplete: completeFlags,
 				Usage:         "Add a person to a group and re-encrypt affected files",
 			},
 			{
@@ -209,7 +209,7 @@ func Main(args []string) error {
 			+1: slog.LevelDebug,
 		}
 
-		logLevel, ok := logLevels[flagsVerboseCount+flagsQuietCount]
+		logLevel, ok := logLevels[flagsVerboseCount-flagsQuietCount]
 		if !ok {
 			logLevel = slog.LevelDebug
 		}

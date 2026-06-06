@@ -63,7 +63,7 @@ func printReport(opts repo.VerifyOptions, report *repo.VerifyReport) {
 	}
 
 	if opts.Integrity {
-		if !report.OK() {
+		if report.Integrity != nil {
 			slog.Warn(fmt.Sprintf("Integrity: %s", red("error")))
 			for _, integErr := range report.Integrity.Errors {
 				slog.Warn(fmt.Sprintf("  %s: %s", integErr.RevealedPath, integErr.Message))
