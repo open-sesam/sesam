@@ -10,13 +10,13 @@ import (
 
 // HandleAdd adds a secret path to sesam metadata.
 func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	if cmd.Args().Present() {
+	if !cmd.Args().Present() {
 		return fmt.Errorf("need at least one path")
 	}
 
 	groups := normalizedGroups(cmd.StringSlice("group"))
 	if len(groups) == 0 {
-		return fmt.Errorf("missing group: pass --group at least once")
+		printInfo("no groups specified, assuming `--group admin` only")
 	}
 
 	return r.SecretAdd(cmd.Args().Slice(), groups)

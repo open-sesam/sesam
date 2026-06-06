@@ -239,18 +239,18 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 	}
 
 	if !mergeConfigured {
-		opts.PrintStep("  • installing merge driver...")
+		opts.PrintStep("  • Installing merge driver…")
 
 		mergeSection.SetOption("name", "merge the audit log of sesam")
 		mergeSection.SetOption("driver", mergeCmd)
 
-		opts.PrintStep("  • installing diff driver...")
+		opts.PrintStep("  • installing diff driver…")
 		diffSection := cfg.Raw.Section("diff").Subsection("sesam-diff")
 		diffSection.SetOption("textconv", textconvCmd)
 	}
 
 	if !processConfigured {
-		opts.PrintStep("  • installing smudge filter...")
+		opts.PrintStep("  • Installing smudge filter…")
 
 		// required=false means a smudge failure doesn't abort
 		// `git checkout`; the encrypted bytes land instead. We rely
@@ -270,7 +270,7 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 		// looking for `git-sesam` on PATH, so users get `git sesam ...`
 		// without any PATH plumbing. Git runs the command with cwd =
 		// worktree root, which is what sesam wants anyway.
-		opts.PrintStep("  • making sure sesam can be called as `git sesam`...")
+		opts.PrintStep("  • Making sure sesam can be called as `git sesam`…")
 		aliasSection.SetOption("sesam", "!"+aliasCmd)
 	}
 

@@ -92,9 +92,8 @@ var flagsReveal = []cli.Flag{}
 // flagsAdd contains controls for adding secrets.
 var flagsAdd = []cli.Flag{
 	&cli.StringSliceFlag{
-		Name:     "group",
-		Required: true,
-		Usage:    "Group assignment for the secret (repeatable)",
+		Name:  "group",
+		Usage: "Group assignment for the secret (repeatable) - 'admin' is implicit",
 	},
 }
 

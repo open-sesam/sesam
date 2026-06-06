@@ -37,10 +37,11 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 		},
 	}
 
+	ids := cmd.StringSlice("identity")
 	r, err := repo.Init(
 		ctx,
 		cmd.String("sesam-dir"),
-		cmd.StringSlice("identity"),
+		ids,
 		opts,
 	)
 	if err != nil {
@@ -59,5 +60,12 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 	}()
 
 	fmt.Print(asciiLogo)
+
+	fmt.Println()
+
+	out := termenv.NewOutput(os.Stdout)
+	export := out.String("export SESAM_ID=" + ids[0]).Foreground(termenv.ANSIBrightBlue).String()
+
+	printInfo("Tip: Put '%s' in your shell config", export)
 	return nil
 }
