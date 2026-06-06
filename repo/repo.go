@@ -626,11 +626,11 @@ type VerifyOptions struct {
 
 // VerifyReport carries the per-check outcome from Verify.
 type VerifyReport struct {
-	// Integrity is the report from the integrity check. nil if Integrity was
-	// not requested.
-	Integrity *core.IntegrityReport
-
-	// TODO: Truncation, KeyReuse, ForgeCheck reports
+	Success          bool                   `json:"success"`
+	Integrity        *core.IntegrityReport  `json:"integrity,omitempty"`
+	TruncateError    error                  `json:"truncate_error,omitempty"`
+	ForgeCheckReport *core.ForgeReport      `json:"forge_report,omitempty"`
+	SharedPublicKeys []core.SharedPublicKey `json:"shared_public_keys,omitempty"`
 }
 
 // OK reports whether every requested check passed.
@@ -638,9 +638,20 @@ func (rep *VerifyReport) OK() bool {
 	if rep == nil {
 		return true
 	}
+
 	if rep.Integrity != nil && !rep.Integrity.OK() {
 		return false
 	}
+
+	if rep.TruncateError != nil {
+		return false
+	}
+
+	if len(rep.SharedPublicKeys) > 0 {
+		return false
+	}
+
+	// NOTE: ForgeCheckReport may exist, they're more informal.
 	return true
 }
 
@@ -649,7 +660,7 @@ func (rep *VerifyReport) OK() bool {
 // audit log cannot be decrypted or is inconsistent) and are returned as
 // `err`. All other consistency checks have their results placed in the
 // returned report.
-func (r *Repo) Verify(opts VerifyOptions) (*VerifyReport, error) {
+func (r *Repo) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -663,11 +674,19 @@ func (r *Repo) Verify(opts VerifyOptions) (*VerifyReport, error) {
 		report.Integrity = core.VerifyIntegrity(r.sesamDir, r.vstate, r.keyring)
 	}
 
-	// TODO: Truncation, KeyReuse, ForgeCheck.
-	_ = opts.Truncation
-	_ = opts.KeyReuse
-	_ = opts.ForgeCheck
+	if opts.ForgeCheck {
+		report.ForgeCheckReport = core.VerifyForgeIds(ctx, r.vstate, r.keyring, r.opts.pluginUI())
+	}
 
+	if opts.Truncation {
+		report.TruncateError = core.VerifyHistory(r.sesamDir, r.gitRepo, r.identities, r.opts.pluginUI())
+	}
+
+	if opts.KeyReuse {
+		report.SharedPublicKeys = core.VerifyKeyReuse(r.keyring)
+	}
+
+	report.Success = report.OK()
 	return report, nil
 }
 

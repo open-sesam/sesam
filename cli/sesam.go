@@ -44,6 +44,7 @@ func Main(args []string) error {
 			},
 			{
 				Name:   "verify",
+				Flags:  flagsVerify,
 				Action: commands.WithRepo(commands.HandleVerify),
 				Usage:  "Verify sesam signatures and encryption state",
 			},

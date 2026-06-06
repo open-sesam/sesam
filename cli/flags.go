@@ -19,16 +19,9 @@ var (
 var flagsGeneral = []cli.Flag{
 	&cli.StringSliceFlag{
 		Name:    "identity",
-		Aliases: []string{"i"},
+		Aliases: []string{"i", "id"},
 		Usage:   "Path to the age identity (can be given several times)",
 		Sources: cli.EnvVars("SESAM_ID", "SESAM_IDENTITY"),
-	},
-	&cli.StringFlag{
-		Name:    "config",
-		Aliases: []string{"c"},
-		Value:   "sesam.yml",
-		Usage:   "Path to the sesam config file",
-		Sources: cli.EnvVars("SESAM_CONFIG"),
 	},
 	&cli.StringFlag{
 		Name:    "sesam-dir",
@@ -46,7 +39,7 @@ var flagsGeneral = []cli.Flag{
 	&cli.BoolFlag{
 		Name:    "no-color",
 		Usage:   "Disable color always",
-		Sources: cli.EnvVars("NO_COLOR"),
+		Sources: cli.EnvVars("NO_COLOR", "SESAM_NO_COLOR"),
 	},
 	&cli.BoolFlag{
 		Name:    "verbose",
@@ -165,4 +158,32 @@ var flagsID = []cli.Flag{
 		Name:  "json",
 		Usage: "Print as JSON",
 	},
+}
+
+var flagsVerify = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "all",
+		Usage: "Run all verifications",
+	},
+	&cli.BoolFlag{
+		Name:  "truncate",
+		Usage: "Verify the audit log was not truncated over history",
+	},
+	&cli.BoolFlag{
+		Name:  "forge-check",
+		Usage: "Verify the forge public keys did not change since adding users",
+	},
+	&cli.BoolFlag{
+		Name:  "key-reuse",
+		Usage: "Double-check that no key is re-used between users",
+	},
+	&cli.BoolFlag{
+		Name:  "integrity",
+		Usage: "Check file integrity on disk",
+	},
+	&cli.BoolFlag{
+		Name:  "json",
+		Usage: "Print report as json",
+	},
+	// TODO: Probably need a config linter here too at some point.
 }

@@ -20,7 +20,7 @@ type IntegrityError struct {
 
 // IntegrityReport collects all issues found during deep verification.
 type IntegrityReport struct {
-	Errors []IntegrityError
+	Errors []IntegrityError `json:"errors,omitempty"`
 }
 
 func (ie IntegrityError) Error() string {
