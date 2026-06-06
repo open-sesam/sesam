@@ -8,7 +8,10 @@ import (
 
 const flagUser = "user"
 
-var flagsVerboseCount int
+var (
+	flagsVerboseCount int
+	flagsQuietCount   int
+)
 
 // flagsGeneral are shared by most top-level commands.
 //
@@ -51,6 +54,14 @@ var flagsGeneral = []cli.Flag{
 		Usage:   "Print more log output",
 		Config: cli.BoolConfig{
 			Count: &flagsVerboseCount,
+		},
+	},
+	&cli.BoolFlag{
+		Name:    "quiet",
+		Aliases: []string{"q"},
+		Usage:   "Print less log output",
+		Config: cli.BoolConfig{
+			Count: &flagsQuietCount,
 		},
 	},
 }

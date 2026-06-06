@@ -196,12 +196,12 @@ func Main(args []string) error {
 		}
 
 		logLevels := map[int]slog.Level{
-			0: slog.LevelWarn,
-			1: slog.LevelInfo,
-			2: slog.LevelDebug,
+			-1: slog.LevelWarn,
+			+0: slog.LevelInfo,
+			+1: slog.LevelDebug,
 		}
 
-		logLevel, ok := logLevels[flagsVerboseCount]
+		logLevel, ok := logLevels[flagsVerboseCount+flagsQuietCount]
 		if !ok {
 			logLevel = slog.LevelDebug
 		}

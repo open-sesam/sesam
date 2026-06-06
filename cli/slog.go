@@ -21,21 +21,25 @@ import (
 // prefixes are precomputed: when colour is unavailable termenv emits the plain
 // label with no escape codes.
 type prettyHandler struct {
-	w          io.Writer
-	mu         sync.Mutex
-	pre        []slog.Attr
-	level      slog.Level
-	errPrefix  string
-	warnPrefix string
+	w           io.Writer
+	mu          sync.Mutex
+	pre         []slog.Attr
+	level       slog.Level
+	debugPrefix string
+	infoPrefix  string
+	errPrefix   string
+	warnPrefix  string
 }
 
 func newPrettyHandler(w io.Writer, level slog.Level) *prettyHandler {
 	out := termenv.NewOutput(w)
 	return &prettyHandler{
-		w:          w,
-		level:      level,
-		errPrefix:  out.String("ERR ").Foreground(out.Color("#800000")).String(),
-		warnPrefix: out.String("WARN").Foreground(out.Color("#808000")).String() + " ",
+		w:           w,
+		level:       level,
+		errPrefix:   out.String("⨯ ").Foreground(out.Color("#800000")).String(),
+		warnPrefix:  out.String("‼ ").Foreground(out.Color("#808000")).String(),
+		infoPrefix:  out.String("ℹ ").Foreground(termenv.ANSIBrightBlue).String(),
+		debugPrefix: out.String("» ").Foreground(termenv.ANSIBrightMagenta).String(),
 	}
 }
 
@@ -54,6 +58,10 @@ func (h *prettyHandler) Handle(_ context.Context, r slog.Record) error {
 		sb.WriteString(h.errPrefix)
 	case r.Level >= slog.LevelWarn:
 		sb.WriteString(h.warnPrefix)
+	case r.Level >= slog.LevelInfo:
+		sb.WriteString(h.infoPrefix)
+	case r.Level >= slog.LevelDebug:
+		sb.WriteString(h.debugPrefix)
 	}
 
 	sb.WriteString(r.Message)
@@ -76,13 +84,11 @@ func (h *prettyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	pre := make([]slog.Attr, len(h.pre)+len(attrs))
 	copy(pre, h.pre)
 	copy(pre[len(h.pre):], attrs)
-	return &prettyHandler{
-		w:          h.w,
-		level:      h.level,
-		pre:        pre,
-		errPrefix:  h.errPrefix,
-		warnPrefix: h.warnPrefix,
-	}
+
+	p := *h
+	p.mu = sync.Mutex{}
+	p.pre = pre
+	return &p
 }
 
 func (h *prettyHandler) WithGroup(_ string) slog.Handler {

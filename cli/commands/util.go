@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/muesli/termenv"
 	json "github.com/neilotoole/jsoncolor"
 
 	"github.com/mattn/go-colorable"
@@ -67,7 +66,5 @@ func printJSON(value any) error {
 }
 
 func printInfo(format string, args ...any) {
-	out := termenv.NewOutput(os.Stdout)
-	infoPrefix := out.String("ℹ ").Foreground(termenv.ANSIBrightBlue).String()
-	fmt.Printf(infoPrefix+format+"\n", args...)
+	slog.Info(fmt.Sprintf(format, args...))
 }
