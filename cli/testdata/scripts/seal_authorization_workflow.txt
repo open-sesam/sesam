@@ -27,7 +27,9 @@ cp .sesam/objects/README.md.sesam original.sesam
 # sesam should warn about that but keep sealing for other files.
 cp evil_readme.md README.md
 exec sesam --identity $BOB_KEY seal
-stderr 'WARN ignoring path because user is not authorized user=bob path=README.md'
+# Match the message without the log-level prefix, so the assertion is robust
+# to how the handler renders the level (e.g. a `‼` symbol vs. `WARN`).
+stderr 'ignoring path because user is not authorized user=bob path=README.md'
 
 # The on-disk ciphertext must not have been touched by the failed seal:
 # the swap never happened because stageSecret rejected before staging.

@@ -229,17 +229,24 @@ func TestVerifySecretChangeBasic(t *testing.T) {
 	require.Equal(t, "secrets/db", s.RevealedPath)
 }
 
-func TestVerifySecretChangeNegative(t *testing.T) {
-	t.Run("empty groups", func(t *testing.T) {
-		sesamDir := testRepo(t)
-		admin := newTestUser(t, "admin")
-		al := initAuditLog(t, sesamDir, admin)
-		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
-			RevealedPath: "secrets/db", Groups: []string{},
-		}), nil)
-		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
-	})
+// Empty groups is not an error: it means the secret is accessible to admins
+// only (admin is always implicitly added).
+func TestVerifySecretChangeEmptyGroupsMeansAdminOnly(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+		RevealedPath: "secrets/db", Groups: []string{},
+	}), nil)
 
+	state := verifyState(t, al, EmptyKeyring())
+	s, exists := state.SecretExists("secrets/db")
+	require.True(t, exists)
+	require.Equal(t, []string{"admin"}, s.AccessGroups,
+		"empty groups must resolve to admin-only access")
+}
+
+func TestVerifySecretChangeNegative(t *testing.T) {
 	t.Run("no access to existing secret", func(t *testing.T) {
 		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")

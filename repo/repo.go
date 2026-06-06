@@ -568,9 +568,6 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string) error {
 	if len(revealedPaths) == 0 {
 		return fmt.Errorf("missing secret path: pass at least one path")
 	}
-	if len(groups) == 0 {
-		return fmt.Errorf("missing group: pass at least one group")
-	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()

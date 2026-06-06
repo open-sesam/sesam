@@ -345,10 +345,6 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 		return fmt.Errorf("parse detail: %w", err)
 	}
 
-	if len(scd.Groups) == 0 {
-		return fmt.Errorf("groups may not be empty (%s)", scd.RevealedPath)
-	}
-
 	// double check nobody inserted ../../ or similar into the revealed path.
 	if err := validSecretPathFormat(log.SesamDir, scd.RevealedPath); err != nil {
 		return err

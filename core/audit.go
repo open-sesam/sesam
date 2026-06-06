@@ -214,7 +214,7 @@ type DetailUserKill struct {
 // Verification:
 //
 // - "admin" may be part of `Groups`, but is implicitly added anyways.
-// - `Groups` may not be empty.
+// - An empty `Groups` is therefore valid and means "admin only".
 // - `Groups` should not have duplicates.
 // - If secret exists: Only users that already have access to it may issue another Change.
 //

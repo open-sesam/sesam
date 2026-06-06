@@ -16,7 +16,7 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 	groups := normalizedGroups(cmd.StringSlice("group"))
 	if len(groups) == 0 {
-		printInfo("no groups specified, assuming `--group admin` only")
+		printInfo("no groups specified, assuming `--group admin` only - only admins can decrypt")
 	}
 
 	return r.SecretAdd(cmd.Args().Slice(), groups)
