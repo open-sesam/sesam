@@ -24,9 +24,9 @@ exec git sesam list secrets
 stdout 'README\.md'
 stdout 'admin'
 
-# A freshly-initialized repo passes `verify`.
+# A freshly-initialized repo passes `verify` (status lines go to stderr via slog).
 exec git sesam verify
-stdout '^verify ok$'
+stderr 'Integrity: ok$'
 
 # Extra flags pass through the alias intact.
 exec git sesam list secrets --json

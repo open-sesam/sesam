@@ -125,7 +125,7 @@ func ensureSesamDirs(sesamDir string) error {
 		return err
 	}
 
-	slog.Info("initialized sesam directory", slog.String("path", filepath.Join(sesamDir, sesamSuffix)))
+	slog.Debug("initialized sesam directory", slog.String("path", filepath.Join(sesamDir, sesamSuffix)))
 	return nil
 }
 
@@ -178,7 +178,7 @@ func createInitialConfig(configPath, initialUser string, initialRecipients []str
 		return fmt.Errorf("failed to create sample config %s: %w", configPath, err)
 	}
 
-	slog.Info("created sample config", slog.String("path", configPath))
+	slog.Debug("created sample config", slog.String("path", configPath))
 	return nil
 }
 
@@ -401,7 +401,7 @@ func ensureSesamReadme(sesamDir string) error {
 		return fmt.Errorf("failed to create sesam readme %s: %w", readmePath, err)
 	}
 
-	slog.Info("created sesam readme", slog.String("path", readmePath))
+	slog.Debug("created sesam readme", slog.String("path", readmePath))
 	return nil
 }
 

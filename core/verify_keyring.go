@@ -63,6 +63,10 @@ type ForgeReport struct {
 	Errored []ForgeReportError `json:"errored,omitempty"`
 }
 
+func (fr *ForgeReport) IsZero() bool {
+	return len(fr.Added) == 0 && len(fr.Deleted) == 0 && len(fr.Errored) == 0
+}
+
 // VerifyForgeIds checks the public keys of all users and will re-fetch the source they were from.
 // Difference to the current state will be highlighted in the returned ForgeReport.
 func VerifyForgeIds(ctx context.Context, vstate *VerifiedState, kr Keyring, pluginUI *PluginUI) *ForgeReport {

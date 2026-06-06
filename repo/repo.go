@@ -672,10 +672,16 @@ func (r *Repo) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 
 	if opts.Integrity {
 		report.Integrity = core.VerifyIntegrity(r.sesamDir, r.vstate, r.keyring)
+		if report.Integrity.IsZero() {
+			report.Integrity = nil
+		}
 	}
 
 	if opts.ForgeCheck {
 		report.ForgeCheckReport = core.VerifyForgeIds(ctx, r.vstate, r.keyring, r.opts.pluginUI())
+		if report.ForgeCheckReport.IsZero() {
+			report.ForgeCheckReport = nil
+		}
 	}
 
 	if opts.Truncation {

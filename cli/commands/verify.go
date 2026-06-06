@@ -92,45 +92,41 @@ func printReport(opts repo.VerifyOptions, report *repo.VerifyReport) {
 
 		slog.Warn(fmt.Sprintf("  - %s", name))
 		for _, entry := range entries {
-			slog.Warn(fmt.Sprintf("    - %s", entry.User, entry.PubKey))
+			slog.Warn(fmt.Sprintf("    - %s: %s", entry.User, entry.PubKey))
 		}
 	}
 
 	if opts.ForgeCheck {
-		if report.ForgeCheckReport != nil {
+		if report.ForgeCheckReport == nil || report.ForgeCheckReport.IsZero() {
+			slog.Info(fmt.Sprintf("Forge Check: %s", green("ok")))
+		} else {
 			added := report.ForgeCheckReport.Added
 			deleted := report.ForgeCheckReport.Deleted
 			errored := report.ForgeCheckReport.Errored
 
-			if len(added) == 0 && len(deleted) == 0 && len(errored) == 0 {
-				slog.Info(fmt.Sprintf("Forge Check: %s", green("ok")))
-			} else {
-				slog.Info(fmt.Sprintf(
-					"Forge Check: %d added, %d deleted, %d errored",
-					len(added),
-					len(deleted),
-					len(errored),
-				))
+			slog.Info(fmt.Sprintf(
+				"Forge Check: %d added, %d deleted, %d errored",
+				len(added),
+				len(deleted),
+				len(errored),
+			))
 
-				printForgeReportEntries("Added", added)
-				printForgeReportEntries("Deleted", deleted)
+			printForgeReportEntries("Added", added)
+			printForgeReportEntries("Deleted", deleted)
 
-				if len(errored) > 0 {
-					slog.Error("  - Errored:")
-					for _, forgeErr := range errored {
-						slog.Error(
-							fmt.Sprintf(
-								"    - %s (%s): %s",
-								forgeErr.User,
-								forgeErr.Source,
-								red(forgeErr.Error.Error()),
-							),
-						)
-					}
+			if len(errored) > 0 {
+				slog.Error("  - Errored:")
+				for _, forgeErr := range errored {
+					slog.Error(
+						fmt.Sprintf(
+							"    - %s (%s): %s",
+							forgeErr.User,
+							forgeErr.Source,
+							red(forgeErr.Error.Error()),
+						),
+					)
 				}
 			}
-		} else {
-			slog.Info(fmt.Sprintf("Forge Check: %s", orange("missing")))
 		}
 	}
 
@@ -140,7 +136,7 @@ func printReport(opts repo.VerifyOptions, report *repo.VerifyReport) {
 		} else {
 			slog.Error(
 				fmt.Sprintf(
-					"Key re-use: %d",
+					"Key re-use: %s",
 					red(fmt.Sprintf("%d shared", len(report.SharedPublicKeys))),
 				),
 			)
@@ -170,6 +166,9 @@ func HandleVerify(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		printReport(opts, report)
 	}
 
-	// TODO: fix exit code & add success field to json
+	if !report.OK() {
+		return fmt.Errorf("there were issues")
+	}
+
 	return nil
 }

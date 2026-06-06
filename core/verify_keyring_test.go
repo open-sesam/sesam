@@ -131,10 +131,10 @@ func TestVerifyForgeIds_KeySwap(t *testing.T) {
 	require.Empty(t, report.Errored)
 
 	require.Equal(t, "alice", report.Added[0].User)
-	require.Equal(t, newKey, report.Added[0].PubKey.String())
+	require.Equal(t, newKey, report.Added[0].PubKey)
 
 	require.Equal(t, "alice", report.Deleted[0].User)
-	require.Equal(t, oldKey, report.Deleted[0].PubKey.String())
+	require.Equal(t, oldKey, report.Deleted[0].PubKey)
 }
 
 func TestVerifyForgeIds_DeletedKey(t *testing.T) {
@@ -159,7 +159,7 @@ func TestVerifyForgeIds_DeletedKey(t *testing.T) {
 	require.Empty(t, report.Errored)
 	require.Len(t, report.Deleted, 1)
 	require.Equal(t, "alice", report.Deleted[0].User)
-	require.Equal(t, dropKey, report.Deleted[0].PubKey.String())
+	require.Equal(t, dropKey, report.Deleted[0].PubKey)
 }
 
 func TestVerifyForgeIds_ErroredOnMissingSource(t *testing.T) {
@@ -227,15 +227,15 @@ func TestVerifyForgeIds_ManualKeyNeverReportedAsDeleted(t *testing.T) {
 	report := VerifyForgeIds(context.Background(), f.State, f.Kr, NewNonInteractivePluginUI())
 
 	for _, entry := range report.Deleted {
-		require.NotEqual(t, manualKey, entry.PubKey.String(),
+		require.NotEqual(t, manualKey, entry.PubKey,
 			"manual key must never appear in Deleted")
 	}
 
 	// Sanity: forge key is reported deleted, otherKey is reported added.
 	require.Len(t, report.Deleted, 1)
-	require.Equal(t, forgeKey, report.Deleted[0].PubKey.String())
+	require.Equal(t, forgeKey, report.Deleted[0].PubKey)
 	require.Len(t, report.Added, 1)
-	require.Equal(t, otherKey, report.Added[0].PubKey.String())
+	require.Equal(t, otherKey, report.Added[0].PubKey)
 }
 
 func TestVerifyForgeIds_KeyringNotMutated(t *testing.T) {
@@ -295,11 +295,11 @@ func TestVerifyForgeIds_MultipleUsersSorted(t *testing.T) {
 
 	require.Len(t, report.Added, 1)
 	require.Equal(t, "bob", report.Added[0].User)
-	require.Equal(t, bobNew, report.Added[0].PubKey.String())
+	require.Equal(t, bobNew, report.Added[0].PubKey)
 
 	require.Len(t, report.Deleted, 1, "charlie's errored fetch must not leak as Deleted")
 	require.Equal(t, "bob", report.Deleted[0].User)
-	require.Equal(t, bobOld, report.Deleted[0].PubKey.String())
+	require.Equal(t, bobOld, report.Deleted[0].PubKey)
 
 	require.Len(t, report.Errored, 1)
 	require.Equal(t, "charlie", report.Errored[0].User)

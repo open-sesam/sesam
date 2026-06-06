@@ -310,10 +310,11 @@ func TestRepo_Verify_IntegrityOK(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	_, r := bootstrapRepo(t, admin)
 
-	report, err := r.Verify(VerifyOptions{Integrity: true})
+	report, err := r.Verify(context.Background(), VerifyOptions{Integrity: true})
 	require.NoError(t, err)
-	require.NotNil(t, report.Integrity)
-	require.True(t, report.Integrity.OK(), report.Integrity.String())
+	// A clean repo produces no integrity errors, so the report is dropped to
+	// nil (omitted from JSON). OK() still reports success.
+	require.Nil(t, report.Integrity, "empty integrity report is omitted")
 	require.True(t, report.OK())
 }
 
@@ -321,7 +322,7 @@ func TestRepo_Verify_NoChecksMeansOK(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	_, r := bootstrapRepo(t, admin)
 
-	report, err := r.Verify(VerifyOptions{})
+	report, err := r.Verify(context.Background(), VerifyOptions{})
 	require.NoError(t, err)
 	require.Nil(t, report.Integrity, "no checks requested → no Integrity report")
 	require.True(t, report.OK())
