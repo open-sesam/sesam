@@ -14,12 +14,20 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return fmt.Errorf("need at least one path")
 	}
 
-	groups := normalizedGroups(cmd.StringSlice("group"))
+	groups := cmd.StringSlice("group")
 	if len(groups) == 0 {
 		printInfo("no groups specified, assuming `--group admin` only - only admins can decrypt")
 	}
 
-	return r.SecretAdd(cmd.Args().Slice(), groups)
+	if err := r.SecretAdd(cmd.Args().Slice(), groups); err != nil {
+		return err
+	}
+
+	if cmd.Bool("no-seal") {
+		return nil
+	}
+
+	return r.SealAll()
 }
 
 // HandleRemove removes a secret path from sesam metadata.
@@ -35,16 +43,4 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 // HandleMove renames or relocates a tracked secret path.
 func HandleMove(_ context.Context, _ *cli.Command) error {
 	return handleStub("modify mv")
-}
-
-func normalizedGroups(groups []string) []string {
-	out := make([]string, 0, len(groups))
-	for _, group := range groups {
-		if group == "" {
-			continue
-		}
-		out = append(out, group)
-	}
-
-	return out
 }

@@ -91,10 +91,6 @@ var flagsClean = []cli.Flag{
 		Name:  "dry-run",
 		Usage: "Do not actually delete, just print what would be deleted",
 	},
-	&cli.BoolFlag{
-		Name:  "quiet",
-		Usage: "Don't print files",
-	},
 }
 
 // flagsReveal contains optional controls for reveal.
@@ -105,6 +101,10 @@ var flagsAdd = []cli.Flag{
 	&cli.StringSliceFlag{
 		Name:  "group",
 		Usage: "Group assignment for the secret (repeatable) - 'admin' is implicit",
+	},
+	&cli.BoolFlag{
+		Name:  "no-seal",
+		Usage: "Do not run `sesam seal` after adding files - useful when batch adding",
 	},
 }
 
