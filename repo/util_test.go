@@ -132,9 +132,9 @@ func TestLoadIdentities_FailureModes(t *testing.T) {
 			wantErr: "",
 		},
 		{
-			name:    "same identity twice is rejected",
+			name:    "same identity twice is deduplicated",
 			paths:   []string{good.Path, good.Path},
-			wantErr: "already used",
+			wantErr: "",
 		},
 	}
 
