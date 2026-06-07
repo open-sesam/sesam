@@ -37,7 +37,11 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return fmt.Errorf("missing secret path: pass a path argument")
 	}
 
-	return r.SecretRemove([]string{revealedPath})
+	if err := r.SecretRemove([]string{revealedPath}); err != nil {
+		return err
+	}
+
+	return r.SealAll()
 }
 
 // HandleMove renames or relocates a tracked secret path.
