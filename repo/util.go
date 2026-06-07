@@ -106,7 +106,8 @@ func loadIdentitiesWith(identityPaths []string, newProvider func(keyFingerprint 
 
 		idPub := identity.Public().String()
 		if seen[idPub] {
-			return nil, fmt.Errorf("identity with pubkey %s already used", idPub)
+			// just ignore duplicate identities.
+			continue
 		}
 
 		identities = append(identities, identity)
