@@ -44,22 +44,26 @@ func identityToUser(identities core.Identities, users map[string]core.Recipients
 }
 
 // loadIdentities reads all given paths and parses all identities. Encrypted
-// identities are unlocked via the system keyring, falling back to a stdin
-// prompt when no entry exists.
+// identities are unlocked via the system keyring, falling back to askpass and
+// then a stdin prompt when no entry exists.
 func loadIdentities(identityPaths []string, keyFingerprint string, pluginUI *core.PluginUI) (core.Identities, error) {
 	return loadIdentitiesWith(identityPaths, &core.KeyringPassphraseProvider{
 		KeyFingerprint: keyFingerprint,
-		Fallback:       &core.StdinPassphraseProvider{},
+		Fallback: &core.AskpassProvider{
+			Fallback: &core.StdinPassphraseProvider{},
+		},
 	}, pluginUI)
 }
 
 // loadIdentitiesKeyringOnly is like loadIdentities but never prompts on stdin.
 // It is required for the long-running smudge filter, where stdin is owned by
 // the git pkt-line protocol and a passphrase prompt would corrupt the stream.
-// If the keyring has no entry for an encrypted identity, parsing fails.
+// If the keyring has no entry for an encrypted identity, askpass is used when
+// configured; otherwise parsing fails.
 func loadIdentitiesKeyringOnly(identityPaths []string, keyFingerprint string, pluginUI *core.PluginUI) (core.Identities, error) {
 	return loadIdentitiesWith(identityPaths, &core.KeyringPassphraseProvider{
 		KeyFingerprint: keyFingerprint,
+		Fallback:       &core.AskpassProvider{},
 	}, pluginUI)
 }
 

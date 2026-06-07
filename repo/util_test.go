@@ -1,13 +1,18 @@
 package repo
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"filippo.io/age"
 	"github.com/open-sesam/sesam/core"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestExpandHomeDir(t *testing.T) {
@@ -148,13 +153,60 @@ func TestLoadIdentities_FailureModes(t *testing.T) {
 	}
 }
 
+func TestLoadIdentitiesKeyringOnlyUsesAskpass(t *testing.T) {
+	for _, env := range []string{
+		"SESAM_ASKPASS", "SESAM_ASKPASS_REQUIRED",
+		"GIT_ASKPASS", "GIT_ASKPASS_REQUIRED",
+		"SSH_ASKPASS", "SSH_ASKPASS_REQUIRED",
+	} {
+		t.Setenv(env, "")
+	}
+
+	passphrase := "from-askpass"
+	t.Setenv("SESAM_ASKPASS", writeRepoAskpassScript(t, passphrase))
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	pemBlock, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "", []byte(passphrase))
+	require.NoError(t, err)
+
+	identityPath := filepath.Join(t.TempDir(), "encrypted-identity")
+	require.NoError(t, os.WriteFile(identityPath, pem.EncodeToMemory(pemBlock), 0o600))
+
+	ids, err := loadIdentitiesKeyringOnly(
+		[]string{identityPath},
+		"sesam.test."+t.Name(),
+		core.NewNonInteractivePluginUI(),
+	)
+	require.NoError(t, err)
+	require.Len(t, ids, 1)
+}
+
+func writeRepoAskpassScript(t *testing.T, output string) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(dir, "askpass.cmd")
+		err := os.WriteFile(path, []byte("@echo off\r\necho "+output+"\r\n"), 0o700)
+		require.NoError(t, err)
+		return path
+	}
+
+	path := filepath.Join(dir, "askpass")
+	err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '"+output+"\\n'\n"), 0o700)
+	require.NoError(t, err)
+	return path
+}
+
 func TestSplitObjectPath(t *testing.T) {
 	cases := []struct {
-		name      string
-		pathname  string
-		wantOk    bool
-		wantDir   string
-		wantPath  string
+		name     string
+		pathname string
+		wantOk   bool
+		wantDir  string
+		wantPath string
 	}{
 		{
 			name:     "worktree root",
