@@ -37,7 +37,7 @@ func HandleID(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	return nil
 }
 
-func HandleIDClearCache(_ context.Context, _ *cli.Command) error {
+func HandleKeyringClearCache(_ context.Context, _ *cli.Command) error {
 	return core.DeleteAllCachedPassphrases()
 }
 
