@@ -1,8 +1,100 @@
-# sesam bootstrap
+# Sesam Cheatsheet
 
-This repository was initialized with sesam.
+This repository was initialized with `sesam` (https://opensesam.org/).
+`sesam` is a tool to manage secrets in git for multiple users.
 
-Next steps:
-- Review and commit sesam.yml and .sesam/ metadata.
-- Add or change secrets with sesam add.
-- Seal and reveal via sesam seal / sesam reveal.
+This file contains a quick cheatsheet regarding the most common operations in just 100 lines.
+If you'd like to remove this file, then just run `sesam rm README.md`.
+
+In general, there are two ways to use `sesam`:
+
+1. Modify user/secrets via the CLI. Preferable for one-off changes.
+2. Adjust `sesam.yml` and let `sesam` apply the changes. Preferable for batch changes.
+
+## Files
+
+- `sesam.yml` - the state the repository should have after `sesam apply`.
+- `.sesam/`   - here all encrypted files and other things are stored.
+- other       - all other files are by default in .gitignore.
+
+Only `sesam.yml` and `.sesam/` is committed.
+You decide when you commit or push, so imagine something like `git add . && git push` is done after the steps below.
+
+## User and groups
+
+1. Only admins can add or remove users and groups.
+2. The first is user is automatically in the `admin` group.
+3. Every secret has a list of groups it can be accessed by.
+3. User may change the access list of a secret they have access to.
+
+## Adding
+
+1. Add the file at a path of your choosing.
+2. Run `sesam add <file>`. This will encrypt the file directly.
+   If you want to open access to other groups than `admin` add them via `--group`.
+
+Alternatively:
+
+1. Add the file at a path of your choosing.
+2. Edit `sesam.yml` to include it in the `secrets:` section.
+3. Run `sesam apply`.
+
+## Changing existing secrets
+
+1. Run `sesam seal` or run `sesam add <file>` or run `sesam apply`.
+
+## Adding new users
+
+If the user is on Codeberg, GitHub or GitLab:
+
+1. For Forge-ids: Run `sesam tell --recipient github:user`
+
+If not, you need a public key of this user, either age or ssh. Then:
+
+1. Run `sesam tell --user <name> --recipient <public_key>`
+
+Alternatively:
+
+1. Edit `sesam.yml` and add the user there.
+2. Run `sesam apply`.
+
+## Removing secrets
+
+1. Run `sesam rm <path>`
+
+Alternatively:
+
+1. Edit `sesam.yml` and add the user there.
+2. Run `sesam apply`.
+
+## Removing persons
+
+1. Run `sesam kill --user <name>`
+2. Rotate the secrets the user had access to.
+
+Alternatively:
+
+1. Edit `sesam.yml` and remove the user there.
+2. Run `sesam apply`.
+3. Rotate the secrets the user had access to.
+
+## Check the log
+
+1. Run `sesam log`.
+
+NOTE: We recommend disabling force pushes to your repo or at least restrict usage of it.
+
+## Verify repository state
+
+1. `sesam` will do a lot of checks already when it starts.
+2. Additional checks can be triggered via `sesam verify`.
+3. If you have a CI/CD pipeline you should consider running it there.
+4. If you feel something is not configured right, run `sesam doctor`.
+
+## Git integration
+
+1. Both audit log and secret change are visible in `git diff`.
+2. When you checkout a different state, `sesam` will automatically reveal the files there.
+3. Before you commit we will run a hook to make sure all files are sealed.
+4. `sesam` will try to help `git` when merging secrets of different branches.
+5. You can call `sesam` also as `git sesam`.
