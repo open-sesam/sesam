@@ -79,6 +79,10 @@ html.ayu {
     --logo-inner-bg:       var(--l-logo-inner);
 
     /* mdBook variable mappings */
+    /* Widen the content column from mdBook's stock 750px — the wide
+       comparison tables in alternatives.md need the room, and the page-TOC
+       (pagetoc.css) positions itself relative to this value. */
+    --content-max-width:      1100px;
     --sidebar-bg:             var(--sesam-sidebar-bg);
     --sidebar-fg:             var(--sesam-text);
     --sidebar-non-existant:   var(--sesam-text-muted);
