@@ -14,6 +14,7 @@ sesam
 [--quiet|-q]
 [--sesam-dir|-r|--repo]=[value]
 [--verbose|-v]
+[--verify-mode]=[value]
 [--version]
 ```
 
@@ -38,6 +39,8 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 **--sesam-dir, -r, --repo**="": Directory where .sesam lives (default: ".")
 
 **--verbose, -v**: Print more log output
+
+**--verify-mode**="": Adjust how strong or weak the disk state is verified (default: "all")
 
 **--version**: Print the version and exit
 
@@ -78,9 +81,15 @@ Identify the current user by age identity
 
 **--json**: Print as JSON
 
-### clear-cache
+## keyring
 
-Clear cached passprhases from the keyring
+Keyring utils
+
+**--help, -h**: show help
+
+### clear
+
+Clear cached passphrases from the keyring
 
 **--help, -h**: show help
 

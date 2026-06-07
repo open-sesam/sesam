@@ -199,7 +199,6 @@ func negotiateCapabilities(scanner *pktline.Scanner, encoder *pktline.Encoder) e
 	}
 
 	// we only do smudge right now, we might add `git add` later.
-	// TODO: Can we change paths when using the clean filter?
 	if err := encoder.EncodeString("capability=smudge\n"); err != nil {
 		return err
 	}

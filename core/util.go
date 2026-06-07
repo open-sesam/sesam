@@ -151,8 +151,6 @@ func copyFile(src, dst string) error {
 	return dstFd.Close()
 }
 
-// TODO: Add WriteAgeFile() and ReadAgeFile() utils
-
 func ReadFileLimited(path string, size int64) ([]byte, error) {
 	//nolint:gosec
 	fd, err := os.Open(path)

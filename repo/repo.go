@@ -78,9 +78,6 @@ func ToVerifyMode(s string) (VerifyMode, error) {
 // RepoOpts controls runtime behavior shared across all Repo operations.
 type RepoOpts struct {
 	// Interactive should be true when we can talk to the user via the terminal.
-	// TODO: later we should check things like ssh-askpass to allow password
-	// decryption without running in the foreground. Then we might need to split
-	// up options here too (one for interactive terminal and one for interactive UI)
 	Interactive bool
 
 	// LockTimeout bounds how long acquiring the on-disk repo lock waits.
