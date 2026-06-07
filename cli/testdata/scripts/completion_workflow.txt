@@ -47,6 +47,9 @@ exec sesam kill --user --generate-shell-completion
 stdout '^admin$'
 stdout '^bob$'
 
-# `sesam tell --user <TAB>` likewise completes users instead of printing "help".
+# `sesam tell --user <TAB>`: unlike `kill`, `tell` adds a NEW user, so it must
+# NOT complete existing user names (and must never print the bare "help").
 exec sesam tell --user --generate-shell-completion
-stdout '^bob$'
+! stdout '^bob$'
+! stdout '^admin$'
+! stdout '^help$'
