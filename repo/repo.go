@@ -52,6 +52,29 @@ type Repo struct {
 	mu sync.Mutex
 }
 
+type VerifyMode string
+
+const (
+	// VerifyModeAll runs the default check (chain verify + root hash verify)
+	VerifyModeAll = "all"
+
+	// VerifyModeNoDisk will skip the root hash check
+	VerifyModeNoDisk = "no-disk"
+
+	VerifyModeDefault = VerifyModeAll
+)
+
+func ToVerifyMode(s string) (VerifyMode, error) {
+	switch s {
+	case VerifyModeAll:
+	case VerifyModeNoDisk:
+	default:
+		return VerifyMode(""), fmt.Errorf("invalid verify mode: %s", s)
+	}
+
+	return VerifyMode(s), nil
+}
+
 // RepoOpts controls runtime behavior shared across all Repo operations.
 type RepoOpts struct {
 	// Interactive should be true when we can talk to the user via the terminal.
@@ -63,6 +86,9 @@ type RepoOpts struct {
 	// LockTimeout bounds how long acquiring the on-disk repo lock waits.
 	// Zero means use the default.
 	LockTimeout time.Duration
+
+	// VerifyMode defines how the on-disk state is verified
+	VerifyMode VerifyMode
 }
 
 type RepoInitOpts struct {
@@ -227,7 +253,13 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	r.auditLog = auditLog
 
 	r.keyring = core.EmptyKeyring()
-	vstate, err := core.Verify(auditLog, r.keyring, r.pluginUI)
+
+	verifyFn := core.Verify
+	if opts.VerifyMode == VerifyModeNoDisk {
+		verifyFn = core.VerifyChain
+	}
+
+	vstate, err := verifyFn(auditLog, r.keyring, r.pluginUI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}
@@ -320,7 +352,12 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	}
 	r.auditLog = auditLog
 
-	vstate, err := core.Verify(auditLog, r.keyring, r.pluginUI)
+	verifyFn := core.Verify
+	if opts.VerifyMode == VerifyModeNoDisk {
+		verifyFn = core.VerifyChain
+	}
+
+	vstate, err := verifyFn(auditLog, r.keyring, r.pluginUI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}

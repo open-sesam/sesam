@@ -560,7 +560,7 @@ func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, erro
 		diskRootHash := buildRootHash(sigs)
 		if diskRootHash != state.LastSealRootHash {
 			return nil, fmt.Errorf(
-				"root hash mismatch: log says %s, disk says %s",
+				"root hash mismatch: log says %s, disk says %s (try --verify-mode no-disk)",
 				state.LastSealRootHash,
 				diskRootHash,
 			)

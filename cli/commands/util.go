@@ -25,12 +25,18 @@ type RepoAction func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error
 //   - if the handler already failed, a Close error is logged at warn
 func WithRepo(action RepoAction) cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) (err error) {
+		verifyMode, err := repo.ToVerifyMode(cmd.String("verify-mode"))
+		if err != nil {
+			return err
+		}
+
 		r, err := repo.Load(
 			cmd.String("sesam-dir"),
 			cmd.StringSlice("identity"),
 			repo.RepoOpts{
 				Interactive: true,
 				LockTimeout: cmd.Duration("lock-timeout"),
+				VerifyMode:  verifyMode,
 			},
 		)
 		if err != nil {

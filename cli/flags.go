@@ -57,6 +57,11 @@ var flagsGeneral = []cli.Flag{
 			Count: &flagsQuietCount,
 		},
 	},
+	&cli.StringFlag{
+		Name:  "verify-mode",
+		Usage: "Adjust how strong or weak the disk state is verified",
+		Value: "all",
+	},
 }
 
 // flagsInit are specific to repository bootstrap.
