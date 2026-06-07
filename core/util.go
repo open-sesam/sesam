@@ -61,6 +61,10 @@ func validSecretPathFormat(sesamDir, revealedPath string) error {
 		if elem == ".sesam" {
 			return fmt.Errorf("encrypting files in .sesam/ is not allowed")
 		}
+
+		if elem == ".git" {
+			return fmt.Errorf("encrypting files in .git/ is not allowed")
+		}
 	}
 
 	return nil
