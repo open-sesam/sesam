@@ -53,11 +53,15 @@ func Main(args []string) error {
 				Flags:  flagsID,
 				Action: commands.WithRepo(commands.HandleID),
 				Usage:  "Identify the current user by age identity",
+			},
+			{
+				Name:  "keyring",
+				Usage: "Keyring utils",
 				Commands: []*cli.Command{
 					{
-						Name:   "clear-cache",
+						Name:   "clear",
 						Usage:  "Clear cached passphrases from the keyring",
-						Action: commands.HandleIDClearCache,
+						Action: commands.HandleKeyringClearCache,
 					},
 				},
 			},
