@@ -57,10 +57,10 @@ type Repo struct {
 // RepoOpts controls runtime behavior shared across all Repo operations.
 type RepoOpts struct {
 	// Interactive should be true when we can talk to the user via the terminal.
-	// TODO: later we should check things like ssh-askpass to allow password
-	// decryption without running in the foreground. Then we might need to split
-	// up options here too (one for interactive terminal and one for interactive UI)
 	Interactive bool
+
+	// AskpassProgram overrides SESAM_ASKPASS when set.
+	AskpassProgram string
 
 	// LockTimeout bounds how long acquiring the on-disk repo lock waits.
 	// Zero means use the default.
@@ -81,14 +81,24 @@ func (opts RepoOpts) pluginUI() *core.PluginUI {
 	return core.NewNonInteractivePluginUI()
 }
 
-// LoadIdentities reads the user's age identity files.
-func LoadIdentities(identityPaths []string, opts RepoOpts) (core.Identities, error) {
-	idLoader := loadIdentities
-	if !opts.Interactive {
-		idLoader = loadIdentitiesKeyringOnly
+func (opts RepoOpts) passphraseProvider(keyFingerprint string) core.PassphraseProvider {
+	chain := core.PassphraseChain{}
+	if askpassRequired() != "never" {
+		chain = append(chain, &core.AskpassProvider{Program: opts.AskpassProgram})
+	}
+	if opts.Interactive && askpassRequired() != "force" {
+		chain = append(chain, &core.StdinPassphraseProvider{})
 	}
 
-	return idLoader(identityPaths, keyringFingerprint, opts.pluginUI())
+	return &core.KeyringPassphraseProvider{
+		KeyFingerprint: keyFingerprint,
+		Fallback:       chain,
+	}
+}
+
+// LoadIdentities reads the user's age identity files.
+func LoadIdentities(identityPaths []string, opts RepoOpts) (core.Identities, error) {
+	return loadIdentitiesWith(identityPaths, opts.passphraseProvider(keyringFingerprint), opts.pluginUI())
 }
 
 // ResolveSesamDir resolves the sesam repository root. It walks up from

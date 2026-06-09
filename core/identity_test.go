@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/pem"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"filippo.io/age"
@@ -25,6 +27,50 @@ func (m *mockPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
 	m.called = true
 	m.lastPrompt = prompt
 	return m.passphrase, nil
+}
+
+func TestAskpassProviderReadsPassphrase(t *testing.T) {
+	helper := writeAskpassHelper(t, "printf '%s\\n' secret")
+
+	passphrase, err := (&AskpassProvider{Program: helper}).ReadPassphrase("Prompt: ")
+	require.NoError(t, err)
+	require.Equal(t, []byte("secret"), passphrase)
+}
+
+func TestAskpassProviderUsesEnvOrder(t *testing.T) {
+	t.Setenv("SESAM_ASKPASS", "")
+	t.Setenv("GIT_ASKPASS", writeAskpassHelper(t, "printf git"))
+	t.Setenv("SSH_ASKPASS", writeAskpassHelper(t, "printf ssh"))
+
+	passphrase, err := (&AskpassProvider{}).ReadPassphrase("Prompt: ")
+	require.NoError(t, err)
+	require.Equal(t, []byte("git"), passphrase)
+}
+
+func TestAskpassProviderProgramOverridesEnv(t *testing.T) {
+	t.Setenv("SESAM_ASKPASS", writeAskpassHelper(t, "printf env"))
+	helper := writeAskpassHelper(t, "printf flag")
+
+	passphrase, err := (&AskpassProvider{Program: helper}).ReadPassphrase("Prompt: ")
+	require.NoError(t, err)
+	require.Equal(t, []byte("flag"), passphrase)
+}
+
+func TestAskpassProviderUnavailable(t *testing.T) {
+	t.Setenv("SESAM_ASKPASS", "")
+	t.Setenv("GIT_ASKPASS", "")
+	t.Setenv("SSH_ASKPASS", "")
+
+	_, err := (&AskpassProvider{}).ReadPassphrase("Prompt: ")
+	require.ErrorIs(t, err, errAskpassUnavailable)
+}
+
+func writeAskpassHelper(t *testing.T, body string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "askpass")
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700))
+	return path
 }
 
 func TestParseIdentityAgeNative(t *testing.T) {

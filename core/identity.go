@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 
@@ -58,6 +60,15 @@ type PassphraseProvider interface {
 // StdinPassphraseProvider is a simple PassphraseProvider that reads a password from stdin.
 type StdinPassphraseProvider struct{}
 
+// AskpassProvider reads a passphrase through an askpass helper.
+type AskpassProvider struct {
+	// Program overrides SESAM_ASKPASS when set, typically from --askpass.
+	Program string
+}
+
+// PassphraseChain tries providers in order until one returns a passphrase.
+type PassphraseChain []PassphraseProvider
+
 // KeyringPassphraseProvider tries to read the passphrase from the system
 // keyring (GNOME Keyring, KWallet, macOS Keychain, Windows Credential Manager).
 // If no entry exists, it falls back to prompting via the given fallback provider
@@ -72,6 +83,8 @@ type KeyringPassphraseProvider struct {
 }
 
 const keyringService = "sesam"
+
+var errAskpassUnavailable = errors.New("askpass unavailable")
 
 func newStringPubKey(s string) stringPubKey {
 	// just make sure we don't have formatting accidents...
@@ -344,6 +357,54 @@ func (spp *StdinPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error
 		prompt = "Passphrase: "
 	}
 	return readline.Password(prompt)
+}
+
+func (ap *AskpassProvider) ReadPassphrase(prompt string) ([]byte, error) {
+	program := ap.program()
+	if program == "" {
+		return nil, errAskpassUnavailable
+	}
+	if prompt == "" {
+		prompt = "Passphrase: "
+	}
+
+	out, err := exec.Command(program, prompt).Output()
+	if err != nil {
+		return nil, fmt.Errorf("askpass failed: %w", err)
+	}
+
+	return []byte(strings.TrimRight(string(out), "\r\n")), nil
+}
+
+func (ap *AskpassProvider) program() string {
+	if ap != nil && strings.TrimSpace(ap.Program) != "" {
+		return ap.Program
+	}
+	for _, name := range []string{"SESAM_ASKPASS", "GIT_ASKPASS", "SSH_ASKPASS"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (chain PassphraseChain) ReadPassphrase(prompt string) ([]byte, error) {
+	for _, provider := range chain {
+		if provider == nil {
+			continue
+		}
+
+		passphrase, err := provider.ReadPassphrase(prompt)
+		if err == nil {
+			return passphrase, nil
+		}
+		if errors.Is(err, errAskpassUnavailable) {
+			continue
+		}
+		return nil, err
+	}
+
+	return nil, fmt.Errorf("no passphrase provider available")
 }
 
 func (kpp *KeyringPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {

@@ -44,23 +44,31 @@ func identityToUser(identities core.Identities, users map[string]core.Recipients
 }
 
 // loadIdentities reads all given paths and parses all identities. Encrypted
-// identities are unlocked via the system keyring, falling back to a stdin
-// prompt when no entry exists.
+// identities are unlocked via the system keyring, falling back to askpass and
+// then stdin when allowed.
 func loadIdentities(identityPaths []string, keyFingerprint string, pluginUI *core.PluginUI) (core.Identities, error) {
-	return loadIdentitiesWith(identityPaths, &core.KeyringPassphraseProvider{
-		KeyFingerprint: keyFingerprint,
-		Fallback:       &core.StdinPassphraseProvider{},
-	}, pluginUI)
+	return loadIdentitiesWith(identityPaths, RepoOpts{Interactive: true}.passphraseProvider(keyFingerprint), pluginUI)
 }
 
 // loadIdentitiesKeyringOnly is like loadIdentities but never prompts on stdin.
 // It is required for the long-running smudge filter, where stdin is owned by
 // the git pkt-line protocol and a passphrase prompt would corrupt the stream.
-// If the keyring has no entry for an encrypted identity, parsing fails.
 func loadIdentitiesKeyringOnly(identityPaths []string, keyFingerprint string, pluginUI *core.PluginUI) (core.Identities, error) {
-	return loadIdentitiesWith(identityPaths, &core.KeyringPassphraseProvider{
-		KeyFingerprint: keyFingerprint,
-	}, pluginUI)
+	return loadIdentitiesWith(identityPaths, RepoOpts{}.passphraseProvider(keyFingerprint), pluginUI)
+}
+
+func askpassRequired() string {
+	for _, name := range []string{"SESAM_ASKPASS_REQUIRED", "GIT_ASKPASS_REQUIRED", "SSH_ASKPASS_REQUIRED"} {
+		switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+		case "never":
+			return "never"
+		case "force":
+			return "force"
+		case "prefer":
+			return "prefer"
+		}
+	}
+	return "prefer"
 }
 
 func loadIdentitiesWith(identityPaths []string, provider core.PassphraseProvider, pluginUI *core.PluginUI) (core.Identities, error) {

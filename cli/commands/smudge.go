@@ -17,6 +17,7 @@ func HandleSmudge(ctx context.Context, cmd *cli.Command) error {
 		ctx,
 		cmd.String("sesam-dir"),
 		cmd.StringSlice("identity"),
+		cmd.String("askpass"),
 		os.Stdin,
 		os.Stdout,
 	)

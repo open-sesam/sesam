@@ -26,8 +26,9 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 			cmd.String("sesam-dir"),
 			cmd.StringSlice("identity"),
 			repo.RepoOpts{
-				Interactive: true,
-				LockTimeout: cmd.Duration("lock-timeout"),
+				Interactive:    true,
+				AskpassProgram: cmd.String("askpass"),
+				LockTimeout:    cmd.Duration("lock-timeout"),
 			},
 		)
 		if err != nil {
