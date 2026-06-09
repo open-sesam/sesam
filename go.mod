@@ -9,6 +9,7 @@ require (
 	github.com/gofrs/flock v0.12.1
 	github.com/google/renameio v1.0.1
 	github.com/google/uuid v1.6.0
+	github.com/jedib0t/go-pretty/v6 v6.8.0
 	github.com/mattn/go-colorable v0.1.14
 	github.com/muesli/termenv v0.16.0
 	github.com/multiformats/go-multihash v0.2.3
@@ -45,6 +46,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/minio/sha256-simd v1.0.0 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/multiformats/go-varint v0.0.6 // indirect
@@ -57,7 +59,8 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/tools v0.39.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/tools v0.44.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.1.6 // indirect
