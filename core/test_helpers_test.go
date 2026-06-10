@@ -185,7 +185,7 @@ func testSecretManagerFull(t *testing.T) *SecretManager {
 	al := initAuditLog(t, sesamDir, admin)
 
 	// Add a secret to the audit log.
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/test",
 		Groups:       []string{"admin"},
 	}), nil)

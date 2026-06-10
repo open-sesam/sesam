@@ -35,9 +35,15 @@ const (
 	OpInit         = Operation("init")
 	OpUserTell     = Operation("user.tell")
 	OpUserKill     = Operation("user.kill")
-	OpSecretChange = Operation("secret.change")
+	OpSecretAdd    = Operation("secret.add")
 	OpSecretRemove = Operation("secret.remove")
 	OpSeal         = Operation("seal")
+
+	// Upadte operations:
+	OpUserRename         = Operation("user.rename")
+	OpUserChangeGroups   = Operation("user.change_groups")
+	OpSecretRename       = Operation("secret.rename")
+	OpSecretChangeAccess = Operation("secret.change_access")
 )
 
 // AuditDetail is a type constraint covering all valid detail types.
@@ -45,9 +51,13 @@ type AuditDetail interface {
 	DetailInit |
 		DetailUserTell |
 		DetailUserKill |
-		DetailSecretChange |
+		DetailSecretAdd |
 		DetailSecretRemove |
-		DetailSeal
+		DetailSeal |
+		DetailSecretRename |
+		DetailSecretChangeAccess |
+		DetailUserRename |
+		DetailUserChangeGroups
 }
 
 type AuditEntry struct {
@@ -209,7 +219,27 @@ type DetailUserKill struct {
 	User string `json:"user"`
 }
 
-// DetailSecretChange describes the operation of adding/changing a secret.
+type DetailUserRename struct {
+	OldName string `json:"old_name"`
+	NewName string `json:"new_name"`
+}
+
+type DetailUserChangeGroups struct {
+	User      string   `json:"user"`
+	NewGroups []string `json:"new_groups"`
+}
+
+type DetailSecretRename struct {
+	OldRevealedPath string `json:"old_revealed_path"`
+	NewRevealedPath string `json:"new_revealed_path"`
+}
+
+type DetailSecretChangeAccess struct {
+	RevealedPath string   `json:"revealed_path"`
+	AccessGroups []string `json:"access_groups"`
+}
+
+// DetailSecretAdd describes the operation of adding/changing a secret.
 //
 // Verification:
 //
@@ -221,9 +251,10 @@ type DetailUserKill struct {
 // Note:
 //
 // - When changing the access list it is okay to issue another SecretMod
-type DetailSecretChange struct {
-	RevealedPath string   `json:"revealed_path"`
-	Groups       []string `json:"groups"`
+type DetailSecretAdd struct {
+	RevealedPath string `json:"revealed_path"`
+	// TODO: Hmm... changing groups should be a separate operation. Should split in add and change maybe.
+	Groups []string `json:"groups"`
 }
 
 // DetailSecretRemove is the act of removing a secret.
@@ -318,12 +349,20 @@ func operationFor(detail any) Operation {
 		return OpUserTell
 	case *DetailUserKill:
 		return OpUserKill
-	case *DetailSecretChange:
-		return OpSecretChange
+	case *DetailSecretAdd:
+		return OpSecretAdd
 	case *DetailSecretRemove:
 		return OpSecretRemove
 	case *DetailSeal:
 		return OpSeal
+	case *DetailSecretRename:
+		return OpSecretRename
+	case *DetailSecretChangeAccess:
+		return OpSecretChangeAccess
+	case *DetailUserRename:
+		return OpUserRename
+	case *DetailUserChangeGroups:
+		return OpUserChangeGroups
 	default:
 		panic(fmt.Sprintf("unknown detail type: %T", detail))
 	}
