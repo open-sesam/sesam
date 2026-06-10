@@ -603,6 +603,12 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string) error {
 		return fmt.Errorf("missing secret path: pass at least one path")
 	}
 
+	for _, revealedPath := range revealedPaths {
+		if err := core.IsForbiddenPath(r.sesamDir, revealedPath); err != nil {
+			return err
+		}
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

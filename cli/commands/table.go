@@ -23,8 +23,8 @@ func newTable(title string, headers ...any) table.Writer {
 	t.Style().Format.Footer = text.FormatDefault
 	t.Style().Options.SeparateRows = true
 
-	if term.IsTerminal(int(os.Stdout.Fd())) {
-		if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+	if term.IsTerminal(int(os.Stdout.Fd())) { //nolint:gosec
+		if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 { //nolint:gosec
 			t.Style().Size.WidthMax = w
 		}
 	}

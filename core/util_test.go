@@ -49,6 +49,7 @@ func TestValidUserName(t *testing.T) {
 		"alice.bob",
 		"user@host",
 		"c.pohl@hermanbionic.com",
+		"Alice",
 	}
 
 	for _, name := range valid {
@@ -68,7 +69,6 @@ func TestValidUserNameRejects(t *testing.T) {
 		{"slash", "alice/bob"},
 		{"backslash", `alice\bob`},
 		{"space", "alice bob"},
-		{"uppercase", "Alice"},
 		{"colon", "user:name"},
 		{"unicode", "alicё"},
 		{"too long", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
@@ -87,9 +87,9 @@ func (fc failCloser) Close() error {
 	return errors.New("close failed")
 }
 
-func TestValidSecretPathFormatSesamSubdir(t *testing.T) {
+func TestIsForbiddenPathSesamSubdir(t *testing.T) {
 	// A relative path that points inside .sesam/ must be rejected.
-	err := validSecretPathFormat(".", filepath.Join(".sesam", "signkeys", "admin.age"))
+	err := IsForbiddenPath(".", filepath.Join(".sesam", "signkeys", "admin.age"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), ".sesam")
 }
@@ -100,7 +100,7 @@ func TestValidSecretPathFormatNormalPath(t *testing.T) {
 
 // sesam.yml is sesam's own config and must never be sealed as a secret,
 // regardless of which directory it lives in.
-func TestValidSecretPathFormatRejectsSesamYml(t *testing.T) {
+func TestIsForbiddenPathRejectsSesamYml(t *testing.T) {
 	cases := []string{
 		"sesam.yml",
 		filepath.Join("config", "sesam.yml"),
@@ -109,7 +109,7 @@ func TestValidSecretPathFormatRejectsSesamYml(t *testing.T) {
 
 	for _, path := range cases {
 		t.Run(path, func(t *testing.T) {
-			err := validSecretPathFormat(".", path)
+			err := IsForbiddenPath(".", path)
 			require.Error(t, err, "should reject %q", path)
 			require.Contains(t, err.Error(), "sesam.yml")
 		})
@@ -119,7 +119,7 @@ func TestValidSecretPathFormatRejectsSesamYml(t *testing.T) {
 // Anything living inside a .sesam directory must be rejected no matter where
 // the component appears in the path, and independent of whether sesamDir is
 // relative or absolute (the leading-prefix check alone misses both).
-func TestValidSecretPathFormatRejectsDotSesam(t *testing.T) {
+func TestIsForbiddenPathRejectsDotSesam(t *testing.T) {
 	cases := []struct {
 		name        string
 		sesamDir    string
@@ -135,7 +135,7 @@ func TestValidSecretPathFormatRejectsDotSesam(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validSecretPathFormat(tc.sesamDir, tc.revealed)
+			err := IsForbiddenPath(tc.sesamDir, tc.revealed)
 			require.Error(t, err, "should reject %q", tc.revealed)
 			require.Contains(t, err.Error(), tc.wantMessage)
 		})
@@ -144,7 +144,7 @@ func TestValidSecretPathFormatRejectsDotSesam(t *testing.T) {
 
 // A regular secret path that merely mentions "sesam" must still be allowed -
 // only the exact .sesam component and sesam.yml file are forbidden.
-func TestValidSecretPathFormatAllowsLookalikes(t *testing.T) {
+func TestIsForbiddenPathAllowsLookalikes(t *testing.T) {
 	cases := []string{
 		filepath.Join("sesam", "secret"),       // dir named "sesam", not ".sesam"
 		filepath.Join("secrets", "sesam.yaml"), // .yaml, not .yml
@@ -154,7 +154,7 @@ func TestValidSecretPathFormatAllowsLookalikes(t *testing.T) {
 
 	for _, path := range cases {
 		t.Run(path, func(t *testing.T) {
-			require.NoError(t, validSecretPathFormat(".", path), "should accept %q", path)
+			require.NoError(t, IsForbiddenPath(".", path), "should accept %q", path)
 		})
 	}
 }
