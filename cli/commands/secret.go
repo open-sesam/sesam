@@ -56,9 +56,6 @@ func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
-	if cmd.Bool("no-seal") {
-		return nil
-	}
-
+	// move always needs an seal, otherwise state is pretty broken
 	return r.SealAll()
 }
