@@ -133,9 +133,7 @@ var flagsAdd = []cli.Flag{
 	flagNoSeal,
 }
 
-var flagsMove = []cli.Flag{
-	flagNoSeal,
-}
+var flagsMove = []cli.Flag{}
 
 // flagsTell contains controls for adding users.
 var flagsTell = []cli.Flag{
