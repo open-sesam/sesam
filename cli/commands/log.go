@@ -85,8 +85,8 @@ func HandleLog(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 				colorize(duk.User, detailPrimaryColor),
 			)
 		},
-		core.OpSecretChange: func(e *core.AuditEntrySigned) string {
-			dsc, ok := e.RawDetail().(*core.DetailSecretChange)
+		core.OpSecretAdd: func(e *core.AuditEntrySigned) string {
+			dsc, ok := e.RawDetail().(*core.DetailSecretAdd)
 			if !ok {
 				return unknown
 			}

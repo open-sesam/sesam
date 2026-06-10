@@ -219,7 +219,7 @@ func TestVerifySecretChangeBasic(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/db", Groups: []string{"dev"},
 	}), nil)
 
@@ -235,7 +235,7 @@ func TestVerifySecretChangeEmptyGroupsMeansAdminOnly(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/db", Groups: []string{},
 	}), nil)
 
@@ -258,12 +258,12 @@ func TestVerifySecretChangeNegative(t *testing.T) {
 			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
 		}), nil)
 
-		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 			RevealedPath: "secrets/db", Groups: []string{"ops"},
 		}), nil)
 
 		// Bob (dev) tries to change ops-only secret.
-		al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretChange{
+		al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretAdd{
 			RevealedPath: "secrets/db", Groups: []string{"dev"},
 		}), nil)
 
@@ -276,11 +276,11 @@ func TestVerifySecretChangeUpdate(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/db", Groups: []string{"dev"},
 	}), nil)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/db", Groups: []string{"ops"},
 	}), nil)
 
@@ -298,7 +298,7 @@ func TestVerifySecretChangeRejectsPathTraversal(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "../../.ssh/authorized_keys",
 		Groups:       []string{"admin"},
 	}), nil)
@@ -324,7 +324,7 @@ func TestVerifySecretChangeNewSecretRequiresAccess(t *testing.T) {
 	}), nil)
 
 	// Bob (dev) tries to register a brand-new secret restricted to "ops".
-	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretChange{
+	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretAdd{
 		RevealedPath: "secrets/ops-db", Groups: []string{"ops"},
 	}), nil)
 
@@ -338,7 +338,7 @@ func TestVerifySecretRemoveBasic(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/db", Groups: []string{"dev"},
 	}), nil)
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRemove{
@@ -370,7 +370,7 @@ func TestVerifySecretRemoveNegative(t *testing.T) {
 			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
 		}), nil)
 
-		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 			RevealedPath: "secrets/db", Groups: []string{"ops"},
 		}), nil)
 
@@ -658,7 +658,7 @@ func TestVerifyExportedRootHashMatch(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/test", Groups: []string{"admin"},
 	}), nil)
 
@@ -716,7 +716,7 @@ func TestEndToEndStoreLoadVerify(t *testing.T) {
 		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
 	}), nil)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/db", Groups: []string{"dev"},
 	}), nil)
 
@@ -750,11 +750,11 @@ func TestFullLifecycle(t *testing.T) {
 		PubKeys: []UserPubKey{{Key: carol.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{carol.SignPubKey},
 	}), nil)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/db_pass", Groups: []string{"dev"},
 	}), nil)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/api_key", Groups: []string{"ops"},
 	}), nil)
 

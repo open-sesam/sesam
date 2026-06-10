@@ -348,7 +348,7 @@ func TestSealAllMultiple(t *testing.T) {
 	al := initAuditLog(t, sesamDir, admin)
 
 	for _, p := range []string{"secrets/a", "secrets/b"} {
-		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 			RevealedPath: p,
 			Groups:       []string{"admin"},
 		}), nil)
@@ -471,7 +471,7 @@ func TestSealAllNonAdminPreservesCiphertextItCannotDecrypt(t *testing.T) {
 	require.NoError(t, err)
 
 	// Two secrets: one admin-only (bob cannot decrypt), one shared with dev.
-	for _, sc := range []DetailSecretChange{
+	for _, sc := range []DetailSecretAdd{
 		{RevealedPath: "secrets/admin-only", Groups: []string{"admin"}},
 		{RevealedPath: "secrets/dev-shared", Groups: []string{"dev"}},
 	} {

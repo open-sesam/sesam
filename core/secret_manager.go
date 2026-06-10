@@ -141,7 +141,7 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 
 	return sm.State.FeedEntry(
 		sm.Signer,
-		newAuditEntry(sm.Signer.UserName(), &DetailSecretChange{
+		newAuditEntry(sm.Signer.UserName(), &DetailSecretAdd{
 			RevealedPath: revealedPath,
 			Groups:       groups,
 		}),
