@@ -31,7 +31,7 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 			LockTimeout: cmd.Duration("lock-timeout"),
 		},
 		InitStep: func(format string, args ...any) {
-			prefix := output.String("✓ ").Foreground(output.Color("#008000")).String()
+			prefix := output.String(" ✓ ").Foreground(output.Color("#008000")).String()
 			format = prefix + format + "\n"
 			fmt.Printf(format, args...)
 		},

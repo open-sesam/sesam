@@ -187,7 +187,7 @@ func testSecretManagerFull(t *testing.T) *SecretManager {
 	// Add a secret to the audit log.
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/test",
-		Groups:       []string{"admin"},
+		AccessGroups: []string{"admin"},
 	}), nil)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{

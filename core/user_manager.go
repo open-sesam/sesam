@@ -159,6 +159,42 @@ func (um *UserManager) KillUsers(user string) error {
 	return um.resealAfterMembershipChange("kill")
 }
 
+func (um *UserManager) RenameUser(oldName, newName string) error {
+	if !um.signUser.IsAdmin() {
+		return fmt.Errorf("need to be admin for renaming users")
+	}
+
+	if err := um.state.FeedEntry(
+		um.signer,
+		newAuditEntry(um.signer.UserName(), &DetailUserRename{
+			OldName: oldName,
+			NewName: newName,
+		}),
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (um *UserManager) UserChangeGroups(user string, groups []string) error {
+	if !um.signUser.IsAdmin() {
+		return fmt.Errorf("need to be admin for changing a user groups")
+	}
+
+	if err := um.state.FeedEntry(
+		um.signer,
+		newAuditEntry(um.signer.UserName(), &DetailUserChangeGroups{
+			User:      user,
+			NewGroups: groups,
+		}),
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // InitAdminUser has to be called on init to create the initial user.
 // pluginUI is used when any of pubKeySpecs is a plugin recipient; pass nil
 // to default to a non-interactive UI.

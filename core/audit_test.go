@@ -44,14 +44,14 @@ func TestNewAuditEntryDerivesOperation(t *testing.T) {
 }
 
 func TestNewAuditEntryDetailRoundtrip(t *testing.T) {
-	detail := &DetailSecretAdd{RevealedPath: "secrets/x", Groups: []string{"dev"}}
+	detail := &DetailSecretAdd{RevealedPath: "secrets/x", AccessGroups: []string{"dev"}}
 	entry := newAuditEntry("bob", detail)
 
 	signed := &AuditEntrySigned{AuditEntry: *entry}
 	got, err := parseDetail[DetailSecretAdd](signed)
 	require.NoError(t, err)
 	require.Equal(t, "secrets/x", got.RevealedPath)
-	require.Equal(t, []string{"dev"}, got.Groups)
+	require.Equal(t, []string{"dev"}, got.AccessGroups)
 }
 
 func TestParseDetailCache(t *testing.T) {

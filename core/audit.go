@@ -239,22 +239,20 @@ type DetailSecretChangeAccess struct {
 	AccessGroups []string `json:"access_groups"`
 }
 
-// DetailSecretAdd describes the operation of adding/changing a secret.
+// DetailSecretAdd describes the operation of adding a new secret. Changing the
+// access list of an existing secret is a separate operation
+// (DetailSecretChangeAccess), and renaming is DetailSecretRename.
 //
 // Verification:
 //
-// - "admin" may be part of `Groups`, but is implicitly added anyways.
-// - An empty `Groups` is therefore valid and means "admin only".
-// - `Groups` should not have duplicates.
-// - If secret exists: Only users that already have access to it may issue another Change.
-//
-// Note:
-//
-// - When changing the access list it is okay to issue another SecretMod
+// - The secret must not already exist (adding an existing secret is an error).
+// - "admin" may be part of `AccessGroups`, but is implicitly added anyways.
+// - An empty `AccessGroups` is therefore valid and means "admin only".
+// - `AccessGroups` should not have duplicates.
+// - The author must have access to at least one of the proposed groups.
 type DetailSecretAdd struct {
-	RevealedPath string `json:"revealed_path"`
-	// TODO: Hmm... changing groups should be a separate operation. Should split in add and change maybe.
-	Groups []string `json:"groups"`
+	RevealedPath string   `json:"revealed_path"`
+	AccessGroups []string `json:"access_groups"`
 }
 
 // DetailSecretRemove is the act of removing a secret.
