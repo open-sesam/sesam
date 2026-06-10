@@ -44,7 +44,21 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	return r.SealAll()
 }
 
-// HandleMove renames or relocates a tracked secret path.
-func HandleMove(_ context.Context, _ *cli.Command) error {
-	return handleStub("modify mv")
+func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+	oldRevealedPath := cmd.StringArg("oldpath")
+	newRevealedPath := cmd.StringArg("newpath")
+
+	if oldRevealedPath == "" || newRevealedPath == "" {
+		return fmt.Errorf("need <old> and <new>")
+	}
+
+	if err := r.MoveSecret(oldRevealedPath, newRevealedPath); err != nil {
+		return err
+	}
+
+	if cmd.Bool("no-seal") {
+		return nil
+	}
+
+	return r.SealAll()
 }

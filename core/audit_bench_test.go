@@ -21,7 +21,7 @@ func buildBenchAuditLog(b testing.TB, entries int) (string, *testUser) {
 	for i := 1; i < entries; i++ {
 		if _, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 			RevealedPath: fmt.Sprintf("secrets/bench/secret-%06d", i),
-			Groups:       []string{"admin"},
+			AccessGroups: []string{"admin"},
 		}), nil); err != nil {
 			b.Fatalf("seed entry %d: %v", i, err)
 		}

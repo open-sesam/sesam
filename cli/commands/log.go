@@ -94,8 +94,8 @@ func HandleLog(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 			return fmt.Sprintf(
 				"modified %s accessibly by %s %s",
 				colorize(dsc.RevealedPath, detailPrimaryColor),
-				pluralize("group", len(dsc.Groups)),
-				colorize(strings.Join(dsc.Groups, ", "), detailSecondaryColor),
+				pluralize("group", len(dsc.AccessGroups)),
+				colorize(strings.Join(dsc.AccessGroups, ", "), detailSecondaryColor),
 			)
 		},
 		core.OpSecretRemove: func(e *core.AuditEntrySigned) string {

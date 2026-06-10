@@ -109,14 +109,14 @@ func (sm *SecretManager) AddSecret(revealedPath string, groups []string) error {
 	return sm.addOrChangeSecret(revealedPath, groups)
 }
 
-// ChangeSecretGroups changes the access groups for the secret at `revealedPath`
-// NOTE: It is currently valid to call AddSecret instead.
+// ChangeSecretGroups changes the access groups for the secret at `revealedPath`.
 func (sm *SecretManager) ChangeSecretGroups(revealedPath string, groups []string) error {
 	return sm.addOrChangeSecret(revealedPath, groups)
 }
 
-// NOTE: right now add/change is the same operation. Later we can do different things on add/change,
-// the API is already split in case we want to go that route.
+// addOrChangeSecret emits a secret.add entry for a new secret and a
+// secret.change_access entry for an existing one, deciding which based on
+// whether the secret is already known.
 func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string) error {
 	if err := validSecretPath(sm.SesamDir, revealedPath); err != nil {
 		return fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
@@ -129,23 +129,29 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 	accessUsers := sm.State.UserForGroups(groups)
 	recps := sm.Keyring.Recipients(accessUsers)
 
+	var auditEntry *AuditEntry
 	if idx < 0 {
+		// Secret does not exist yet: this is an add.
 		sm.secrets = append(sm.secrets, secret{
 			Mgr:          sm,
 			RevealedPath: revealedPath,
 			Recipients:   recps,
 		})
+
+		auditEntry = newAuditEntry(sm.Signer.UserName(), &DetailSecretAdd{
+			RevealedPath: revealedPath,
+			AccessGroups: groups,
+		})
 	} else {
+		// Secret already exists: this is an access-list change.
 		sm.secrets[idx].Recipients = recps
+		auditEntry = newAuditEntry(sm.Signer.UserName(), &DetailSecretChangeAccess{
+			RevealedPath: revealedPath,
+			AccessGroups: groups,
+		})
 	}
 
-	return sm.State.FeedEntry(
-		sm.Signer,
-		newAuditEntry(sm.Signer.UserName(), &DetailSecretAdd{
-			RevealedPath: revealedPath,
-			Groups:       groups,
-		}),
-	)
+	return sm.State.FeedEntry(sm.Signer, auditEntry)
 }
 
 // SealAll seals all known secrets.
@@ -328,6 +334,43 @@ func (sm *SecretManager) RemoveSecret(revealedPath string) error {
 	}
 
 	sm.secrets = slices.Delete(sm.secrets, idx, idx+1)
+	return nil
+}
+
+func (sm *SecretManager) MoveSecret(oldRevealedPath, newRevealedPath string) error {
+	idx := slices.IndexFunc(sm.secrets, func(s secret) bool {
+		return s.RevealedPath == oldRevealedPath
+	})
+
+	if idx < 0 {
+		return fmt.Errorf("failed to move non-existing secret: %s", oldRevealedPath)
+	}
+
+	if err := sm.State.FeedEntry(
+		sm.Signer,
+		newAuditEntry(sm.Signer.UserName(), &DetailSecretRename{
+			OldRevealedPath: oldRevealedPath,
+			NewRevealedPath: newRevealedPath,
+		}),
+	); err != nil {
+		return fmt.Errorf("failed to add secret remove entry: %w", err)
+	}
+
+	if !pathExists(filepath.Join(sm.SesamDir, oldRevealedPath)) {
+		// not yet revealed
+		if err := sm.secrets[idx].Reveal(); err != nil {
+			return err
+		}
+	}
+
+	if err := os.Rename(oldRevealedPath, newRevealedPath); err != nil {
+		return err
+	}
+
+	sm.secrets[idx].RevealedPath = newRevealedPath
+
+	// TODO: Need to ensure that SealAll is done so the root hash is correct.
+	// TODO: Rename also in sm.secrets => that's actually double managing.
 	return nil
 }
 

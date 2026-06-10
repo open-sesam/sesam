@@ -102,6 +102,24 @@ func Main(args []string) error {
 				Usage:         "Remove a secret file or directory",
 			},
 			{
+				Name:          "mv",
+				Flags:         flagsMove,
+				ArgsUsage:     "<oldpath> <newpath>",
+				Action:        commands.WithRepo(commands.HandleMove),
+				ShellComplete: completeSecrets,
+				Usage:         "Move a secret file or directory to a new name",
+				Arguments: []cli.Argument{
+					&cli.StringArg{
+						Name:      "oldpath",
+						UsageText: "The old revealed path to move from",
+					},
+					&cli.StringArg{
+						Name:      "newpath",
+						UsageText: "The new revealed path to move to",
+					},
+				},
+			},
+			{
 				Name:   "apply",
 				Hidden: true,
 				Action: commands.HandleApply,
@@ -137,6 +155,42 @@ func Main(args []string) error {
 					&cli.StringArg{
 						Name:      "object",
 						UsageText: "<object>",
+					},
+				},
+			},
+
+			{
+				Name:    "user",
+				Aliases: []string{"u"},
+				Usage:   "User management commands",
+				Commands: []*cli.Command{
+					{
+						Name:   "list",
+						Flags:  flagsListUsers,
+						Action: commands.WithRepo(commands.HandleListUsers),
+						Usage:  "List persons, groups, and access",
+					},
+					{
+						Name:   "change-groups",
+						Flags:  flagsUserChangeGroups,
+						Action: commands.WithRepo(commands.HandleUserChangeGroups),
+						Usage:  "Change the groups a user is in",
+					},
+					{
+						Name:   "rename",
+						Flags:  flagsRenameUser,
+						Action: commands.WithRepo(commands.HandleRenameUser),
+						Usage:  "Give a user a different name",
+						Arguments: []cli.Argument{
+							&cli.StringArg{
+								Name:      "olduser",
+								UsageText: "The old user name",
+							},
+							&cli.StringArg{
+								Name:      "newuser",
+								UsageText: "The new user name",
+							},
+						},
 					},
 				},
 			},

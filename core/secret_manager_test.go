@@ -350,7 +350,7 @@ func TestSealAllMultiple(t *testing.T) {
 	for _, p := range []string{"secrets/a", "secrets/b"} {
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 			RevealedPath: p,
-			Groups:       []string{"admin"},
+			AccessGroups: []string{"admin"},
 		}), nil)
 	}
 
@@ -472,8 +472,8 @@ func TestSealAllNonAdminPreservesCiphertextItCannotDecrypt(t *testing.T) {
 
 	// Two secrets: one admin-only (bob cannot decrypt), one shared with dev.
 	for _, sc := range []DetailSecretAdd{
-		{RevealedPath: "secrets/admin-only", Groups: []string{"admin"}},
-		{RevealedPath: "secrets/dev-shared", Groups: []string{"dev"}},
+		{RevealedPath: "secrets/admin-only", AccessGroups: []string{"admin"}},
+		{RevealedPath: "secrets/dev-shared", AccessGroups: []string{"dev"}},
 	} {
 		_, err = al.AddEntry(admin.Signer, newAuditEntry("admin", &sc), nil)
 		require.NoError(t, err)
