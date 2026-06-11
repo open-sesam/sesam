@@ -13,7 +13,7 @@ import (
 func TestBuildSecretManager(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	require.Equal(t, "admin", mgr.Signer.UserName())
-	require.Len(t, mgr.secrets, 1)
+	require.Len(t, mgr.State.Secrets, 1)
 }
 
 func TestAddSecret(t *testing.T) {
@@ -30,7 +30,7 @@ func TestAddSecret(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origDir) })
 
 	require.NoError(t, mgr.AddSecret("secrets/new", []string{"admin"}))
-	require.Len(t, mgr.secrets, 2)
+	require.Len(t, mgr.State.Secrets, 2)
 
 	_, exists := mgr.State.SecretExists("secrets/new")
 	require.True(t, exists)
@@ -41,14 +41,14 @@ func TestAddSecretDuplicate(t *testing.T) {
 
 	// Adding the same path again should update recipients, not add a second entry.
 	require.NoError(t, mgr.AddSecret("secrets/test", []string{"admin"}))
-	require.Len(t, mgr.secrets, 1, "should not duplicate the secret in the internal list")
+	require.Len(t, mgr.State.Secrets, 1, "should not duplicate the secret in the verified state")
 }
 
 func TestChangeSecretGroups(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
 	require.NoError(t, mgr.ChangeSecretGroups("secrets/test", []string{"admin", "dev"}))
-	require.Len(t, mgr.secrets, 1, "should still be one secret")
+	require.Len(t, mgr.State.Secrets, 1, "should still be one secret")
 
 	vs, exists := mgr.State.SecretExists("secrets/test")
 	require.True(t, exists)
@@ -190,7 +190,7 @@ func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
 func TestRevealBlobHappyPath(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/token", "top-secret")
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	//nolint:gosec
@@ -212,7 +212,7 @@ func TestRevealBlobHappyPath(t *testing.T) {
 func TestRevealBlobNonRecipient(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/token", "top-secret")
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	//nolint:gosec
@@ -229,7 +229,7 @@ func TestRevealBlobNonRecipient(t *testing.T) {
 func TestRevealBlobCorruptedFile(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/token", "top-secret")
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	os.WriteFile(mgr.cryptPath("secrets/token"), []byte("not-a-valid-sesam-file"), 0o600)
@@ -273,25 +273,16 @@ func TestRevealBlobAuthMismatchLandsPlaintext(t *testing.T) {
 		State:      state,
 	}
 	writeSecret(t, sesamDir, "secrets/admin-only", "real payload")
-	legit := &secret{
-		Mgr:          adminMgr,
-		RevealedPath: "secrets/admin-only",
-		Recipients:   kr.Recipients([]string{"admin", "bob"}),
-	}
+	recps := kr.Recipients([]string{"admin", "bob"})
 	cryptPath := adminMgr.cryptPath("secrets/admin-only")
-	_, err := legit.Seal(cryptPath, "admin")
+	_, err := sealSecret(adminMgr, "secrets/admin-only", recps, cryptPath, "admin")
 	require.NoError(t, err)
 
 	// Bob substitutes the file (bypasses the seal-time guard, which
 	// honest clients run but a patched client would not).
 	bobMgr := &SecretManager{SesamDir: sesamDir, Signer: bob.Signer}
 	writeSecret(t, sesamDir, "secrets/admin-only", "bob's substituted payload")
-	bad := &secret{
-		Mgr:          bobMgr,
-		RevealedPath: "secrets/admin-only",
-		Recipients:   kr.Recipients([]string{"admin", "bob"}),
-	}
-	_, err = bad.Seal(cryptPath, "bob")
+	_, err = sealSecret(bobMgr, "secrets/admin-only", recps, cryptPath, "bob")
 	require.NoError(t, err)
 
 	// Reveal via RevealBlob with kr+authorize wired up. Bob's name in
@@ -410,10 +401,7 @@ func TestSealRejectsUnauthorizedUser(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	_, wasSealed, err := bobMgr.stageSecret(secret{
-		Mgr:          mgr,
-		RevealedPath: "secrets/test",
-	}, tmpDir)
+	_, wasSealed, err := bobMgr.stageSecret("secrets/test", tmpDir)
 
 	require.NoError(t, err)
 	require.False(t, wasSealed)
@@ -588,7 +576,7 @@ func TestRecoverIncompleteSealErrorsOnUnknownStage(t *testing.T) {
 func TestShowSecretSuccessSesamPath(t *testing.T) {
 	mgr := testSecretManager(t)
 	s := testSecret(t, mgr, "secrets/tok", "content123")
-	_, err := s.Seal(s.Mgr.cryptPath(s.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, s, mgr.recipientsFor(s), mgr.cryptPath(s), "testuser")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -608,7 +596,7 @@ func TestShowSecretNotFound(t *testing.T) {
 func TestShowSecretRevealedPathConvenience(t *testing.T) {
 	mgr := testSecretManager(t)
 	s := testSecret(t, mgr, "secrets/tok", "content123")
-	_, err := s.Seal(s.Mgr.cryptPath(s.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, s, mgr.recipientsFor(s), mgr.cryptPath(s), "testuser")
 	require.NoError(t, err)
 
 	origDir, err := os.Getwd()
@@ -632,7 +620,7 @@ func TestShowSecretRevealedPathConvenience(t *testing.T) {
 func TestShowSecretResolvesAgainstSesamDirNotCWD(t *testing.T) {
 	mgr := testSecretManager(t)
 	s := testSecret(t, mgr, "secrets/tok", "content123")
-	_, err := s.Seal(s.Mgr.cryptPath(s.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, s, mgr.recipientsFor(s), mgr.cryptPath(s), "testuser")
 	require.NoError(t, err)
 
 	// Chdir into a sibling of sesamDir so the relative ".sesam/objects"
