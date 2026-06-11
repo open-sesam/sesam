@@ -222,7 +222,13 @@ func (sm *SecretManager) stageSecret(revealedPath, stageRoot string) (*secretFoo
 		// it does not change SealedBy.
 		sealer := sm.Signer.UserName()
 		if sm.State.SealerAuthorized(sealer, revealedPath) {
-			sig, err := sealSecret(sm, revealedPath, sm.recipientsFor(revealedPath), stageDest, sealer)
+			sig, err := sealSecret(
+				sm,
+				revealedPath,
+				sm.recipientsFor(revealedPath),
+				stageDest,
+				sealer,
+			)
 			return sig, true, err
 		}
 
@@ -302,6 +308,16 @@ func (sm *SecretManager) MoveSecret(oldRevealedPath, newRevealedPath string) err
 	}
 
 	needsReveal := !pathExists(filepath.Join(sm.SesamDir, oldRevealedPath))
+	if needsReveal {
+		// not yet revealed, do it before the rename entry, otherwise reveal would fail
+		if err := revealSecret(sm, oldRevealedPath); err != nil {
+			return err
+		}
+	}
+
+	// NOTE: This is not particularly crash-safe. We could use the SealAll()
+	// mechanism of using a stageDir, but without re-rencrypting everything to
+	// make things better.
 
 	if err := sm.State.FeedEntry(
 		sm.Signer,
@@ -313,18 +329,49 @@ func (sm *SecretManager) MoveSecret(oldRevealedPath, newRevealedPath string) err
 		return fmt.Errorf("failed to add secret remove entry: %w", err)
 	}
 
-	if needsReveal {
-		// not yet revealed
-		if err := revealSecret(sm, oldRevealedPath); err != nil {
-			return err
-		}
-	}
-
-	if err := os.Rename(oldRevealedPath, newRevealedPath); err != nil {
+	if err := os.Rename(
+		filepath.Join(sm.SesamDir, oldRevealedPath),
+		filepath.Join(sm.SesamDir, newRevealedPath),
+	); err != nil {
 		return err
 	}
 
-	// TODO: Need to ensure that SealAll is done so the root hash is correct.
+	if err := os.RemoveAll(sm.cryptPath(oldRevealedPath)); err != nil {
+		return err
+	}
+
+	_, err := sealSecret(
+		sm,
+		newRevealedPath,
+		sm.recipientsFor(newRevealedPath),
+		sm.cryptPath(newRevealedPath),
+		sm.Signer.UserName(),
+	)
+	if err != nil {
+		return err
+	}
+
+	// If we'd cache signatures, we could skip reading all of them. But for now good enough.
+	sigs, err := readAllSignatures(sm.SesamDir)
+	if err != nil {
+		return err
+	}
+
+	if err := sm.State.FeedEntry(
+		sm.Signer,
+		newAuditEntry(sm.Signer.UserName(), &DetailSeal{
+			RootHash:    buildRootHash(sigs),
+			FilesSealed: 1,
+		}),
+	); err != nil {
+		return fmt.Errorf("failed to add secret remove entry: %w", err)
+	}
+
+	if needsReveal {
+		// file was not revealed before, to be consistent we should remove it again.
+		return os.Remove(filepath.Join(sm.SesamDir, newRevealedPath))
+	}
+
 	return nil
 }
 
