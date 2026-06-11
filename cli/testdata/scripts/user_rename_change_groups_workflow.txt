@@ -1,0 +1,40 @@
+# Verify `sesam user change-groups` and `sesam user rename` write the right
+# audit entries and update the verified state, and that the log stays valid.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Add bob as a dev.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec sesam user list
+stdout 'bob'
+
+# Change bob's groups: dev -> dev, ops.
+exec sesam user change-groups --user bob --group dev --group ops
+exec sesam show .sesam/audit/log.jsonl
+stdout '"user.change_groups"'
+exec sesam log
+stdout 'changed user groups of bob to dev, ops'
+exec sesam verify
+
+# Rename bob to robert.
+exec sesam user rename bob robert
+exec sesam show .sesam/audit/log.jsonl
+stdout '"user.rename"'
+stdout '"robert"'
+exec sesam log
+stdout 'changed user name bob to robert'
+exec sesam verify
+
+# After the rename only robert is known, bob is gone.
+exec sesam user list
+stdout 'robert'
+! stdout '\bbob\b'
+
+# A non-existent user cannot be renamed.
+! exec sesam user rename ghost phantom

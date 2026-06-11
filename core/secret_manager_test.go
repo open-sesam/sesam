@@ -55,6 +55,59 @@ func TestChangeSecretGroups(t *testing.T) {
 	require.Contains(t, vs.AccessGroups, "dev")
 }
 
+// The admin group is implicit: even when it is not passed it must remain on
+// the access list, otherwise admins could lock themselves out of a secret.
+func TestChangeSecretGroupsKeepsAdminImplicit(t *testing.T) {
+	mgr := sealedSecretManager(t)
+
+	require.NoError(t, mgr.ChangeSecretGroups("secrets/test", []string{"dev"}))
+
+	vs, exists := mgr.State.SecretExists("secrets/test")
+	require.True(t, exists)
+	require.ElementsMatch(t, []string{"dev", "admin"}, vs.AccessGroups)
+}
+
+func TestChangeSecretGroupsNonExistent(t *testing.T) {
+	mgr := sealedSecretManager(t)
+
+	// No plaintext on disk and not tracked in state: path validation rejects
+	// it before any audit entry is written.
+	err := mgr.ChangeSecretGroups("secrets/nope", []string{"dev"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid secret path")
+}
+
+// A user without access to a secret must not be able to change its access
+// list - otherwise anyone in the audit log could grant themselves access to
+// a secret they were never allowed to read.
+func TestChangeSecretGroupsUnauthorized(t *testing.T) {
+	mgr := sealedSecretManager(t) // admin manager, secrets/test is admin-only
+
+	bob := newTestUser(t, "bob")
+	_, err := mgr.AuditLog.AddEntry(mgr.Signer, newAuditEntry("admin", &DetailUserTell{
+		User: "bob", Groups: []string{"dev"},
+		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKeys: []string{bob.SignPubKey},
+	}), nil)
+	require.NoError(t, err)
+	require.NoError(t, verify(mgr.State))
+
+	bobMgr, err := BuildSecretManager(
+		mgr.SesamDir, Identities{bob.Identity}, bob.Signer,
+		mgr.Keyring, mgr.AuditLog, mgr.State,
+	)
+	require.NoError(t, err)
+
+	err = bobMgr.ChangeSecretGroups("secrets/test", []string{"dev"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no access")
+
+	// The access list must be untouched after the rejected change.
+	vs, exists := mgr.State.SecretExists("secrets/test")
+	require.True(t, exists)
+	require.Equal(t, []string{"admin"}, vs.AccessGroups)
+}
+
 func TestAddSecretEmptyGroups(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	writeSecret(t, mgr.SesamDir, "secrets/onlyadmin", "data")
