@@ -277,6 +277,132 @@ func TestKillUserResealsWithoutKilledRecipient(t *testing.T) {
 	require.False(t, ok, "killed user must not be a recipient of the resealed file")
 }
 
+// nonAdminUserManager returns a UserManager signed by bob (a non-admin "dev"
+// user) sharing one audit log and state with the admin who created the repo.
+// Used to exercise the admin-only guards on rename / change-groups.
+func nonAdminUserManager(t *testing.T) *UserManager {
+	t.Helper()
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	bob := newTestUser(t, "bob")
+	al := initAuditLog(t, sesamDir, admin)
+
+	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+		User:        "bob",
+		Groups:      []string{"dev"},
+		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKeys: []string{bob.SignPubKey},
+	}), nil)
+	require.NoError(t, err)
+
+	kr := EmptyKeyring()
+	state := &VerifiedState{auditLog: al, keyring: kr}
+	require.NoError(t, verify(state))
+
+	secMgr, err := BuildSecretManager(
+		sesamDir, Identities{bob.Identity}, bob.Signer, kr, al, state,
+	)
+	require.NoError(t, err)
+
+	um, err := BuildUserManager(sesamDir, bob.Signer, al, state, secMgr)
+	require.NoError(t, err)
+	return um
+}
+
+func TestRenameUserSuccess(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+
+	require.NoError(t, um.RenameUser("bob", "robert"))
+
+	_, exists := um.state.UserExists("bob")
+	require.False(t, exists, "old name must be gone from state")
+	vu, exists := um.state.UserExists("robert")
+	require.True(t, exists, "new name must exist in state")
+	require.Equal(t, []string{"dev"}, vu.Groups, "groups must carry over to the new name")
+
+	// The keyring entry moved with the rename, so recipients resolve under
+	// the new name and no longer under the old one.
+	require.Len(t, um.secMgr.Keyring.Recipients([]string{"robert"}), 1)
+	require.Empty(t, um.secMgr.Keyring.Recipients([]string{"bob"}))
+}
+
+func TestRenameUserNonAdmin(t *testing.T) {
+	um := nonAdminUserManager(t)
+
+	err := um.RenameUser("admin", "root")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "admin")
+}
+
+func TestRenameUserNotFound(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+
+	err := um.RenameUser("ghost", "phantom")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not exist")
+}
+
+func TestRenameUserToExistingName(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+
+	err := um.RenameUser("bob", "admin")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already exists")
+}
+
+func TestRenameUserInvalidNewName(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+
+	err := um.RenameUser("admin", "Invalid Name!")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid new user name")
+}
+
+func TestUserChangeGroupsSuccess(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+
+	require.NoError(t, um.UserChangeGroups("bob", []string{"dev", "ops"}))
+
+	vu, exists := um.state.UserExists("bob")
+	require.True(t, exists)
+	require.ElementsMatch(t, []string{"dev", "ops"}, vu.Groups)
+
+	// Membership changes require a re-seal so ciphertext recipients catch up.
+	require.NotZero(t, um.state.SealRequiredSeqID, "group change must mark a seal as pending")
+}
+
+func TestUserChangeGroupsNonAdmin(t *testing.T) {
+	um := nonAdminUserManager(t)
+
+	err := um.UserChangeGroups("admin", []string{"dev"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "admin")
+}
+
+func TestUserChangeGroupsUnknownUser(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+
+	err := um.UserChangeGroups("ghost", []string{"dev"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not exist")
+}
+
+// Stripping the admin group from the sole admin would lock everyone out of
+// future admin operations, so verify must refuse it.
+func TestUserChangeGroupsLastAdmin(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+
+	err := um.UserChangeGroups("admin", []string{"dev"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "last admin")
+}
+
 func TestShowUserSuccess(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 

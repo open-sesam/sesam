@@ -10,7 +10,7 @@ import (
 
 func printError(msg string) {
 	output := termenv.NewOutput(os.Stdout)
-	prefix := output.String(" ✘").Foreground(output.Color("#800000")).String()
+	prefix := output.String("✘").Foreground(output.Color("#800000")).String()
 	fmt.Printf("%s %s\n", prefix, msg)
 }
 

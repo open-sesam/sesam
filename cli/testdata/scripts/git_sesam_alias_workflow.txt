@@ -20,7 +20,7 @@ exec git sesam id
 stdout '^admin$'
 
 # Subcommand routing works (multi-word verbs + secondary args).
-exec git sesam list secrets
+exec git sesam ls
 stdout 'README\.md'
 stdout 'admin'
 
@@ -29,5 +29,5 @@ exec git sesam verify
 stderr 'Integrity: ok$'
 
 # Extra flags pass through the alias intact.
-exec git sesam list secrets --json
+exec git sesam ls --json
 stdout '"RevealedPath": "README.md"'

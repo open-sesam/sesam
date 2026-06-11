@@ -195,26 +195,11 @@ func Main(args []string) error {
 				},
 			},
 			{
-				Name:    "list",
-				Aliases: []string{"ls"},
+				Name:    "ls",
+				Aliases: []string{"list-secrets"},
 				Flags:   flagsListSecrets,
-				Usage:   "List entities",
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return fmt.Errorf("missing list target: use `sesam list secrets` or `sesam list users`")
-				},
-				Commands: []*cli.Command{
-					{
-						Name:   "secrets",
-						Flags:  flagsListSecrets,
-						Action: commands.WithRepo(commands.HandleListSecrets),
-						Usage:  "List known secrets and metadata",
-					}, {
-						Name:   "users",
-						Flags:  flagsListUsers,
-						Action: commands.WithRepo(commands.HandleListUsers),
-						Usage:  "List persons, groups, and access",
-					},
-				},
+				Action:  commands.WithRepo(commands.HandleListSecrets),
+				Usage:   "List known secrets and metadata",
 			},
 			{
 				Name:   "smudge",

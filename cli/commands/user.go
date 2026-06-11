@@ -74,10 +74,10 @@ func HandleUserChangeGroups(_ context.Context, cmd *cli.Command, r *repo.Repo) e
 }
 
 func HandleRenameUser(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	oldName := cmd.StringArg("old")
-	newName := cmd.StringArg("new")
+	oldName := cmd.StringArg("olduser")
+	newName := cmd.StringArg("newuser")
 	if oldName == "" || newName == "" {
-		return fmt.Errorf("need <old> and <new>")
+		return fmt.Errorf("need <olduser> and <newuser>")
 	}
 
 	return r.RenameUser(oldName, newName)
