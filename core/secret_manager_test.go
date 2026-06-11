@@ -187,6 +187,79 @@ func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
 	require.True(t, exists, "secret must remain in verified state")
 }
 
+func TestMoveSecret(t *testing.T) {
+	mgr := sealedSecretManager(t) // secrets/test sealed for admin, plaintext on disk
+
+	require.NoError(t, mgr.MoveSecret("secrets/test", "secrets/moved"))
+
+	// The encrypted object moved.
+	require.NoFileExists(t, mgr.cryptPath("secrets/test"))
+	require.FileExists(t, mgr.cryptPath("secrets/moved"))
+
+	// The plaintext moved, content preserved.
+	require.NoFileExists(t, filepath.Join(mgr.SesamDir, "secrets/test"))
+	plaintext, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/moved"))
+	require.NoError(t, err)
+	require.Equal(t, "secret-content", string(plaintext))
+
+	// State tracks the new path only.
+	_, exists := mgr.State.SecretExists("secrets/test")
+	require.False(t, exists)
+	_, exists = mgr.State.SecretExists("secrets/moved")
+	require.True(t, exists)
+
+	// No seal is pending and the new seal entry's root hash matches disk.
+	require.Zero(t, mgr.State.SealRequiredSeqID, "move must leave no pending seal")
+	report := VerifyIntegrity(mgr.SesamDir, mgr.State, mgr.Keyring)
+	require.True(t, report.OK(), report.String())
+
+	// The moved secret still reveals to the original content. The footer is
+	// re-signed over the new path, so this also proves the path-bound hash
+	// was rewritten correctly.
+	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/moved")))
+	require.NoError(t, revealSecret(mgr, "secrets/moved"))
+	revealed, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/moved"))
+	require.NoError(t, err)
+	require.Equal(t, "secret-content", string(revealed))
+}
+
+func TestMoveSecretNotFound(t *testing.T) {
+	mgr := sealedSecretManager(t)
+
+	err := mgr.MoveSecret("secrets/nonexistent", "secrets/moved")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "non-existing secret")
+}
+
+// The secret is sealed on disk but its plaintext is not revealed. MoveSecret
+// must reveal it (from the old ciphertext, while the old path is still
+// authorized) before rewriting the footer for the new path. Regression guard
+// for the reveal-after-rename ordering.
+func TestMoveSecretNotYetRevealed(t *testing.T) {
+	mgr := sealedSecretManager(t)
+
+	// Drop the plaintext so the move has to reveal it first.
+	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/test")))
+
+	require.NoError(t, mgr.MoveSecret("secrets/test", "secrets/moved"))
+
+	require.NoFileExists(t, mgr.cryptPath("secrets/test"))
+	require.FileExists(t, mgr.cryptPath("secrets/moved"))
+
+	// The secret was not revealed before the move, so the move must not
+	// leave a revealed plaintext behind at the new path either.
+	require.NoFileExists(t, filepath.Join(mgr.SesamDir, "secrets/moved"))
+
+	report := VerifyIntegrity(mgr.SesamDir, mgr.State, mgr.Keyring)
+	require.True(t, report.OK(), report.String())
+
+	// Revealing from the moved ciphertext still yields the original content.
+	require.NoError(t, revealSecret(mgr, "secrets/moved"))
+	revealed, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/moved"))
+	require.NoError(t, err)
+	require.Equal(t, "secret-content", string(revealed))
+}
+
 func TestRevealBlobHappyPath(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/token", "top-secret")
