@@ -52,7 +52,6 @@ func BuildUserManager(
 // partial state: log advanced, ciphertext recipients stale. The error
 // message points at `sesam seal` as the resync.
 func (um *UserManager) resealAfterMembershipChange(op string) error {
-	um.secMgr.refreshRecipients()
 	if err := um.secMgr.SealAll(); err != nil {
 		return fmt.Errorf(
 			"%s succeeded but auto re-seal failed (run `sesam seal` to resync): %w",

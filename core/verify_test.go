@@ -664,16 +664,13 @@ func TestVerifyExportedRootHashMatch(t *testing.T) {
 
 	writeSecret(t, sesamDir, "secrets/test", "content")
 	kr2 := testKeyring(t, admin)
-	s := &secret{
-		Mgr: &SecretManager{
-			SesamDir: sesamDir, Identities: Identities{admin.Identity},
-			Signer: admin.Signer, Keyring: kr2,
-		},
-		RevealedPath: "secrets/test",
-		Recipients:   kr2.Recipients([]string{"admin"}),
+	sm := &SecretManager{
+		SesamDir: sesamDir, Identities: Identities{admin.Identity},
+		Signer: admin.Signer, Keyring: kr2,
 	}
+	recps := kr2.Recipients([]string{"admin"})
 
-	sig, err := s.Seal(s.Mgr.cryptPath(s.RevealedPath), "admin")
+	sig, err := sealSecret(sm, "secrets/test", recps, sm.cryptPath("secrets/test"), "admin")
 	require.NoError(t, err)
 
 	rootHash := buildRootHash([]*secretFooter{sig})

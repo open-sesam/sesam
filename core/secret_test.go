@@ -31,12 +31,13 @@ func testSecretManager(t *testing.T) *SecretManager {
 	}
 }
 
-func testSecret(t *testing.T, mgr *SecretManager, path, content string) *secret {
+// testSecret writes a plaintext file and registers it in the verified state
+// so reveal-time authorization checks pass for the default test user (admin).
+// It returns the revealed path, which seal/reveal helpers take directly.
+func testSecret(t *testing.T, mgr *SecretManager, path, content string) string {
 	t.Helper()
 	writeSecret(t, mgr.SesamDir, path, content)
 
-	// Register the secret in the verified state so reveal-time
-	// authorization checks pass for the default test user (admin).
 	if mgr.State != nil {
 		mgr.State.Secrets = append(mgr.State.Secrets, VerifiedSecret{
 			RevealedPath: path,
@@ -44,18 +45,14 @@ func testSecret(t *testing.T, mgr *SecretManager, path, content string) *secret 
 		})
 	}
 
-	return &secret{
-		Mgr:          mgr,
-		RevealedPath: path,
-		Recipients:   mgr.Keyring.Recipients([]string{mgr.Signer.UserName()}),
-	}
+	return path
 }
 
 func TestSealAndReveal(t *testing.T) {
 	mgr := testSecretManager(t)
-	secret := testSecret(t, mgr, "secrets/db_password", "super-secret-password-123")
+	path := testSecret(t, mgr, "secrets/db_password", "super-secret-password-123")
 
-	sig, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	sig, err := sealSecret(mgr, path, mgr.recipientsFor(path), mgr.cryptPath(path), "testuser")
 	require.NoError(t, err)
 	require.Equal(t, "secrets/db_password", sig.RevealedPath)
 	require.Equal(t, "testuser", sig.SealedBy)
@@ -69,7 +66,7 @@ func TestSealAndReveal(t *testing.T) {
 	plainPath := filepath.Join(mgr.SesamDir, "secrets/db_password")
 	os.Remove(plainPath)
 
-	require.NoError(t, secret.Reveal())
+	require.NoError(t, revealSecret(mgr, path))
 
 	got, _ := os.ReadFile(plainPath)
 	require.Equal(t, "super-secret-password-123", string(got))
@@ -94,12 +91,12 @@ func TestSealRevealTableDriven(t *testing.T) {
 			mgr := testSecretManager(t)
 			secret := testSecret(t, mgr, tc.path, tc.content)
 
-			_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+			_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 			require.NoError(t, err)
 
 			os.Remove(filepath.Join(mgr.SesamDir, tc.path))
 
-			require.NoError(t, secret.Reveal())
+			require.NoError(t, revealSecret(mgr, secret))
 
 			got, _ := os.ReadFile(filepath.Join(mgr.SesamDir, tc.path))
 			require.Equal(t, tc.content, string(got))
@@ -111,7 +108,7 @@ func TestSealCreatesSignatureFile(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "config/api_key", "key-abc-456")
 
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	sigs, err := readAllSignatures(mgr.SesamDir)
@@ -128,13 +125,13 @@ func TestRevealDetectsCorruptedCiphertext(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/token", "original-token")
 
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	// Corrupt the .sesam file contents.
 	os.WriteFile(mgr.cryptPath("secrets/token"), []byte("corrupted-ciphertext"), 0o600)
 
-	err = secret.Reveal()
+	err = revealSecret(mgr, secret)
 	require.Error(t, err, "reveal should detect corrupted ciphertext")
 }
 
@@ -142,7 +139,7 @@ func TestRevealDetectsTruncatedCiphertext(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/trunc", "some-data")
 
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	// Truncate the .age file to half its size.
@@ -150,7 +147,7 @@ func TestRevealDetectsTruncatedCiphertext(t *testing.T) {
 	data, _ := os.ReadFile(agePath)
 	os.WriteFile(agePath, data[:len(data)/2], 0o600)
 
-	err = secret.Reveal()
+	err = revealSecret(mgr, secret)
 	require.Error(t, err, "reveal should detect truncated ciphertext")
 }
 
@@ -158,7 +155,7 @@ func TestRevealDetectsBadSignature(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/cert", "cert-data")
 
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	// Replace keyring with a different signing key.
@@ -167,7 +164,7 @@ func TestRevealDetectsBadSignature(t *testing.T) {
 	mgr.Keyring = EmptyKeyring()
 	mgr.Keyring.AddSignPubKey("testuser", otherPub)
 
-	err = secret.Reveal()
+	err = revealSecret(mgr, secret)
 	require.Error(t, err, "reveal should detect signature from wrong key")
 }
 
@@ -175,7 +172,7 @@ func TestRevealDetectsWrongSigner(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/wrong-signer", "data")
 
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	// Add a second user and remove the original, so sealedBy doesn't match any key.
@@ -183,31 +180,23 @@ func TestRevealDetectsWrongSigner(t *testing.T) {
 	other := newTestUser(t, "other")
 	mgr.Keyring.AddSignPubKey("other", other.Signer.PublicKey())
 
-	err = secret.Reveal()
+	err = revealSecret(mgr, secret)
 	require.Error(t, err, "reveal should fail when sealed_by user has no matching key")
 }
 
 func TestSealMissingFile(t *testing.T) {
 	mgr := testSecretManager(t)
-	secret := &secret{
-		Mgr:          mgr,
-		RevealedPath: "does/not/exist",
-		Recipients:   mgr.Keyring.Recipients([]string{"testuser"}),
-	}
+	path := "does/not/exist"
+	recps := mgr.Keyring.Recipients([]string{"testuser"})
 
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, path, recps, mgr.cryptPath(path), "testuser")
 	require.Error(t, err)
 }
 
 func TestRevealMissingAgeFile(t *testing.T) {
 	mgr := testSecretManager(t)
-	secret := &secret{
-		Mgr:          mgr,
-		RevealedPath: "does/not/exist",
-		Recipients:   mgr.Keyring.Recipients([]string{"testuser"}),
-	}
 
-	err := secret.Reveal()
+	err := revealSecret(mgr, "does/not/exist")
 	require.Error(t, err)
 }
 
@@ -215,13 +204,13 @@ func TestRevealMissingFooter(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/nofooter", "data")
 
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	// Overwrite the .sesam file with content that has no newline footer.
 	os.WriteFile(mgr.cryptPath("secrets/nofooter"), []byte("no-footer-here"), 0o600)
 
-	err = secret.Reveal()
+	err = revealSecret(mgr, secret)
 	require.Error(t, err, "reveal should fail when footer is missing")
 }
 
@@ -234,11 +223,11 @@ func TestSealRevealLargeFile(t *testing.T) {
 
 	secret := testSecret(t, mgr, "secrets/large", string(data))
 
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	os.Remove(filepath.Join(mgr.SesamDir, "secrets/large"))
-	require.NoError(t, secret.Reveal())
+	require.NoError(t, revealSecret(mgr, secret))
 
 	got, _ := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/large"))
 	require.Equal(t, data, got)
@@ -251,7 +240,7 @@ func TestSealDoesNotLeakFileDescriptors(t *testing.T) {
 	fdsBefore := countOpenFDs(t)
 
 	for i := 0; i < 50; i++ {
-		_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+		_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 		require.NoError(t, err)
 	}
 
@@ -267,13 +256,13 @@ func TestRevealDoesNotLeakFileDescriptors(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/fdleak2", "fd-test")
 
-	_, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	fdsBefore := countOpenFDs(t)
 
 	for i := 0; i < 50; i++ {
-		require.NoError(t, secret.Reveal())
+		require.NoError(t, revealSecret(mgr, secret))
 	}
 
 	runtime.GC()
@@ -296,7 +285,7 @@ func TestReadStoredSignatureRoundtrip(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/roundtrip", "roundtrip-data")
 
-	expected, err := secret.Seal(secret.Mgr.cryptPath(secret.RevealedPath), "testuser")
+	expected, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	sigs, err := readAllSignatures(mgr.SesamDir)
@@ -316,13 +305,13 @@ func TestRevealAcceptsAuthorizedSealer(t *testing.T) {
 	mgr := testSecretManager(t)
 	s := testSecret(t, mgr, "secrets/legit", "payload")
 
-	_, err := s.Seal(s.Mgr.cryptPath(s.RevealedPath), mgr.Signer.UserName())
+	_, err := sealSecret(mgr, s, mgr.recipientsFor(s), mgr.cryptPath(s), mgr.Signer.UserName())
 	require.NoError(t, err)
 
-	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, s.RevealedPath)))
-	require.NoError(t, s.Reveal())
+	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, s)))
+	require.NoError(t, revealSecret(mgr, s))
 
-	got, err := os.ReadFile(filepath.Join(mgr.SesamDir, s.RevealedPath))
+	got, err := os.ReadFile(filepath.Join(mgr.SesamDir, s))
 	require.NoError(t, err)
 	require.Equal(t, "payload", string(got))
 }
@@ -332,7 +321,7 @@ func TestRevealAcceptsAuthorizedSealer(t *testing.T) {
 // Bob is in the audit log (in the "dev" group) but has no access to
 // "secrets/admin-only". An honest client refuses to seal that path as
 // bob, but a patched client could skip the seal-time guard. We simulate
-// that by calling secret.Seal directly with bob's signer. Admin's
+// that by calling sealSecret directly with bob's signer. Admin's
 // reveal must still reject the substituted footer.
 func TestRevealRejectsUnauthorizedSealer(t *testing.T) {
 	sesamDir := testRepo(t)
@@ -360,12 +349,8 @@ func TestRevealRejectsUnauthorizedSealer(t *testing.T) {
 
 	// Step 1: admin legitimately seals the secret.
 	writeSecret(t, sesamDir, "secrets/admin-only", "admin payload")
-	legit := &secret{
-		Mgr:          adminMgr,
-		RevealedPath: "secrets/admin-only",
-		Recipients:   kr.Recipients([]string{"admin"}),
-	}
-	_, err := legit.Seal(adminMgr.cryptPath("secrets/admin-only"), "admin")
+	adminRecps := kr.Recipients([]string{"admin"})
+	_, err := sealSecret(adminMgr, "secrets/admin-only", adminRecps, adminMgr.cryptPath("secrets/admin-only"), "admin")
 	require.NoError(t, err)
 
 	// Step 2: bob substitutes content, bypassing the seal-time guard.
@@ -375,18 +360,13 @@ func TestRevealRejectsUnauthorizedSealer(t *testing.T) {
 		Signer:   bob.Signer,
 	}
 	writeSecret(t, sesamDir, "secrets/admin-only", "bob's evil payload")
-	bad := &secret{
-		Mgr:          bobMgr,
-		RevealedPath: "secrets/admin-only",
-		Recipients:   kr.Recipients([]string{"admin"}),
-	}
-	_, err = bad.Seal(adminMgr.cryptPath("secrets/admin-only"), "bob")
-	require.NoError(t, err, "low-level Seal must accept this - the attacker bypassed the guard")
+	_, err = sealSecret(bobMgr, "secrets/admin-only", adminRecps, adminMgr.cryptPath("secrets/admin-only"), "bob")
+	require.NoError(t, err, "low-level sealSecret must accept this - the attacker bypassed the guard")
 
 	// Step 3: admin reveals. The substituted footer is cryptographically
 	// valid (real bob signature) but bob has no authority over admin-only.
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/admin-only")))
-	err = legit.Reveal()
+	err = revealSecret(adminMgr, "secrets/admin-only")
 	require.Error(t, err, "reveal must reject a footer signed by an unauthorized sealer")
 	require.Contains(t, err.Error(), "not authorized")
 	require.Contains(t, err.Error(), "bob")

@@ -17,16 +17,6 @@ import (
 // assumption: signature fits into one page, a file with less that one page is suspicious here.
 const maxFooterSize = 4096
 
-type secret struct {
-	Mgr *SecretManager
-
-	// RevealedPath is relative to Mgr.SesamDir
-	RevealedPath string
-
-	// Recipients are the people that may reveal this secret.
-	Recipients Recipients
-}
-
 type secretFooter struct {
 	RevealedPath string `json:"path"`
 	Hash         string `json:"hash"`
@@ -34,11 +24,17 @@ type secretFooter struct {
 	SealedBy     string `json:"sealed_by"`
 }
 
-// Seal encrypts `s` to `destPath` for `sealedByUser`. The destination
+// sealSecret encrypts the plaintext at sm.SesamDir/revealedPath to `destPath`
+// for `recipients`, recording `sealedByUser` in the footer. The destination
 // directory is created if missing; the write goes through a renameio temp
 // file in .sesam/tmp so the final destination is replaced atomically.
-func (s *secret) Seal(destPath, sealedByUser string) (*secretFooter, error) {
-	rd, err := os.Open(filepath.Join(s.Mgr.SesamDir, s.RevealedPath))
+func sealSecret(
+	sm *SecretManager,
+	revealedPath string,
+	recipients Recipients,
+	destPath, sealedByUser string,
+) (*secretFooter, error) {
+	rd, err := os.Open(filepath.Join(sm.SesamDir, revealedPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secret: %w", err)
 	}
@@ -48,7 +44,7 @@ func (s *secret) Seal(destPath, sealedByUser string) (*secretFooter, error) {
 		return nil, err
 	}
 
-	tmpDir := filepath.Join(s.Mgr.SesamDir, ".sesam", "tmp")
+	tmpDir := filepath.Join(sm.SesamDir, ".sesam", "tmp")
 	wc, err := renameio.TempFile(tmpDir, destPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open encrypted file in repo: %w", err)
@@ -62,7 +58,7 @@ func (s *secret) Seal(destPath, sealedByUser string) (*secretFooter, error) {
 	h := sha3.New256()
 	mw := io.MultiWriter(wc, h)
 
-	encW, err := age.Encrypt(mw, s.Recipients.AgeRecipients()...)
+	encW, err := age.Encrypt(mw, recipients.AgeRecipients()...)
 	if err != nil {
 		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to initiate encryption: %w", err)
@@ -71,7 +67,7 @@ func (s *secret) Seal(destPath, sealedByUser string) (*secretFooter, error) {
 	_, err = io.Copy(encW, rd)
 	if err != nil {
 		_ = os.Remove(wc.Name())
-		return nil, fmt.Errorf("failed to encrypt secret %s: %w", s.RevealedPath, err)
+		return nil, fmt.Errorf("failed to encrypt secret %s: %w", revealedPath, err)
 	}
 
 	if err := encW.Close(); err != nil {
@@ -80,17 +76,17 @@ func (s *secret) Seal(destPath, sealedByUser string) (*secretFooter, error) {
 	}
 
 	// NOTE: We use the path as well to make sure files cannot just be moved around.
-	_, _ = h.Write([]byte(s.RevealedPath))
+	_, _ = h.Write([]byte(revealedPath))
 	hashBytes := h.Sum(nil)
 
-	sig, err := s.Mgr.Signer.Sign(SesamDomainSignSecretTag, hashBytes)
+	sig, err := sm.Signer.Sign(SesamDomainSignSecretTag, hashBytes)
 	if err != nil {
 		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to compute signature for %s: %w", destPath, err)
 	}
 
 	ss := secretFooter{
-		RevealedPath: s.RevealedPath,
+		RevealedPath: revealedPath,
 		Hash:         MulticodeEncode(hashBytes, MhSHA3_256),
 		Signature:    sig,
 		SealedBy:     sealedByUser,
@@ -158,10 +154,11 @@ func readSignature(fd io.ReadSeeker) (io.Reader, *secretFooter, error) {
 	return io.LimitReader(fd, ageSize), &ss, nil
 }
 
-// Reveal decrypts secret `s` and verifies its detached signature.
-// No error is only returned if the reveal has been fully successful.
-func (s *secret) Reveal() error {
-	cryptPath := s.Mgr.cryptPath(s.RevealedPath)
+// revealSecret decrypts the secret at `revealedPath` and verifies its
+// detached signature. No error is only returned if the reveal has been
+// fully successful.
+func revealSecret(sm *SecretManager, revealedPath string) error {
+	cryptPath := sm.cryptPath(revealedPath)
 
 	//nolint:gosec
 	srcFd, err := os.Open(cryptPath)
@@ -173,8 +170,8 @@ func (s *secret) Reveal() error {
 	defer closeLogged(srcFd)
 
 	// Write revealed file to a temp file first, so we can get rid of it later easily:
-	dstPath := filepath.Join(s.Mgr.SesamDir, s.RevealedPath)
-	dstFd, err := renameio.TempFile(s.Mgr.tmpDir(), dstPath)
+	dstPath := filepath.Join(sm.SesamDir, revealedPath)
+	dstFd, err := renameio.TempFile(sm.tmpDir(), dstPath)
 	if err != nil {
 		return fmt.Errorf("failed to create revealed file: %w", err)
 	}
@@ -184,13 +181,13 @@ func (s *secret) Reveal() error {
 		_ = dstFd.Cleanup()
 	}()
 
-	ids := s.Mgr.Identities.AgeIdentities()
+	ids := sm.Identities.AgeIdentities()
 	if err := revealStreamAndVerify(
 		srcFd,
 		dstFd,
 		ids,
-		s.Mgr.Keyring,
-		s.Mgr.State.SealerAuthorized,
+		sm.Keyring,
+		sm.State.SealerAuthorized,
 	); err != nil {
 		return err
 	}
