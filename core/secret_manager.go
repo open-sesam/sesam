@@ -370,7 +370,7 @@ func (sm *SecretManager) MoveSecret(oldRevealedPath, newRevealedPath string) err
 	sm.secrets[idx].RevealedPath = newRevealedPath
 
 	// TODO: Need to ensure that SealAll is done so the root hash is correct.
-	// TODO: Rename also in sm.secrets => that's actually double managing.
+	// TODO: The whole sm.secrets stuff is double managing.
 	return nil
 }
 
