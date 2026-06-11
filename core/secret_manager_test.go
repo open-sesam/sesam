@@ -313,6 +313,51 @@ func TestMoveSecretNotYetRevealed(t *testing.T) {
 	require.Equal(t, "secret-content", string(revealed))
 }
 
+// A secret's footer records sealed_by (the name of the user who sealed it),
+// but that field is only a *hint*: kr.Verify tries the named user's keys
+// first and falls back to every other key, then authorization runs against
+// the user whose key actually verified - never against the footer's claimed
+// name. So renaming a user must NOT invalidate files they sealed under the
+// old name: the keyring moves the signing key to the new name, the stale
+// hint misses, the fallback finds it, and authorization passes for the new
+// name.
+//
+// This guards against someone "tightening" kr.Verify to require the hint to
+// match (or to reject on mismatch), which would silently break reveal and
+// `verify --all` for every file sealed before a rename. If you intend to make
+// sealed_by authoritative, you must also rewrite footers on rename - and this
+// test should then be updated deliberately, not deleted.
+func TestRevealSurvivesSealerRename(t *testing.T) {
+	mgr := sealedSecretManager(t) // admin sealed secrets/test; footer sealed_by=admin
+
+	// Precondition: the footer names admin as the sealer.
+	footer, err := readSecretFooter(mgr.cryptPath("secrets/test"))
+	require.NoError(t, err)
+	require.Equal(t, "admin", footer.SealedBy)
+
+	// Rename admin -> root. This moves the signing key in the keyring but
+	// leaves the on-disk footer untouched (still sealed_by=admin).
+	um, err := BuildUserManager(mgr.SesamDir, mgr.Signer, mgr.AuditLog, mgr.State, mgr)
+	require.NoError(t, err)
+	require.NoError(t, um.RenameUser("admin", "root"))
+
+	require.Len(t, mgr.Keyring.Recipients([]string{"root"}), 1)
+	require.Empty(t, mgr.Keyring.Recipients([]string{"admin"}),
+		"the old name must no longer resolve in the keyring")
+
+	// Reveal still works: the stale sealed_by=admin hint misses, kr.Verify
+	// falls back to the renamed key, and authorization passes for "root".
+	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/test")))
+	require.NoError(t, revealSecret(mgr, "secrets/test"))
+	got, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/test"))
+	require.NoError(t, err)
+	require.Equal(t, "secret-content", string(got))
+
+	// The deep integrity check (sesam verify --all) tolerates it too.
+	report := VerifyIntegrity(mgr.SesamDir, mgr.State, mgr.Keyring)
+	require.True(t, report.OK(), report.String())
+}
+
 func TestRevealBlobHappyPath(t *testing.T) {
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/token", "top-secret")
