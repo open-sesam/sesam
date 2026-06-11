@@ -85,6 +85,30 @@ func HandleLog(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 				colorize(duk.User, detailPrimaryColor),
 			)
 		},
+		core.OpUserRename: func(e *core.AuditEntrySigned) string {
+			dur, ok := e.RawDetail().(*core.DetailUserRename)
+			if !ok {
+				return unknown
+			}
+
+			return fmt.Sprintf(
+				"changed user name %s to %s",
+				colorize(dur.OldName, detailPrimaryColor),
+				colorize(dur.NewName, detailSecondaryColor),
+			)
+		},
+		core.OpUserChangeGroups: func(e *core.AuditEntrySigned) string {
+			ducg, ok := e.RawDetail().(*core.DetailUserChangeGroups)
+			if !ok {
+				return unknown
+			}
+
+			return fmt.Sprintf(
+				"changed user groups of %s to %s",
+				colorize(ducg.User, detailPrimaryColor),
+				colorize(strings.Join(ducg.NewGroups, ", "), detailSecondaryColor),
+			)
+		},
 		core.OpSecretAdd: func(e *core.AuditEntrySigned) string {
 			dsc, ok := e.RawDetail().(*core.DetailSecretAdd)
 			if !ok {
@@ -107,6 +131,30 @@ func HandleLog(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 			return fmt.Sprintf(
 				"removed %s",
 				colorize(dsr.RevealedPath, detailPrimaryColor),
+			)
+		},
+		core.OpSecretRename: func(e *core.AuditEntrySigned) string {
+			dsr, ok := e.RawDetail().(*core.DetailSecretRename)
+			if !ok {
+				return unknown
+			}
+
+			return fmt.Sprintf(
+				"renamed %s to %s",
+				colorize(dsr.OldRevealedPath, detailPrimaryColor),
+				colorize(dsr.NewRevealedPath, detailSecondaryColor),
+			)
+		},
+		core.OpSecretChangeAccess: func(e *core.AuditEntrySigned) string {
+			dsca, ok := e.RawDetail().(*core.DetailSecretChangeAccess)
+			if !ok {
+				return unknown
+			}
+
+			return fmt.Sprintf(
+				"changed access of %s to %s",
+				colorize(dsca.RevealedPath, detailPrimaryColor),
+				colorize(strings.Join(dsca.AccessGroups, ", "), detailSecondaryColor),
 			)
 		},
 		core.OpSeal: func(e *core.AuditEntrySigned) string {
@@ -136,13 +184,13 @@ func HandleLog(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if seqIDFormat == "" {
 			// choose format depending on how much entries we have:
 			seqIDFormat = fmt.Sprintf(
-				"%%-%dd",
+				"%%0%dd",
 				int(math.Log10(float64(e.SeqID))+1),
 			)
 		}
 
 		fmt.Printf(
-			"#%s [%s] %s %s\n",
+			"%s %s %s %s\n",
 			fmt.Sprintf(seqIDFormat, e.SeqID),
 			output.String(e.Time.Format(time.RFC3339)).Foreground(timeColor),
 			output.String(e.ChangedBy).Foreground(userColor),
