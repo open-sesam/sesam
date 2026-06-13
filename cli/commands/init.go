@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/muesli/termenv"
 	"github.com/open-sesam/sesam/repo"
@@ -59,13 +60,16 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 		slog.Warn("close repo failed", slog.Any("error", closeErr))
 	}()
 
-	fmt.Print(asciiLogo)
-
-	fmt.Println()
+	fmt.Print(output.String(asciiLogo).Foreground(termenv.ANSIBrightGreen))
 
 	out := termenv.NewOutput(os.Stdout)
-	export := out.String("export SESAM_ID=" + ids[0]).Foreground(termenv.ANSIBrightBlue).String()
+	export := out.String("export SESAM_ID=\""+ids[0]).Foreground(termenv.ANSIBrightBlue).String() + "\""
 
-	printInfo("Tip: Put '%s' in your shell config", export)
+	if os.Getenv("SESAM_ID") == "" {
+		homeDir := os.Getenv("HOME")
+		homeExport := strings.Replace(export, homeDir, "$HOME", 1)
+		fmt.Println()
+		printInfo("Tip: Put %s in your shell config", homeExport)
+	}
 	return nil
 }
