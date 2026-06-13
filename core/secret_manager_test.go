@@ -449,9 +449,15 @@ func TestRevealBlobAuthMismatchLandsPlaintext(t *testing.T) {
 	_, err := sealSecret(adminMgr, "secrets/admin-only", recps, cryptPath, "admin")
 	require.NoError(t, err)
 
-	// Bob substitutes the file (bypasses the seal-time guard, which
-	// honest clients run but a patched client would not).
-	bobMgr := &SecretManager{SesamDir: sesamDir, Signer: bob.Signer}
+	// Bob substitutes the file (bypasses the policy guard, which honest
+	// clients run but a patched client would not). Bob is a recipient of
+	// the file (recps above include him), so he can derive the content-hash
+	// key and seal - he is just not an authorized *sealer* of admin-only.
+	bobMgr := &SecretManager{
+		SesamDir:   sesamDir,
+		Identities: Identities{bob.Identity},
+		Signer:     bob.Signer,
+	}
 	writeSecret(t, sesamDir, "secrets/admin-only", "bob's substituted payload")
 	_, err = sealSecret(bobMgr, "secrets/admin-only", recps, cryptPath, "bob")
 	require.NoError(t, err)

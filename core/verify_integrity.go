@@ -86,7 +86,7 @@ func verifyIntegritySingleSecret(
 
 	defer closeLogged(fd)
 
-	ageRd, _, err := readSignature(fd)
+	ageRd, _, err := readFooter(fd)
 	if err != nil {
 		report.add(vs.RevealedPath, fmt.Sprintf("failed to read .sesam footer: %v", err))
 		return
@@ -101,20 +101,31 @@ func verifyIntegritySingleSecret(
 	_, _ = h.Write([]byte(vs.RevealedPath))
 	computedHash := MulticodeEncode(h.Sum(nil), MhSHA3_256)
 
-	if computedHash != sig.Hash {
+	if computedHash != sig.CipherTextHash {
 		report.add(vs.RevealedPath, fmt.Sprintf(
 			"hash mismatch: footer says %s, computed says %s",
-			sig.Hash, computedHash,
+			sig.CipherTextHash, computedHash,
 		))
 	}
 
-	hashBytes, _, err := multicodeDecode(sig.Hash)
+	cipherTextHashBytes, _, err := multicodeDecode(sig.CipherTextHash)
 	if err != nil {
-		report.add(vs.RevealedPath, fmt.Sprintf("failed to decode hash: %v", err))
+		report.add(vs.RevealedPath, fmt.Sprintf("failed to decode ciphertext hash: %v", err))
 		return
 	}
 
-	sealer, err := kr.Verify(SesamDomainSignSecretTag, hashBytes, sig.Signature, sig.SealedBy)
+	hmacContentHashBytes, _, err := multicodeDecode(sig.HMACContentHash)
+	if err != nil {
+		report.add(vs.RevealedPath, fmt.Sprintf("failed to decode content hash: %v", err))
+		return
+	}
+
+	sealer, err := kr.Verify(
+		SesamDomainSignSecretTag,
+		append(cipherTextHashBytes, hmacContentHashBytes...),
+		sig.Signature,
+		sig.SealedBy,
+	)
 	if err != nil {
 		report.add(vs.RevealedPath, fmt.Sprintf("invalid signature: %v", err))
 		return

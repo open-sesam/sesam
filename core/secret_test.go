@@ -56,7 +56,7 @@ func TestSealAndReveal(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "secrets/db_password", sig.RevealedPath)
 	require.Equal(t, "testuser", sig.SealedBy)
-	require.NotEmpty(t, sig.Hash)
+	require.NotEmpty(t, sig.CipherTextHash)
 	require.NotEmpty(t, sig.Signature)
 
 	// Check file was created.
@@ -294,7 +294,7 @@ func TestReadStoredSignatureRoundtrip(t *testing.T) {
 
 	got := sigs[0]
 	require.Equal(t, expected.RevealedPath, got.RevealedPath)
-	require.Equal(t, expected.Hash, got.Hash)
+	require.Equal(t, expected.CipherTextHash, got.CipherTextHash)
 	require.Equal(t, expected.Signature, got.Signature)
 	require.Equal(t, expected.SealedBy, got.SealedBy)
 }
@@ -318,11 +318,12 @@ func TestRevealAcceptsAuthorizedSealer(t *testing.T) {
 
 // Load-bearing test: the malicious-client scenario.
 //
-// Bob is in the audit log (in the "dev" group) but has no access to
-// "secrets/admin-only". An honest client refuses to seal that path as
-// bob, but a patched client could skip the seal-time guard. We simulate
-// that by calling sealSecret directly with bob's signer. Admin's
-// reveal must still reject the substituted footer.
+// Bob is in the audit log (in the "dev" group) but the access policy
+// does not grant the "dev" group "secrets/admin-only". An honest client
+// refuses to seal that path as bob, but a patched client could skip the
+// policy guard. We simulate that by calling sealSecret directly with
+// bob's signer. Admin's reveal must still reject the substituted footer
+// even though bob's signature is cryptographically valid.
 func TestRevealRejectsUnauthorizedSealer(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
@@ -353,15 +354,21 @@ func TestRevealRejectsUnauthorizedSealer(t *testing.T) {
 	_, err := sealSecret(adminMgr, "secrets/admin-only", adminRecps, adminMgr.cryptPath("secrets/admin-only"), "admin")
 	require.NoError(t, err)
 
-	// Step 2: bob substitutes content, bypassing the seal-time guard.
-	// This is what a patched client would do.
+	// Step 2: bob substitutes content, bypassing the policy guard.
+	// This is what a patched client would do. Deriving the content-hash
+	// key requires decrypting the file, so bob can only seal a file he is
+	// a recipient of - he seals to a set including himself (admin is kept
+	// so admin can still reveal). Bob is a valid recipient here but still
+	// not an authorized *sealer* of admin-only per the access policy.
 	bobMgr := &SecretManager{
-		SesamDir: sesamDir,
-		Signer:   bob.Signer,
+		SesamDir:   sesamDir,
+		Identities: Identities{bob.Identity},
+		Signer:     bob.Signer,
 	}
 	writeSecret(t, sesamDir, "secrets/admin-only", "bob's evil payload")
-	_, err = sealSecret(bobMgr, "secrets/admin-only", adminRecps, adminMgr.cryptPath("secrets/admin-only"), "bob")
-	require.NoError(t, err, "low-level sealSecret must accept this - the attacker bypassed the guard")
+	bobRecps := kr.Recipients([]string{"admin", "bob"})
+	_, err = sealSecret(bobMgr, "secrets/admin-only", bobRecps, adminMgr.cryptPath("secrets/admin-only"), "bob")
+	require.NoError(t, err, "low-level sealSecret must accept this - the attacker bypassed the policy guard")
 
 	// Step 3: admin reveals. The substituted footer is cryptographically
 	// valid (real bob signature) but bob has no authority over admin-only.

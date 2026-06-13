@@ -266,7 +266,7 @@ func readSecretFooter(path string) (*secretFooter, error) {
 	}
 	defer closeLogged(fd)
 
-	_, footer, err := readSignature(fd)
+	_, footer, err := readFooter(fd)
 	if err != nil {
 		return nil, fmt.Errorf("read footer of %s: %w", path, err)
 	}
@@ -410,7 +410,7 @@ func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bo
 
 	defer closeLogged(srcFd)
 
-	_, _, err = revealStream(srcFd, dst, ids.AgeIdentities())
+	_, _, _, err = revealStream(srcFd, dst, ids.AgeIdentities())
 	return true, err
 }
 
@@ -458,7 +458,7 @@ func RevealBlob(
 	if kr != nil {
 		revealErr = revealStreamAndVerify(src, dst, ids.AgeIdentities(), kr, authorize)
 	} else {
-		_, _, revealErr = revealStream(src, dst, ids.AgeIdentities())
+		_, _, _, revealErr = revealStream(src, dst, ids.AgeIdentities())
 	}
 
 	if revealErr != nil {
