@@ -43,6 +43,11 @@ func Main(args []string) error {
 				Usage:  "Initialize sesam in the current repository",
 			},
 			{
+				Name:   "deinit",
+				Action: commands.HandleStub,
+				Usage:  "Remove all traces of sesam",
+			},
+			{
 				Name:   "verify",
 				Flags:  flagsVerify,
 				Action: commands.WithRepo(commands.HandleVerify),
@@ -128,9 +133,39 @@ func Main(args []string) error {
 			},
 			{
 				Name:   "apply",
-				Hidden: true,
-				Action: commands.HandleApply,
-				Usage:  "Apply config differences to audit log and metadata",
+				Action: commands.HandleStub,
+				Usage:  "alias for `sesam config apply`",
+			},
+			{
+				Name:  "config",
+				Usage: "Config management commands",
+				Commands: []*cli.Command{
+					{
+						Name:   "apply",
+						Usage:  "Apply config differences to audit log and metadata",
+						Action: commands.HandleStub,
+					},
+					{
+						Name:   "diff",
+						Usage:  "Show the diff between config and actual state",
+						Action: commands.HandleStub,
+					},
+					{
+						Name:   "get",
+						Usage:  "Get specific config keys",
+						Action: commands.HandleStub,
+					},
+					{
+						Name:   "set",
+						Usage:  "Set specific config keys",
+						Action: commands.HandleStub,
+					},
+				},
+			},
+			{
+				Name:   "edit",
+				Action: commands.HandleStub,
+				Usage:  "Edit an secret and immeediately seal it afterwards",
 			},
 			{
 				Name:          "tell",
@@ -222,24 +257,23 @@ func Main(args []string) error {
 			},
 			{
 				Name:   "rotate",
-				Hidden: true,
-				Action: commands.HandleRotate,
+				Action: commands.HandleStub,
 				Usage:  "Plan and execute secret rotation",
 				Commands: []*cli.Command{
 					{
 						Name:   "plan",
 						Hidden: true,
-						Action: commands.HandleRotatePlan,
+						Action: commands.HandleStub,
 						Usage:  "Show the rotation and exchange plan",
 					}, {
 						Name:   "exec",
 						Hidden: true,
-						Action: commands.HandleRotateExec,
+						Action: commands.HandleStub,
 						Usage:  "Execute the planned rotation",
 					}, {
 						Name:   "todo",
 						Hidden: true,
-						Action: commands.HandleRotateTodo,
+						Action: commands.HandleStub,
 						Usage:  "Show rotation tasks and follow-up status",
 					},
 				},
