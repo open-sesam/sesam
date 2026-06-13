@@ -24,10 +24,6 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
 		return fmt.Errorf("failed to find git in PATH - required for this command")
 	}
 
-	if err := os.Chdir(status.DiffDir); err != nil {
-		return err
-	}
-
 	// We have to call git directly here, as the user might have configured git tooling of his liking.
 	cmd := exec.CommandContext(
 		ctx,
@@ -39,6 +35,7 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
 		"sealed/",
 		"revealed/",
 	)
+	cmd.Dir = status.DiffDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -61,9 +58,9 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
 
 func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	status, err := r.Status(repo.StatusOpts{
-		WriteDiffDirs:    cmd.Bool("diff"),
-		SortByState:      cmd.Bool("sort-by-state"),
-		IgnoreUnamanaged: cmd.Bool("ignore-unmanaged"),
+		WriteDiffDirs:   cmd.Bool("diff"),
+		SortByState:     cmd.Bool("sort-by-state"),
+		IgnoreUnmanaged: cmd.Bool("ignore-unmanaged"),
 	})
 	if err != nil {
 		return err
@@ -86,24 +83,25 @@ func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 	// NOTE: Maybe we want rather a "git status" like output here...
 	for _, file := range status.Files {
-		var desc string
+		var color string
 		switch file.State {
 		case repo.SecretStateNoSealedPath:
-			desc = output.String("unsealed").Foreground(output.Color("#FFFF00")).String()
+			color = "#FFF000"
 		case repo.SecretStateNoRevealedPath:
-			desc = output.String("unrevealed").Foreground(output.Color("#00FFFF")).String()
+			color = "#00FFFF"
 		case repo.SecretStateUserHasNoAccess:
-			desc = output.String("no access").Foreground(output.Color("#FF00FF")).String()
+			color = "#FF00FF"
 		case repo.SecretStateSameContent:
-			desc = output.String("same").Foreground(output.Color("#00FF00")).String()
+			color = "#00FF00"
 		case repo.SecretStateDifferentContent:
-			desc = output.String("diff").Foreground(output.Color("#FF0000")).String()
+			color = "#FF0000"
 		case repo.SecretStateNoSesamSecret:
-			desc = output.String("no sesam file").Foreground(output.Color("#FF8800")).String()
+			color = "#FF8800"
 		default:
-			desc = output.String("undefined").Foreground(output.Color("#800000")).String()
+			color = "#800000"
 		}
 
+		desc := output.String(file.State.String()).Foreground(output.Color(color)).String()
 		t.AppendRow([]any{file.RevealedPath, desc})
 	}
 

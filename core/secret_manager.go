@@ -507,7 +507,7 @@ func (sm *SecretManager) EqualPlaintext(revealedPath string, ids Identities) (bo
 	defer closeLogged(sealFd)
 
 	//nolint:gosec
-	plainFd, err := os.Open(revealedPath)
+	plainFd, err := os.Open(filepath.Join(sm.SesamDir, revealedPath))
 	if err != nil {
 		return false, err
 	}
