@@ -1,5 +1,12 @@
 # We are trying to build an alternative to git-secret
 
+[![CI](https://github.com/open-sesam/sesam/actions/workflows/ci.yml/badge.svg)](https://github.com/open-sesam/sesam/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-mdBook-blue)](https://open-sesam.github.io/sesam/)
+[![Go Reference](https://pkg.go.dev/badge/github.com/open-sesam/sesam.svg)](https://pkg.go.dev/github.com/open-sesam/sesam)
+[![Latest tag](https://img.shields.io/github/v/tag/open-sesam/sesam)](https://github.com/open-sesam/sesam/tags)
+[![Maintenance](https://img.shields.io/maintenance/yes/2026)](https://github.com/open-sesam/sesam/commits/main)
+[![License: GPL v3](https://img.shields.io/github/license/open-sesam/sesam)](LICENSE)
+
 ![Sesam](sesam.png)
 
 ## Requirements

@@ -55,7 +55,7 @@ func groupFlag(required bool, usage string) cli.Flag {
 var flagsGeneral = []cli.Flag{
 	&cli.StringSliceFlag{
 		Name:    "identity",
-		Aliases: []string{"i", "id"},
+		Aliases: []string{"i"},
 		Usage:   "Path to the age identity (can be given several times)",
 		Sources: cli.EnvVars("SESAM_ID", "SESAM_IDENTITY"),
 	},
