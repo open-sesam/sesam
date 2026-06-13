@@ -275,48 +275,11 @@ func (h *filterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 		return err
 	}
 
-	spill, err := openSpillFile(h.SesamDir)
+	spill, err := h.echoThroughSpill(scanner, encoder)
 	if err != nil {
 		return err
 	}
-
 	defer func() { _ = spill.Cleanup() }()
-
-	// Each Scan() yields one input pkt-line (≤ MaxPayloadSize bytes). We
-	// forward it as-is via Encode (one new pkt-line of equal size) and, if
-	// we have a spill open, tee it to disk so reveal can read the full blob.
-	for {
-		if !scanner.Scan() {
-			if err := scanner.Err(); err != nil {
-				return err
-			}
-			return fmt.Errorf("%w: EOF in middle of content", errProtocol)
-		}
-		chunk := scanner.Bytes()
-		if len(chunk) == 0 {
-			break // input flush == end of content
-		}
-		if err := encoder.Encode(chunk); err != nil {
-			return err
-		}
-
-		if _, err := spill.Write(chunk); err != nil {
-			return fmt.Errorf("spill write: %w", err)
-		}
-	}
-	// First flush mirrors end-of-content; second flush is end-of-response
-	// (an empty trailing list with no `status=...` packet means success).
-	if err := encoder.Flush(); err != nil {
-		return err
-	}
-	if err := encoder.Flush(); err != nil {
-		return err
-	}
-
-	if _, err := spill.Seek(0, io.SeekStart); err != nil {
-		slog.Warn("smudge: failed to seek spill", slog.String("path", pathname), slog.String("err", err.Error()))
-		return nil
-	}
 
 	revealed, err := core.RevealBlob(
 		h.SesamDir,
@@ -346,6 +309,79 @@ func (h *filterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 		slog.Debug("smudge: not a recipient, skipping reveal", slog.String("path", pathname))
 	}
 	return nil
+}
+
+// echoThroughSpill drains the entire content stream into a fresh spill file
+// and then echoes it back to git unchanged, re-chunked into protocol-sized
+// packets. Draining fully BEFORE writing is what avoids the pipe-buffer
+// deadlock: git streams the whole request and only then reads the reply, so
+// echoing chunks mid-read would block once both ~64 KiB pipe buffers fill
+// (any blob larger than a pipe buffer would hang `git diff` / `git checkout`).
+// Spilling to disk keeps memory flat regardless of blob size.
+//
+// On success the returned spill is rewound to the start so callers can read
+// the blob again (e.g. smudge reveals from it); the caller owns Cleanup.
+func (h *filterProcessHandler) echoThroughSpill(scanner *pktline.Scanner, encoder *pktline.Encoder) (*renameio.PendingFile, error) {
+	spill, err := openSpillFile(h.SesamDir)
+	if err != nil {
+		return nil, err
+	}
+
+	ok := false
+	defer func() {
+		if !ok {
+			_ = spill.Cleanup()
+		}
+	}()
+
+	for {
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w: EOF in middle of content", errProtocol)
+		}
+		chunk := scanner.Bytes()
+		if len(chunk) == 0 {
+			break // input flush == end of content
+		}
+		if _, err := spill.Write(chunk); err != nil {
+			return nil, fmt.Errorf("spill write: %w", err)
+		}
+	}
+
+	if _, err := spill.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("spill seek for response: %w", err)
+	}
+	buf := make([]byte, pktline.MaxPayloadSize)
+	for {
+		n, err := spill.Read(buf)
+		if n > 0 {
+			if encErr := encoder.Encode(buf[:n]); encErr != nil {
+				return nil, encErr
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("spill read for response: %w", err)
+		}
+	}
+	// First flush mirrors end-of-content; second flush is end-of-response
+	// (an empty trailing list with no `status=...` packet means success).
+	if err := encoder.Flush(); err != nil {
+		return nil, err
+	}
+	if err := encoder.Flush(); err != nil {
+		return nil, err
+	}
+
+	if _, err := spill.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("spill rewind: %w", err)
+	}
+	ok = true
+	return spill, nil
 }
 
 // loadAuditView reads the audit log (preferring the git **index** copy -
