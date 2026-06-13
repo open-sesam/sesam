@@ -202,6 +202,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 
 	r := newRepo(resolvedDir, gitRepo, idPaths, opts.RepoOpts)
+	r.whoami = opts.InitialUserName
 	success := false
 	defer func() {
 		if !success {
@@ -1043,6 +1044,10 @@ func (r *Repo) statusToDiffDir(status *Status) (diffDir string, err error) {
 		}
 
 		plainTmpPath := filepath.Join(plainTmpDir, file.RevealedPath)
+		if err := os.MkdirAll(filepath.Dir(plainTmpPath), 0o700); err != nil {
+			return "", fmt.Errorf("failed to make sub temp dir for diff: %w", err)
+		}
+
 		switch file.State {
 		case SecretStateNoRevealedPath, SecretStateNone, SecretStateUserHasNoAccess:
 			// can't link revealed path, write dummy file.
@@ -1053,11 +1058,7 @@ func (r *Repo) statusToDiffDir(status *Status) (diffDir string, err error) {
 		case SecretStateSameContent:
 			// no need to write same files.
 		default:
-			if err := os.MkdirAll(filepath.Dir(plainTmpPath), 0o700); err != nil {
-				return "", fmt.Errorf("failed to make sub temp dir for diff: %w", err)
-			}
-
-			if err := os.Link(file.RevealedPath, plainTmpPath); err != nil {
+			if err := os.Link(filepath.Join(r.sesamDir, file.RevealedPath), plainTmpPath); err != nil {
 				return "", fmt.Errorf("failed to link revealed file: %w", err)
 			}
 		}
