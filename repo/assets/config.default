@@ -3,12 +3,6 @@
 # TODO: Change to main branch once merged.
 # https://github.com/redhat-developer/yaml-language-server#using-modeline
 config:
-  general:
-    # encrypt all files, even when no change is needed when true.
-    # This is a security consideration as only re-encrypting the files needed
-    # could tell an attacker which files where changed by whom over time.
-    # On the other hand, it is often rightfully useful to know when secrets were changed by whom.
-    - encrypt_all: false
   users:
     - name: [[ yaml .InitialUser ]]
       desc: default admin user
@@ -29,7 +23,6 @@ config:
       [[ end ]]
 
   groups:
-    # Initial admin group created by sesam init.
     admin:
       # This is the only user that by definition may change user/groups.
       # We recommend to have at least two people here. These users also
@@ -37,8 +30,4 @@ config:
       - [[ yaml .InitialUser ]]
 
 secrets:
-  # Starter secret created by sesam init.
-  # This ensures audit/config state starts in sync.
-  - path: .sesam/README.md
-    access:
-      - admin
+  - path: README.md
