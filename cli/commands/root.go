@@ -41,11 +41,6 @@ func HandleKeyringClearCache(_ context.Context, _ *cli.Command) error {
 	return core.DeleteAllCachedPassphrases()
 }
 
-// HandleApply applies config changes to audit and metadata state.
-func HandleApply(_ context.Context, _ *cli.Command) error {
-	return handleStub("apply")
-}
-
 func commaJoined(values []string) string {
 	if len(values) == 0 {
 		return ""
