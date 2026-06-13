@@ -129,7 +129,7 @@ func (s *VerifiedState) AdminUserCount() (adminUsersFound int, adminName string)
 		}
 	}
 
-	return
+	return adminUsersFound, adminName
 }
 
 // SealerAuthorized reports whether `user` is allowed to seal `revealedPath`,

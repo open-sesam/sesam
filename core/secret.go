@@ -42,7 +42,7 @@ func readAgeEncryptionKey(r io.Reader, ageIds []age.Identity) ([]byte, error) {
 	return ageKey, nil
 }
 
-func keyContentHash(ageKey []byte, contentHash []byte) []byte {
+func keyContentHash(ageKey, contentHash []byte) []byte {
 	const info = "sesam.contenthash.v1"
 
 	// derive actual key from the age encryption key:

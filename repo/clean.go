@@ -123,11 +123,10 @@ func recursiveRmEmptyDirs(rootDir string, except map[string]bool, checkFn func(p
 }
 
 // cleanup removes every file under sesamRoot that is not in the git index.
-// `.sesam/` and `.git/` are skipped entirely — sesam owns one, git owns the
-// other. The intent is to wipe stale revealed plaintext (which is gitignored
-// and therefore "untracked") before a smudge pass repopulates the worktree
-// from sealed objects, so files removed in the new tree do not linger as
-// readable plaintext.
+// `.sesam/` and `.git/` are skipped entirely The intent is to wipe stale
+// revealed plaintext (which is gitignored and therefore "untracked") before a
+// smudge pass repopulates the worktree from sealed objects, so files removed
+// in the new tree do not linger as readable plaintext.
 //
 // Tracked files are preserved even when modified; symlinks and other
 // non-regular entries are left alone. The optional exclude list holds
@@ -203,7 +202,7 @@ func cleanup(
 
 		allow := true
 		if checkFn != nil {
-			allow, err = checkFn(path)
+			allow, err = checkFn(rel)
 			if err != nil {
 				return err
 			}
@@ -213,7 +212,7 @@ func cleanup(
 			if err := os.Remove(path); err != nil { //nolint:gosec
 				return fmt.Errorf("remove %s: %w", path, err)
 			}
-			slog.Debug("clean: removed untracked file", slog.String("path", path))
+			slog.Debug("clean: removed untracked file", slog.String("path", rel))
 		}
 		return nil
 	}); err != nil {

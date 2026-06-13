@@ -2,7 +2,9 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 
@@ -12,9 +14,21 @@ import (
 )
 
 func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
-	// TODO: Check for git and print a nicer message if not present.
-	// defer os.RemoveAll(status.DiffDir)
-	os.Chdir(status.DiffDir)
+	defer func() {
+		if err := os.RemoveAll(status.DiffDir); err != nil {
+			slog.Error("failed to remove diff dir", slog.Any("err", err))
+		}
+	}()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		return fmt.Errorf("failed to find git in PATH - required for this command")
+	}
+
+	if err := os.Chdir(status.DiffDir); err != nil {
+		return err
+	}
+
+	// We have to call git directly here, as the user might have configured git tooling of his liking.
 	cmd := exec.CommandContext(
 		ctx,
 		"git",
@@ -22,8 +36,8 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
 		"--no-index",
 		"--color=auto",
 		"--",
-		"sealed",
-		"revealed",
+		"sealed/",
+		"revealed/",
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -31,14 +45,12 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
 
 	err := cmd.Run()
 	if err != nil {
-		exitErr, ok := err.(*exec.ExitError)
-		if !ok {
-			return err
-		}
-
-		if exitErr.ProcessState.ExitCode() == 1 {
-			// if there's a diff it will exit with 1
-			return nil
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if exitErr.ExitCode() == 1 {
+				// if there's a diff it will exit with 1
+				return nil
+			}
 		}
 
 		return err
@@ -49,7 +61,9 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
 
 func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	status, err := r.Status(repo.StatusOpts{
-		WriteDiffDirs: cmd.Bool("diff"),
+		WriteDiffDirs:    cmd.Bool("diff"),
+		SortByState:      cmd.Bool("sort-by-state"),
+		IgnoreUnamanaged: cmd.Bool("ignore-unmanaged"),
 	})
 	if err != nil {
 		return err
@@ -70,6 +84,7 @@ func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	s := t.Style()
 	s.Size.WidthMin = len(header) + 5
 
+	// NOTE: Maybe we want rather a "git status" like output here...
 	for _, file := range status.Files {
 		var desc string
 		switch file.State {
@@ -83,6 +98,8 @@ func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 			desc = output.String("same").Foreground(output.Color("#00FF00")).String()
 		case repo.SecretStateDifferentContent:
 			desc = output.String("diff").Foreground(output.Color("#FF0000")).String()
+		case repo.SecretStateNoSesamSecret:
+			desc = output.String("no sesam file").Foreground(output.Color("#FF8800")).String()
 		default:
 			desc = output.String("undefined").Foreground(output.Color("#800000")).String()
 		}
@@ -99,6 +116,5 @@ func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		),
 	})
 	t.Render()
-
 	return nil
 }

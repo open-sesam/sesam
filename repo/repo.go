@@ -807,6 +807,7 @@ const (
 	SecretStateUserHasNoAccess
 	SecretStateSameContent
 	SecretStateDifferentContent
+	SecretStateNoSesamSecret
 )
 
 func (s SecretState) MarshalJSON() ([]byte, error) {
@@ -822,6 +823,8 @@ func (s SecretState) MarshalJSON() ([]byte, error) {
 		desc = "same_content"
 	case SecretStateDifferentContent:
 		desc = "diff_content"
+	case SecretStateNoSesamSecret:
+		desc = "no_sesam_secret"
 	default:
 		desc = "undefined"
 	}
@@ -834,28 +837,51 @@ func (s SecretState) MarshalJSON() ([]byte, error) {
 // Cases:
 //
 //  1. Seal exists, Revealed does not exist => Not yet revealed, because cleaned.
-//     => RevealedExists = false, other values undefined.
 //  2. Seal exists, Revealed does not exist => Not revealed, because user has no access.
-//     => UserHasAccess = false, other values undefined.
 //  3. Seal exists not, Reveaed exists      => Not yet sealed.
-//     => SealedExists = false, other values undefined.
 //  4. Both exist and user has access to it => Either not equal or not.
-//     => SameContent is true or false (only if 3 cases before were ruled out)
 type StatusForFile struct {
-	// If empty: File was not revealed yet.
 	RevealedPath string      `json:"revealed_path"`
 	State        SecretState `json:"state"`
 }
 
+// Status describes how the revealed state compares to the sealed state
 type Status struct {
-	Files   []StatusForFile ` json:"files"`
+	// Files are the reports for each known secret
+	Files []StatusForFile ` json:"files"`
+
+	// DiffDir is only set when WriteDiffDirs is true.
 	DiffDir string
 }
 
+// StatusOpts can be given to Status()
 type StatusOpts struct {
+	// WriteDiffDirs will return a tmp directory that has a sealed/ and revealed/ sub-directory.
+	// It contains the whole repo in a way that can be easily passed to `git diff`.
+	// You are supposed to delete this directory after use.
 	WriteDiffDirs bool
+
+	// SortByState will sort the status by state instead of path.
+	SortByState bool
+
+	// IgnoreUnamanaged will ignore files not managed by sesam.
+	IgnoreUnamanaged bool
 }
 
+func (r *Repo) cleanablePaths() ([]string, error) {
+	paths := []string{}
+	err := cleanup(r.gitRepo, r.sesamDir, func(path string) (bool, error) {
+		paths = append(paths, path)
+		return false, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return paths, nil
+}
+
+// Status computes a comparison between the revealed and sealed state in the repo.
 func (r *Repo) Status(opts StatusOpts) (*Status, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -864,42 +890,61 @@ func (r *Repo) Status(opts StatusOpts) (*Status, error) {
 		return nil, ErrClosed
 	}
 
-	// TODO: We could also iterate over all paths in git, to include the ones that sesam does not manage.
-	// TODO: Option to sort by state rather than
-
 	var status Status
 
-	for _, secret := range r.vstate.Secrets {
-		if !r.vstate.UserHasAccess(r.whoami, secret.AccessGroups) {
+	secretMap := make(map[string]*core.VerifiedSecret)
+	for idx := range r.vstate.Secrets {
+		secretMap[r.vstate.Secrets[idx].RevealedPath] = &r.vstate.Secrets[idx]
+	}
+
+	if !opts.IgnoreUnamanaged {
+		allPaths, _ := r.cleanablePaths()
+		for _, path := range allPaths {
+			if _, ok := secretMap[path]; !ok {
+				secretMap[path] = nil
+			}
+		}
+	}
+
+	for path, secret := range secretMap {
+		if secret != nil {
+			if !r.vstate.UserHasAccess(r.whoami, secret.AccessGroups) {
+				status.Files = append(status.Files, StatusForFile{
+					RevealedPath: path,
+					State:        SecretStateUserHasNoAccess,
+				})
+				continue
+			}
+		} else {
 			status.Files = append(status.Files, StatusForFile{
-				RevealedPath: secret.RevealedPath,
-				State:        SecretStateUserHasNoAccess,
+				RevealedPath: path,
+				State:        SecretStateNoSesamSecret,
 			})
 			continue
 		}
 
-		if !core.PathExists(secret.RevealedPath) {
+		if !core.PathExists(path) {
 			status.Files = append(status.Files, StatusForFile{
-				RevealedPath: secret.RevealedPath,
+				RevealedPath: path,
 				State:        SecretStateNoRevealedPath,
 			})
 			continue
 		}
 
-		sealedPath := r.secret.SealedPath(secret.RevealedPath)
+		sealedPath := r.secret.SealedPath(path)
 		if !core.PathExists(sealedPath) {
 			status.Files = append(status.Files, StatusForFile{
-				RevealedPath: secret.RevealedPath,
+				RevealedPath: path,
 				State:        SecretStateNoSealedPath,
 			})
 			continue
 		}
 
-		same, err := r.secret.EqualPlaintext(secret.RevealedPath, r.identities)
+		same, err := r.secret.EqualPlaintext(path, r.identities)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"failed to compare %s and %s: %w",
-				secret.RevealedPath,
+				path,
 				sealedPath,
 				err,
 			)
@@ -907,87 +952,103 @@ func (r *Repo) Status(opts StatusOpts) (*Status, error) {
 
 		if same {
 			status.Files = append(status.Files, StatusForFile{
-				RevealedPath: secret.RevealedPath,
+				RevealedPath: path,
 				State:        SecretStateSameContent,
 			})
 		} else {
 			status.Files = append(status.Files, StatusForFile{
-				RevealedPath: secret.RevealedPath,
+				RevealedPath: path,
 				State:        SecretStateDifferentContent,
 			})
 		}
 	}
 
-	sort.Slice(status.Files, func(i, j int) bool {
-		return status.Files[i].RevealedPath < status.Files[j].RevealedPath
-	})
+	if opts.SortByState {
+		sort.Slice(status.Files, func(i, j int) bool {
+			return status.Files[i].State < status.Files[j].State
+		})
+	} else {
+		sort.Slice(status.Files, func(i, j int) bool {
+			return status.Files[i].RevealedPath < status.Files[j].RevealedPath
+		})
+	}
 
 	if opts.WriteDiffDirs {
-		if err := r.statusToDiffDir(&status); err != nil {
+		tmpDir, err := r.statusToDiffDir(&status)
+		if err != nil {
 			return nil, err
 		}
+
+		status.DiffDir = tmpDir
 	}
 
 	return &status, nil
 }
 
-func (r *Repo) statusToDiffDir(status *Status) error {
+func (r *Repo) statusToDiffDir(status *Status) (diffDir string, err error) {
 	rootTmpDir := r.secret.TmpDir()
-
 	tmpDir, err := os.MkdirTemp(rootTmpDir, "status-diff-")
 	if err != nil {
-		return err
+		return "", fmt.Errorf("failed to make temp dir for diff: %w", err)
 	}
 
-	// TODO: Only set this when err == nil, otherwise removeall
-	status.DiffDir = tmpDir
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(tmpDir)
+		}
+	}()
 
 	sealTmpDir := filepath.Join(tmpDir, "sealed")
 	plainTmpDir := filepath.Join(tmpDir, "revealed")
 
-	// TODO: error handling
-
 	for _, file := range status.Files {
 		sealTmpPath := filepath.Join(sealTmpDir, file.RevealedPath)
-		if err := os.MkdirAll(filepath.Dir(sealTmpPath), 0700); err != nil {
-			return err
+		if err := os.MkdirAll(filepath.Dir(sealTmpPath), 0o700); err != nil {
+			return "", fmt.Errorf("failed to make sub temp dir for diff: %w", err)
 		}
 
 		switch file.State {
 		case SecretStateNoSealedPath, SecretStateUserHasNoAccess, SecretStateNone:
 			// can't decrypt path - put a dummy file there.
 			desc, _ := file.State.MarshalJSON()
-			_ = renameio.WriteFile(sealTmpPath, desc, 0600)
+			if err := renameio.WriteFile(sealTmpPath, desc, 0o600); err != nil {
+				return "", fmt.Errorf("failed write sealed state file: %w", err)
+			}
 		default:
-			sealFd, err := os.OpenFile(sealTmpPath, os.O_CREATE|os.O_WRONLY|os.O_SYNC, 0600)
+			//nolint:gosec
+			sealFd, err := os.OpenFile(sealTmpPath, os.O_CREATE|os.O_WRONLY|os.O_SYNC, 0o600)
 			if err != nil {
-				return err
+				return "", fmt.Errorf("failed to open sealed file: %w", err)
 			}
 
 			if _, err := core.ShowSecret(r.sesamDir, r.identities, file.RevealedPath, sealFd); err != nil {
 				_ = sealFd.Close()
-				return err
+				return "", err
 			}
 
-			_ = sealFd.Close()
+			if err := sealFd.Close(); err != nil {
+				return "", fmt.Errorf("failed to close seal file: %w", err)
+			}
 		}
 
 		switch file.State {
 		case SecretStateNoRevealedPath, SecretStateNone:
 			// can't link revealed path, write dummy file.
 			desc, _ := file.State.MarshalJSON()
-			_ = renameio.WriteFile(sealTmpPath, desc, 0600)
+			if err := renameio.WriteFile(sealTmpPath, desc, 0o600); err != nil {
+				return "", fmt.Errorf("failed write revealed state file: %w", err)
+			}
 		default:
 			plainTmpPath := filepath.Join(plainTmpDir, file.RevealedPath)
-			if err := os.MkdirAll(filepath.Dir(plainTmpPath), 0700); err != nil {
-				return err
+			if err := os.MkdirAll(filepath.Dir(plainTmpPath), 0o700); err != nil {
+				return "", fmt.Errorf("failed to make sub temp dir for diff: %w", err)
 			}
 
 			if err := os.Link(file.RevealedPath, plainTmpPath); err != nil {
-				return err
+				return "", fmt.Errorf("failed to link revealed file: %w", err)
 			}
 		}
 	}
 
-	return nil
+	return tmpDir, nil
 }
