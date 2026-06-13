@@ -95,7 +95,7 @@ var flagsGeneral = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name:  "verify-mode",
-		Usage: "Adjust how strong or weak the disk state is verified",
+		Usage: "Adjust how strong or weak the disk state is verified ('all', or 'no-disk')",
 		Value: "all",
 	},
 }
