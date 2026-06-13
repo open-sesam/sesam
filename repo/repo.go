@@ -810,7 +810,7 @@ const (
 	SecretStateNoSesamSecret
 )
 
-func (s SecretState) MarshalJSON() ([]byte, error) {
+func (s SecretState) String() string {
 	var desc string
 	switch s {
 	case SecretStateNoSealedPath:
@@ -829,7 +829,11 @@ func (s SecretState) MarshalJSON() ([]byte, error) {
 		desc = "undefined"
 	}
 
-	return []byte(fmt.Sprintf("%q", desc)), nil
+	return desc
+}
+
+func (s SecretState) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf("%q", s.String())), nil
 }
 
 // StatusForFile describes wether the sealed file differs from the revealed file.
@@ -848,10 +852,10 @@ type StatusForFile struct {
 // Status describes how the revealed state compares to the sealed state
 type Status struct {
 	// Files are the reports for each known secret
-	Files []StatusForFile ` json:"files"`
+	Files []StatusForFile `json:"files"`
 
 	// DiffDir is only set when WriteDiffDirs is true.
-	DiffDir string
+	DiffDir string `json:"-"`
 }
 
 // StatusOpts can be given to Status()
@@ -864,8 +868,8 @@ type StatusOpts struct {
 	// SortByState will sort the status by state instead of path.
 	SortByState bool
 
-	// IgnoreUnamanaged will ignore files not managed by sesam.
-	IgnoreUnamanaged bool
+	// IgnoreUnmanaged will ignore files not managed by sesam.
+	IgnoreUnmanaged bool
 }
 
 func (r *Repo) cleanablePaths() ([]string, error) {
@@ -897,8 +901,12 @@ func (r *Repo) Status(opts StatusOpts) (*Status, error) {
 		secretMap[r.vstate.Secrets[idx].RevealedPath] = &r.vstate.Secrets[idx]
 	}
 
-	if !opts.IgnoreUnamanaged {
-		allPaths, _ := r.cleanablePaths()
+	if !opts.IgnoreUnmanaged {
+		allPaths, err := r.cleanablePaths()
+		if err != nil {
+			return nil, fmt.Errorf("failed to list all paths: %w", err)
+		}
+
 		for _, path := range allPaths {
 			if _, ok := secretMap[path]; !ok {
 				secretMap[path] = nil
@@ -906,45 +914,46 @@ func (r *Repo) Status(opts StatusOpts) (*Status, error) {
 		}
 	}
 
-	for path, secret := range secretMap {
+	for revealedPath, secret := range secretMap {
+		absPath := filepath.Join(r.sesamDir, revealedPath)
 		if secret != nil {
 			if !r.vstate.UserHasAccess(r.whoami, secret.AccessGroups) {
 				status.Files = append(status.Files, StatusForFile{
-					RevealedPath: path,
+					RevealedPath: revealedPath,
 					State:        SecretStateUserHasNoAccess,
 				})
 				continue
 			}
 		} else {
 			status.Files = append(status.Files, StatusForFile{
-				RevealedPath: path,
+				RevealedPath: revealedPath,
 				State:        SecretStateNoSesamSecret,
 			})
 			continue
 		}
 
-		if !core.PathExists(path) {
+		if !core.PathExists(absPath) {
 			status.Files = append(status.Files, StatusForFile{
-				RevealedPath: path,
+				RevealedPath: revealedPath,
 				State:        SecretStateNoRevealedPath,
 			})
 			continue
 		}
 
-		sealedPath := r.secret.SealedPath(path)
+		sealedPath := r.secret.SealedPath(revealedPath)
 		if !core.PathExists(sealedPath) {
 			status.Files = append(status.Files, StatusForFile{
-				RevealedPath: path,
+				RevealedPath: revealedPath,
 				State:        SecretStateNoSealedPath,
 			})
 			continue
 		}
 
-		same, err := r.secret.EqualPlaintext(path, r.identities)
+		same, err := r.secret.EqualPlaintext(revealedPath, r.identities)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"failed to compare %s and %s: %w",
-				path,
+				revealedPath,
 				sealedPath,
 				err,
 			)
@@ -952,12 +961,12 @@ func (r *Repo) Status(opts StatusOpts) (*Status, error) {
 
 		if same {
 			status.Files = append(status.Files, StatusForFile{
-				RevealedPath: path,
+				RevealedPath: revealedPath,
 				State:        SecretStateSameContent,
 			})
 		} else {
 			status.Files = append(status.Files, StatusForFile{
-				RevealedPath: path,
+				RevealedPath: revealedPath,
 				State:        SecretStateDifferentContent,
 			})
 		}
@@ -1014,6 +1023,8 @@ func (r *Repo) statusToDiffDir(status *Status) (diffDir string, err error) {
 			if err := renameio.WriteFile(sealTmpPath, desc, 0o600); err != nil {
 				return "", fmt.Errorf("failed write sealed state file: %w", err)
 			}
+		case SecretStateSameContent:
+			// no need to write same files.
 		default:
 			//nolint:gosec
 			sealFd, err := os.OpenFile(sealTmpPath, os.O_CREATE|os.O_WRONLY|os.O_SYNC, 0o600)
@@ -1031,15 +1042,17 @@ func (r *Repo) statusToDiffDir(status *Status) (diffDir string, err error) {
 			}
 		}
 
+		plainTmpPath := filepath.Join(plainTmpDir, file.RevealedPath)
 		switch file.State {
-		case SecretStateNoRevealedPath, SecretStateNone:
+		case SecretStateNoRevealedPath, SecretStateNone, SecretStateUserHasNoAccess:
 			// can't link revealed path, write dummy file.
 			desc, _ := file.State.MarshalJSON()
-			if err := renameio.WriteFile(sealTmpPath, desc, 0o600); err != nil {
+			if err := renameio.WriteFile(plainTmpPath, desc, 0o600); err != nil {
 				return "", fmt.Errorf("failed write revealed state file: %w", err)
 			}
+		case SecretStateSameContent:
+			// no need to write same files.
 		default:
-			plainTmpPath := filepath.Join(plainTmpDir, file.RevealedPath)
 			if err := os.MkdirAll(filepath.Dir(plainTmpPath), 0o700); err != nil {
 				return "", fmt.Errorf("failed to make sub temp dir for diff: %w", err)
 			}
