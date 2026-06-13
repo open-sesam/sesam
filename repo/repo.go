@@ -24,6 +24,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/gofrs/flock"
+	"github.com/google/renameio"
 	"github.com/open-sesam/sesam/core"
 )
 
@@ -847,16 +848,24 @@ type StatusForFile struct {
 }
 
 type Status struct {
-	Files []StatusForFile ` json:"files"`
+	Files   []StatusForFile ` json:"files"`
+	DiffDir string
 }
 
-func (r *Repo) Status() (*Status, error) {
+type StatusOpts struct {
+	WriteDiffDirs bool
+}
+
+func (r *Repo) Status(opts StatusOpts) (*Status, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.isClosed() {
 		return nil, ErrClosed
 	}
+
+	// TODO: We could also iterate over all paths in git, to include the ones that sesam does not manage.
+	// TODO: Option to sort by state rather than
 
 	var status Status
 
@@ -913,5 +922,72 @@ func (r *Repo) Status() (*Status, error) {
 		return status.Files[i].RevealedPath < status.Files[j].RevealedPath
 	})
 
+	if opts.WriteDiffDirs {
+		if err := r.statusToDiffDir(&status); err != nil {
+			return nil, err
+		}
+	}
+
 	return &status, nil
+}
+
+func (r *Repo) statusToDiffDir(status *Status) error {
+	rootTmpDir := r.secret.TmpDir()
+
+	tmpDir, err := os.MkdirTemp(rootTmpDir, "status-diff-")
+	if err != nil {
+		return err
+	}
+
+	// TODO: Only set this when err == nil, otherwise removeall
+	status.DiffDir = tmpDir
+
+	sealTmpDir := filepath.Join(tmpDir, "sealed")
+	plainTmpDir := filepath.Join(tmpDir, "revealed")
+
+	// TODO: error handling
+
+	for _, file := range status.Files {
+		sealTmpPath := filepath.Join(sealTmpDir, file.RevealedPath)
+		if err := os.MkdirAll(filepath.Dir(sealTmpPath), 0700); err != nil {
+			return err
+		}
+
+		switch file.State {
+		case SecretStateNoSealedPath, SecretStateUserHasNoAccess, SecretStateNone:
+			// can't decrypt path - put a dummy file there.
+			desc, _ := file.State.MarshalJSON()
+			_ = renameio.WriteFile(sealTmpPath, desc, 0600)
+		default:
+			sealFd, err := os.OpenFile(sealTmpPath, os.O_CREATE|os.O_WRONLY|os.O_SYNC, 0600)
+			if err != nil {
+				return err
+			}
+
+			if _, err := core.ShowSecret(r.sesamDir, r.identities, file.RevealedPath, sealFd); err != nil {
+				_ = sealFd.Close()
+				return err
+			}
+
+			_ = sealFd.Close()
+		}
+
+		switch file.State {
+		case SecretStateNoRevealedPath, SecretStateNone:
+			// can't link revealed path, write dummy file.
+			desc, _ := file.State.MarshalJSON()
+			_ = renameio.WriteFile(sealTmpPath, desc, 0600)
+		default:
+			plainTmpPath := filepath.Join(plainTmpDir, file.RevealedPath)
+			if err := os.MkdirAll(filepath.Dir(plainTmpPath), 0700); err != nil {
+				return err
+			}
+
+			if err := os.Link(file.RevealedPath, plainTmpPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }

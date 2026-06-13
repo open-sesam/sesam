@@ -4,18 +4,53 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/muesli/termenv"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
 
-func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-	if cmd.Bool("diff") {
-		return fmt.Errorf("not yet implemented")
+func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
+	// TODO: Check for git and print a nicer message if not present.
+	// defer os.RemoveAll(status.DiffDir)
+	os.Chdir(status.DiffDir)
+	cmd := exec.CommandContext(
+		ctx,
+		"git",
+		"diff",
+		"--no-index",
+		"--color=auto",
+		"--",
+		"sealed",
+		"revealed",
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	err := cmd.Run()
+	if err != nil {
+		exitErr, ok := err.(*exec.ExitError)
+		if !ok {
+			return err
+		}
+
+		if exitErr.ProcessState.ExitCode() == 1 {
+			// if there's a diff it will exit with 1
+			return nil
+		}
+
+		return err
 	}
 
-	status, err := r.Status()
+	return nil
+}
+
+func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+	status, err := r.Status(repo.StatusOpts{
+		WriteDiffDirs: cmd.Bool("diff"),
+	})
 	if err != nil {
 		return err
 	}
@@ -24,9 +59,17 @@ func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return printJSON(status)
 	}
 
+	if cmd.Bool("diff") {
+		return printDirectoryDiff(ctx, status)
+	}
+
 	output := termenv.NewOutput(os.Stdout)
 
-	t := newTable("Difference between revealed and sealed", "State", "Path")
+	header := "DIFF REVEALED vs. SEALED"
+	t := newTable(header, "Path", "State")
+	s := t.Style()
+	s.Size.WidthMin = len(header) + 5
+
 	for _, file := range status.Files {
 		var desc string
 		switch file.State {
