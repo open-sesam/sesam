@@ -42,21 +42,18 @@ func readAgeEncryptionKey(r io.Reader, ageIds []age.Identity) ([]byte, error) {
 	return ageKey, nil
 }
 
-func keyContentHash(ageKey []byte, contentHash []byte) ([]byte, error) {
+func keyContentHash(ageKey []byte, contentHash []byte) []byte {
 	const info = "sesam.contenthash.v1"
 
 	// derive actual key from the age encryption key:
 	finalKey := make([]byte, 32)
 	keyReader := hkdf.New(sha3.New256, ageKey, nil, []byte(info))
 
-	if _, err := io.ReadFull(keyReader, finalKey); err != nil {
-		return nil, fmt.Errorf("failed to read hkdf key: %w", err)
-	}
-
+	_, _ = io.ReadFull(keyReader, finalKey)
 	hm := hmac.New(sha3.New256, finalKey)
 	_, _ = hm.Write(contentHash)
 	hmacContentHash := hm.Sum(nil)
-	return hmacContentHash, nil
+	return hmacContentHash
 }
 
 // sealSecret encrypts the plaintext at sm.SesamDir/revealedPath to `destPath`
@@ -122,11 +119,7 @@ func sealSecret(
 		return nil, fmt.Errorf("failed to read age key: %w", err)
 	}
 
-	hmacContentHash, err := keyContentHash(ageKey, contentHash.Sum(nil))
-	if err != nil {
-		return nil, err
-	}
-
+	hmacContentHash := keyContentHash(ageKey, contentHash.Sum(nil))
 	ciphertextHashBytes := ciphertextHash.Sum(nil)
 	sig, err := sm.Signer.Sign(
 		SesamDomainSignSecretTag,
@@ -364,10 +357,6 @@ func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) (
 	_, _ = cipherTextHash.Write([]byte(sigDesc.RevealedPath))
 	_, _ = contentHash.Write([]byte(sigDesc.RevealedPath))
 
-	hmacContentHash, err := keyContentHash(ageKey, contentHash.Sum(nil))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
+	hmacContentHash := keyContentHash(ageKey, contentHash.Sum(nil))
 	return cipherTextHash.Sum(nil), hmacContentHash, sigDesc, nil
 }

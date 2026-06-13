@@ -72,5 +72,16 @@ func printJSON(value any) error {
 }
 
 func printInfo(format string, args ...any) {
+	// format is always a constant developer-supplied string; args are
+	// rendered into the message, not used to forge log records.
+	//nolint:gosec // G706: not attacker-controlled log injection
 	slog.Info(fmt.Sprintf(format, args...))
+}
+
+func pluralize(s string, n int) string {
+	if n == 1 {
+		return s
+	}
+
+	return s + "s"
 }

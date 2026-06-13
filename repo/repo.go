@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,8 @@ type Repo struct {
 	pluginUI *core.PluginUI
 	gitRepo  *git.Repository
 	lock     *flock.Flock
+
+	whoami string
 
 	identityPaths []string
 	identities    core.Identities
@@ -364,6 +367,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to map identity to user: %w", err)
 	}
+	r.whoami = whoami
 
 	signer, err := core.LoadSignKey(resolvedDir, whoami, signIdentity)
 	if err != nil {
@@ -746,11 +750,7 @@ func (r *Repo) Whoami() (string, error) {
 		return "", ErrClosed
 	}
 
-	whoami, _, err := identityToUser(r.identities, r.keyring.ListUsers())
-	if err != nil {
-		return "", fmt.Errorf("failed to identify current user: %w", err)
-	}
-	return whoami, nil
+	return r.whoami, nil
 }
 
 func (r *Repo) Log(fn func(e *core.AuditEntrySigned) error) error {
@@ -795,4 +795,123 @@ func (r *Repo) UserChangeGroups(user string, groups []string) error {
 	}
 
 	return r.user.UserChangeGroups(user, groups)
+}
+
+type SecretState int
+
+const (
+	SecretStateNone = SecretState(iota)
+	SecretStateNoSealedPath
+	SecretStateNoRevealedPath
+	SecretStateUserHasNoAccess
+	SecretStateSameContent
+	SecretStateDifferentContent
+)
+
+func (s SecretState) MarshalJSON() ([]byte, error) {
+	var desc string
+	switch s {
+	case SecretStateNoSealedPath:
+		desc = "unsealed"
+	case SecretStateNoRevealedPath:
+		desc = "unrevealed"
+	case SecretStateUserHasNoAccess:
+		desc = "no_access"
+	case SecretStateSameContent:
+		desc = "same_content"
+	case SecretStateDifferentContent:
+		desc = "diff_content"
+	default:
+		desc = "undefined"
+	}
+
+	return []byte(fmt.Sprintf("%q", desc)), nil
+}
+
+// StatusForFile describes wether the sealed file differs from the revealed file.
+//
+// Cases:
+//
+//  1. Seal exists, Revealed does not exist => Not yet revealed, because cleaned.
+//     => RevealedExists = false, other values undefined.
+//  2. Seal exists, Revealed does not exist => Not revealed, because user has no access.
+//     => UserHasAccess = false, other values undefined.
+//  3. Seal exists not, Reveaed exists      => Not yet sealed.
+//     => SealedExists = false, other values undefined.
+//  4. Both exist and user has access to it => Either not equal or not.
+//     => SameContent is true or false (only if 3 cases before were ruled out)
+type StatusForFile struct {
+	// If empty: File was not revealed yet.
+	RevealedPath string      `json:"revealed_path"`
+	State        SecretState `json:"state"`
+}
+
+type Status struct {
+	Files []StatusForFile ` json:"files"`
+}
+
+func (r *Repo) Status() (*Status, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return nil, ErrClosed
+	}
+
+	var status Status
+
+	for _, secret := range r.vstate.Secrets {
+		if !r.vstate.UserHasAccess(r.whoami, secret.AccessGroups) {
+			status.Files = append(status.Files, StatusForFile{
+				RevealedPath: secret.RevealedPath,
+				State:        SecretStateUserHasNoAccess,
+			})
+			continue
+		}
+
+		if !core.PathExists(secret.RevealedPath) {
+			status.Files = append(status.Files, StatusForFile{
+				RevealedPath: secret.RevealedPath,
+				State:        SecretStateNoRevealedPath,
+			})
+			continue
+		}
+
+		sealedPath := r.secret.SealedPath(secret.RevealedPath)
+		if !core.PathExists(sealedPath) {
+			status.Files = append(status.Files, StatusForFile{
+				RevealedPath: secret.RevealedPath,
+				State:        SecretStateNoSealedPath,
+			})
+			continue
+		}
+
+		same, err := r.secret.EqualPlaintext(secret.RevealedPath, r.identities)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"failed to compare %s and %s: %w",
+				secret.RevealedPath,
+				sealedPath,
+				err,
+			)
+		}
+
+		if same {
+			status.Files = append(status.Files, StatusForFile{
+				RevealedPath: secret.RevealedPath,
+				State:        SecretStateSameContent,
+			})
+		} else {
+			status.Files = append(status.Files, StatusForFile{
+				RevealedPath: secret.RevealedPath,
+				State:        SecretStateDifferentContent,
+			})
+		}
+	}
+
+	sort.Slice(status.Files, func(i, j int) bool {
+		return status.Files[i].RevealedPath < status.Files[j].RevealedPath
+	})
+
+	return &status, nil
 }

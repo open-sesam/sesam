@@ -173,6 +173,14 @@ var flagsLog = []cli.Flag{flagJSON}
 
 var flagsID = []cli.Flag{flagJSON}
 
+var flagsStatus = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "diff",
+		Usage: "Also show the actual diff",
+	},
+	flagJSON,
+}
+
 var flagsVerify = []cli.Flag{
 	&cli.BoolFlag{
 		Name:  "all",

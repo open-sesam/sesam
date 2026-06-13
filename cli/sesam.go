@@ -120,6 +120,13 @@ func Main(args []string) error {
 				},
 			},
 			{
+				Name:          "status",
+				Action:        commands.WithRepo(commands.HandleStatus),
+				Flags:         flagsStatus,
+				ShellComplete: completeFlags,
+				Usage:         "Show secrets that are not sealed yet",
+			},
+			{
 				Name:   "apply",
 				Hidden: true,
 				Action: commands.HandleApply,
