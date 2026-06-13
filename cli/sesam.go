@@ -168,6 +168,11 @@ func Main(args []string) error {
 				Usage:  "Edit an secret and immeediately seal it afterwards",
 			},
 			{
+				Name:   "doctor",
+				Action: commands.HandleStub,
+				Usage:  "Check sesam installation for possible problems",
+			},
+			{
 				Name:          "tell",
 				Flags:         flagsTell,
 				Action:        commands.WithRepo(commands.HandleTell),
