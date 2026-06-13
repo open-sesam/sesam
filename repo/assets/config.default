@@ -1,8 +1,7 @@
-# Optional; always 1 for now.
-version: 1
-
-# This is a demonstration file of Sesam.
-# All kinds of features are listed here, you will likely only need a fraction of them.
+# $schema: https://raw.githubusercontent.com/open-sesam/sesam/refs/heads/feat/yaml-parsing/config/sesam_schema.json
+#
+# TODO: Change to main branch once merged.
+# https://github.com/redhat-developer/yaml-language-server#using-modeline
 config:
   general:
     # encrypt all files, even when no change is needed when true.
