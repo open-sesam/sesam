@@ -874,7 +874,7 @@ func buildRootHash(sigs []*secretFooter) string {
 
 	b := bytes.NewBuffer(nil)
 	for _, sig := range sigs {
-		b.WriteString(sig.Hash)
+		b.WriteString(sig.CipherTextHash)
 		b.WriteByte('\n')
 	}
 

@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/google/renameio"
+	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/sha3"
 
 	"filippo.io/age"
@@ -18,10 +20,43 @@ import (
 const maxFooterSize = 4096
 
 type secretFooter struct {
-	RevealedPath string `json:"path"`
-	Hash         string `json:"hash"`
-	Signature    string `json:"signature"`
-	SealedBy     string `json:"sealed_by"`
+	RevealedPath    string `json:"path"`
+	CipherTextHash  string `json:"cipher_text_hash"`
+	HMACContentHash string `json:"hmac_content_hash"`
+	Signature       string `json:"signature"`
+	SealedBy        string `json:"sealed_by"`
+	Version         int    `json:"version"`
+}
+
+func readAgeEncryptionKey(r io.Reader, ageIds []age.Identity) ([]byte, error) {
+	hdrBytes, err := age.ExtractHeader(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract age header: %w", err)
+	}
+
+	ageKey, err := age.DecryptHeader(hdrBytes, ageIds...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt age header: %w", err)
+	}
+
+	return ageKey, nil
+}
+
+func keyContentHash(ageKey []byte, contentHash []byte) ([]byte, error) {
+	const info = "sesam.contenthash.v1"
+
+	// derive actual key from the age encryption key:
+	finalKey := make([]byte, 32)
+	keyReader := hkdf.New(sha3.New256, ageKey, nil, []byte(info))
+
+	if _, err := io.ReadFull(keyReader, finalKey); err != nil {
+		return nil, fmt.Errorf("failed to read hkdf key: %w", err)
+	}
+
+	hm := hmac.New(sha3.New256, finalKey)
+	_, _ = hm.Write(contentHash)
+	hmacContentHash := hm.Sum(nil)
+	return hmacContentHash, nil
 }
 
 // sealSecret encrypts the plaintext at sm.SesamDir/revealedPath to `destPath`
@@ -34,6 +69,7 @@ func sealSecret(
 	recipients Recipients,
 	destPath, sealedByUser string,
 ) (*secretFooter, error) {
+	//nolint:gosec
 	rd, err := os.Open(filepath.Join(sm.SesamDir, revealedPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secret: %w", err)
@@ -55,41 +91,62 @@ func sealSecret(
 	}()
 
 	// use the stream to compute the hash, what is written to wc, is also written to the hash:
-	h := sha3.New256()
-	mw := io.MultiWriter(wc, h)
+	ciphertextHash := sha3.New256()
+	contentHash := sha3.New256()
+	mw := io.MultiWriter(wc, ciphertextHash)
 
 	encW, err := age.Encrypt(mw, recipients.AgeRecipients()...)
 	if err != nil {
-		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to initiate encryption: %w", err)
 	}
 
-	_, err = io.Copy(encW, rd)
+	_, err = io.Copy(encW, io.TeeReader(rd, contentHash))
 	if err != nil {
-		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to encrypt secret %s: %w", revealedPath, err)
 	}
 
 	if err := encW.Close(); err != nil {
-		_ = os.Remove(wc.Name())
 		return nil, fmt.Errorf("failed to close encrypted writer: %w", err)
 	}
 
 	// NOTE: We use the path as well to make sure files cannot just be moved around.
-	_, _ = h.Write([]byte(revealedPath))
-	hashBytes := h.Sum(nil)
+	_, _ = ciphertextHash.Write([]byte(revealedPath))
+	_, _ = contentHash.Write([]byte(revealedPath))
 
-	sig, err := sm.Signer.Sign(SesamDomainSignSecretTag, hashBytes)
+	if _, err := wc.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("failed to seek back to crypt file: %w", err)
+	}
+
+	ageKey, err := readAgeEncryptionKey(wc.File, sm.Identities.AgeIdentities())
 	if err != nil {
-		_ = os.Remove(wc.Name())
+		return nil, fmt.Errorf("failed to read age key: %w", err)
+	}
+
+	hmacContentHash, err := keyContentHash(ageKey, contentHash.Sum(nil))
+	if err != nil {
+		return nil, err
+	}
+
+	ciphertextHashBytes := ciphertextHash.Sum(nil)
+	sig, err := sm.Signer.Sign(
+		SesamDomainSignSecretTag,
+		append(ciphertextHashBytes, hmacContentHash...),
+	)
+	if err != nil {
 		return nil, fmt.Errorf("failed to compute signature for %s: %w", destPath, err)
 	}
 
 	ss := secretFooter{
-		RevealedPath: revealedPath,
-		Hash:         MulticodeEncode(hashBytes, MhSHA3_256),
-		Signature:    sig,
-		SealedBy:     sealedByUser,
+		RevealedPath:    revealedPath,
+		CipherTextHash:  MulticodeEncode(ciphertextHashBytes, MhSHA3_256),
+		Signature:       sig,
+		SealedBy:        sealedByUser,
+		HMACContentHash: MulticodeEncode(hmacContentHash, MhSHA3_256),
+		Version:         1,
+	}
+
+	if _, err := wc.Seek(0, io.SeekEnd); err != nil {
+		return nil, fmt.Errorf("failed to seek back to crypt file: %w", err)
 	}
 
 	// Write signature to buffer, delimited by newline:
@@ -115,9 +172,9 @@ func sealSecret(
 	return &ss, wc.CloseAtomicallyReplace()
 }
 
-// readSignature seeks to the footer & parses it.
+// readFooter seeks to the footer & parses it.
 // It returns a reader that sees only the age content and the parsed signature.
-func readSignature(fd io.ReadSeeker) (io.Reader, *secretFooter, error) {
+func readFooter(fd io.ReadSeeker) (io.ReadSeeker, *secretFooter, error) {
 	fileSize, err := fd.Seek(0, io.SeekEnd)
 	if err != nil {
 		return nil, nil, err
@@ -151,7 +208,15 @@ func readSignature(fd io.ReadSeeker) (io.Reader, *secretFooter, error) {
 
 	jsonTrailerSize := fileSize - (footerPageOffset + int64(idx))
 	ageSize := fileSize - jsonTrailerSize
-	return io.LimitReader(fd, ageSize), &ss, nil
+
+	// cap max reading size:
+	return struct {
+		io.Reader
+		io.Seeker
+	}{
+		Seeker: fd,
+		Reader: io.LimitReader(fd, ageSize),
+	}, &ss, nil
 }
 
 // revealSecret decrypts the secret at `revealedPath` and verifies its
@@ -234,65 +299,75 @@ func revealStreamAndVerify(
 	kr Keyring,
 	authorize func(user, path string) bool,
 ) error {
-	sha3HashBytes, sigDesc, err := revealStream(srcFd, dstFd, ageIds)
+	cipherTextHash, contentHashBytes, footer, err := revealStream(srcFd, dstFd, ageIds)
 	if err != nil {
 		return err
 	}
 
 	// Verify the signature, but check before if hashes are the same at all as quick check:
-	computedhash := MulticodeEncode(sha3HashBytes, MhSHA3_256)
-	if computedhash != sigDesc.Hash {
-		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", computedhash, sigDesc.Hash)
+	computedhash := MulticodeEncode(cipherTextHash, MhSHA3_256)
+	if computedhash != footer.CipherTextHash {
+		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", computedhash, footer.CipherTextHash)
 	}
 
 	sealer, err := kr.Verify(
 		SesamDomainSignSecretTag,
-		sha3HashBytes,
-		sigDesc.Signature,
-		sigDesc.SealedBy,
+		append(cipherTextHash, contentHashBytes...),
+		footer.Signature,
+		footer.SealedBy,
 	)
 	if err != nil {
-		return fmt.Errorf("signature verification failed for %s: %w", sigDesc.RevealedPath, err)
+		return fmt.Errorf("signature verification failed for %s: %w", footer.RevealedPath, err)
 	}
 
-	if authorize != nil && !authorize(sealer, sigDesc.RevealedPath) {
-		return &BadSealerError{SealedBy: sealer, Path: sigDesc.RevealedPath}
+	if authorize != nil && !authorize(sealer, footer.RevealedPath) {
+		return &BadSealerError{SealedBy: sealer, Path: footer.RevealedPath}
 	}
 
 	return nil
 }
 
-// revealStream decrypts the stream without checking the footer
-// signature or the sealer's authorization. Currently used by
-// ShowSecret (git diff textconv) where loading the audit log isn't
-// worth the latency on a read-only display path, and by RevealBlob
-// when the caller passes nil for kr/authorize. Authoritative
-// verification lives in revealStreamAndVerify (sesam reveal,
-// smudge with audit-log loaded) and VerifyIntegrity
-// (sesam verify --all).
-func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) ([]byte, *secretFooter, error) {
-	ageRd, sigDesc, err := readSignature(srcFd)
+func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) ([]byte, []byte, *secretFooter, error) {
+	ageRd, sigDesc, err := readFooter(srcFd)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+
+	ageKey, err := readAgeEncryptionKey(srcFd, ageIds)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to read age key: %w", err)
+	}
+
+	// set back to start so age.Decrypt works.
+	if _, err := ageRd.Seek(0, io.SeekStart); err != nil {
+		return nil, nil, nil, fmt.Errorf("seek to start failed: %w", err)
 	}
 
 	// Setup hashing parallel to decrypting:
-	h := sha3.New256()
-	tr := io.TeeReader(ageRd, h)
+	cipherTextHash := sha3.New256()
+	tr := io.TeeReader(ageRd, cipherTextHash)
 
 	encR, err := age.Decrypt(tr, ageIds...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to decrypt %s: %w", sigDesc.RevealedPath, err)
+		return nil, nil, nil, fmt.Errorf("failed to decrypt %s: %w", sigDesc.RevealedPath, err)
 	}
+
+	contentHash := sha3.New256()
 
 	// Kick-off the decrypting and hashing:
-	_, err = io.Copy(dstFd, encR)
+	_, err = io.Copy(dstFd, io.TeeReader(encR, contentHash))
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to copy decrypted secret back in place: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to copy decrypted secret back in place: %w", err)
 	}
 
-	// Finish hash (includes path to make sure it is non-movable)
-	_, _ = h.Write([]byte(sigDesc.RevealedPath))
-	sha3HashBytes := h.Sum(nil)
-	return sha3HashBytes, sigDesc, nil
+	// Finish hashses (includes path to make sure it is non-movable)
+	_, _ = cipherTextHash.Write([]byte(sigDesc.RevealedPath))
+	_, _ = contentHash.Write([]byte(sigDesc.RevealedPath))
+
+	hmacContentHash, err := keyContentHash(ageKey, contentHash.Sum(nil))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return cipherTextHash.Sum(nil), hmacContentHash, sigDesc, nil
 }
