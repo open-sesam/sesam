@@ -12,6 +12,17 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// Command categories group subcommands in `sesam --help`. urfave/cli sorts
+// categories alphabetically by name with no ordering hook, so the leading
+// ordinal pins the order (repo lifecycle first, then daily and admin groups).
+const (
+	catRepository = "REPOSITORY"
+	catSecrets    = "SECRETS"
+	catAccess     = "ACCESS"
+	catConfig     = "CONFIG"
+	catMeta       = "META"
+)
+
 // Main builds and runs the sesam CLI command tree.
 //
 // Commands wrapped in commands.WithRepo load a sesam Repo (acquire lock,
@@ -36,63 +47,45 @@ func Main(args []string) error {
 		EnableShellCompletion:  true,
 		UseShortOptionHandling: true,
 		Commands: []*cli.Command{
+			// --- Repository: set up, tear down, and keep a repo healthy ---
 			{
-				Name:   "init",
-				Flags:  flagsInit,
-				Action: commands.HandleInit,
-				Usage:  "Initialize sesam in the current repository",
+				Name:     "init",
+				Category: catRepository,
+				Flags:    flagsInit,
+				Action:   commands.HandleInit,
+				Usage:    "Initialize sesam in the current repository",
 			},
 			{
-				Name:   "deinit",
-				Action: commands.HandleStub,
-				Usage:  "Remove all traces of sesam",
+				Name:     "deinit",
+				Category: catRepository,
+				Action:   commands.HandleStub,
+				Usage:    "Remove all traces of sesam",
 			},
 			{
-				Name:   "verify",
-				Flags:  flagsVerify,
-				Action: commands.WithRepo(commands.HandleVerify),
-				Usage:  "Verify sesam signatures and encryption state",
+				Name:     "verify",
+				Category: catRepository,
+				Flags:    flagsVerify,
+				Action:   commands.WithRepo(commands.HandleVerify),
+				Usage:    "Verify sesam signatures and encryption state",
 			},
 			{
-				Name:   "id",
-				Flags:  flagsID,
-				Action: commands.WithRepo(commands.HandleID),
-				Usage:  "Identify the current user by age identity",
+				Name:     "clean",
+				Category: catRepository,
+				Action:   commands.HandleClean,
+				Usage:    "Remove revealed plaintext and other untracked files from the sesam directory",
+				Flags:    flagsClean,
 			},
 			{
-				Name:  "keyring",
-				Usage: "Keyring utils",
-				Commands: []*cli.Command{
-					{
-						Name:   "clear",
-						Usage:  "Clear cached passphrases from the keyring",
-						Action: commands.HandleKeyringClearCache,
-					},
-				},
+				Name:     "doctor",
+				Category: catRepository,
+				Action:   commands.HandleStub,
+				Usage:    "Check sesam installation for possible problems",
 			},
-			{
-				Name:   "seal",
-				Flags:  flagsSeal,
-				Action: commands.WithRepo(commands.HandleSeal),
-				Usage:  "Encrypt and sign changed secrets",
-			},
-			{
-				Name:          "open",
-				Aliases:       []string{"reveal"},
-				Flags:         flagsReveal,
-				Action:        commands.WithRepo(commands.HandleOpen),
-				ShellComplete: completeSecrets,
-				Usage:         "Decrypt all secrets available to the current user",
-			},
-			{
-				Name:   "log",
-				Hidden: true,
-				Flags:  flagsLog,
-				Action: commands.WithRepo(commands.HandleLog),
-				Usage:  "Show the audit log of secret changes",
-			},
+
+			// --- Secrets: manage which files are secrets and their content ---
 			{
 				Name:          "add",
+				Category:      catSecrets,
 				Flags:         flagsAdd,
 				ArgsUsage:     "<path> [<path>]...",
 				Action:        commands.WithRepo(commands.HandleAdd),
@@ -101,6 +94,7 @@ func Main(args []string) error {
 			},
 			{
 				Name:          "rm",
+				Category:      catSecrets,
 				ArgsUsage:     "<path>",
 				Action:        commands.WithRepo(commands.HandleRemove),
 				ShellComplete: completeSecrets,
@@ -108,6 +102,7 @@ func Main(args []string) error {
 			},
 			{
 				Name:          "mv",
+				Category:      catSecrets,
 				Flags:         flagsMove,
 				ArgsUsage:     "<oldpath> <newpath>",
 				Action:        commands.WithRepo(commands.HandleMove),
@@ -125,75 +120,38 @@ func Main(args []string) error {
 				},
 			},
 			{
+				Name:     "edit",
+				Category: catSecrets,
+				Action:   commands.HandleStub,
+				Usage:    "Edit an secret and immeediately seal it afterwards",
+			},
+			{
+				Name:     "seal",
+				Category: catSecrets,
+				Flags:    flagsSeal,
+				Action:   commands.WithRepo(commands.HandleSeal),
+				Usage:    "Encrypt and sign changed secrets",
+			},
+			{
+				Name:          "open",
+				Category:      catSecrets,
+				Aliases:       []string{"reveal"},
+				Flags:         flagsReveal,
+				Action:        commands.WithRepo(commands.HandleOpen),
+				ShellComplete: completeSecrets,
+				Usage:         "Decrypt all secrets available to the current user",
+			},
+			{
 				Name:          "status",
+				Category:      catSecrets,
 				Action:        commands.WithRepo(commands.HandleStatus),
 				Flags:         flagsStatus,
 				ShellComplete: completeFlags,
 				Usage:         "Show secrets that are not sealed yet",
 			},
 			{
-				Name:   "apply",
-				Action: commands.HandleStub,
-				Usage:  "alias for `sesam config apply`",
-			},
-			{
-				Name:  "config",
-				Usage: "Config management commands",
-				Commands: []*cli.Command{
-					{
-						Name:   "apply",
-						Usage:  "Apply config differences to audit log and metadata",
-						Action: commands.HandleStub,
-					},
-					{
-						Name:   "diff",
-						Usage:  "Show the diff between config and actual state",
-						Action: commands.HandleStub,
-					},
-					{
-						Name:   "get",
-						Usage:  "Get specific config keys",
-						Action: commands.HandleStub,
-					},
-					{
-						Name:   "set",
-						Usage:  "Set specific config keys",
-						Action: commands.HandleStub,
-					},
-				},
-			},
-			{
-				Name:   "edit",
-				Action: commands.HandleStub,
-				Usage:  "Edit an secret and immeediately seal it afterwards",
-			},
-			{
-				Name:   "doctor",
-				Action: commands.HandleStub,
-				Usage:  "Check sesam installation for possible problems",
-			},
-			{
-				Name:          "tell",
-				Flags:         flagsTell,
-				Action:        commands.WithRepo(commands.HandleTell),
-				ShellComplete: completeFlags,
-				Usage:         "Add a person to a group and re-encrypt affected files",
-			},
-			{
-				Name:          "kill",
-				Flags:         flagsKill,
-				Action:        commands.WithRepo(commands.HandleKill),
-				ShellComplete: completeUsers,
-				Usage:         "Remove a person from a group",
-			},
-			{
-				Name:   "docgen",
-				Hidden: true,
-				Action: commands.HandleDocGen,
-				Usage:  "Write a markdown command reference to stdout",
-			},
-			{
 				Name:          "show",
+				Category:      catSecrets,
 				Flags:         flagsShow,
 				Action:        commands.HandleShow,
 				ShellComplete: completeSecrets,
@@ -205,11 +163,61 @@ func Main(args []string) error {
 					},
 				},
 			},
-
 			{
-				Name:    "user",
-				Aliases: []string{"u"},
-				Usage:   "User management commands",
+				Name:     "ls",
+				Category: catSecrets,
+				Aliases:  []string{"list-secrets"},
+				Flags:    flagsListSecrets,
+				Action:   commands.WithRepo(commands.HandleListSecrets),
+				Usage:    "List known secrets and metadata",
+			},
+			{
+				Name:     "rotate",
+				Category: catSecrets,
+				Action:   commands.HandleStub,
+				Usage:    "Plan and execute secret rotation",
+				Commands: []*cli.Command{
+					{
+						Name:   "plan",
+						Hidden: true,
+						Action: commands.HandleStub,
+						Usage:  "Show the rotation and exchange plan",
+					}, {
+						Name:   "exec",
+						Hidden: true,
+						Action: commands.HandleStub,
+						Usage:  "Execute the planned rotation",
+					}, {
+						Name:   "todo",
+						Hidden: true,
+						Action: commands.HandleStub,
+						Usage:  "Show rotation tasks and follow-up status",
+					},
+				},
+			},
+
+			// --- Access: who can read which secrets ---
+			{
+				Name:          "tell",
+				Category:      catAccess,
+				Flags:         flagsTell,
+				Action:        commands.WithRepo(commands.HandleTell),
+				ShellComplete: completeFlags,
+				Usage:         "Add a person to a group and re-encrypt affected files",
+			},
+			{
+				Name:          "kill",
+				Category:      catAccess,
+				Flags:         flagsKill,
+				Action:        commands.WithRepo(commands.HandleKill),
+				ShellComplete: completeUsers,
+				Usage:         "Remove a person from a group",
+			},
+			{
+				Name:     "user",
+				Category: catAccess,
+				Aliases:  []string{"u"},
+				Usage:    "User management commands",
 				Commands: []*cli.Command{
 					{
 						Name:   "list",
@@ -241,13 +249,71 @@ func Main(args []string) error {
 					},
 				},
 			},
+
+			// --- Config: the declarative sesam.yml workflow ---
 			{
-				Name:    "ls",
-				Aliases: []string{"list-secrets"},
-				Flags:   flagsListSecrets,
-				Action:  commands.WithRepo(commands.HandleListSecrets),
-				Usage:   "List known secrets and metadata",
+				Name:     "config",
+				Category: catConfig,
+				Usage:    "Config management commands",
+				Commands: []*cli.Command{
+					{
+						Name:   "apply",
+						Usage:  "Apply config differences to audit log and metadata",
+						Action: commands.HandleStub,
+					},
+					{
+						Name:   "diff",
+						Usage:  "Show the diff between config and actual state",
+						Action: commands.HandleStub,
+					},
+					{
+						Name:   "get",
+						Usage:  "Get specific config keys",
+						Action: commands.HandleStub,
+					},
+					{
+						Name:   "set",
+						Usage:  "Set specific config keys",
+						Action: commands.HandleStub,
+					},
+				},
 			},
+			{
+				Name:     "apply",
+				Category: catConfig,
+				Action:   commands.HandleStub,
+				Usage:    "alias for `sesam config apply`",
+			},
+
+			// --- Meta: identity, audit, and local caches ---
+			{
+				Name:     "id",
+				Category: catMeta,
+				Flags:    flagsID,
+				Action:   commands.WithRepo(commands.HandleID),
+				Usage:    "Identify the current user by age identity",
+			},
+			{
+				Name:     "keyring",
+				Category: catMeta,
+				Usage:    "Keyring utils",
+				Commands: []*cli.Command{
+					{
+						Name:   "clear",
+						Usage:  "Clear cached passphrases from the keyring",
+						Action: commands.HandleKeyringClearCache,
+					},
+				},
+			},
+			{
+				Name:     "log",
+				Category: catMeta,
+				Flags:    flagsLog,
+				Action:   commands.WithRepo(commands.HandleLog),
+				Usage:    "Show the audit log of secret changes",
+			},
+
+			// --- Plumbing: invoked by git or tooling, hidden from help ---
 			{
 				Name:   "smudge",
 				Hidden: true,
@@ -255,33 +321,10 @@ func Main(args []string) error {
 				Usage:  "Git smudge filter: reveal a secret to its plaintext path (called by git)",
 			},
 			{
-				Name:   "clean",
-				Action: commands.HandleClean,
-				Usage:  "Remove revealed plaintext and other untracked files from the sesam directory",
-				Flags:  flagsClean,
-			},
-			{
-				Name:   "rotate",
-				Action: commands.HandleStub,
-				Usage:  "Plan and execute secret rotation",
-				Commands: []*cli.Command{
-					{
-						Name:   "plan",
-						Hidden: true,
-						Action: commands.HandleStub,
-						Usage:  "Show the rotation and exchange plan",
-					}, {
-						Name:   "exec",
-						Hidden: true,
-						Action: commands.HandleStub,
-						Usage:  "Execute the planned rotation",
-					}, {
-						Name:   "todo",
-						Hidden: true,
-						Action: commands.HandleStub,
-						Usage:  "Show rotation tasks and follow-up status",
-					},
-				},
+				Name:   "docgen",
+				Hidden: true,
+				Action: commands.HandleDocGen,
+				Usage:  "Write a markdown command reference to stdout",
 			},
 		},
 	}
