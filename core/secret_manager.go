@@ -91,6 +91,10 @@ func (sm *SecretManager) SealedPath(path string) string {
 	return sm.cryptPath(path)
 }
 
+func (sm *SecretManager) TmpDir() string {
+	return sm.tmpDir()
+}
+
 // AddSecret adds a new secret to be managed by sesam
 func (sm *SecretManager) AddSecret(revealedPath string, groups []string) error {
 	return sm.addOrChangeSecret(revealedPath, groups)
@@ -527,8 +531,5 @@ func (sm *SecretManager) EqualPlaintext(revealedPath string, ids Identities) (bo
 
 	plainHmacContentHashBytes := keyContentHash(ageKey, plainContentHash.Sum(nil))
 	plainHmacContentHash := MulticodeEncode(plainHmacContentHashBytes, MhSHA3_256)
-
-	fmt.Println(plainHmacContentHash, footer.HMACContentHash)
-
 	return plainHmacContentHash == footer.HMACContentHash, nil
 }
