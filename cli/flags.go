@@ -175,8 +175,19 @@ var flagsID = []cli.Flag{flagJSON}
 
 var flagsStatus = []cli.Flag{
 	&cli.BoolFlag{
-		Name:  "diff",
-		Usage: "Also show the actual diff",
+		Name:    "diff",
+		Aliases: []string{"d"},
+		Usage:   "Also show the actual diff",
+	},
+	&cli.BoolFlag{
+		Name:    "sort-by-state",
+		Aliases: []string{"s"},
+		Usage:   "Sort by state instead of path",
+	},
+	&cli.BoolFlag{
+		Name:    "ignore-unmanaged",
+		Aliases: []string{"i"},
+		Usage:   "Ignore the files not managed by sesam",
 	},
 	flagJSON,
 }

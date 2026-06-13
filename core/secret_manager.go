@@ -504,13 +504,14 @@ func (sm *SecretManager) EqualPlaintext(revealedPath string, ids Identities) (bo
 	if err != nil {
 		return false, err
 	}
-	defer sealFd.Close()
+	defer closeLogged(sealFd)
 
+	//nolint:gosec
 	plainFd, err := os.Open(revealedPath)
 	if err != nil {
 		return false, err
 	}
-	defer plainFd.Close()
+	defer closeLogged(plainFd)
 
 	ageKey, err := readAgeEncryptionKey(sealFd, ids.AgeIdentities())
 	if err != nil {
