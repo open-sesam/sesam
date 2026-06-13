@@ -1,0 +1,40 @@
+# `sesam status` reports how the revealed plaintext compares to the sealed state.
+# --ignore-unmanaged keeps these assertions focused on sesam-tracked secrets;
+# the unmanaged-file classification is covered by repo unit tests.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+# Init creates README.md, registers it as a secret, and seals it.
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Fresh out of init the revealed README matches its sealed object.
+exec sesam status --ignore-unmanaged --json
+stdout 'README.md'
+stdout '"same_content"'
+
+# Modify the revealed secret without re-sealing; status must flag the drift.
+cp modified_readme.md README.md
+exec sesam status --ignore-unmanaged --json
+stdout '"diff_content"'
+
+# Table output (no --json) still names the secret.
+exec sesam status --ignore-unmanaged
+stdout 'README.md'
+
+# --diff shells out to git to show old (sealed) vs new (revealed) content.
+exec sesam status --ignore-unmanaged --diff
+stdout 'modified readme'
+
+# Removing the revealed plaintext entirely reports it as unrevealed.
+rm README.md
+exec sesam status --ignore-unmanaged --json
+stdout '"unrevealed"'
+
+-- modified_readme.md --
+# modified readme
+
+This is the new content after the change.

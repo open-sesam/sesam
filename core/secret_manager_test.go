@@ -817,3 +817,70 @@ func TestShowSecretResolvesAgainstSesamDirNotCWD(t *testing.T) {
 		"ShowSecret must find the object via sesamDir even when cwd differs")
 	require.Equal(t, "content123", buf.String())
 }
+
+// TestEqualPlaintext exercises the cheap "does the working-tree plaintext
+// still match the sealed secret" check that `sesam status` relies on. It must
+// recompute the keyed content hash from the sealed file's own age key and
+// compare it against the footer - without decrypting the body.
+func TestEqualPlaintext(t *testing.T) {
+	// seal sets up a fresh manager with one sealed secret at the given content.
+	seal := func(t *testing.T, content string) (*SecretManager, string) {
+		t.Helper()
+		mgr := testSecretManager(t)
+		path := testSecret(t, mgr, "secrets/token", content)
+		_, err := sealSecret(mgr, path, mgr.recipientsFor(path), mgr.cryptPath(path), "testuser")
+		require.NoError(t, err)
+		return mgr, path
+	}
+
+	t.Run("identical content is equal", func(t *testing.T) {
+		mgr, path := seal(t, "secret-value")
+		eq, err := mgr.EqualPlaintext(path, mgr.Identities)
+		require.NoError(t, err)
+		require.True(t, eq)
+	})
+
+	t.Run("empty content round-trips as equal", func(t *testing.T) {
+		mgr, path := seal(t, "")
+		eq, err := mgr.EqualPlaintext(path, mgr.Identities)
+		require.NoError(t, err)
+		require.True(t, eq)
+	})
+
+	t.Run("modified content is not equal", func(t *testing.T) {
+		mgr, path := seal(t, "secret-value")
+		writeSecret(t, mgr.SesamDir, path, "secret-value-CHANGED")
+		eq, err := mgr.EqualPlaintext(path, mgr.Identities)
+		require.NoError(t, err)
+		require.False(t, eq)
+	})
+
+	t.Run("trailing whitespace change is detected", func(t *testing.T) {
+		mgr, path := seal(t, "value")
+		writeSecret(t, mgr.SesamDir, path, "value ")
+		eq, err := mgr.EqualPlaintext(path, mgr.Identities)
+		require.NoError(t, err)
+		require.False(t, eq)
+	})
+
+	t.Run("missing revealed file is an error", func(t *testing.T) {
+		mgr, path := seal(t, "x")
+		require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, path)))
+		_, err := mgr.EqualPlaintext(path, mgr.Identities)
+		require.Error(t, err)
+	})
+
+	t.Run("missing sealed file is an error", func(t *testing.T) {
+		mgr, path := seal(t, "x")
+		require.NoError(t, os.Remove(mgr.cryptPath(path)))
+		_, err := mgr.EqualPlaintext(path, mgr.Identities)
+		require.Error(t, err)
+	})
+
+	t.Run("non-recipient identity is an error", func(t *testing.T) {
+		mgr, path := seal(t, "x")
+		outsider := newTestUser(t, "outsider")
+		_, err := mgr.EqualPlaintext(path, Identities{outsider.Identity})
+		require.Error(t, err)
+	})
+}
