@@ -9,9 +9,11 @@ import (
 )
 
 func printError(msg string) {
-	output := termenv.NewOutput(os.Stdout)
+	output := termenv.NewOutput(os.Stderr)
 	prefix := output.String("✘").Foreground(output.Color("#800000")).String()
-	fmt.Printf("%s %s\n", prefix, msg)
+
+	// NOTE: errors must go to stderr.
+	fmt.Fprintf(os.Stderr, "%s %s\n", prefix, msg)
 }
 
 func main() {
