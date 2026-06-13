@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 	"github.com/open-sesam/sesam/core"
@@ -264,6 +265,84 @@ func TestFilterProcessLargeBlobIsRechunked(t *testing.T) {
 	// Verify the chunking really happened (more than one content packet).
 	contentPackets := i - 2
 	require.GreaterOrEqualf(t, contentPackets, 2, "expected content split across multiple packets, got %d", contentPackets)
+}
+
+// Regression: the smudge filter must drain git's entire request before
+// writing its response. git streams the whole blob and only then reads the
+// reply, so a handler that echoes chunks while still reading deadlocks once
+// both OS pipe buffers fill (~64 KiB) - i.e. any secret larger than a pipe
+// buffer hangs `git diff` / `git checkout`.
+//
+// The in-memory runHandler harness cannot catch this: bytes.Reader/Buffer
+// never block, so the interleaving bug passes there. This test wires real
+// os.Pipes and a client that writes the full request *before* reading -
+// exactly git's order - and guards it with a timeout so a deadlock fails
+// loudly instead of hanging the suite.
+func TestFilterProcessLargeBlobDoesNotDeadlock(t *testing.T) {
+	chdirSesamRoot(t)
+
+	// ~1 MiB of content, far past the 64 KiB pipe buffer.
+	full := strings.Repeat("z", pktline.MaxPayloadSize*16)
+
+	var content bytes.Buffer
+	enc := pktline.NewEncoder(&content)
+	for remaining := full; len(remaining) > 0; {
+		n := min(len(remaining), pktline.MaxPayloadSize)
+		require.NoError(t, enc.Encode([]byte(remaining[:n])))
+		remaining = remaining[n:]
+	}
+	require.NoError(t, enc.Flush())
+
+	request := bytes.Join([][]byte{
+		validHandshake(t, "smudge"),
+		pktScript(t, "command=smudge\n", "pathname="+objectPathname+"\n", ""),
+		content.Bytes(),
+	}, nil)
+
+	inR, inW, err := os.Pipe()
+	require.NoError(t, err)
+	outR, outW, err := os.Pipe()
+	require.NoError(t, err)
+
+	handler := &filterProcessHandler{Keyring: stubKeyring(), Authorize: stubAuthorize}
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- handler.Run(t.Context(), inR, outW)
+		_ = outW.Close()
+	}()
+
+	done := make(chan []byte, 1)
+	go func() {
+		// Mimic git: write the whole request, THEN read the reply. With the
+		// interleaving bug this Copy never completes (the handler stalls
+		// writing its echo into an undrained stdout and stops reading), so
+		// `done` never fires and the timeout below trips.
+		_, _ = io.Copy(inW, bytes.NewReader(request))
+		_ = inW.Close()
+		got, _ := io.ReadAll(outR)
+		done <- got
+	}()
+
+	select {
+	case raw := <-done:
+		require.NoError(t, <-runErr)
+
+		// The echoed ciphertext must round-trip intact across the re-chunking.
+		resp := readPkts(t, raw)[5:] // skip handshake + capability packets
+		require.Equal(t, "status=success\n", resp[0])
+		require.Equal(t, "", resp[1], "flush after status")
+
+		var got strings.Builder
+		i := 2
+		for i < len(resp) && resp[i] != "" {
+			got.WriteString(resp[i])
+			i++
+		}
+		require.Equal(t, full, got.String(), "content must round-trip")
+	case <-time.After(15 * time.Second):
+		t.Fatal("smudge filter deadlocked on a blob larger than the pipe buffer")
+	}
 }
 
 func TestFilterProcessUnknownCommandReturnsStatusError(t *testing.T) {
