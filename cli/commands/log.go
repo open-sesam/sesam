@@ -41,14 +41,6 @@ func HandleLog(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return output.String(s).Foreground(col).String()
 	}
 
-	pluralize := func(s string, n int) string {
-		if n == 1 {
-			return s
-		}
-
-		return s + "s"
-	}
-
 	fmtOpMap := map[core.Operation]func(e *core.AuditEntrySigned) string{
 		core.OpInit: func(e *core.AuditEntrySigned) string {
 			id, ok := e.RawDetail().(*core.DetailInit)

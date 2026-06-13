@@ -578,7 +578,7 @@ func recoverIncompleteSeal(sesamDir string, vstate *VerifiedState) error {
 	stageDir := filepath.Join(sesamDir, ".sesam", "seal-stage")
 	objectsDir := filepath.Join(sesamDir, ".sesam", "objects")
 
-	if !pathExists(stageDir) {
+	if !PathExists(stageDir) {
 		return nil
 	}
 

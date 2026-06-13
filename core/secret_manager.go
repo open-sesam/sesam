@@ -11,6 +11,7 @@ import (
 
 	"filippo.io/age"
 	"github.com/google/renameio"
+	"golang.org/x/crypto/sha3"
 )
 
 // SecretManager is the high level API to manage secrets,
@@ -84,6 +85,10 @@ func (sm *SecretManager) objectsDir() string {
 
 func (sm *SecretManager) stageDir() string {
 	return filepath.Join(sm.SesamDir, ".sesam", "seal-stage")
+}
+
+func (sm *SecretManager) SealedPath(path string) string {
+	return sm.cryptPath(path)
 }
 
 // AddSecret adds a new secret to be managed by sesam
@@ -243,7 +248,7 @@ func (sm *SecretManager) stageSecret(revealedPath, stageRoot string) (*secretFoo
 
 	// No plaintext: preserve the existing ciphertext if we have one.
 	existing := sm.cryptPath(revealedPath)
-	if !pathExists(existing) {
+	if !PathExists(existing) {
 		return nil, false, fmt.Errorf(
 			"no plaintext at %q and no existing ciphertext at %q to preserve",
 			plainPath, existing,
@@ -307,7 +312,7 @@ func (sm *SecretManager) MoveSecret(oldRevealedPath, newRevealedPath string) err
 		return fmt.Errorf("failed to move non-existing secret: %s", oldRevealedPath)
 	}
 
-	needsReveal := !pathExists(filepath.Join(sm.SesamDir, oldRevealedPath))
+	needsReveal := !PathExists(filepath.Join(sm.SesamDir, oldRevealedPath))
 	if needsReveal {
 		// not yet revealed, do it before the rename entry, otherwise reveal would fail
 		if err := revealSecret(sm, oldRevealedPath); err != nil {
@@ -485,4 +490,45 @@ func RevealBlob(
 
 	_ = dst.Chmod(0o600)
 	return true, dst.CloseAtomicallyReplace()
+}
+
+// EqualPlaintext will check if revealedPath has the same content as the sealed
+// text. It does not need to decrypt the sealed file for that and only needs to
+// read the revealedPath once.
+func (sm *SecretManager) EqualPlaintext(revealedPath string, ids Identities) (bool, error) {
+	sealFd, err := os.Open(sm.cryptPath(revealedPath))
+	if err != nil {
+		return false, err
+	}
+	defer sealFd.Close()
+
+	plainFd, err := os.Open(revealedPath)
+	if err != nil {
+		return false, err
+	}
+	defer plainFd.Close()
+
+	ageKey, err := readAgeEncryptionKey(sealFd, ids.AgeIdentities())
+	if err != nil {
+		return false, err
+	}
+
+	_, footer, err := readFooter(sealFd)
+	if err != nil {
+		return false, err
+	}
+
+	plainContentHash := sha3.New256()
+	if _, err := io.Copy(plainContentHash, plainFd); err != nil {
+		return false, err
+	}
+
+	_, _ = plainContentHash.Write([]byte(revealedPath))
+
+	plainHmacContentHashBytes := keyContentHash(ageKey, plainContentHash.Sum(nil))
+	plainHmacContentHash := MulticodeEncode(plainHmacContentHashBytes, MhSHA3_256)
+
+	fmt.Println(plainHmacContentHash, footer.HMACContentHash)
+
+	return plainHmacContentHash == footer.HMACContentHash, nil
 }

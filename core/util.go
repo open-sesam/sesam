@@ -114,10 +114,10 @@ func closeLogged(fd io.Closer) {
 	}
 }
 
-// pathExists reports whether `p` is reachable via os.Stat. It does not
+// PathExists reports whether `p` is reachable via os.Stat. It does not
 // distinguish between "missing" and "permission denied" - it simply
 // answers "can I see something there?".
-func pathExists(p string) bool {
+func PathExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
 }
