@@ -266,9 +266,14 @@ func (h *filterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 
 	if !h.cleaned {
 		h.cleaned = true
-		if err := cleanWorktree(h.SesamDir, h.IdentityPaths); err != nil {
-			slog.Warn("smudge: cleanup failed", slog.String("err", err.Error()))
-		}
+		// TODO: I noticed that smudge is also being run on "git diff".
+		// This has the side effect that revealed files are getting removed, then re-checked out
+		// from the sealed files. Any change in the revealed files would be overwritten.
+		// We maybe need to rethink how this is done.
+		// Not deleting old files on checkout is of course kind annoying as well.
+		// if err := cleanWorktree(h.SesamDir, h.IdentityPaths); err != nil {
+		// 	slog.Warn("smudge: cleanup failed", slog.String("err", err.Error()))
+		// }
 	}
 
 	if err := writeStatus(encoder, "success"); err != nil {
