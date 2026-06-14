@@ -42,7 +42,7 @@ func formatLogTime(t time.Time, full bool) string {
 	if full {
 		return t.Format(time.RFC3339)
 	}
-	return t.Format("Jan 02 15:04")
+	return t.Format("2006 Jan 02 15:04")
 }
 
 // groupsOrAdmin renders an access-group list, defaulting to the implicit
