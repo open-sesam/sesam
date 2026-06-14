@@ -480,8 +480,8 @@ func verifySecretChangeAccess(log *AuditLog, state *VerifiedState, entry *AuditE
 	return nil
 }
 
-func verifySecretRename(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
-	scr, err := parseDetail[DetailSecretRename](entry)
+func verifySecretMove(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
+	scr, err := parseDetail[DetailSecretMove](entry)
 	if err != nil {
 		return fmt.Errorf("parse detail: %w", err)
 	}
@@ -726,8 +726,8 @@ func verify(state *VerifiedState) error {
 			err = verifySecretRemove(log, &newState, entry)
 		case OpSecretChangeAccess:
 			err = verifySecretChangeAccess(log, &newState, entry)
-		case OpSecretRename:
-			err = verifySecretRename(log, &newState, entry)
+		case OpSecretMove:
+			err = verifySecretMove(log, &newState, entry)
 		case OpUserKill, OpUserRename:
 			// done later
 		default:
