@@ -73,7 +73,7 @@ func HandleUserChangeGroups(_ context.Context, cmd *cli.Command, r *repo.Repo) e
 	return r.SealAll()
 }
 
-func HandleRenameUser(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+func HandleRenameUser(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	oldName := cmd.StringArg("olduser")
 	newName := cmd.StringArg("newuser")
 	if oldName == "" || newName == "" {
@@ -81,4 +81,12 @@ func HandleRenameUser(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	}
 
 	return r.RenameUser(oldName, newName)
+}
+
+func HandleUserAddRecipient(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+	return HandleStub(ctx, cmd)
+}
+
+func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+	return HandleStub(ctx, cmd)
 }

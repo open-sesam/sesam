@@ -233,6 +233,20 @@ func Main(args []string) error {
 						Usage:  "Change the groups a user is in",
 					},
 					{
+						Name:    "add-recipient",
+						Aliases: []string{"ar"},
+						Flags:   flagsUserAddRecipient,
+						Action:  commands.WithRepo(commands.HandleUserAddRecipient),
+						Usage:   "Add a recipient to an existing user",
+					},
+					{
+						Name:    "remove-recipient",
+						Aliases: []string{"rr"},
+						Flags:   flagsUserRemoveRecipient,
+						Action:  commands.WithRepo(commands.HandleUserRemoveRecipient),
+						Usage:   "Remove a recipient from an existing user (may not be the last one)",
+					},
+					{
 						Name:   "rename",
 						Flags:  flagsRenameUser,
 						Action: commands.WithRepo(commands.HandleRenameUser),
