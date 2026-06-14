@@ -49,6 +49,14 @@ func groupFlag(required bool, usage string) cli.Flag {
 	}
 }
 
+func recipientsFlag(required bool) cli.Flag {
+	return &cli.StringSliceFlag{
+		Name:     "recipient",
+		Required: required,
+		Usage:    "Recipient key spec (e.g. github:alice) - can be given several times",
+	}
+}
+
 // flagsGeneral are shared by most top-level commands.
 //
 // They describe the operator identity and repository/config roots.
@@ -138,11 +146,7 @@ var flagsMove = []cli.Flag{}
 // flagsTell contains controls for adding users.
 var flagsTell = []cli.Flag{
 	userFlag(false, "User name to add"),
-	&cli.StringSliceFlag{
-		Name:     "recipient",
-		Required: true,
-		Usage:    "Recipient key spec (e.g. github:alice) - can be given several times",
-	},
+	recipientsFlag(true),
 	groupFlag(true, "Group assignment (repeatable)"),
 	flagNoSeal,
 }
@@ -164,6 +168,18 @@ var flagsRenameUser = []cli.Flag{}
 var flagsUserChangeGroups = []cli.Flag{
 	userFlag(true, "Which user should be changed"),
 	groupFlag(true, "Group assignment for the secret (repeatable) - 'admin' is implicit"),
+	flagNoSeal,
+}
+
+var flagsUserAddRecipient = []cli.Flag{
+	userFlag(true, "Which user receives the new recipient"),
+	recipientsFlag(true),
+	flagNoSeal,
+}
+
+var flagsUserRemoveRecipient = []cli.Flag{
+	userFlag(true, "Which user looses the specified recipient"),
+	recipientsFlag(true),
 	flagNoSeal,
 }
 
