@@ -1043,7 +1043,7 @@ func TestVerifySecretRenameBasic(t *testing.T) {
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/db", AccessGroups: []string{"admin"},
 	}), nil)
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRename{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretMove{
 		OldRevealedPath: "secrets/db", NewRevealedPath: "secrets/database",
 	}), nil)
 
@@ -1068,7 +1068,7 @@ func TestVerifySecretRenameRejectsCollision(t *testing.T) {
 	}), nil)
 
 	// Renaming a onto the existing b must be rejected.
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRename{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretMove{
 		OldRevealedPath: "secrets/a", NewRevealedPath: "secrets/b",
 	}), nil)
 
@@ -1080,7 +1080,7 @@ func TestVerifySecretRenameNonExistent(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRename{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretMove{
 		OldRevealedPath: "secrets/ghost", NewRevealedPath: "secrets/casper",
 	}), nil)
 
@@ -1095,7 +1095,7 @@ func TestVerifySecretRenameRejectsPathTraversal(t *testing.T) {
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/db", AccessGroups: []string{"admin"},
 	}), nil)
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRename{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretMove{
 		OldRevealedPath: "secrets/db", NewRevealedPath: "../../.ssh/authorized_keys",
 	}), nil)
 
@@ -1117,7 +1117,7 @@ func TestVerifySecretRenameRequiresAccess(t *testing.T) {
 		RevealedPath: "secrets/ops_db", AccessGroups: []string{"ops"},
 	}), nil)
 
-	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretRename{
+	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretMove{
 		OldRevealedPath: "secrets/ops_db", NewRevealedPath: "secrets/mine",
 	}), nil)
 
