@@ -330,7 +330,7 @@ func (sm *SecretManager) MoveSecret(oldRevealedPath, newRevealedPath string) err
 
 	if err := sm.State.FeedEntry(
 		sm.Signer,
-		newAuditEntry(sm.Signer.UserName(), &DetailSecretRename{
+		newAuditEntry(sm.Signer.UserName(), &DetailSecretMove{
 			OldRevealedPath: oldRevealedPath,
 			NewRevealedPath: newRevealedPath,
 		}),
