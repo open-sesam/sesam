@@ -19,7 +19,7 @@ exec sesam user change-groups --user bob --group dev --group ops
 exec sesam show .sesam/audit/log.jsonl
 stdout '"user.change_groups"'
 exec sesam log
-stdout 'changed user groups of bob to dev, ops'
+stdout 'set groups of bob to dev, ops'
 exec sesam verify
 
 # Rename bob to robert.
@@ -28,7 +28,7 @@ exec sesam show .sesam/audit/log.jsonl
 stdout '"user.rename"'
 stdout '"robert"'
 exec sesam log
-stdout 'changed user name bob to robert'
+stdout 'renamed user bob → robert'
 exec sesam verify
 
 # After the rename only robert is known, bob is gone.
