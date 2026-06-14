@@ -9,7 +9,7 @@
 
 ![Sesam](sesam.png)
 
-<p align="center"><b>Encrypted, multi-user secrets that live in your git repo — and nowhere else.</b></p>
+<p align="center"><b>Encrypted, multi-user secrets that live in your git repo</b></p>
 
 <p align="center">
   <a href="https://opensesam.org/">Documentation</a> ·
