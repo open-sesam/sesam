@@ -105,7 +105,7 @@ func recursiveRmEmptyDirs(rootDir string, except map[string]bool, checkFn func(p
 		allow := true
 		if checkFn != nil {
 			var err error
-			allow, err = checkFn(full)
+			allow, err = checkFn(emptyDir)
 			if err != nil {
 				return deleted, err
 			}

@@ -7,7 +7,10 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"sort"
+	"strings"
 
+	"github.com/jedib0t/go-pretty/v6/list"
 	"github.com/muesli/termenv"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
@@ -25,6 +28,7 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
 	}
 
 	// We have to call git directly here, as the user might have configured git tooling of his liking.
+	// go-git offers no comparable diff viewing capabilities (just basic uncolored diffs)
 	cmd := exec.CommandContext(
 		ctx,
 		"git",
@@ -40,8 +44,7 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 
-	err := cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			if exitErr.ExitCode() == 1 {
@@ -56,11 +59,172 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
 	return nil
 }
 
+const colorDim = "#808080"
+
+// glyphFor maps a secret state to a git-style single-character marker and its
+// color. The character carries the meaning so it stays useful without color.
+// Glyphs are single-width on purpose so the tree's leading column stays aligned.
+func glyphFor(state repo.SecretState) (glyph, color string) {
+	switch state {
+	case repo.SecretStateNotInSync:
+		return "M", "#FFD000" // modified - needs seal
+	case repo.SecretStateNoSealedPath:
+		return "A", "#00FF00" // added - never sealed
+	case repo.SecretStateNoRevealedPath:
+		return "∅", "#00AAFF" // sealed, not revealed here
+	case repo.SecretStateUserHasNoAccess:
+		return "x", "#FF5555" // not a recipient
+	case repo.SecretStateInSync:
+		return "✓", colorDim // in sync
+	case repo.SecretStateUnmanaged:
+		return "?", colorDim // unmanaged
+	default:
+		return "?", colorDim
+	}
+}
+
+// footerOrder fixes the order states appear in the summary line.
+var footerOrder = []repo.SecretState{
+	repo.SecretStateNotInSync,
+	repo.SecretStateNoSealedPath,
+	repo.SecretStateNoRevealedPath,
+	repo.SecretStateUserHasNoAccess,
+	repo.SecretStateInSync,
+	repo.SecretStateUnmanaged,
+}
+
+// statusNode is a single node in the path tree built from revealed paths.
+type statusNode struct {
+	children map[string]*statusNode
+	leaf     *repo.StatusForFile
+}
+
+func newStatusNode() *statusNode {
+	return &statusNode{children: map[string]*statusNode{}}
+}
+
+func (n *statusNode) insert(file repo.StatusForFile) {
+	cur := n
+
+	parts := strings.Split(file.RevealedPath, "/")
+	for i, part := range parts {
+		child, ok := cur.children[part]
+		if !ok {
+			child = newStatusNode()
+			cur.children[part] = child
+		}
+		cur = child
+		if i == len(parts)-1 {
+			f := file
+			cur.leaf = &f
+		}
+	}
+}
+
+// emit walks the tree depth-first, appending directory and leaf lines to the
+// list writer. Empty branches never exist because only visible files were
+// inserted.
+func (n *statusNode) emit(out *termenv.Output, l list.Writer, showUsers bool) {
+	names := make([]string, 0, len(n.children))
+	for name := range n.children {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		child := n.children[name]
+		if child.leaf != nil && len(child.children) == 0 {
+			l.AppendItem(renderLeaf(out, name, *child.leaf, showUsers))
+			continue
+		}
+
+		l.AppendItem(out.String(name + "/").Foreground(out.Color("#888888")).String())
+		l.Indent()
+		child.emit(out, l, showUsers)
+		l.UnIndent()
+	}
+}
+
+// renderLeaf renders "<glyph> <name> (groups)" for a single secret.
+func renderLeaf(out *termenv.Output, name string, file repo.StatusForFile, showUsers bool) string {
+	glyph, color := glyphFor(file.State)
+	line := out.String(glyph).Foreground(out.Color(color)).String() + " " + name
+
+	elems := file.AccessGroups
+	if showUsers {
+		elems = file.AccessUsers
+	}
+
+	if len(elems) > 0 {
+		line += " " + out.String(
+			"("+strings.Join(elems, ", ")+")",
+		).Foreground(out.Color(colorDim)).String()
+	}
+
+	return line
+}
+
+// printStatusTree renders the status as a tree rooted at ".". In-sync secrets
+// and unmanaged files are hidden unless `all` is set; the footer counts every
+// state regardless of what is shown.
+func printStatusTree(status *repo.Status, all bool, showUsers bool) {
+	out := termenv.NewOutput(os.Stdout)
+
+	counts := make(map[repo.SecretState]int, len(footerOrder))
+	root := newStatusNode()
+	visible := 0
+	for _, file := range status.Files {
+		counts[file.State]++
+		if !all && (file.State == repo.SecretStateInSync ||
+			file.State == repo.SecretStateUnmanaged) {
+			continue
+		}
+		root.insert(file)
+		visible++
+	}
+
+	if visible == 0 {
+		fmt.Println(out.String("✓ nothing to show - everything in sync").
+			Foreground(out.Color("#00FF00")).String())
+	} else {
+		l := list.NewWriter()
+		// Tweak the connected style so the manually printed "." root reads like
+		// unix `tree`: the first top-level item is a branch (not a tree-start
+		// corner) and a lone item is the last branch.
+		style := list.StyleConnectedRounded
+		style.CharItemTop = style.CharItemFirst
+		style.CharItemSingle = style.CharItemBottom
+		l.SetStyle(style)
+		root.emit(out, l, showUsers)
+
+		fmt.Println(out.String(".").Foreground(out.Color("#888888")).String())
+		fmt.Println(l.Render())
+	}
+
+	// Summary: count every state, using the state's own name as the label.
+	parts := make([]string, 0, len(footerOrder))
+	for _, state := range footerOrder {
+		n := counts[state]
+		if n == 0 {
+			continue
+		}
+		_, color := glyphFor(state)
+		label := strings.ReplaceAll(state.String(), "_", " ")
+		parts = append(parts, out.String(fmt.Sprintf("%d %s", n, label)).
+			Foreground(out.Color(color)).String())
+	}
+	if len(parts) > 0 {
+		fmt.Println("  " + strings.Join(parts, " · "))
+	}
+}
+
 func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+	diff := cmd.Bool("diff")
 	status, err := r.Status(repo.StatusOpts{
-		WriteDiffDirs:   cmd.Bool("diff"),
-		SortByState:     cmd.Bool("sort-by-state"),
-		IgnoreUnmanaged: cmd.Bool("ignore-unmanaged"),
+		WriteDiffDirs: diff,
+		// The diff dir is for managed secrets only; the tree needs unmanaged
+		// files so the footer can count them (they are hidden unless --all).
+		IgnoreUnmanaged: diff,
 	})
 	if err != nil {
 		return err
@@ -70,49 +234,10 @@ func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return printJSON(status)
 	}
 
-	if cmd.Bool("diff") {
+	if diff {
 		return printDirectoryDiff(ctx, status)
 	}
 
-	output := termenv.NewOutput(os.Stdout)
-
-	header := "DIFF REVEALED vs. SEALED"
-	t := newTable(header, "Path", "State")
-	s := t.Style()
-	s.Size.WidthMin = len(header) + 5
-
-	// NOTE: Maybe we want rather a "git status" like output here...
-	for _, file := range status.Files {
-		var color string
-		switch file.State {
-		case repo.SecretStateNoSealedPath:
-			color = "#FFF000"
-		case repo.SecretStateNoRevealedPath:
-			color = "#00FFFF"
-		case repo.SecretStateUserHasNoAccess:
-			color = "#FF00FF"
-		case repo.SecretStateSameContent:
-			color = "#00FF00"
-		case repo.SecretStateDifferentContent:
-			color = "#FF0000"
-		case repo.SecretStateNoSesamSecret:
-			color = "#FF8800"
-		default:
-			color = "#800000"
-		}
-
-		desc := output.String(file.State.String()).Foreground(output.Color(color)).String()
-		t.AppendRow([]any{file.RevealedPath, desc})
-	}
-
-	t.AppendFooter([]any{
-		"",
-		fmt.Sprintf(
-			"%d %s",
-			len(status.Files),
-			pluralize("secret", len(status.Files)),
-		),
-	})
-	t.Render()
+	printStatusTree(status, cmd.Bool("all"), cmd.Bool("users"))
 	return nil
 }

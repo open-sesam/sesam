@@ -516,18 +516,18 @@ func TestRepoStatusStates(t *testing.T) {
 
 	t.Run("each state is classified", func(t *testing.T) {
 		m := statusStates(t, r, StatusOpts{})
-		require.Equal(t, SecretStateSameContent, m["secrets/same"])
-		require.Equal(t, SecretStateDifferentContent, m["secrets/diff"])
+		require.Equal(t, SecretStateInSync, m["secrets/same"])
+		require.Equal(t, SecretStateNotInSync, m["secrets/diff"])
 		require.Equal(t, SecretStateNoRevealedPath, m["secrets/unrevealed"])
 		require.Equal(t, SecretStateNoSealedPath, m["secrets/unsealed"])
-		require.Equal(t, SecretStateNoSesamSecret, m["loose.txt"])
+		require.Equal(t, SecretStateUnmanaged, m["loose.txt"])
 	})
 
 	t.Run("ignore-unmanaged drops loose files but keeps secrets", func(t *testing.T) {
 		m := statusStates(t, r, StatusOpts{IgnoreUnmanaged: true})
 		_, ok := m["loose.txt"]
 		require.False(t, ok, "unmanaged file must not appear")
-		require.Equal(t, SecretStateSameContent, m["secrets/same"])
+		require.Equal(t, SecretStateInSync, m["secrets/same"])
 	})
 }
 
