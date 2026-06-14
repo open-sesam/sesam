@@ -134,7 +134,7 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 		}
 		return logLine{"-", secretColor, "removed " + c(d.RevealedPath, secretColor)}
 
-	case core.OpSecretRename:
+	case core.OpSecretMove:
 		d, ok := e.RawDetail().(*core.DetailSecretRename)
 		if !ok {
 			return unknown

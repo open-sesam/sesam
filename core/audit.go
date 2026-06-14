@@ -42,7 +42,7 @@ const (
 	// Upadte operations:
 	OpUserRename         = Operation("user.rename")
 	OpUserChangeGroups   = Operation("user.change_groups")
-	OpSecretRename       = Operation("secret.rename")
+	OpSecretMove         = Operation("secret.move")
 	OpSecretChangeAccess = Operation("secret.change_access")
 )
 
@@ -54,7 +54,7 @@ type AuditDetail interface {
 		DetailSecretAdd |
 		DetailSecretRemove |
 		DetailSeal |
-		DetailSecretRename |
+		DetailSecretMove |
 		DetailSecretChangeAccess |
 		DetailUserRename |
 		DetailUserChangeGroups
@@ -229,7 +229,7 @@ type DetailUserChangeGroups struct {
 	NewGroups []string `json:"new_groups"`
 }
 
-type DetailSecretRename struct {
+type DetailSecretMove struct {
 	OldRevealedPath string `json:"old_revealed_path"`
 	NewRevealedPath string `json:"new_revealed_path"`
 }
@@ -353,8 +353,8 @@ func operationFor(detail any) Operation {
 		return OpSecretRemove
 	case *DetailSeal:
 		return OpSeal
-	case *DetailSecretRename:
-		return OpSecretRename
+	case *DetailSecretMove:
+		return OpSecretMove
 	case *DetailSecretChangeAccess:
 		return OpSecretChangeAccess
 	case *DetailUserRename:
