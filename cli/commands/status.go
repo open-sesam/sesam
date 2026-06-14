@@ -167,7 +167,7 @@ func renderLeaf(out *termenv.Output, name string, file repo.StatusForFile, showU
 // printStatusTree renders the status as a tree rooted at ".". In-sync secrets
 // and unmanaged files are hidden unless `all` is set; the footer counts every
 // state regardless of what is shown.
-func printStatusTree(status *repo.Status, all bool, showUsers bool) {
+func printStatusTree(status *repo.Status, all, showUsers bool) {
 	out := termenv.NewOutput(os.Stdout)
 
 	counts := make(map[repo.SecretState]int, len(footerOrder))

@@ -3,11 +3,13 @@ package commands
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/muesli/termenv"
 	"github.com/open-sesam/sesam/core"
 	"github.com/open-sesam/sesam/repo"
@@ -20,174 +22,196 @@ func HandleLogJSON(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	})
 }
 
+// logLine is the rendered glyph + colored description for one audit entry.
+type logLine struct {
+	glyph string
+	color termenv.Color
+	desc  string
+}
+
+// shortID truncates long ids (audit root hashes, init UUIDs) to a git-style
+// prefix, unless full output was requested.
+func shortID(s string, full bool) string {
+	if full || len(s) <= 8 {
+		return s
+	}
+	return s[:8]
+}
+
+func formatLogTime(t time.Time, full bool) string {
+	if full {
+		return t.Format(time.RFC3339)
+	}
+	return t.Format("Jan 02 15:04")
+}
+
+// groupsOrAdmin renders an access-group list, defaulting to the implicit
+// "admin" when no groups are set.
+func groupsOrAdmin(groups []string) string {
+	if len(groups) == 0 {
+		return "admin"
+	}
+	return strings.Join(groups, ", ")
+}
+
+// describeLogEntry maps an audit entry to a glyph (the action), a color (the
+// object) and a colored one-line description. Glyph encodes the action
+// (+ add, - remove, ~ change, → rename, ★ init, ✓ seal); color encodes the
+// object (cyan = user, magenta = secret, green = repo/seal).
+func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) logLine {
+	userColor := termenv.ANSIBrightCyan
+	secretColor := termenv.ANSIBrightMagenta
+	repoColor := termenv.ANSIBrightGreen
+	groupColor := termenv.ANSIBrightYellow
+	dim := out.Color("#808080")
+
+	c := func(v any, col termenv.Color) string {
+		return out.String(fmt.Sprintf("%v", v)).Foreground(col).String()
+	}
+	sid := func(s string) string { return c(shortID(s, full), dim) }
+
+	unknown := logLine{glyph: "?", color: dim, desc: "unknown"}
+
+	switch e.Operation {
+	case core.OpInit:
+		d, ok := e.RawDetail().(*core.DetailInit)
+		if !ok {
+			return unknown
+		}
+		return logLine{"★", repoColor, "initialized repo " + sid(d.InitUUID)}
+
+	case core.OpUserTell:
+		d, ok := e.RawDetail().(*core.DetailUserTell)
+		if !ok {
+			return unknown
+		}
+		return logLine{
+			"+", userColor,
+			"told " + c(d.User, userColor) + " into " + c(groupsOrAdmin(d.Groups), groupColor),
+		}
+
+	case core.OpUserKill:
+		d, ok := e.RawDetail().(*core.DetailUserKill)
+		if !ok {
+			return unknown
+		}
+		return logLine{"-", userColor, "removed user " + c(d.User, userColor)}
+
+	case core.OpUserRename:
+		d, ok := e.RawDetail().(*core.DetailUserRename)
+		if !ok {
+			return unknown
+		}
+		return logLine{
+			"→", userColor,
+			"renamed user " + c(d.OldName, userColor) + " → " + c(d.NewName, userColor),
+		}
+
+	case core.OpUserChangeGroups:
+		d, ok := e.RawDetail().(*core.DetailUserChangeGroups)
+		if !ok {
+			return unknown
+		}
+		return logLine{
+			"~", userColor,
+			"set groups of " + c(d.User, userColor) + " to " + c(groupsOrAdmin(d.NewGroups), groupColor),
+		}
+
+	case core.OpSecretAdd:
+		d, ok := e.RawDetail().(*core.DetailSecretAdd)
+		if !ok {
+			return unknown
+		}
+		return logLine{
+			"+", secretColor,
+			"added " + c(d.RevealedPath, secretColor) + " (" + c(groupsOrAdmin(d.AccessGroups), groupColor) + ")",
+		}
+
+	case core.OpSecretRemove:
+		d, ok := e.RawDetail().(*core.DetailSecretRemove)
+		if !ok {
+			return unknown
+		}
+		return logLine{"-", secretColor, "removed " + c(d.RevealedPath, secretColor)}
+
+	case core.OpSecretRename:
+		d, ok := e.RawDetail().(*core.DetailSecretRename)
+		if !ok {
+			return unknown
+		}
+		return logLine{
+			"→", secretColor,
+			"renamed " + c(d.OldRevealedPath, secretColor) + " → " + c(d.NewRevealedPath, secretColor),
+		}
+
+	case core.OpSecretChangeAccess:
+		d, ok := e.RawDetail().(*core.DetailSecretChangeAccess)
+		if !ok {
+			return unknown
+		}
+		return logLine{
+			"~", secretColor,
+			"changed access of " + c(d.RevealedPath, secretColor) + " to " + c(groupsOrAdmin(d.AccessGroups), groupColor),
+		}
+
+	case core.OpSeal:
+		d, ok := e.RawDetail().(*core.DetailSeal)
+		if !ok {
+			return unknown
+		}
+		return logLine{"✓", repoColor, fmt.Sprintf(
+			"sealed %d %s %s",
+			d.FilesSealed, pluralize("secret", d.FilesSealed), sid(d.RootHash),
+		)}
+
+	default:
+		return unknown
+	}
+}
+
 func HandleLog(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	if cmd.Bool("json") {
 		return HandleLogJSON(ctx, cmd, r)
 	}
 
-	output := termenv.NewOutput(os.Stdout)
+	full := cmd.Bool("full")
+	out := termenv.NewOutput(os.Stdout)
+	dim := out.Color("#808080")
+	timeColor := out.Color("#008000")
+	userColor := termenv.ANSIBrightCyan
 
-	var (
-		timeColor            = output.Color("#008000")
-		userColor            = termenv.ANSIBrightCyan
-		detailPrimaryColor   = termenv.ANSIBrightMagenta
-		detailSecondaryColor = termenv.ANSIBrightYellow
+	t := table.NewWriter()
+	t.SetOutputMirror(os.Stdout)
+	t.SuppressTrailingSpaces()
 
-		unknown = "[unknown]"
-	)
-
-	colorize := func(v any, col termenv.Color) string {
-		s := fmt.Sprintf("%v", v)
-		return output.String(s).Foreground(col).String()
-	}
-
-	fmtOpMap := map[core.Operation]func(e *core.AuditEntrySigned) string{
-		core.OpInit: func(e *core.AuditEntrySigned) string {
-			id, ok := e.RawDetail().(*core.DetailInit)
-			if !ok {
-				return unknown
-			}
-
-			return fmt.Sprintf(
-				"initialized the repository with uuid %s",
-				colorize(id.InitUUID, detailPrimaryColor),
-			)
-		},
-		core.OpUserTell: func(e *core.AuditEntrySigned) string {
-			dut, ok := e.RawDetail().(*core.DetailUserTell)
-			if !ok {
-				return unknown
-			}
-
-			return fmt.Sprintf(
-				"told secrets to a new user %s in %s (%s)",
-				colorize(dut.User, detailPrimaryColor),
-				pluralize("group", len(dut.Groups)),
-				colorize(strings.Join(dut.Groups, ", "), detailSecondaryColor),
-			)
-		},
-		core.OpUserKill: func(e *core.AuditEntrySigned) string {
-			duk, ok := e.RawDetail().(*core.DetailUserKill)
-			if !ok {
-				return unknown
-			}
-
-			return fmt.Sprintf(
-				"removed user %s",
-				colorize(duk.User, detailPrimaryColor),
-			)
-		},
-		core.OpUserRename: func(e *core.AuditEntrySigned) string {
-			dur, ok := e.RawDetail().(*core.DetailUserRename)
-			if !ok {
-				return unknown
-			}
-
-			return fmt.Sprintf(
-				"changed user name %s to %s",
-				colorize(dur.OldName, detailPrimaryColor),
-				colorize(dur.NewName, detailSecondaryColor),
-			)
-		},
-		core.OpUserChangeGroups: func(e *core.AuditEntrySigned) string {
-			ducg, ok := e.RawDetail().(*core.DetailUserChangeGroups)
-			if !ok {
-				return unknown
-			}
-
-			return fmt.Sprintf(
-				"changed user groups of %s to %s",
-				colorize(ducg.User, detailPrimaryColor),
-				colorize(strings.Join(ducg.NewGroups, ", "), detailSecondaryColor),
-			)
-		},
-		core.OpSecretAdd: func(e *core.AuditEntrySigned) string {
-			dsc, ok := e.RawDetail().(*core.DetailSecretAdd)
-			if !ok {
-				return unknown
-			}
-
-			return fmt.Sprintf(
-				"modified %s accessibly by %s %s",
-				colorize(dsc.RevealedPath, detailPrimaryColor),
-				pluralize("group", len(dsc.AccessGroups)),
-				colorize(strings.Join(dsc.AccessGroups, ", "), detailSecondaryColor),
-			)
-		},
-		core.OpSecretRemove: func(e *core.AuditEntrySigned) string {
-			dsr, ok := e.RawDetail().(*core.DetailSecretRemove)
-			if !ok {
-				return unknown
-			}
-
-			return fmt.Sprintf(
-				"removed %s",
-				colorize(dsr.RevealedPath, detailPrimaryColor),
-			)
-		},
-		core.OpSecretRename: func(e *core.AuditEntrySigned) string {
-			dsr, ok := e.RawDetail().(*core.DetailSecretRename)
-			if !ok {
-				return unknown
-			}
-
-			return fmt.Sprintf(
-				"renamed %s to %s",
-				colorize(dsr.OldRevealedPath, detailPrimaryColor),
-				colorize(dsr.NewRevealedPath, detailSecondaryColor),
-			)
-		},
-		core.OpSecretChangeAccess: func(e *core.AuditEntrySigned) string {
-			dsca, ok := e.RawDetail().(*core.DetailSecretChangeAccess)
-			if !ok {
-				return unknown
-			}
-
-			return fmt.Sprintf(
-				"changed access of %s to %s",
-				colorize(dsca.RevealedPath, detailPrimaryColor),
-				colorize(strings.Join(dsca.AccessGroups, ", "), detailSecondaryColor),
-			)
-		},
-		core.OpSeal: func(e *core.AuditEntrySigned) string {
-			ds, ok := e.RawDetail().(*core.DetailSeal)
-			if !ok {
-				return unknown
-			}
-
-			return fmt.Sprintf(
-				"sealed %s %s (%s)",
-				colorize(ds.FilesSealed, detailPrimaryColor),
-				pluralize("secret", ds.FilesSealed),
-				colorize(ds.RootHash, detailSecondaryColor),
-			)
-		},
-	}
-
-	var seqIDFormat string
-
-	return r.Log(func(e *core.AuditEntrySigned) error {
-		opFn, ok := fmtOpMap[e.Operation]
-		opDesc := "unknown"
-		if ok {
-			opDesc = opFn(e)
-		}
-
-		if seqIDFormat == "" {
-			// choose format depending on how much entries we have:
-			seqIDFormat = fmt.Sprintf(
-				"%%0%dd",
-				int(math.Log10(float64(e.SeqID))+1),
-			)
-		}
-
-		fmt.Printf(
-			"%s %s %s %s\n",
-			fmt.Sprintf(seqIDFormat, e.SeqID),
-			output.String(e.Time.Format(time.RFC3339)).Foreground(timeColor),
-			output.String(e.ChangedBy).Foreground(userColor),
-			opDesc,
-		)
-		return nil
+	// A borderless table aligns the columns while staying ANSI-width aware, so
+	// the colored cells line up where hand-padding would not.
+	style := table.StyleDefault
+	style.Options.DrawBorder = false
+	style.Options.SeparateColumns = false
+	style.Options.SeparateRows = false
+	style.Options.SeparateHeader = false
+	style.Box.PaddingLeft = ""
+	style.Box.PaddingRight = "  "
+	t.SetStyle(style)
+	t.SetColumnConfigs([]table.ColumnConfig{
+		{Number: 1, Align: text.AlignRight}, // sequence id
 	})
+
+	if err := r.Log(func(e *core.AuditEntrySigned) error {
+		line := describeLogEntry(out, e, full)
+		t.AppendRow(table.Row{
+			out.String("#" + strconv.FormatUint(e.SeqID, 10)).Foreground(dim).String(),
+			out.String(line.glyph).Foreground(line.color).String(),
+			out.String(formatLogTime(e.Time, full)).Foreground(timeColor).String(),
+			out.String(e.ChangedBy).Foreground(userColor).String(),
+			line.desc,
+		})
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	t.Render()
+	return nil
 }

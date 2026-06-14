@@ -169,7 +169,14 @@ var flagsUserChangeGroups = []cli.Flag{
 
 var flagsShow = []cli.Flag{}
 
-var flagsLog = []cli.Flag{flagJSON}
+var flagsLog = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "full",
+		Aliases: []string{"f"},
+		Usage:   "Show full timestamps and ids instead of shortened ones",
+	},
+	flagJSON,
+}
 
 var flagsID = []cli.Flag{flagJSON}
 
