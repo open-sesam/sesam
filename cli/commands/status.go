@@ -41,6 +41,7 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status, extraGitArgs [
 		"revealed/",
 	}
 
+	//nolint:gocritic
 	allArgs := append(
 		args,
 		append(
@@ -49,6 +50,8 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status, extraGitArgs [
 		)...,
 	)
 
+	// gosec complains about extra args coming from the command line.
+	//nolint:gosec
 	cmd := exec.CommandContext(
 		ctx,
 		"git",
