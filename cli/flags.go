@@ -180,14 +180,14 @@ var flagsStatus = []cli.Flag{
 		Usage:   "Also show the actual diff",
 	},
 	&cli.BoolFlag{
-		Name:    "sort-by-state",
-		Aliases: []string{"s"},
-		Usage:   "Sort by state instead of path",
+		Name:    "users",
+		Aliases: []string{"u"},
+		Usage:   "Show users instead of groups",
 	},
 	&cli.BoolFlag{
-		Name:    "ignore-unmanaged",
-		Aliases: []string{"i"},
-		Usage:   "Ignore the files not managed by sesam",
+		Name:    "all",
+		Aliases: []string{"a"},
+		Usage:   "Also show in-sync secrets and unmanaged files (hidden by default)",
 	},
 	flagJSON,
 }

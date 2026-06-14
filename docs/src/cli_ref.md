@@ -8,7 +8,7 @@ sesam
 
 ```
 [--help|-h]
-[--identity|-i|--id]=[value]
+[--identity|-i]=[value]
 [--lock-timeout]=[value]
 [--no-color]
 [--quiet|-q]
@@ -28,7 +28,7 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 
 **--help, -h**: show help
 
-**--identity, -i, --id**="": Path to the age identity (can be given several times)
+**--identity, -i**="": Path to the age identity (can be given several times)
 
 **--lock-timeout**="": Repository lock wait timeout (e.g. 5s, 30s, 2m) (default: 5s)
 
@@ -40,7 +40,7 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 
 **--verbose, -v**: Print more log output
 
-**--verify-mode**="": Adjust how strong or weak the disk state is verified (default: "all")
+**--verify-mode**="": Adjust how strong or weak the disk state is verified ('all', or 'no-disk') (default: "all")
 
 **--version**: Print the version and exit
 
@@ -55,6 +55,12 @@ Initialize sesam in the current repository
 
 **--user**="": Initial admin user name (if not given, git config is used to guess)
 
+## deinit
+
+Remove all traces of sesam
+
+**--help, -h**: show help
+
 ## verify
 
 Verify sesam signatures and encryption state
@@ -67,29 +73,53 @@ Verify sesam signatures and encryption state
 
 **--integrity**: Check file integrity on disk
 
-**--json**: Print report as json
+**--json**: Print output as JSON
 
 **--key-reuse**: Double-check that no key is re-used between users
 
 **--truncate**: Verify the audit log was not truncated over history
 
-## id
+## clean
 
-Identify the current user by age identity
+Remove revealed plaintext and other untracked files from the sesam directory
 
-**--help, -h**: show help
+**--aggressive**: Also delete other untracked files (similar to `git clean -fdx`)
 
-**--json**: Print as JSON
-
-## keyring
-
-Keyring utils
+**--dry-run**: Do not actually delete, just print what would be deleted
 
 **--help, -h**: show help
 
-### clear
+## doctor
 
-Clear cached passphrases from the keyring
+Check sesam installation for possible problems
+
+**--help, -h**: show help
+
+## add
+
+Add a secret file or directory at `PATH`
+
+**--group**="": Group assignment for the secret (repeatable) - 'admin' is implicit
+
+**--help, -h**: show help
+
+**--no-seal**: Do not run `sesam seal` afterwards - useful when batching
+
+## rm
+
+Remove a secret file or directory
+
+**--help, -h**: show help
+
+## mv
+
+Move a secret file or directory to a new name
+
+**--help, -h**: show help
+
+## edit
+
+Edit an secret and immeediately seal it afterwards
 
 **--help, -h**: show help
 
@@ -107,19 +137,37 @@ Decrypt all secrets available to the current user
 
 **--help, -h**: show help
 
-## add
+## status
 
-Add a secret file or directory at `PATH`
+Show secrets that are not sealed yet
 
-**--group**="": Group assignment for the secret (repeatable) - 'admin' is implicit
+**--all, -a**: Also show in-sync secrets and unmanaged files (hidden by default)
+
+**--diff, -d**: Also show the actual diff
 
 **--help, -h**: show help
 
-**--no-seal**: Do not run `sesam seal` after adding files - useful when batch adding
+**--json**: Print output as JSON
 
-## rm
+**--sort-by-state, -s**: Sort by state instead of path
 
-Remove a secret file or directory
+## show
+
+Show objects managed by sesam
+
+**--help, -h**: show help
+
+## ls, list-secrets
+
+List known secrets and metadata
+
+**--help, -h**: show help
+
+**--json**: Print output as JSON
+
+## rotate
+
+Plan and execute secret rotation
 
 **--help, -h**: show help
 
@@ -131,6 +179,8 @@ Add a person to a group and re-encrypt affected files
 
 **--help, -h**: show help
 
+**--no-seal**: Do not run `sesam seal` afterwards - useful when batching
+
 **--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
 
 **--user**="": User name to add
@@ -141,31 +191,17 @@ Remove a person from a group
 
 **--help, -h**: show help
 
+**--no-seal**: Do not run `sesam seal` afterwards - useful when batching
+
 **--user**="": User name to remove
 
-## show
+## user, u
 
-Show objects managed by sesam
-
-**--help, -h**: show help
-
-## list, ls
-
-List entities
+User management commands
 
 **--help, -h**: show help
 
-**--json**: Print output as JSON
-
-### secrets
-
-List known secrets and metadata
-
-**--help, -h**: show help
-
-**--json**: Print output as JSON
-
-### users
+### list
 
 List persons, groups, and access
 
@@ -173,13 +209,85 @@ List persons, groups, and access
 
 **--json**: Print output as JSON
 
-## clean
+### change-groups
 
-Remove revealed plaintext and other untracked files from the sesam directory
+Change the groups a user is in
 
-**--aggressive**: Also delete other untracked files (similar to `git clean -fdx`)
-
-**--dry-run**: Do not actually delete, just print what would be deleted
+**--group**="": Group assignment for the secret (repeatable) - 'admin' is implicit
 
 **--help, -h**: show help
+
+**--no-seal**: Do not run `sesam seal` afterwards - useful when batching
+
+**--user**="": Which user should be changed
+
+### rename
+
+Give a user a different name
+
+**--help, -h**: show help
+
+## config
+
+Config management commands
+
+**--help, -h**: show help
+
+### apply
+
+Apply config differences to audit log and metadata
+
+**--help, -h**: show help
+
+### diff
+
+Show the diff between config and actual state
+
+**--help, -h**: show help
+
+### get
+
+Get specific config keys
+
+**--help, -h**: show help
+
+### set
+
+Set specific config keys
+
+**--help, -h**: show help
+
+## apply
+
+alias for `sesam config apply`
+
+**--help, -h**: show help
+
+## id
+
+Identify the current user by age identity
+
+**--help, -h**: show help
+
+**--json**: Print output as JSON
+
+## keyring
+
+Keyring utils
+
+**--help, -h**: show help
+
+### clear
+
+Clear cached passphrases from the keyring
+
+**--help, -h**: show help
+
+## log
+
+Show the audit log of secret changes
+
+**--help, -h**: show help
+
+**--json**: Print output as JSON
 

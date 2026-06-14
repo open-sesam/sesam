@@ -143,11 +143,12 @@ func Main(args []string) error {
 			},
 			{
 				Name:          "status",
+				Aliases:       []string{"s"},
 				Category:      catSecrets,
 				Action:        commands.WithRepo(commands.HandleStatus),
 				Flags:         flagsStatus,
 				ShellComplete: completeFlags,
-				Usage:         "Show secrets that are not sealed yet",
+				Usage:         "Show overview over repo state (revealed, sealed, unmanaged, ...)",
 			},
 			{
 				Name:          "show",

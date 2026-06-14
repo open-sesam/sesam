@@ -1,6 +1,6 @@
-# `sesam status` reports how the revealed plaintext compares to the sealed state.
-# --ignore-unmanaged keeps these assertions focused on sesam-tracked secrets;
-# the unmanaged-file classification is covered by repo unit tests.
+# `sesam status` renders a tree of secrets with a per-secret state glyph.
+# In-sync secrets are hidden by default and shown with --all; --json stays the
+# stable, unfiltered machine interface.
 
 exec git init
 exec git config user.email test@sesam.dev
@@ -11,27 +11,37 @@ exec sesam init --user admin
 exec git add -A
 exec git commit -m 'init sesam'
 
-# Fresh out of init the revealed README matches its sealed object.
-exec sesam status --ignore-unmanaged --json
+# --json is unfiltered: the in-sync README still appears.
+exec sesam status --json
 stdout 'README.md'
-stdout '"same_content"'
+stdout '"in_sync"'
 
-# Modify the revealed secret without re-sealing; status must flag the drift.
+# Default tree hides in-sync secrets; README is not listed, but the footer
+# still counts it.
+exec sesam status
+! stdout 'README\.md'
+stdout 'in sync'
+
+# --all reveals the in-sync secret in the tree.
+exec sesam status --all
+stdout 'README\.md'
+
+# Modify the revealed secret: it is now drift and shows by default.
 cp modified_readme.md README.md
-exec sesam status --ignore-unmanaged --json
-stdout '"diff_content"'
+exec sesam status
+stdout 'README\.md'
+stdout 'out of sync'
 
-# Table output (no --json) still names the secret.
-exec sesam status --ignore-unmanaged
-stdout 'README.md'
+exec sesam status --json
+stdout '"out_of_sync"'
 
 # --diff shells out to git to show old (sealed) vs new (revealed) content.
-exec sesam status --ignore-unmanaged --diff
+exec sesam status --diff
 stdout 'modified readme'
 
-# Removing the revealed plaintext entirely reports it as unrevealed.
+# Removing the revealed plaintext reports it as unrevealed.
 rm README.md
-exec sesam status --ignore-unmanaged --json
+exec sesam status --json
 stdout '"unrevealed"'
 
 -- modified_readme.md --
