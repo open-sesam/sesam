@@ -184,7 +184,7 @@ var flagsStatus = []cli.Flag{
 	&cli.BoolFlag{
 		Name:    "diff",
 		Aliases: []string{"d"},
-		Usage:   "Also show the actual diff",
+		Usage:   "Show the actual diff using git (extra args are passed to git)",
 	},
 	&cli.BoolFlag{
 		Name:    "users",

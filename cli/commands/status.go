@@ -16,7 +16,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
+func printDirectoryDiff(ctx context.Context, status *repo.Status, extraGitArgs []string) error {
 	defer func() {
 		if err := os.RemoveAll(status.DiffDir); err != nil {
 			slog.Error("failed to remove diff dir", slog.Any("err", err))
@@ -29,15 +29,30 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status) error {
 
 	// We have to call git directly here, as the user might have configured git tooling of his liking.
 	// go-git offers no comparable diff viewing capabilities (just basic uncolored diffs)
-	cmd := exec.CommandContext(
-		ctx,
-		"git",
+	args := []string{
 		"diff",
 		"--no-index",
 		"--color=auto",
+	}
+
+	targetDirs := []string{
 		"--",
 		"sealed/",
 		"revealed/",
+	}
+
+	allArgs := append(
+		args,
+		append(
+			extraGitArgs,
+			targetDirs...,
+		)...,
+	)
+
+	cmd := exec.CommandContext(
+		ctx,
+		"git",
+		allArgs...,
 	)
 	cmd.Dir = status.DiffDir
 	cmd.Stdout = os.Stdout
@@ -235,7 +250,7 @@ func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	}
 
 	if diff {
-		return printDirectoryDiff(ctx, status)
+		return printDirectoryDiff(ctx, status, cmd.Args().Slice())
 	}
 
 	printStatusTree(status, cmd.Bool("all"), cmd.Bool("users"))
