@@ -845,7 +845,7 @@ func (s SecretState) MarshalJSON() ([]byte, error) {
 //  1. Seal exists, Revealed does not exist => Not yet revealed, because cleaned.
 //  2. Seal exists, Revealed does not exist => Not revealed, because user has no access.
 //  3. Seal exists not, Reveaed exists      => Not yet sealed.
-//  4. Both exist and user has access to it => Either not equal or not.
+//  4. Both exist and user has access to it => Either equal or not.
 type StatusForFile struct {
 	RevealedPath string      `json:"revealed_path"`
 	State        SecretState `json:"state"`
