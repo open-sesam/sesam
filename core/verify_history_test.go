@@ -118,10 +118,10 @@ func (f *historyFixture) truncateLog(t *testing.T) {
 
 func TestAuditLogIsPrefix(t *testing.T) {
 	mk := func(sigs ...string) *AuditLog {
-		entries := make([]auditEntrySigned, len(sigs))
+		entries := make([]AuditEntrySigned, len(sigs))
 		for i, s := range sigs {
-			entries[i] = auditEntrySigned{
-				auditEntry: auditEntry{SeqID: uint64(i + 1)},
+			entries[i] = AuditEntrySigned{
+				AuditEntry: AuditEntry{SeqID: uint64(i + 1)},
 				Signature:  s,
 			}
 		}

@@ -57,10 +57,15 @@ func TestChangeSecretGroups(t *testing.T) {
 
 func TestAddSecretEmptyGroups(t *testing.T) {
 	mgr := testSecretManagerFull(t)
-	writeSecret(t, mgr.SesamDir, "secrets/bad", "data")
+	writeSecret(t, mgr.SesamDir, "secrets/onlyadmin", "data")
 
-	err := mgr.AddSecret("secrets/bad", []string{})
-	require.Error(t, err, "empty groups should fail verification")
+	// Empty groups is valid and means "admin only" - it must not be rejected.
+	require.NoError(t, mgr.AddSecret("secrets/onlyadmin", []string{}))
+
+	vs, exists := mgr.State.SecretExists("secrets/onlyadmin")
+	require.True(t, exists)
+	require.Equal(t, []string{"admin"}, vs.AccessGroups,
+		"empty groups should resolve to admin-only access")
 }
 
 func TestSealAllAndRevealAll(t *testing.T) {

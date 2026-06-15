@@ -10,17 +10,24 @@ import (
 
 // HandleAdd adds a secret path to sesam metadata.
 func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	revealedPath := cmd.Args().First()
-	if revealedPath == "" {
-		return fmt.Errorf("missing secret path: pass a path argument")
+	if !cmd.Args().Present() {
+		return fmt.Errorf("need at least one path")
 	}
 
-	groups := normalizedGroups(cmd.StringSlice("group"))
+	groups := cmd.StringSlice("group")
 	if len(groups) == 0 {
-		return fmt.Errorf("missing group: pass --group at least once")
+		printInfo("no groups specified, assuming `--group admin` only - only admins can decrypt")
 	}
 
-	return r.SecretAdd([]string{revealedPath}, groups)
+	if err := r.SecretAdd(cmd.Args().Slice(), groups); err != nil {
+		return err
+	}
+
+	if cmd.Bool("no-seal") {
+		return nil
+	}
+
+	return r.SealAll()
 }
 
 // HandleRemove removes a secret path from sesam metadata.
@@ -30,22 +37,14 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return fmt.Errorf("missing secret path: pass a path argument")
 	}
 
-	return r.SecretRemove([]string{revealedPath})
+	if err := r.SecretRemove([]string{revealedPath}); err != nil {
+		return err
+	}
+
+	return r.SealAll()
 }
 
 // HandleMove renames or relocates a tracked secret path.
 func HandleMove(_ context.Context, _ *cli.Command) error {
 	return handleStub("modify mv")
-}
-
-func normalizedGroups(groups []string) []string {
-	out := make([]string, 0, len(groups))
-	for _, group := range groups {
-		if group == "" {
-			continue
-		}
-		out = append(out, group)
-	}
-
-	return out
 }

@@ -199,7 +199,6 @@ func negotiateCapabilities(scanner *pktline.Scanner, encoder *pktline.Encoder) e
 	}
 
 	// we only do smudge right now, we might add `git add` later.
-	// TODO: Can we change paths when using the clean filter?
 	if err := encoder.EncodeString("capability=smudge\n"); err != nil {
 		return err
 	}
@@ -388,12 +387,20 @@ func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring,
 		return nil, nil, fmt.Errorf("read git index: %w", err)
 	}
 
-	// Index entries are repo-root-relative with forward slashes.
-	// sesamDir is the same shape (resolved from --sesam-dir, default
-	// "."); path.Join collapses "." correctly when sesam lives at the
-	// worktree root. ToSlash guards against an OS-native --sesam-dir
-	// (e.g. "sub\dir" on Windows), which path.Join would not normalize.
-	auditPath := path.Join(filepath.ToSlash(sesamDir), ".sesam/audit/log.jsonl")
+	// Index entries are worktree-root-relative with forward slashes.
+	// sesamDir may be absolute (callers no longer chdir into the repo) or
+	// relative, so translate it into a worktree-root-relative slash path
+	// before matching index names. path.Join collapses "." correctly when
+	// sesam lives at the worktree root.
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve worktree for %q: %w", sesamDir, err)
+	}
+	relDir, err := repoRootRelative(wt.Filesystem.Root(), sesamDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	auditPath := path.Join(relDir, ".sesam/audit/log.jsonl")
 
 	blobIdx := slices.IndexFunc(idx.Entries, func(e *index.Entry) bool {
 		return e.Name == auditPath
@@ -424,7 +431,7 @@ func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring,
 	// Pull it from the index too — without it, verifyInit reports a bogus
 	// truncation error and the whole index path silently degrades to the
 	// worktree fallback.
-	initPath := path.Join(sesamDir, ".sesam/audit/init")
+	initPath := path.Join(relDir, ".sesam/audit/init")
 	initIdx := slices.IndexFunc(idx.Entries, func(e *index.Entry) bool {
 		return e.Name == initPath
 	})
@@ -452,6 +459,26 @@ func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring,
 		return nil, nil, fmt.Errorf("verify audit chain (index version): %w", err)
 	}
 	return kr, state.SealerAuthorized, nil
+}
+
+// repoRootRelative converts sesamDir into a slash path relative to the git
+// worktree root — the shape git uses for index entry names. It accepts either
+// an absolute sesamDir or one relative to the current directory, so callers
+// need not chdir into the repository.
+func repoRootRelative(worktreeRoot, sesamDir string) (string, error) {
+	absRoot, err := filepath.Abs(worktreeRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolve worktree root %q: %w", worktreeRoot, err)
+	}
+	absSesam, err := filepath.Abs(sesamDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve sesam dir %q: %w", sesamDir, err)
+	}
+	rel, err := filepath.Rel(absRoot, absSesam)
+	if err != nil {
+		return "", fmt.Errorf("relativize %q against worktree root %q: %w", absSesam, absRoot, err)
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 func loadAuditViewFromWorktree(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
@@ -488,7 +515,7 @@ func RunSmudgeFilter(ctx context.Context, sesamDir string, identityPaths []strin
 		return err
 	}
 
-	ids, err := loadIdentitiesKeyringOnly(identityPaths, keyringFingerprint, core.NewNonInteractivePluginUI())
+	ids, err := loadIdentitiesKeyringOnly(identityPaths, core.NewNonInteractivePluginUI())
 	if err != nil {
 		return err
 	}

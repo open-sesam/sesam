@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 
+	"github.com/muesli/termenv"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
@@ -21,20 +23,26 @@ aa    ]8I  "8b,   ,aa  aa    ]8I  88,    ,88  88      88      88
 
 // HandleInit bootstraps sesam metadata in a git repository.
 func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
-	initialUser := cmd.String("user")
-	if initialUser == "" {
-		return fmt.Errorf("failed to determine initial user, please pass --user")
-	}
-
-	r, err := repo.Init(
-		ctx,
-		cmd.String("sesam-dir"),
-		initialUser,
-		cmd.StringSlice("identity"),
-		repo.RepoOpts{
+	output := termenv.NewOutput(os.Stdout)
+	opts := repo.RepoInitOpts{
+		InitialUserName: cmd.String("user"),
+		RepoOpts: repo.RepoOpts{
 			Interactive: true,
 			LockTimeout: cmd.Duration("lock-timeout"),
 		},
+		InitStep: func(format string, args ...any) {
+			prefix := output.String("✓ ").Foreground(output.Color("#008000")).String()
+			format = prefix + format + "\n"
+			fmt.Printf(format, args...)
+		},
+	}
+
+	ids := cmd.StringSlice("identity")
+	r, err := repo.Init(
+		ctx,
+		cmd.String("sesam-dir"),
+		ids,
+		opts,
 	)
 	if err != nil {
 		return err
@@ -53,5 +61,11 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 
 	fmt.Print(asciiLogo)
 
+	fmt.Println()
+
+	out := termenv.NewOutput(os.Stdout)
+	export := out.String("export SESAM_ID=" + ids[0]).Foreground(termenv.ANSIBrightBlue).String()
+
+	printInfo("Tip: Put '%s' in your shell config", export)
 	return nil
 }

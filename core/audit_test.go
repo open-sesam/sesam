@@ -14,14 +14,14 @@ import (
 func TestOperationFor(t *testing.T) {
 	cases := []struct {
 		detail any
-		want   operation
+		want   Operation
 	}{
-		{&DetailInit{}, opInit},
-		{&DetailUserTell{}, opUserTell},
-		{&DetailUserKill{}, opUserKill},
-		{&DetailSecretChange{}, opSecretChange},
-		{&DetailSecretRemove{}, opSecretRemove},
-		{&DetailSeal{}, opSeal},
+		{&DetailInit{}, OpInit},
+		{&DetailUserTell{}, OpUserTell},
+		{&DetailUserKill{}, OpUserKill},
+		{&DetailSecretChange{}, OpSecretChange},
+		{&DetailSecretRemove{}, OpSecretRemove},
+		{&DetailSeal{}, OpSeal},
 	}
 
 	for _, tc := range cases {
@@ -38,7 +38,7 @@ func TestOperationForPanicsOnUnknown(t *testing.T) {
 
 func TestNewAuditEntryDerivesOperation(t *testing.T) {
 	e := newAuditEntry("alice", &DetailSeal{RootHash: "abc", FilesSealed: 3})
-	require.Equal(t, opSeal, e.Operation)
+	require.Equal(t, OpSeal, e.Operation)
 	require.Equal(t, "alice", e.ChangedBy)
 	require.False(t, e.Time.IsZero(), "Time should be set")
 }
@@ -47,7 +47,7 @@ func TestNewAuditEntryDetailRoundtrip(t *testing.T) {
 	detail := &DetailSecretChange{RevealedPath: "secrets/x", Groups: []string{"dev"}}
 	entry := newAuditEntry("bob", detail)
 
-	signed := &auditEntrySigned{auditEntry: *entry}
+	signed := &AuditEntrySigned{AuditEntry: *entry}
 	got, err := parseDetail[DetailSecretChange](signed)
 	require.NoError(t, err)
 	require.Equal(t, "secrets/x", got.RevealedPath)
@@ -56,7 +56,7 @@ func TestNewAuditEntryDetailRoundtrip(t *testing.T) {
 
 func TestParseDetailCache(t *testing.T) {
 	entry := newAuditEntry("alice", &DetailInit{InitUUID: "test-uuid"})
-	signed := &auditEntrySigned{auditEntry: *entry}
+	signed := &AuditEntrySigned{AuditEntry: *entry}
 
 	d1, err := parseDetail[DetailInit](signed)
 	require.NoError(t, err)
@@ -69,7 +69,7 @@ func TestParseDetailCache(t *testing.T) {
 
 func TestParseDetailWrongType(t *testing.T) {
 	entry := newAuditEntry("alice", &DetailInit{InitUUID: "test"})
-	signed := &auditEntrySigned{auditEntry: *entry}
+	signed := &AuditEntrySigned{AuditEntry: *entry}
 
 	// Parse as Init first (caches it).
 	_, err := parseDetail[DetailInit](signed)
@@ -83,7 +83,7 @@ func TestParseDetailWrongType(t *testing.T) {
 
 func TestParseDetailCorruptJSON(t *testing.T) {
 	entry := newAuditEntry("alice", &DetailInit{InitUUID: "test"})
-	signed := &auditEntrySigned{auditEntry: *entry}
+	signed := &AuditEntrySigned{AuditEntry: *entry}
 	signed.Detail = []byte("not json")
 	signed.unmarshaledDetail = nil // clear cache
 
@@ -236,7 +236,7 @@ func TestInitLogCreatesFiles(t *testing.T) {
 	require.Equal(t, al.InitHash, string(data))
 
 	require.Len(t, al.Entries, 1)
-	require.Equal(t, opInit, al.Entries[0].Operation)
+	require.Equal(t, OpInit, al.Entries[0].Operation)
 }
 
 func TestAuditEntrySignedHash(t *testing.T) {
@@ -279,7 +279,7 @@ func TestIterate(t *testing.T) {
 	al := initAuditLog(t, sesamDir, admin)
 
 	var count int
-	err := al.Iterate(func(idx int, entry *auditEntrySigned) error {
+	err := al.Iterate(func(idx int, entry *AuditEntrySigned) error {
 		count++
 		return nil
 	})
@@ -299,7 +299,7 @@ func TestIterateStopsOnError(t *testing.T) {
 	}), nil)
 
 	var count int
-	err := al.Iterate(func(idx int, entry *auditEntrySigned) error {
+	err := al.Iterate(func(idx int, entry *AuditEntrySigned) error {
 		count++
 		return fmt.Errorf("stop")
 	})
@@ -310,7 +310,7 @@ func TestIterateStopsOnError(t *testing.T) {
 func TestIterateEmpty(t *testing.T) {
 	al := &AuditLog{}
 	var count int
-	err := al.Iterate(func(idx int, entry *auditEntrySigned) error {
+	err := al.Iterate(func(idx int, entry *AuditEntrySigned) error {
 		count++
 		return nil
 	})
@@ -320,7 +320,7 @@ func TestIterateEmpty(t *testing.T) {
 
 func TestAuditEntrySignedString(t *testing.T) {
 	e := newAuditEntry("alice", &DetailSeal{RootHash: "abc", FilesSealed: 3})
-	signed := &auditEntrySigned{auditEntry: *e}
+	signed := &AuditEntrySigned{AuditEntry: *e}
 	s := signed.String()
 	require.NotEmpty(t, s)
 	require.Contains(t, s, "abc")

@@ -16,19 +16,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
 	"github.com/gofrs/flock"
 	"github.com/open-sesam/sesam/core"
 )
 
 const defaultLockTimeout = 30 * time.Second
-
-// keyringFingerprint is the OS-keyring entry name used to cache the runtime
-// passphrase of encrypted age identities.
-const keyringFingerprint = "sesam.identity.runtime"
 
 var ErrClosed = errors.New("sesam repo is closed")
 
@@ -54,17 +52,59 @@ type Repo struct {
 	mu sync.Mutex
 }
 
+type VerifyMode string
+
+const (
+	// VerifyModeAll runs the default check (chain verify + root hash verify)
+	VerifyModeAll = "all"
+
+	// VerifyModeNoDisk will skip the root hash check
+	VerifyModeNoDisk = "no-disk"
+
+	VerifyModeDefault = VerifyModeAll
+)
+
+func ToVerifyMode(s string) (VerifyMode, error) {
+	switch s {
+	case VerifyModeAll:
+	case VerifyModeNoDisk:
+	default:
+		return VerifyMode(""), fmt.Errorf("invalid verify mode: %s", s)
+	}
+
+	return VerifyMode(s), nil
+}
+
 // RepoOpts controls runtime behavior shared across all Repo operations.
 type RepoOpts struct {
 	// Interactive should be true when we can talk to the user via the terminal.
-	// TODO: later we should check things like ssh-askpass to allow password
-	// decryption without running in the foreground. Then we might need to split
-	// up options here too (one for interactive terminal and one for interactive UI)
 	Interactive bool
 
 	// LockTimeout bounds how long acquiring the on-disk repo lock waits.
 	// Zero means use the default.
 	LockTimeout time.Duration
+
+	// VerifyMode defines how the on-disk state is verified
+	VerifyMode VerifyMode
+}
+
+type RepoInitOpts struct {
+	RepoOpts
+
+	// InitialUserName is the name of the first admin user.
+	// If empty, we try to guess it from the git config.
+	InitialUserName string
+
+	// InitStep receives logs whenever something interesting happens
+	InitStep func(fmt string, args ...any)
+}
+
+func (rio *RepoInitOpts) PrintStep(fmt string, args ...any) {
+	if rio.InitStep == nil {
+		return
+	}
+
+	rio.InitStep(fmt, args...)
 }
 
 func (opts RepoOpts) lockTimeout() time.Duration {
@@ -88,7 +128,32 @@ func LoadIdentities(identityPaths []string, opts RepoOpts) (core.Identities, err
 		idLoader = loadIdentitiesKeyringOnly
 	}
 
-	return idLoader(identityPaths, keyringFingerprint, opts.pluginUI())
+	return idLoader(identityPaths, opts.pluginUI())
+}
+
+func guessInitUserNameFromGitConfig(repo *git.Repository) (string, error) {
+	// This checks:
+	// - repo .git/config
+	// - ~/.gitconfig
+	// - /etc/gitconfig
+	cfg, err := repo.ConfigScoped(config.SystemScope)
+	if err != nil {
+		return "", fmt.Errorf("failed to read git config: %w", err)
+	}
+
+	if cfg.User.Email != "" {
+		return strings.ToLower(cfg.User.Email), nil
+	}
+
+	if cfg.User.Name != "" {
+		n := cfg.User.Name
+		n = strings.ReplaceAll(n, " ", "_")
+		n = strings.ReplaceAll(n, "/", "_")
+		n = strings.ToLower(n)
+		return n, nil
+	}
+
+	return "", fmt.Errorf("user.email is not set in git-config - please pass --user")
 }
 
 // ResolveSesamDir resolves the sesam repository root. It walks up from
@@ -101,15 +166,12 @@ func ResolveSesamDir(sesamPath string) (string, error) {
 
 // Init initializes a new sesam repository at sesamDir.
 //
-// initialUserName becomes the first admin user; ids are paths to the admin's
-// age identity files. The sesam config is written to <sesamDir>/sesam.yml.
-// On success the returned Repo holds the on-disk lock and has the secret /
-// user managers ready for use; the caller must Close it.
-func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, opts RepoOpts) (*Repo, error) {
-	if err := core.ValidUserName(initialUserName); err != nil {
-		return nil, fmt.Errorf("invalid initial user %q: %w", initialUserName, err)
-	}
-
+// ids are paths to the admin's age identity files. The sesam config is written
+// to <sesamDir>/sesam.yml. On success the returned Repo holds the on-disk lock
+// and has the secret / user managers ready for use; the caller must Close it.
+//
+// The initial user's name is derived from git config (if possible) or taken from the options if given explicitly.
+func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitOpts) (*Repo, error) {
 	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
 	if err != nil {
 		return nil, err
@@ -119,7 +181,23 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, err
 	}
 
-	r := newRepo(resolvedDir, gitRepo, ids, opts)
+	if opts.InitialUserName == "" {
+		opts.InitialUserName, err = guessInitUserNameFromGitConfig(gitRepo)
+		if err != nil {
+			return nil, err
+		}
+
+		opts.PrintStep(
+			"Guessed initial user's name from git-config as `%s` (use --user to override)",
+			opts.InitialUserName,
+		)
+	}
+
+	if err := core.ValidUserName(opts.InitialUserName); err != nil {
+		return nil, fmt.Errorf("invalid initial user %q: %w", opts.InitialUserName, err)
+	}
+
+	r := newRepo(resolvedDir, gitRepo, idPaths, opts.RepoOpts)
 	success := false
 	defer func() {
 		if !success {
@@ -131,12 +209,15 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		}
 	}()
 
-	identities, err := loadIdentities(ids, "sesam.id."+initialUserName, r.pluginUI)
+	identities, err := loadIdentities(idPaths, r.pluginUI)
 	if err != nil {
 		return nil, err
 	}
 	r.identities = identities
 
+	opts.PrintStep("Will use identities at %q…", strings.Join(idPaths, ", "))
+
+	opts.PrintStep("Creating repo at »%s«…", filepath.Join(resolvedDir, ".sesam"))
 	if err := ensureSesamDirs(resolvedDir); err != nil {
 		return nil, err
 	}
@@ -145,19 +226,37 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, err
 	}
 
+	opts.PrintStep("Creating initial sesam.yml")
 	configPath := filepath.Join(resolvedDir, "sesam.yml")
-	if err := createInitialConfig(configPath, initialUserName, identities.RecipientStrings()); err != nil {
+	if err := createInitialConfig(
+		configPath,
+		opts.InitialUserName,
+		identities.RecipientStrings(),
+	); err != nil {
 		return nil, err
 	}
 
-	signer, auditLog, err := core.InitAdminUser(ctx, resolvedDir, initialUserName, identities.RecipientStrings(), r.pluginUI)
+	opts.PrintStep("Creating initial user »%s«…", opts.InitialUserName)
+	signer, auditLog, err := core.InitAdminUser(
+		ctx,
+		resolvedDir,
+		opts.InitialUserName,
+		identities.RecipientStrings(),
+		r.pluginUI,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize admin user: %w", err)
 	}
 	r.auditLog = auditLog
 
 	r.keyring = core.EmptyKeyring()
-	vstate, err := core.Verify(auditLog, r.keyring, r.pluginUI)
+
+	verifyFn := core.Verify
+	if opts.VerifyMode == VerifyModeNoDisk {
+		verifyFn = core.VerifyChain
+	}
+
+	vstate, err := verifyFn(auditLog, r.keyring, r.pluginUI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}
@@ -173,25 +272,31 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, fmt.Errorf("failed to build user manager: %w", err)
 	}
 
+	opts.PrintStep("Adjusting .gitgnore to ignore all revealed files…")
 	if err := ensureDefaultGitIgnore(resolvedDir); err != nil {
 		return nil, err
 	}
+
+	opts.PrintStep("Telling git when to call sesam…")
 	if err := ensureDefaultGitAttributes(resolvedDir); err != nil {
 		return nil, err
 	}
-	if err := ensureGitConfig(gitRepo, resolvedDir); err != nil {
+
+	opts.PrintStep("Adjusting git config…")
+	if err := ensureGitConfig(gitRepo, resolvedDir, opts); err != nil {
 		return nil, err
 	}
+
+	opts.PrintStep("Creating initial README.md as first secret…")
 	if err := ensureSesamReadme(resolvedDir); err != nil {
 		return nil, err
 	}
 
-	if err := withWorkingDir(resolvedDir, func() error {
-		return r.secret.AddSecret("README.md", []string{"admin"})
-	}); err != nil {
+	if err := r.secret.AddSecret("README.md", []string{"admin"}); err != nil {
 		return nil, fmt.Errorf("failed to bootstrap readme secret: %w", err)
 	}
 
+	opts.PrintStep("Making sure the rains come down in Africa…")
 	if err := ensureTmpKeepFile(resolvedDir); err != nil {
 		return nil, err
 	}
@@ -200,10 +305,12 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, err
 	}
 
+	opts.PrintStep("Staging all files…")
 	if err := stageInitFiles(gitRepo, resolvedDir, configPath); err != nil {
 		return nil, err
 	}
 
+	opts.PrintStep("Welcome to…")
 	success = true
 	return r, nil
 }
@@ -242,7 +349,12 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	}
 	r.auditLog = auditLog
 
-	vstate, err := core.Verify(auditLog, r.keyring, r.pluginUI)
+	verifyFn := core.Verify
+	if opts.VerifyMode == VerifyModeNoDisk {
+		verifyFn = core.VerifyChain
+	}
+
+	vstate, err := verifyFn(auditLog, r.keyring, r.pluginUI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}
@@ -490,8 +602,11 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string) error {
 	if len(revealedPaths) == 0 {
 		return fmt.Errorf("missing secret path: pass at least one path")
 	}
-	if len(groups) == 0 {
-		return fmt.Errorf("missing group: pass at least one group")
+
+	for _, revealedPath := range revealedPaths {
+		if err := core.IsForbiddenPath(r.sesamDir, revealedPath); err != nil {
+			return err
+		}
 	}
 
 	r.mu.Lock()
@@ -501,14 +616,16 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string) error {
 		return ErrClosed
 	}
 
-	return withWorkingDir(r.sesamDir, func() error {
-		for _, revealedPath := range revealedPaths {
-			if err := r.secret.AddSecret(revealedPath, groups); err != nil {
-				return fmt.Errorf("failed to add secret %q: %w", revealedPath, err)
-			}
+	// TODO: When being outside the repo something like repo/secret.txt should also work as path.
+	//       Same when being in a sub-dir and doing "add ../secret.txt" We should resolve that here.
+	//       We should only care it is inside of the sesam dir.
+	// TODO: When walking "." then we should skip .sesam and .git
+	for _, revealedPath := range revealedPaths {
+		if err := r.secret.AddSecret(revealedPath, groups); err != nil {
+			return fmt.Errorf("failed to add secret %q: %w", revealedPath, err)
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // SecretRemove removes managed secrets at the given paths.
@@ -549,11 +666,11 @@ type VerifyOptions struct {
 
 // VerifyReport carries the per-check outcome from Verify.
 type VerifyReport struct {
-	// Integrity is the report from the integrity check. nil if Integrity was
-	// not requested.
-	Integrity *core.IntegrityReport
-
-	// TODO: Truncation, KeyReuse, ForgeCheck reports
+	Success          bool                   `json:"success"`
+	Integrity        *core.IntegrityReport  `json:"integrity,omitempty"`
+	TruncateError    error                  `json:"truncate_error,omitempty"`
+	ForgeCheckReport *core.ForgeReport      `json:"forge_report,omitempty"`
+	SharedPublicKeys []core.SharedPublicKey `json:"shared_public_keys,omitempty"`
 }
 
 // OK reports whether every requested check passed.
@@ -561,9 +678,20 @@ func (rep *VerifyReport) OK() bool {
 	if rep == nil {
 		return true
 	}
+
 	if rep.Integrity != nil && !rep.Integrity.OK() {
 		return false
 	}
+
+	if rep.TruncateError != nil {
+		return false
+	}
+
+	if len(rep.SharedPublicKeys) > 0 {
+		return false
+	}
+
+	// NOTE: ForgeCheckReport may exist, they're more informal.
 	return true
 }
 
@@ -572,7 +700,7 @@ func (rep *VerifyReport) OK() bool {
 // audit log cannot be decrypted or is inconsistent) and are returned as
 // `err`. All other consistency checks have their results placed in the
 // returned report.
-func (r *Repo) Verify(opts VerifyOptions) (*VerifyReport, error) {
+func (r *Repo) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -584,13 +712,27 @@ func (r *Repo) Verify(opts VerifyOptions) (*VerifyReport, error) {
 
 	if opts.Integrity {
 		report.Integrity = core.VerifyIntegrity(r.sesamDir, r.vstate, r.keyring)
+		if report.Integrity.IsZero() {
+			report.Integrity = nil
+		}
 	}
 
-	// TODO: Truncation, KeyReuse, ForgeCheck.
-	_ = opts.Truncation
-	_ = opts.KeyReuse
-	_ = opts.ForgeCheck
+	if opts.ForgeCheck {
+		report.ForgeCheckReport = core.VerifyForgeIds(ctx, r.vstate, r.keyring, r.opts.pluginUI())
+		if report.ForgeCheckReport.IsZero() {
+			report.ForgeCheckReport = nil
+		}
+	}
 
+	if opts.Truncation {
+		report.TruncateError = core.VerifyHistory(r.sesamDir, r.gitRepo, r.identities, r.opts.pluginUI())
+	}
+
+	if opts.KeyReuse {
+		report.SharedPublicKeys = core.VerifyKeyReuse(r.keyring)
+	}
+
+	report.Success = report.OK()
 	return report, nil
 }
 
@@ -609,4 +751,15 @@ func (r *Repo) Whoami() (string, error) {
 		return "", fmt.Errorf("failed to identify current user: %w", err)
 	}
 	return whoami, nil
+}
+
+func (r *Repo) Log(fn func(e *core.AuditEntrySigned) error) error {
+	ents := r.auditLog.Entries
+	for idx := len(ents) - 1; idx >= 0; idx-- {
+		if err := fn(&ents[idx]); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

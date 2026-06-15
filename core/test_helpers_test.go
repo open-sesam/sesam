@@ -23,7 +23,7 @@ type testUser struct {
 	SignPubKey string // multicode-encoded
 }
 
-func newTestUser(t *testing.T, name string) *testUser {
+func newTestUser(t testing.TB, name string) *testUser {
 	t.Helper()
 
 	ageID, err := age.GenerateX25519Identity()
@@ -69,7 +69,7 @@ func (tu *testUser) DetailUserTell(groups []string) DetailUserTell {
 }
 
 // testRepo creates a temp dir with all required .sesam subdirectories.
-func testRepo(t *testing.T) string {
+func testRepo(t testing.TB) string {
 	t.Helper()
 	sesamDir := t.TempDir()
 
@@ -91,15 +91,15 @@ func testKeyring(t *testing.T, users ...*testUser) *MemoryKeyring {
 	t.Helper()
 	kr := EmptyKeyring()
 	for _, u := range users {
-		kr.AddSignPubKey(u.Name, u.Signer.PublicKey())
-		kr.AddRecipient(u.Name, u.Recipient)
+		require.NoError(t, kr.AddSignPubKey(u.Name, u.Signer.PublicKey()))
+		require.NoError(t, kr.AddRecipient(u.Name, u.Recipient))
 	}
 
 	return kr
 }
 
 // initAuditLog creates a fresh audit log with the given user as admin.
-func initAuditLog(t *testing.T, sesamDir string, admin *testUser) *AuditLog {
+func initAuditLog(t testing.TB, sesamDir string, admin *testUser) *AuditLog {
 	t.Helper()
 
 	al, err := InitAuditLog(

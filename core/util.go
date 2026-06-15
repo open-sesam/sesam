@@ -12,8 +12,8 @@ import (
 )
 
 // ValidUserName checks that a user name is safe for use in file paths and log entries.
-// Only lowercase alphanumeric characters, hyphens and underscores are allowed.
-// The name must not be empty and must not exceed 64 characters.
+// Only alphanumeric characters (mixed case), hyphens, underscores, '@' and '.'
+// are allowed. The name must not be empty and must not exceed 64 characters.
 func ValidUserName(name string) error {
 	if name == "" {
 		return fmt.Errorf("user name must not be empty")
@@ -24,8 +24,38 @@ func ValidUserName(name string) error {
 	}
 
 	for _, r := range name {
-		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' && r != '@' && r != '.' {
 			return fmt.Errorf("user name contains invalid character: %q", r)
+		}
+	}
+
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("name may not include '..': %s", name)
+	}
+
+	return nil
+}
+
+func IsForbiddenPath(sesamDir, revealedPath string) error {
+	if strings.HasPrefix(revealedPath, filepath.Join(sesamDir, ".sesam")) {
+		return fmt.Errorf("secret path may not live in .sesam: %s", revealedPath)
+	}
+
+	if filepath.Base(revealedPath) == "sesam.yml" {
+		return fmt.Errorf("you can't seal sesam.yml")
+	}
+
+	if filepath.Base(revealedPath) == ".gitattributes" {
+		return fmt.Errorf("you shouldn't seal .gitattributes")
+	}
+
+	for _, elem := range strings.Split(revealedPath, string(filepath.Separator)) {
+		if elem == ".sesam" {
+			return fmt.Errorf("encrypting files in .sesam/ is not allowed")
+		}
+
+		if elem == ".git" {
+			return fmt.Errorf("encrypting files in .git/ is not allowed")
 		}
 	}
 
@@ -43,10 +73,6 @@ func validSecretPathFormat(sesamDir, revealedPath string) error {
 
 	if strings.Contains(revealedPath, "..") {
 		return fmt.Errorf("path may not include '..': %s", revealedPath)
-	}
-
-	if strings.HasPrefix(revealedPath, filepath.Join(sesamDir, ".sesam")) {
-		return fmt.Errorf("secret path may not live in .sesam: %s", revealedPath)
 	}
 
 	return nil
@@ -132,8 +158,6 @@ func copyFile(src, dst string) error {
 	}
 	return dstFd.Close()
 }
-
-// TODO: Add WriteAgeFile() and ReadAgeFile() utils
 
 func ReadFileLimited(path string, size int64) ([]byte, error) {
 	//nolint:gosec

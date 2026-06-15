@@ -8,22 +8,20 @@ import (
 
 const flagUser = "user"
 
+var (
+	flagsVerboseCount int
+	flagsQuietCount   int
+)
+
 // flagsGeneral are shared by most top-level commands.
 //
 // They describe the operator identity and repository/config roots.
 var flagsGeneral = []cli.Flag{
 	&cli.StringSliceFlag{
 		Name:    "identity",
-		Aliases: []string{"i"},
+		Aliases: []string{"i", "id"},
 		Usage:   "Path to the age identity (can be given several times)",
 		Sources: cli.EnvVars("SESAM_ID", "SESAM_IDENTITY"),
-	},
-	&cli.StringFlag{
-		Name:    "config",
-		Aliases: []string{"c"},
-		Value:   "sesam.yml",
-		Usage:   "Path to the sesam config file",
-		Sources: cli.EnvVars("SESAM_CONFIG"),
 	},
 	&cli.StringFlag{
 		Name:    "sesam-dir",
@@ -38,18 +36,39 @@ var flagsGeneral = []cli.Flag{
 		Usage:   "Repository lock wait timeout (e.g. 5s, 30s, 2m)",
 		Sources: cli.EnvVars("SESAM_LOCK_TIMEOUT"),
 	},
+	&cli.BoolFlag{
+		Name:    "no-color",
+		Usage:   "Disable color always",
+		Sources: cli.EnvVars("NO_COLOR", "SESAM_NO_COLOR"),
+	},
+	&cli.BoolFlag{
+		Name:    "verbose",
+		Aliases: []string{"v"},
+		Usage:   "Print more log output",
+		Config: cli.BoolConfig{
+			Count: &flagsVerboseCount,
+		},
+	},
+	&cli.BoolFlag{
+		Name:    "quiet",
+		Aliases: []string{"q"},
+		Usage:   "Print less log output",
+		Config: cli.BoolConfig{
+			Count: &flagsQuietCount,
+		},
+	},
+	&cli.StringFlag{
+		Name:  "verify-mode",
+		Usage: "Adjust how strong or weak the disk state is verified",
+		Value: "all",
+	},
 }
 
 // flagsInit are specific to repository bootstrap.
 var flagsInit = []cli.Flag{
 	&cli.StringFlag{
-		Name:     flagUser,
-		Required: true,
-		Usage:    "Initial admin user name",
-	},
-	&cli.BoolFlag{
-		Name:  "use-root",
-		Usage: "Initialize in the selected directory even when it already contains many files",
+		Name:  flagUser,
+		Usage: "Initial admin user name (if not given, git config is used to guess)",
 	},
 }
 
@@ -70,10 +89,6 @@ var flagsClean = []cli.Flag{
 		Name:  "dry-run",
 		Usage: "Do not actually delete, just print what would be deleted",
 	},
-	&cli.BoolFlag{
-		Name:  "quiet",
-		Usage: "Don't print files",
-	},
 }
 
 // flagsReveal contains optional controls for reveal.
@@ -82,18 +97,20 @@ var flagsReveal = []cli.Flag{}
 // flagsAdd contains controls for adding secrets.
 var flagsAdd = []cli.Flag{
 	&cli.StringSliceFlag{
-		Name:     "group",
-		Required: true,
-		Usage:    "Group assignment for the secret (repeatable)",
+		Name:  "group",
+		Usage: "Group assignment for the secret (repeatable) - 'admin' is implicit",
+	},
+	&cli.BoolFlag{
+		Name:  "no-seal",
+		Usage: "Do not run `sesam seal` after adding files - useful when batch adding",
 	},
 }
 
 // flagsTell contains controls for adding users.
 var flagsTell = []cli.Flag{
 	&cli.StringFlag{
-		Name:     flagUser,
-		Required: true,
-		Usage:    "User name to add",
+		Name:  flagUser,
+		Usage: "User name to add",
 	},
 	&cli.StringSliceFlag{
 		Name:     "recipient",
@@ -133,3 +150,45 @@ var flagsListUsers = []cli.Flag{
 }
 
 var flagsShow = []cli.Flag{}
+
+var flagsLog = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "json",
+		Usage: "Print as JSON",
+	},
+}
+
+var flagsID = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "json",
+		Usage: "Print as JSON",
+	},
+}
+
+var flagsVerify = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "all",
+		Usage: "Run all verifications",
+	},
+	&cli.BoolFlag{
+		Name:  "truncate",
+		Usage: "Verify the audit log was not truncated over history",
+	},
+	&cli.BoolFlag{
+		Name:  "forge-check",
+		Usage: "Verify the forge public keys did not change since adding users",
+	},
+	&cli.BoolFlag{
+		Name:  "key-reuse",
+		Usage: "Double-check that no key is re-used between users",
+	},
+	&cli.BoolFlag{
+		Name:  "integrity",
+		Usage: "Check file integrity on disk",
+	},
+	&cli.BoolFlag{
+		Name:  "json",
+		Usage: "Print report as json",
+	},
+	// TODO: Probably need a config linter here too at some point.
+}

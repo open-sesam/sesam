@@ -5,26 +5,48 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/pem"
+	"strings"
 	"testing"
 
 	"filippo.io/age"
 	"filippo.io/age/plugin"
 	"github.com/stretchr/testify/require"
+	"github.com/zalando/go-keyring"
 	"golang.org/x/crypto/ssh"
 )
 
-// mockPassphraseProvider serves a fixed passphrase from memory and records
-// the prompt it was last asked with so tests can assert prompt threading.
+// encryptedSSHKey returns a PEM-encoded ed25519 SSH private key locked with
+// the given passphrase.
+func encryptedSSHKey(t *testing.T, passphrase string) []byte {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "", []byte(passphrase))
+	require.NoError(t, err)
+	return pem.EncodeToMemory(block)
+}
+
+// mockPassphraseProvider serves a fixed passphrase from memory and records the
+// prompt it was last asked with (for prompt threading) plus the success verdict
+// it was told (for the PassphraseVerified contract).
 type mockPassphraseProvider struct {
 	passphrase []byte
 	called     bool
 	lastPrompt string
+
+	verifiedCalled  bool
+	verifiedSuccess bool
 }
 
 func (m *mockPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
 	m.called = true
 	m.lastPrompt = prompt
 	return m.passphrase, nil
+}
+
+func (m *mockPassphraseProvider) PassphraseVerified(_ []byte, success bool) {
+	m.verifiedCalled = true
+	m.verifiedSuccess = success
 }
 
 func TestParseIdentityAgeNative(t *testing.T) {
@@ -78,6 +100,8 @@ func TestParseIdentitySSHEncryptedWithPassphrase(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, mock.called, "passphrase provider should have been called")
 	require.NotNil(t, id.Public())
+	require.True(t, mock.verifiedCalled, "PassphraseVerified must be called")
+	require.True(t, mock.verifiedSuccess, "a correct passphrase must report success")
 }
 
 // The prompt argument to ParseIdentity must reach the PassphraseProvider so
@@ -109,6 +133,68 @@ func TestParseIdentitySSHWrongPassphrase(t *testing.T) {
 	mock := &mockPassphraseProvider{passphrase: []byte("wrong")}
 	_, err = ParseIdentity(string(pemBytes), mock, nil, "")
 	require.Error(t, err, "should fail with wrong passphrase")
+	require.True(t, mock.verifiedCalled, "PassphraseVerified must be called even on failure")
+	require.False(t, mock.verifiedSuccess, "a wrong passphrase must report failure")
+}
+
+func TestKeyFingerprintDistinctPerKey(t *testing.T) {
+	a := KeyFingerprint([]byte("key-a"))
+	b := KeyFingerprint([]byte("key-b"))
+
+	require.NotEqual(t, a, b, "different keys must get different fingerprints")
+	require.Equal(t, a, KeyFingerprint([]byte("key-a")), "same key must be stable across calls")
+	require.True(t, strings.HasPrefix(a, "sesam.identity."), "fingerprint should be namespaced")
+}
+
+// A wrong passphrase must never be cached; only one that actually unlocks the
+// key gets written to the keyring.
+func TestKeyringPassphraseCachesOnlyOnSuccess(t *testing.T) {
+	keyring.MockInit()
+
+	pemBytes := encryptedSSHKey(t, "correct-horse")
+	fp := KeyFingerprint(pemBytes)
+
+	// Wrong passphrase from the fallback prompt -> must NOT be cached.
+	wrong := &KeyringPassphraseProvider{
+		KeyFingerprint: fp,
+		Fallback:       &mockPassphraseProvider{passphrase: []byte("wrong")},
+	}
+	_, err := ParseIdentity(string(pemBytes), wrong, nil, "")
+	require.Error(t, err)
+
+	_, gerr := keyring.Get(keyringService, fp)
+	require.Error(t, gerr, "a wrong passphrase must not be left in the keyring")
+
+	// Correct passphrase -> cached now that it is verified.
+	ok := &KeyringPassphraseProvider{
+		KeyFingerprint: fp,
+		Fallback:       &mockPassphraseProvider{passphrase: []byte("correct-horse")},
+	}
+	_, err = ParseIdentity(string(pemBytes), ok, nil, "")
+	require.NoError(t, err)
+
+	got, gerr := keyring.Get(keyringService, fp)
+	require.NoError(t, gerr)
+	require.Equal(t, "correct-horse", got, "a verified passphrase must be cached")
+}
+
+// A stale keyring entry whose passphrase no longer unlocks the key must be
+// evicted, so a keyring-only load can recover instead of failing forever.
+func TestKeyringPassphraseEvictsStaleEntry(t *testing.T) {
+	keyring.MockInit()
+
+	pemBytes := encryptedSSHKey(t, "correct-horse")
+	fp := KeyFingerprint(pemBytes)
+
+	require.NoError(t, keyring.Set(keyringService, fp, "stale-wrong"))
+
+	// Keyring-only (no fallback): the stored passphrase is tried and fails.
+	prov := &KeyringPassphraseProvider{KeyFingerprint: fp}
+	_, err := ParseIdentity(string(pemBytes), prov, nil, "")
+	require.Error(t, err)
+
+	_, gerr := keyring.Get(keyringService, fp)
+	require.Error(t, gerr, "stale keyring entry must be evicted after a failed unlock")
 }
 
 func TestParseIdentityPluginRequiresPublicKeyHeader(t *testing.T) {

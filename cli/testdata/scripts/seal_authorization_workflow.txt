@@ -16,6 +16,11 @@ exec sesam init --user admin
 exec git add -A
 exec git commit -m 'init sesam'
 
+# Snapshot the legitimate revealed plaintext that init produced, so we can
+# compare against it after reveal without hardcoding the README template
+# (which changes independently of this test).
+cp README.md original_readme.md
+
 # Add bob to the dev group. He has no access to README.md (admin-only).
 exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
 
@@ -27,7 +32,9 @@ cp .sesam/objects/README.md.sesam original.sesam
 # sesam should warn about that but keep sealing for other files.
 cp evil_readme.md README.md
 exec sesam --identity $BOB_KEY seal
-stderr 'WARN ignoring path because user is not authorized user=bob path=README.md'
+# Match the message without the log-level prefix, so the assertion is robust
+# to how the handler renders the level (e.g. a `‼` symbol vs. `WARN`).
+stderr 'ignoring path because user is not authorized user=bob path=README.md'
 
 # The on-disk ciphertext must not have been touched by the failed seal:
 # the swap never happened because stageSecret rejected before staging.
@@ -44,12 +51,3 @@ exec sesam seal
 -- evil_readme.md --
 # evil readme
 bob's substituted content
--- original_readme.md --
-# sesam bootstrap
-
-This repository was initialized with sesam.
-
-Next steps:
-- Review and commit sesam.yml and .sesam/ metadata.
-- Add or change secrets with sesam add.
-- Seal and reveal via sesam seal / sesam reveal.

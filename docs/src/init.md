@@ -110,4 +110,15 @@ You don't need to set it though, we will use a sensible default.
 
 Every user of `sesam` has at least one **recipient**. Think of it as the public part to the identity. While only you possess your **identity**, everyone has access to all **recipients**.
 
+## Shell completion
 
+We have support for shell completion for most popular shells thanks to the [urfave/cli package](https://cli.urfave.org/v3/examples/completions/shell-completions/).
+
+```
+# Choose your shell:
+source <(../sesam completion bash)
+source <(../sesam completion zsh)
+source <(../sesam completion fish)
+```
+
+This will enable it only for the current shell. Put it in your shell config (`.bashrc`, `.zshrc`, ...) to make it permanent.

@@ -19,7 +19,6 @@ linters:
     - errcheck
     - errname
     - errorlint
-    - goconst
     - gocritic
     - gosec
     - govet
@@ -56,3 +55,4 @@ issues:
       linters:
         - gosec
       text: "G101|G404"
+

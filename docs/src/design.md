@@ -291,8 +291,6 @@ On the other side we do the following things to stay reliable in case of crashes
 - We use file locking to avoid having several processes working on the repo.
 - The audit log can detect logic failures.
 
-TODO: Seal + rm secret is not transactional. If interrupted, verify will find that the root hash is wrong.
-
 ### Assumptions
 
 We assume a few things about our environment that are hopefully not fully unreasonable:

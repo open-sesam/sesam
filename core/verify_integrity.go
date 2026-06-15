@@ -12,15 +12,19 @@ import (
 // IntegrityError describes a single integrity issue found during deep verification.
 type IntegrityError struct {
 	// RevealedPath is the secret this error relates to, if any.
-	RevealedPath string
+	RevealedPath string `json:"revealed_path"`
 
 	// Message describes the issue.
-	Message string
+	Message string `json:"message"`
 }
 
 // IntegrityReport collects all issues found during deep verification.
 type IntegrityReport struct {
-	Errors []IntegrityError
+	Errors []IntegrityError `json:"errors,omitempty"`
+}
+
+func (ir *IntegrityReport) IsZero() bool {
+	return len(ir.Errors) == 0
 }
 
 func (ie IntegrityError) Error() string {

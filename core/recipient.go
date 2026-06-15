@@ -19,6 +19,12 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+var SupportedForges = []string{
+	"github",
+	"gitlab",
+	"codeberg",
+}
+
 // KeySource records where a public key originally came from. It is
 // stored alongside the key itself in the audit log so that a later
 // `verify --forge` can refetch and compare against the recorded value.
