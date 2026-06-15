@@ -800,6 +800,28 @@ func (r *Repo) UserChangeGroups(user string, groups []string) error {
 	return r.user.UserChangeGroups(user, groups)
 }
 
+func (r *Repo) UserAddRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
+
+	return r.user.UserAddRecipient(ctx, user, pubKeySpecs)
+}
+
+func (r *Repo) UserRmRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
+
+	return r.user.UserRmRecipient(ctx, user, pubKeySpecs)
+}
+
 type SecretState int
 
 const (

@@ -410,6 +410,83 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 	return nil
 }
 
+func verifyUserAddRecipients(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
+	if _, err := state.RequireAdmin(entry); err != nil {
+		return err
+	}
+
+	duar, err := parseDetail[DetailUserAddRecipients](entry)
+	if err != nil {
+		return fmt.Errorf("parse user.add_recipients detail: %w", err)
+	}
+
+	user, exists := state.UserExists(duar.User)
+	if !exists {
+		return fmt.Errorf(
+			"user %s to add recipients to does not exist; seq_id=%d",
+			duar.User,
+			entry.SeqID,
+		)
+	}
+
+	var recps Recipients
+	for _, pubKey := range duar.PubKeys {
+		recp, err := ParseRecipient(pubKey.Key, state.pluginUI)
+		if err != nil {
+			return fmt.Errorf("bad public key %v", pubKey)
+		}
+
+		recp.Source = pubKey.Source
+		if err := kr.AddRecipient(duar.User, recp); err != nil {
+			// will trigger on duplicate keys.
+			return err
+		}
+
+		recps = append(recps, recp)
+	}
+
+	user.Recps = append(user.Recps, recps...)
+	return nil
+}
+
+func verifyUserRmRecipients(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
+	if _, err := state.RequireAdmin(entry); err != nil {
+		return err
+	}
+
+	durr, err := parseDetail[DetailUserRmRecipients](entry)
+	if err != nil {
+		return fmt.Errorf("parse user.add_recipients detail: %w", err)
+	}
+
+	user, exists := state.UserExists(durr.User)
+	if !exists {
+		return fmt.Errorf(
+			"user %s to remove recipients from does not exist; seq_id=%d",
+			durr.User,
+			entry.SeqID,
+		)
+	}
+
+	for _, pubKey := range durr.PubKeys {
+		toDelete, err := ParseRecipient(pubKey.Key, state.pluginUI)
+		if err != nil {
+			return fmt.Errorf("bad public key %v", pubKey)
+		}
+
+		if err := kr.RemoveRecipient(user.Name, toDelete); err != nil {
+			// kr.RemoveRecipient already checks that at least one recipient is left
+			return err
+		}
+
+		user.Recps = slices.DeleteFunc(user.Recps, func(r *Recipient) bool {
+			return toDelete.Equal(r)
+		})
+	}
+
+	return nil
+}
+
 func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
 	scd, err := parseDetail[DetailSecretAdd](entry)
 	if err != nil {
@@ -716,8 +793,9 @@ func verify(state *VerifiedState) error {
 		case OpUserTell:
 			err = verifyUserTell(log, &newState, entry, kr)
 		case OpUserChangeGroups:
-			// NOTE:
 			err = verifyUserChangeGroups(log, &newState, entry, kr)
+		case OpUserAddRecipients:
+			err = verifyUserAddRecipients(log, &newState, entry, kr)
 		case OpSeal:
 			err = verifySeal(log, &newState, entry)
 		case OpSecretAdd:
@@ -756,6 +834,8 @@ func verify(state *VerifiedState) error {
 			err = verifyUserKill(log, &newState, entry, kr)
 		case OpUserRename:
 			err = verifyUserRename(log, &newState, entry, kr)
+		case OpUserRmRecipients:
+			err = verifyUserRmRecipients(log, &newState, entry, kr)
 		}
 
 		if err != nil {

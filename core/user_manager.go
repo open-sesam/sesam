@@ -189,17 +189,51 @@ func (um *UserManager) UserChangeGroups(user string, groups []string) error {
 		return fmt.Errorf("need to be admin for changing a user groups")
 	}
 
-	if err := um.state.FeedEntry(
+	return um.state.FeedEntry(
 		um.signer,
 		newAuditEntry(um.signer.UserName(), &DetailUserChangeGroups{
 			User:      user,
 			NewGroups: groups,
 		}),
-	); err != nil {
+	)
+}
+
+func (um *UserManager) UserAddRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
+	if !um.signUser.IsAdmin() {
+		return fmt.Errorf("need to be admin for adding recipients an user")
+	}
+
+	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, um.state.pluginUI)
+	if err != nil {
 		return err
 	}
 
-	return nil
+	return um.state.FeedEntry(
+		um.signer,
+		newAuditEntry(um.signer.UserName(), &DetailUserAddRecipients{
+			User:    user,
+			PubKeys: recps.UserPubKeys(),
+		}),
+	)
+}
+
+func (um *UserManager) UserRmRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
+	if !um.signUser.IsAdmin() {
+		return fmt.Errorf("need to be admin for removing recipients from a user")
+	}
+
+	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, um.state.pluginUI)
+	if err != nil {
+		return err
+	}
+
+	return um.state.FeedEntry(
+		um.signer,
+		newAuditEntry(um.signer.UserName(), &DetailUserRmRecipients{
+			User:    user,
+			PubKeys: recps.UserPubKeys(),
+		}),
+	)
 }
 
 // InitAdminUser has to be called on init to create the initial user.

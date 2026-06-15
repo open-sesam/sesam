@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"fmt"
+	"slices"
 )
 
 // DuplicatePubkeyError is returned when a key (recipient or signing key) is
@@ -26,12 +27,15 @@ type Keyring interface {
 	// is returned.
 	AddRecipient(user string, recp *Recipient) error
 
+	// TODO: comment.
+	RemoveRecipient(user string, recp *Recipient) error
+
 	// AddSignPubKey adds a signing key for a a specific user.
 	// Most of the time a user has only a single key, except for key rotation.
 	// For now, only ed25519 keys are supported in `pub`.
 	// Adding the same key twice for a user is a no-op.
 	// Adding a signing key a different user already uses returns DuplicatePubkeyError.
-	AddSignPubKey(user string, pub []byte) error
+	AddSignPubKey(user string, pub []byte) error // TODO: Make that a SetSignPubKey.
 
 	// DeleteUser removes a user from they Keyring.
 	// It will return true if the user existed.
@@ -87,6 +91,7 @@ func addKey[T any, S ~[]T](user string, key T, m map[string]S, equal func(T, T) 
 		}
 	}
 
+	// TODO: AddRecipient and AddSignPubKey are independent, one user might not be in the other...
 	if !isDuplicate {
 		m[user] = append(m[user], key)
 	}
@@ -98,6 +103,30 @@ func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) error {
 	return addKey(user, recp, mk.recipients, func(a, b *Recipient) bool {
 		return a.Equal(b)
 	})
+}
+
+func (mk *MemoryKeyring) RemoveRecipient(user string, toDelete *Recipient) error {
+	recps, ok := mk.recipients[user]
+	if !ok {
+		return fmt.Errorf("no such user: %s", user)
+	}
+
+	idx := slices.IndexFunc(recps, func(o *Recipient) bool {
+		return o.Equal(toDelete)
+	})
+
+	if idx < 0 {
+		// key to delete did not exist.
+		return fmt.Errorf("user %s has no key %s that we could remove", user, toDelete)
+	}
+
+	if len(recps) == 1 {
+		// key was found, but it's the last one.
+		return fmt.Errorf("user %s has only one key left, need to add new keys before removing further", user)
+	}
+
+	mk.recipients[user] = slices.Delete(recps, idx, idx+1)
+	return nil
 }
 
 func (mk *MemoryKeyring) AddSignPubKey(user string, key []byte) error {

@@ -39,11 +39,13 @@ const (
 	OpSecretRemove = Operation("secret.remove")
 	OpSeal         = Operation("seal")
 
-	// Upadte operations:
+	// Update operations:
 	OpUserRename         = Operation("user.rename")
 	OpUserChangeGroups   = Operation("user.change_groups")
 	OpSecretMove         = Operation("secret.move")
 	OpSecretChangeAccess = Operation("secret.change_access")
+	OpUserAddRecipients  = Operation("user.add_recipients")
+	OpUserRmRecipients   = Operation("user.rm_recipients")
 )
 
 // AuditDetail is a type constraint covering all valid detail types.
@@ -57,7 +59,9 @@ type AuditDetail interface {
 		DetailSecretMove |
 		DetailSecretChangeAccess |
 		DetailUserRename |
-		DetailUserChangeGroups
+		DetailUserChangeGroups |
+		DetailUserAddRecipients |
+		DetailUserRmRecipients
 }
 
 type AuditEntry struct {
@@ -239,6 +243,16 @@ type DetailSecretChangeAccess struct {
 	AccessGroups []string `json:"access_groups"`
 }
 
+type DetailUserAddRecipients struct {
+	User    string       `json:"user"`
+	PubKeys []UserPubKey `json:"pub_keys"`
+}
+
+type DetailUserRmRecipients struct {
+	User    string       `json:"user"`
+	PubKeys []UserPubKey `json:"pub_keys"`
+}
+
 // DetailSecretAdd describes the operation of adding a new secret. Changing the
 // access list of an existing secret is a separate operation
 // (DetailSecretChangeAccess), and renaming is DetailSecretRename.
@@ -361,6 +375,10 @@ func operationFor(detail any) Operation {
 		return OpUserRename
 	case *DetailUserChangeGroups:
 		return OpUserChangeGroups
+	case *DetailUserAddRecipients:
+		return OpUserRmRecipients
+	case *DetailUserRmRecipients:
+		return OpUserRmRecipients
 	default:
 		panic(fmt.Sprintf("unknown detail type: %T", detail))
 	}
