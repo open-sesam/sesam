@@ -173,7 +173,15 @@ func (um *UserManager) RenameUser(oldName, newName string) error {
 		return err
 	}
 
-	return nil
+	// TODO: Also not exactly atomic as an operation...
+	return os.Rename(
+		um.signKeyPath(oldName),
+		um.signKeyPath(newName),
+	)
+}
+
+func (um *UserManager) signKeyPath(user string) string {
+	return filepath.Join(um.sesamDir, ".sesam", "signkeys", user+".age")
 }
 
 func (um *UserManager) UserChangeGroups(user string, groups []string) error {
