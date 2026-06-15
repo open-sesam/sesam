@@ -763,3 +763,36 @@ func (r *Repo) Log(fn func(e *core.AuditEntrySigned) error) error {
 
 	return nil
 }
+
+func (r *Repo) MoveSecret(oldRevealedPath, newRevealedPath string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
+
+	return r.secret.MoveSecret(oldRevealedPath, newRevealedPath)
+}
+
+func (r *Repo) RenameUser(oldName, newName string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
+
+	return r.user.RenameUser(oldName, newName)
+}
+
+func (r *Repo) UserChangeGroups(user string, groups []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
+
+	return r.user.UserChangeGroups(user, groups)
+}

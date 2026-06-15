@@ -36,7 +36,7 @@ func newPrettyHandler(w io.Writer, level slog.Level) *prettyHandler {
 	return &prettyHandler{
 		w:           w,
 		level:       level,
-		errPrefix:   out.String("⨯ ").Foreground(out.Color("#800000")).String(),
+		errPrefix:   out.String("✘ ").Foreground(out.Color("#800000")).String(),
 		warnPrefix:  out.String("‼ ").Foreground(out.Color("#808000")).String(),
 		infoPrefix:  out.String("ℹ ").Foreground(termenv.ANSIBrightBlue).String(),
 		debugPrefix: out.String("» ").Foreground(termenv.ANSIBrightMagenta).String(),

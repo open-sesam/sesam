@@ -47,6 +47,10 @@ type Keyring interface {
 
 	// ListUsers() returns all users and recipients.
 	ListUsers() map[string]Recipients
+
+	// RenameUser() renames existing oldUser to newUser.
+	// If oldUser does not exists it's a no-op.
+	RenameUser(oldUser, newUser string)
 }
 
 // MemoryKeyring is a simple Keyring implementation that holds public keys in memory only.
@@ -180,4 +184,18 @@ func AllRecipients(kr Keyring) Recipients {
 	}
 
 	return recps
+}
+
+func (mk *MemoryKeyring) RenameUser(oldUser, newUser string) {
+	recps, ok1 := mk.recipients[oldUser]
+	signPubs, ok2 := mk.signPubs[oldUser]
+	if !ok1 || !ok2 {
+		return
+	}
+
+	delete(mk.recipients, oldUser)
+	mk.recipients[newUser] = recps
+
+	delete(mk.signPubs, oldUser)
+	mk.signPubs[newUser] = signPubs
 }

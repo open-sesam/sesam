@@ -19,9 +19,9 @@ func buildBenchAuditLog(b testing.TB, entries int) (string, *testUser) {
 	// Entry 1 is the init entry; add the rest as distinct secret changes,
 	// which the admin is always allowed to make.
 	for i := 1; i < entries; i++ {
-		if _, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+		if _, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 			RevealedPath: fmt.Sprintf("secrets/bench/secret-%06d", i),
-			Groups:       []string{"admin"},
+			AccessGroups: []string{"admin"},
 		}), nil); err != nil {
 			b.Fatalf("seed entry %d: %v", i, err)
 		}

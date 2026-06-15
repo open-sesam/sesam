@@ -52,7 +52,6 @@ func BuildUserManager(
 // partial state: log advanced, ciphertext recipients stale. The error
 // message points at `sesam seal` as the resync.
 func (um *UserManager) resealAfterMembershipChange(op string) error {
-	um.secMgr.refreshRecipients()
 	if err := um.secMgr.SealAll(); err != nil {
 		return fmt.Errorf(
 			"%s succeeded but auto re-seal failed (run `sesam seal` to resync): %w",
@@ -157,6 +156,50 @@ func (um *UserManager) KillUsers(user string) error {
 	}
 
 	return um.resealAfterMembershipChange("kill")
+}
+
+func (um *UserManager) RenameUser(oldName, newName string) error {
+	if !um.signUser.IsAdmin() {
+		return fmt.Errorf("need to be admin for renaming users")
+	}
+
+	if err := um.state.FeedEntry(
+		um.signer,
+		newAuditEntry(um.signer.UserName(), &DetailUserRename{
+			OldName: oldName,
+			NewName: newName,
+		}),
+	); err != nil {
+		return err
+	}
+
+	// TODO: Also not exactly atomic as an operation...
+	return os.Rename(
+		um.signKeyPath(oldName),
+		um.signKeyPath(newName),
+	)
+}
+
+func (um *UserManager) signKeyPath(user string) string {
+	return filepath.Join(um.sesamDir, ".sesam", "signkeys", user+".age")
+}
+
+func (um *UserManager) UserChangeGroups(user string, groups []string) error {
+	if !um.signUser.IsAdmin() {
+		return fmt.Errorf("need to be admin for changing a user groups")
+	}
+
+	if err := um.state.FeedEntry(
+		um.signer,
+		newAuditEntry(um.signer.UserName(), &DetailUserChangeGroups{
+			User:      user,
+			NewGroups: groups,
+		}),
+	); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // InitAdminUser has to be called on init to create the initial user.

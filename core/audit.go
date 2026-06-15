@@ -35,9 +35,15 @@ const (
 	OpInit         = Operation("init")
 	OpUserTell     = Operation("user.tell")
 	OpUserKill     = Operation("user.kill")
-	OpSecretChange = Operation("secret.change")
+	OpSecretAdd    = Operation("secret.add")
 	OpSecretRemove = Operation("secret.remove")
 	OpSeal         = Operation("seal")
+
+	// Upadte operations:
+	OpUserRename         = Operation("user.rename")
+	OpUserChangeGroups   = Operation("user.change_groups")
+	OpSecretRename       = Operation("secret.rename")
+	OpSecretChangeAccess = Operation("secret.change_access")
 )
 
 // AuditDetail is a type constraint covering all valid detail types.
@@ -45,9 +51,13 @@ type AuditDetail interface {
 	DetailInit |
 		DetailUserTell |
 		DetailUserKill |
-		DetailSecretChange |
+		DetailSecretAdd |
 		DetailSecretRemove |
-		DetailSeal
+		DetailSeal |
+		DetailSecretRename |
+		DetailSecretChangeAccess |
+		DetailUserRename |
+		DetailUserChangeGroups
 }
 
 type AuditEntry struct {
@@ -209,21 +219,40 @@ type DetailUserKill struct {
 	User string `json:"user"`
 }
 
-// DetailSecretChange describes the operation of adding/changing a secret.
+type DetailUserRename struct {
+	OldName string `json:"old_name"`
+	NewName string `json:"new_name"`
+}
+
+type DetailUserChangeGroups struct {
+	User      string   `json:"user"`
+	NewGroups []string `json:"new_groups"`
+}
+
+type DetailSecretRename struct {
+	OldRevealedPath string `json:"old_revealed_path"`
+	NewRevealedPath string `json:"new_revealed_path"`
+}
+
+type DetailSecretChangeAccess struct {
+	RevealedPath string   `json:"revealed_path"`
+	AccessGroups []string `json:"access_groups"`
+}
+
+// DetailSecretAdd describes the operation of adding a new secret. Changing the
+// access list of an existing secret is a separate operation
+// (DetailSecretChangeAccess), and renaming is DetailSecretRename.
 //
 // Verification:
 //
-// - "admin" may be part of `Groups`, but is implicitly added anyways.
-// - An empty `Groups` is therefore valid and means "admin only".
-// - `Groups` should not have duplicates.
-// - If secret exists: Only users that already have access to it may issue another Change.
-//
-// Note:
-//
-// - When changing the access list it is okay to issue another SecretMod
-type DetailSecretChange struct {
+// - The secret must not already exist (adding an existing secret is an error).
+// - "admin" may be part of `AccessGroups`, but is implicitly added anyways.
+// - An empty `AccessGroups` is therefore valid and means "admin only".
+// - `AccessGroups` should not have duplicates.
+// - The author must have access to at least one of the proposed groups.
+type DetailSecretAdd struct {
 	RevealedPath string   `json:"revealed_path"`
-	Groups       []string `json:"groups"`
+	AccessGroups []string `json:"access_groups"`
 }
 
 // DetailSecretRemove is the act of removing a secret.
@@ -318,12 +347,20 @@ func operationFor(detail any) Operation {
 		return OpUserTell
 	case *DetailUserKill:
 		return OpUserKill
-	case *DetailSecretChange:
-		return OpSecretChange
+	case *DetailSecretAdd:
+		return OpSecretAdd
 	case *DetailSecretRemove:
 		return OpSecretRemove
 	case *DetailSeal:
 		return OpSeal
+	case *DetailSecretRename:
+		return OpSecretRename
+	case *DetailSecretChangeAccess:
+		return OpSecretChangeAccess
+	case *DetailUserRename:
+		return OpUserRename
+	case *DetailUserChangeGroups:
+		return OpUserChangeGroups
 	default:
 		panic(fmt.Sprintf("unknown detail type: %T", detail))
 	}

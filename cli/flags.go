@@ -13,6 +13,42 @@ var (
 	flagsQuietCount   int
 )
 
+// Shared flags reused by several commands, defined once and appended to the
+// flag sets that need them.
+
+// flagJSON toggles machine-readable JSON output.
+var flagJSON = &cli.BoolFlag{
+	Name:  "json",
+	Usage: "Print output as JSON",
+}
+
+// flagNoSeal skips the implicit `sesam seal` that normally follows a mutating
+// command - handy when batching several changes into one seal.
+var flagNoSeal = &cli.BoolFlag{
+	Name:  "no-seal",
+	Usage: "Do not run `sesam seal` afterwards - useful when batching",
+}
+
+// userFlag builds the --user flag. Required-ness and help text differ per
+// command (init guesses from git, kill needs it), so it is parametrized rather
+// than a single shared variable.
+func userFlag(required bool, usage string) cli.Flag {
+	return &cli.StringFlag{
+		Name:     flagUser,
+		Required: required,
+		Usage:    usage,
+	}
+}
+
+// groupFlag builds the repeatable --group flag. Required-ness varies per command.
+func groupFlag(required bool, usage string) cli.Flag {
+	return &cli.StringSliceFlag{
+		Name:     "group",
+		Required: required,
+		Usage:    usage,
+	}
+}
+
 // flagsGeneral are shared by most top-level commands.
 //
 // They describe the operator identity and repository/config roots.
@@ -66,10 +102,7 @@ var flagsGeneral = []cli.Flag{
 
 // flagsInit are specific to repository bootstrap.
 var flagsInit = []cli.Flag{
-	&cli.StringFlag{
-		Name:  flagUser,
-		Usage: "Initial admin user name (if not given, git config is used to guess)",
-	},
+	userFlag(false, "Initial admin user name (if not given, git config is used to guess)"),
 }
 
 // flagsSeal contains optional controls for sealing.
@@ -96,74 +129,49 @@ var flagsReveal = []cli.Flag{}
 
 // flagsAdd contains controls for adding secrets.
 var flagsAdd = []cli.Flag{
-	&cli.StringSliceFlag{
-		Name:  "group",
-		Usage: "Group assignment for the secret (repeatable) - 'admin' is implicit",
-	},
-	&cli.BoolFlag{
-		Name:  "no-seal",
-		Usage: "Do not run `sesam seal` after adding files - useful when batch adding",
-	},
+	groupFlag(false, "Group assignment for the secret (repeatable) - 'admin' is implicit"),
+	flagNoSeal,
 }
+
+var flagsMove = []cli.Flag{}
 
 // flagsTell contains controls for adding users.
 var flagsTell = []cli.Flag{
-	&cli.StringFlag{
-		Name:  flagUser,
-		Usage: "User name to add",
-	},
+	userFlag(false, "User name to add"),
 	&cli.StringSliceFlag{
 		Name:     "recipient",
 		Required: true,
 		Usage:    "Recipient key spec (e.g. github:alice) - can be given several times",
 	},
-	&cli.StringSliceFlag{
-		Name:     "group",
-		Required: true,
-		Usage:    "Group assignment (repeatable)",
-	},
+	groupFlag(true, "Group assignment (repeatable)"),
+	flagNoSeal,
 }
 
 // flagsKill contains controls for removing users.
 var flagsKill = []cli.Flag{
-	&cli.StringFlag{
-		Name:     flagUser,
-		Required: true,
-		Usage:    "User name to remove",
-	},
+	userFlag(true, "User name to remove"),
+	flagNoSeal,
 }
 
 // flagsListSecrets contains output controls for secret listing.
-var flagsListSecrets = []cli.Flag{
-	&cli.BoolFlag{
-		Name:  "json",
-		Usage: "Print output as JSON",
-	},
-}
+var flagsListSecrets = []cli.Flag{flagJSON}
 
 // flagsListUsers contains output controls for user listing.
-var flagsListUsers = []cli.Flag{
-	&cli.BoolFlag{
-		Name:  "json",
-		Usage: "Print output as JSON",
-	},
+var flagsListUsers = []cli.Flag{flagJSON}
+
+var flagsRenameUser = []cli.Flag{}
+
+var flagsUserChangeGroups = []cli.Flag{
+	userFlag(true, "Which user should be changed"),
+	groupFlag(true, "Group assignment for the secret (repeatable) - 'admin' is implicit"),
+	flagNoSeal,
 }
 
 var flagsShow = []cli.Flag{}
 
-var flagsLog = []cli.Flag{
-	&cli.BoolFlag{
-		Name:  "json",
-		Usage: "Print as JSON",
-	},
-}
+var flagsLog = []cli.Flag{flagJSON}
 
-var flagsID = []cli.Flag{
-	&cli.BoolFlag{
-		Name:  "json",
-		Usage: "Print as JSON",
-	},
-}
+var flagsID = []cli.Flag{flagJSON}
 
 var flagsVerify = []cli.Flag{
 	&cli.BoolFlag{
@@ -186,9 +194,6 @@ var flagsVerify = []cli.Flag{
 		Name:  "integrity",
 		Usage: "Check file integrity on disk",
 	},
-	&cli.BoolFlag{
-		Name:  "json",
-		Usage: "Print report as json",
-	},
+	flagJSON,
 	// TODO: Probably need a config linter here too at some point.
 }

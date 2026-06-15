@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"filippo.io/age"
@@ -35,8 +34,6 @@ type SecretManager struct {
 
 	// State is the state won by replaying the audit log.
 	State *VerifiedState
-
-	secrets []secret
 }
 
 // BuildSecretManager uses the passed facilities to build a new SecretManager
@@ -62,34 +59,19 @@ func BuildSecretManager(
 	_ = os.RemoveAll(tmpDir)
 	_ = os.MkdirAll(tmpDir, 0o700)
 
-	for _, vsecret := range state.Secrets {
-		accessUsers := state.UsersForSecret(vsecret.RevealedPath)
-		recps := keyring.Recipients(accessUsers)
-		mgr.secrets = append(mgr.secrets, secret{
-			Mgr:          mgr,
-			RevealedPath: vsecret.RevealedPath,
-			Recipients:   recps,
-		})
-	}
-
 	return mgr, nil
+}
+
+// recipientsFor returns the recipients that may reveal `revealedPath`,
+// derived from the current verified state and keyring. The set of secrets
+// lives in sm.State.Secrets - the source of truth - so the recipient list
+// is always recomputed here rather than cached.
+func (sm *SecretManager) recipientsFor(revealedPath string) Recipients {
+	return sm.Keyring.Recipients(sm.State.UsersForSecret(revealedPath))
 }
 
 func (sm *SecretManager) cryptPath(path string) string {
 	return filepath.Join(sm.objectsDir(), path+".sesam")
-}
-
-// refreshRecipients re-derives the recipient list for every managed
-// secret from the current state and keyring. The list of secrets itself
-// is not touched - that is owned by AddSecret/RemoveSecret. This is the
-// hook that user-membership changes (tell/kill) call before SealAll, so
-// the swap captures the new keyring rather than the stale one cached at
-// BuildSecretManager time.
-func (sm *SecretManager) refreshRecipients() {
-	for i := range sm.secrets {
-		users := sm.State.UsersForSecret(sm.secrets[i].RevealedPath)
-		sm.secrets[i].Recipients = sm.Keyring.Recipients(users)
-	}
 }
 
 func (sm *SecretManager) tmpDir() string {
@@ -109,43 +91,35 @@ func (sm *SecretManager) AddSecret(revealedPath string, groups []string) error {
 	return sm.addOrChangeSecret(revealedPath, groups)
 }
 
-// ChangeSecretGroups changes the access groups for the secret at `revealedPath`
-// NOTE: It is currently valid to call AddSecret instead.
+// ChangeSecretGroups changes the access groups for the secret at `revealedPath`.
 func (sm *SecretManager) ChangeSecretGroups(revealedPath string, groups []string) error {
 	return sm.addOrChangeSecret(revealedPath, groups)
 }
 
-// NOTE: right now add/change is the same operation. Later we can do different things on add/change,
-// the API is already split in case we want to go that route.
+// addOrChangeSecret emits a secret.add entry for a new secret and a
+// secret.change_access entry for an existing one, deciding which based on
+// whether the secret is already known.
 func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string) error {
 	if err := validSecretPath(sm.SesamDir, revealedPath); err != nil {
 		return fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
 	}
 
-	idx := slices.IndexFunc(sm.secrets, func(s secret) bool {
-		return s.RevealedPath == revealedPath
-	})
-
-	accessUsers := sm.State.UserForGroups(groups)
-	recps := sm.Keyring.Recipients(accessUsers)
-
-	if idx < 0 {
-		sm.secrets = append(sm.secrets, secret{
-			Mgr:          sm,
+	var auditEntry *AuditEntry
+	if _, exists := sm.State.SecretExists(revealedPath); !exists {
+		// Secret does not exist yet: this is an add.
+		auditEntry = newAuditEntry(sm.Signer.UserName(), &DetailSecretAdd{
 			RevealedPath: revealedPath,
-			Recipients:   recps,
+			AccessGroups: groups,
 		})
 	} else {
-		sm.secrets[idx].Recipients = recps
+		// Secret already exists: this is an access-list change.
+		auditEntry = newAuditEntry(sm.Signer.UserName(), &DetailSecretChangeAccess{
+			RevealedPath: revealedPath,
+			AccessGroups: groups,
+		})
 	}
 
-	return sm.State.FeedEntry(
-		sm.Signer,
-		newAuditEntry(sm.Signer.UserName(), &DetailSecretChange{
-			RevealedPath: revealedPath,
-			Groups:       groups,
-		}),
-	)
+	return sm.State.FeedEntry(sm.Signer, auditEntry)
 }
 
 // SealAll seals all known secrets.
@@ -184,12 +158,12 @@ func (sm *SecretManager) SealAll() error {
 		return fmt.Errorf("create objects dir: %w", err)
 	}
 
-	sigs := make([]*secretFooter, 0, len(sm.secrets))
-	for _, s := range sm.secrets {
-		sig, _, err := sm.stageSecret(s, stage)
+	sigs := make([]*secretFooter, 0, len(sm.State.Secrets))
+	for _, vsecret := range sm.State.Secrets {
+		sig, _, err := sm.stageSecret(vsecret.RevealedPath, stage)
 		if err != nil {
 			_ = os.RemoveAll(stage)
-			return fmt.Errorf("stage %s: %w", s.RevealedPath, err)
+			return fmt.Errorf("stage %s: %w", vsecret.RevealedPath, err)
 		}
 		sigs = append(sigs, sig)
 	}
@@ -228,18 +202,18 @@ func (sm *SecretManager) SealAll() error {
 	return nil
 }
 
-// stageSecret writes the sealed form of `s` into the staging tree rooted at
-// `stageRoot`. If we have access to the plaintext we encrypt it fresh; if
-// the plaintext is missing we copy the existing ciphertext from the live
-// objects/ tree so the file survives the swap. It is an error if neither
+// stageSecret writes the sealed form of `revealedPath` into the staging tree
+// rooted at `stageRoot`. If we have access to the plaintext we encrypt it
+// fresh; if the plaintext is missing we copy the existing ciphertext from the
+// live objects/ tree so the file survives the swap. It is an error if neither
 // is available.
-func (sm *SecretManager) stageSecret(s secret, stageRoot string) (*secretFooter, bool, error) {
-	stageDest := filepath.Join(stageRoot, s.RevealedPath+".sesam")
+func (sm *SecretManager) stageSecret(revealedPath, stageRoot string) (*secretFooter, bool, error) {
+	stageDest := filepath.Join(stageRoot, revealedPath+".sesam")
 	if err := os.MkdirAll(filepath.Dir(stageDest), 0o700); err != nil {
 		return nil, false, fmt.Errorf("create stage subdir: %w", err)
 	}
 
-	plainPath := filepath.Join(sm.SesamDir, s.RevealedPath)
+	plainPath := filepath.Join(sm.SesamDir, revealedPath)
 	switch _, err := os.Stat(plainPath); {
 	case err == nil:
 		// Good-citizen guard: an honest client refuses to produce a
@@ -247,22 +221,28 @@ func (sm *SecretManager) stageSecret(s secret, stageRoot string) (*secretFooter,
 		// existing ciphertext" branch below does not hit this because
 		// it does not change SealedBy.
 		sealer := sm.Signer.UserName()
-		if sm.State.SealerAuthorized(sealer, s.RevealedPath) {
-			sig, err := s.Seal(stageDest, sealer)
+		if sm.State.SealerAuthorized(sealer, revealedPath) {
+			sig, err := sealSecret(
+				sm,
+				revealedPath,
+				sm.recipientsFor(revealedPath),
+				stageDest,
+				sealer,
+			)
 			return sig, true, err
 		}
 
 		slog.Warn(
 			"ignoring path because user is not authorized",
 			slog.String("user", sealer),
-			slog.String("path", s.RevealedPath),
+			slog.String("path", revealedPath),
 		)
 	case !os.IsNotExist(err):
 		return nil, false, fmt.Errorf("stat plaintext: %w", err)
 	}
 
 	// No plaintext: preserve the existing ciphertext if we have one.
-	existing := sm.cryptPath(s.RevealedPath)
+	existing := sm.cryptPath(revealedPath)
 	if !pathExists(existing) {
 		return nil, false, fmt.Errorf(
 			"no plaintext at %q and no existing ciphertext at %q to preserve",
@@ -295,9 +275,9 @@ func readSecretFooter(path string) (*secretFooter, error) {
 
 // RevealAll reveals all known secrets.
 func (sm *SecretManager) RevealAll() error {
-	for _, secret := range sm.secrets {
-		if err := secret.Reveal(); err != nil {
-			return fmt.Errorf("failed to reveal %s: %w", secret.RevealedPath, err)
+	for _, vsecret := range sm.State.Secrets {
+		if err := revealSecret(sm, vsecret.RevealedPath); err != nil {
+			return fmt.Errorf("failed to reveal %s: %w", vsecret.RevealedPath, err)
 		}
 	}
 	return nil
@@ -306,11 +286,7 @@ func (sm *SecretManager) RevealAll() error {
 // RemoveSecret removes a secret from sesam's management.
 // The encrypted files (+associated) are deleted, but the original file is not touched.
 func (sm *SecretManager) RemoveSecret(revealedPath string) error {
-	idx := slices.IndexFunc(sm.secrets, func(s secret) bool {
-		return s.RevealedPath == revealedPath
-	})
-
-	if idx < 0 {
+	if _, exists := sm.State.SecretExists(revealedPath); !exists {
 		return fmt.Errorf("no such secret")
 	}
 
@@ -323,11 +299,79 @@ func (sm *SecretManager) RemoveSecret(revealedPath string) error {
 		return fmt.Errorf("failed to add secret remove entry: %w", err)
 	}
 
-	if err := os.RemoveAll(sm.cryptPath(revealedPath)); err != nil {
+	return os.RemoveAll(sm.cryptPath(revealedPath))
+}
+
+func (sm *SecretManager) MoveSecret(oldRevealedPath, newRevealedPath string) error {
+	if _, exists := sm.State.SecretExists(oldRevealedPath); !exists {
+		return fmt.Errorf("failed to move non-existing secret: %s", oldRevealedPath)
+	}
+
+	needsReveal := !pathExists(filepath.Join(sm.SesamDir, oldRevealedPath))
+	if needsReveal {
+		// not yet revealed, do it before the rename entry, otherwise reveal would fail
+		if err := revealSecret(sm, oldRevealedPath); err != nil {
+			return err
+		}
+	}
+
+	// TODO: This is not particularly crash-safe. We could use the SealAll()
+	// mechanism of using a stageDir, but without re-rencrypting everything to
+	// make things better.
+
+	if err := sm.State.FeedEntry(
+		sm.Signer,
+		newAuditEntry(sm.Signer.UserName(), &DetailSecretRename{
+			OldRevealedPath: oldRevealedPath,
+			NewRevealedPath: newRevealedPath,
+		}),
+	); err != nil {
+		return fmt.Errorf("failed to add secret remove entry: %w", err)
+	}
+
+	if err := os.Rename(
+		filepath.Join(sm.SesamDir, oldRevealedPath),
+		filepath.Join(sm.SesamDir, newRevealedPath),
+	); err != nil {
 		return err
 	}
 
-	sm.secrets = slices.Delete(sm.secrets, idx, idx+1)
+	if err := os.RemoveAll(sm.cryptPath(oldRevealedPath)); err != nil {
+		return err
+	}
+
+	_, err := sealSecret(
+		sm,
+		newRevealedPath,
+		sm.recipientsFor(newRevealedPath),
+		sm.cryptPath(newRevealedPath),
+		sm.Signer.UserName(),
+	)
+	if err != nil {
+		return err
+	}
+
+	// If we'd cache signatures, we could skip reading all of them. But for now good enough.
+	sigs, err := readAllSignatures(sm.SesamDir)
+	if err != nil {
+		return err
+	}
+
+	if err := sm.State.FeedEntry(
+		sm.Signer,
+		newAuditEntry(sm.Signer.UserName(), &DetailSeal{
+			RootHash:    buildRootHash(sigs),
+			FilesSealed: 1,
+		}),
+	); err != nil {
+		return fmt.Errorf("failed to add secret remove entry: %w", err)
+	}
+
+	if needsReveal {
+		// file was not revealed before, to be consistent we should remove it again.
+		return os.Remove(filepath.Join(sm.SesamDir, newRevealedPath))
+	}
+
 	return nil
 }
 

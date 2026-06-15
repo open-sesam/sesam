@@ -219,8 +219,8 @@ func TestVerifySecretChangeBasic(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
-		RevealedPath: "secrets/db", Groups: []string{"dev"},
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/db", AccessGroups: []string{"dev"},
 	}), nil)
 
 	state := verifyState(t, al, EmptyKeyring())
@@ -235,8 +235,8 @@ func TestVerifySecretChangeEmptyGroupsMeansAdminOnly(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
-		RevealedPath: "secrets/db", Groups: []string{},
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/db", AccessGroups: []string{},
 	}), nil)
 
 	state := verifyState(t, al, EmptyKeyring())
@@ -258,13 +258,13 @@ func TestVerifySecretChangeNegative(t *testing.T) {
 			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
 		}), nil)
 
-		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
-			RevealedPath: "secrets/db", Groups: []string{"ops"},
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+			RevealedPath: "secrets/db", AccessGroups: []string{"ops"},
 		}), nil)
 
 		// Bob (dev) tries to change ops-only secret.
-		al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretChange{
-			RevealedPath: "secrets/db", Groups: []string{"dev"},
+		al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretChangeAccess{
+			RevealedPath: "secrets/db", AccessGroups: []string{"dev"},
 		}), nil)
 
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
@@ -276,12 +276,12 @@ func TestVerifySecretChangeUpdate(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
-		RevealedPath: "secrets/db", Groups: []string{"dev"},
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/db", AccessGroups: []string{"dev"},
 	}), nil)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
-		RevealedPath: "secrets/db", Groups: []string{"ops"},
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChangeAccess{
+		RevealedPath: "secrets/db", AccessGroups: []string{"ops"},
 	}), nil)
 
 	state := verifyState(t, al, EmptyKeyring())
@@ -298,9 +298,9 @@ func TestVerifySecretChangeRejectsPathTraversal(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "../../.ssh/authorized_keys",
-		Groups:       []string{"admin"},
+		AccessGroups: []string{"admin"},
 	}), nil)
 
 	err := verifyStateFail(t, al, EmptyKeyring())
@@ -324,8 +324,8 @@ func TestVerifySecretChangeNewSecretRequiresAccess(t *testing.T) {
 	}), nil)
 
 	// Bob (dev) tries to register a brand-new secret restricted to "ops".
-	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretChange{
-		RevealedPath: "secrets/ops-db", Groups: []string{"ops"},
+	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretAdd{
+		RevealedPath: "secrets/ops-db", AccessGroups: []string{"ops"},
 	}), nil)
 
 	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
@@ -338,8 +338,8 @@ func TestVerifySecretRemoveBasic(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
-		RevealedPath: "secrets/db", Groups: []string{"dev"},
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/db", AccessGroups: []string{"dev"},
 	}), nil)
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRemove{
 		RevealedPath: "secrets/db",
@@ -370,8 +370,8 @@ func TestVerifySecretRemoveNegative(t *testing.T) {
 			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
 		}), nil)
 
-		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
-			RevealedPath: "secrets/db", Groups: []string{"ops"},
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+			RevealedPath: "secrets/db", AccessGroups: []string{"ops"},
 		}), nil)
 
 		al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretRemove{RevealedPath: "secrets/db"}), nil)
@@ -658,22 +658,19 @@ func TestVerifyExportedRootHashMatch(t *testing.T) {
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
-		RevealedPath: "secrets/test", Groups: []string{"admin"},
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/test", AccessGroups: []string{"admin"},
 	}), nil)
 
 	writeSecret(t, sesamDir, "secrets/test", "content")
 	kr2 := testKeyring(t, admin)
-	s := &secret{
-		Mgr: &SecretManager{
-			SesamDir: sesamDir, Identities: Identities{admin.Identity},
-			Signer: admin.Signer, Keyring: kr2,
-		},
-		RevealedPath: "secrets/test",
-		Recipients:   kr2.Recipients([]string{"admin"}),
+	sm := &SecretManager{
+		SesamDir: sesamDir, Identities: Identities{admin.Identity},
+		Signer: admin.Signer, Keyring: kr2,
 	}
+	recps := kr2.Recipients([]string{"admin"})
 
-	sig, err := s.Seal(s.Mgr.cryptPath(s.RevealedPath), "admin")
+	sig, err := sealSecret(sm, "secrets/test", recps, sm.cryptPath("secrets/test"), "admin")
 	require.NoError(t, err)
 
 	rootHash := buildRootHash([]*secretFooter{sig})
@@ -716,8 +713,8 @@ func TestEndToEndStoreLoadVerify(t *testing.T) {
 		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
 	}), nil)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
-		RevealedPath: "secrets/db", Groups: []string{"dev"},
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/db", AccessGroups: []string{"dev"},
 	}), nil)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{
@@ -750,12 +747,12 @@ func TestFullLifecycle(t *testing.T) {
 		PubKeys: []UserPubKey{{Key: carol.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{carol.SignPubKey},
 	}), nil)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
-		RevealedPath: "secrets/db_pass", Groups: []string{"dev"},
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/db_pass", AccessGroups: []string{"dev"},
 	}), nil)
 
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
-		RevealedPath: "secrets/api_key", Groups: []string{"ops"},
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/api_key", AccessGroups: []string{"ops"},
 	}), nil)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{RootHash: "hash1", FilesSealed: 2}), nil)
@@ -772,4 +769,357 @@ func TestFullLifecycle(t *testing.T) {
 	require.True(t, exists)
 	require.Equal(t, "hash2", state.LastSealRootHash)
 	require.Equal(t, uint64(0), state.SealRequiredSeqID)
+}
+
+// tellUser appends a user.tell entry authored by admin and returns the user.
+func tellUser(t *testing.T, al *AuditLog, admin, user *testUser, groups []string) {
+	t.Helper()
+	tell := user.DetailUserTell(groups)
+	_, err := al.AddEntry(admin.Signer, newAuditEntry(admin.Name, &tell), nil)
+	require.NoError(t, err)
+}
+
+// --- verifyUserRename tests ---
+
+func TestVerifyUserRenameBasic(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	bob := newTestUser(t, "bob")
+	tellUser(t, al, admin, bob, []string{"dev"})
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserRename{
+		OldName: "bob", NewName: "bobby",
+	}), nil)
+
+	state := verifyState(t, al, EmptyKeyring())
+
+	_, exists := state.UserExists("bob")
+	require.False(t, exists, "old name must be gone")
+
+	renamed, exists := state.UserExists("bobby")
+	require.True(t, exists, "new name must exist")
+	require.Equal(t, []string{"dev"}, renamed.Groups, "groups must be preserved")
+}
+
+// Regression: rename must move the user's keys in the keyring too. Otherwise
+// the renamed user's *subsequent* entries fail signature verification - the
+// signature still matches the old name while ChangedBy is the new name.
+func TestVerifyUserRenameUpdatesKeyring(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	bob := newTestUser(t, "bob")
+	tellUser(t, al, admin, bob, []string{"dev"})
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserRename{
+		OldName: "bob", NewName: "bobby",
+	}), nil)
+
+	// "bobby" (formerly bob, same signing key) authors a later entry. This
+	// only verifies if the keyring learned the new name during the rename.
+	al.AddEntry(bob.Signer, newAuditEntry("bobby", &DetailSecretAdd{
+		RevealedPath: "secrets/db", AccessGroups: []string{"dev"},
+	}), nil)
+
+	require.NoError(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
+func TestVerifyUserRenameRejectsInvalidNewName(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	bob := newTestUser(t, "bob")
+	tellUser(t, al, admin, bob, []string{"dev"})
+
+	// A name with a path separator must be rejected - names become path
+	// components (.sesam/signkeys/<user>.age).
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserRename{
+		OldName: "bob", NewName: "../evil",
+	}), nil)
+
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
+func TestVerifyUserRenameRejectsCollision(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	bob := newTestUser(t, "bob")
+	tellUser(t, al, admin, bob, []string{"dev"})
+
+	carol := newTestUser(t, "carol")
+	tellUser(t, al, admin, carol, []string{"dev"})
+
+	// Renaming bob onto the existing carol must be rejected.
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserRename{
+		OldName: "bob", NewName: "carol",
+	}), nil)
+
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
+func TestVerifyUserRenameRequiresAdmin(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	bob := newTestUser(t, "bob")
+	tellUser(t, al, admin, bob, []string{"dev"})
+
+	// bob (non-admin) tries to rename himself.
+	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailUserRename{
+		OldName: "bob", NewName: "bobby",
+	}), nil)
+
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
+func TestVerifyUserRenameNonExistent(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserRename{
+		OldName: "ghost", NewName: "casper",
+	}), nil)
+
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
+// --- self-mutation edge cases ---
+//
+// The dispatch loop checks an entry's signature *before* applying the keyring
+// changes for kill and rename. That ordering is what makes self-mutation work:
+// the signature is verified against the author's still-current keyring entry,
+// and only afterwards is that entry moved (rename) or removed (kill). If the
+// keyring were mutated first, the signature would resolve to the new name (or
+// to nothing), and the entry would be wrongly rejected.
+
+// An admin renaming *themselves* must succeed: the rename entry is signed under
+// the old name, verified against it, and only then is the keyring moved to the
+// new name.
+func TestVerifyUserRenameSelf(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserRename{
+		OldName: "admin", NewName: "superadmin",
+	}), nil)
+
+	state := verifyState(t, al, EmptyKeyring())
+
+	_, exists := state.UserExists("admin")
+	require.False(t, exists, "old name must be gone")
+
+	renamed, exists := state.UserExists("superadmin")
+	require.True(t, exists, "new name must exist")
+	require.True(t, renamed.IsAdmin(), "admin status must be preserved")
+}
+
+// An admin killing *themselves* must succeed once another admin remains (so the
+// last-admin guard does not fire). The kill entry is verified against the
+// author's key before that key is removed from the keyring.
+func TestVerifyUserKillSelf(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	admin2 := newTestUser(t, "admin2")
+	tellUser(t, al, admin, admin2, []string{"admin"})
+
+	// admin2 removes admin2; a second admin remains, so last-admin is not the blocker.
+	al.AddEntry(admin2.Signer, newAuditEntry("admin2", &DetailUserKill{
+		User: "admin2",
+	}), nil)
+
+	state := verifyState(t, al, EmptyKeyring())
+
+	_, exists := state.UserExists("admin2")
+	require.False(t, exists, "self-killed user must be gone")
+
+	_, exists = state.UserExists("admin")
+	require.True(t, exists, "remaining admin must survive")
+}
+
+// --- verifyUserChangeGroups tests ---
+
+func TestVerifyUserChangeGroupsBasic(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	bob := newTestUser(t, "bob")
+	tellUser(t, al, admin, bob, []string{"dev"})
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserChangeGroups{
+		User: "bob", NewGroups: []string{"ops", "dev"},
+	}), nil)
+
+	state := verifyState(t, al, EmptyKeyring())
+	bob2, exists := state.UserExists("bob")
+	require.True(t, exists)
+	require.ElementsMatch(t, []string{"ops", "dev"}, bob2.Groups)
+	// change_groups must not implicitly grant admin (unlike the secret paths).
+	require.NotContains(t, bob2.Groups, "admin")
+	require.Equal(t, state.VerifiedUntil, state.SealRequiredSeqID,
+		"a group change requires a re-seal")
+}
+
+// Regression: removing "admin" from the only admin must be rejected, otherwise
+// the repo is permanently locked out of every admin-gated operation.
+func TestVerifyUserChangeGroupsCannotDemoteLastAdmin(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserChangeGroups{
+		User: "admin", NewGroups: []string{"dev"},
+	}), nil)
+
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
+func TestVerifyUserChangeGroupsAllowsDemoteWithOtherAdmin(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	admin2 := newTestUser(t, "admin2")
+	tellUser(t, al, admin, admin2, []string{"admin"})
+
+	// admin2 demotes the original admin; a second admin remains, so it's allowed.
+	al.AddEntry(admin2.Signer, newAuditEntry("admin2", &DetailUserChangeGroups{
+		User: "admin", NewGroups: []string{"dev"},
+	}), nil)
+
+	state := verifyState(t, al, EmptyKeyring())
+	demoted, _ := state.UserExists("admin")
+	require.NotContains(t, demoted.Groups, "admin")
+}
+
+func TestVerifyUserChangeGroupsRequiresAdmin(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	bob := newTestUser(t, "bob")
+	tellUser(t, al, admin, bob, []string{"dev"})
+	carol := newTestUser(t, "carol")
+	tellUser(t, al, admin, carol, []string{"dev"})
+
+	// bob (non-admin) tries to change carol's groups.
+	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailUserChangeGroups{
+		User: "carol", NewGroups: []string{"ops"},
+	}), nil)
+
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
+func TestVerifyUserChangeGroupsNonExistent(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserChangeGroups{
+		User: "ghost", NewGroups: []string{"dev"},
+	}), nil)
+
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
+// --- verifySecretRename tests ---
+
+func TestVerifySecretRenameBasic(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/db", AccessGroups: []string{"admin"},
+	}), nil)
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRename{
+		OldRevealedPath: "secrets/db", NewRevealedPath: "secrets/database",
+	}), nil)
+
+	state := verifyState(t, al, EmptyKeyring())
+	_, exists := state.SecretExists("secrets/db")
+	require.False(t, exists, "old path must be gone")
+	renamed, exists := state.SecretExists("secrets/database")
+	require.True(t, exists, "new path must exist")
+	require.Equal(t, "secrets/database", renamed.RevealedPath)
+}
+
+func TestVerifySecretRenameRejectsCollision(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/a", AccessGroups: []string{"admin"},
+	}), nil)
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/b", AccessGroups: []string{"admin"},
+	}), nil)
+
+	// Renaming a onto the existing b must be rejected.
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRename{
+		OldRevealedPath: "secrets/a", NewRevealedPath: "secrets/b",
+	}), nil)
+
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
+func TestVerifySecretRenameNonExistent(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRename{
+		OldRevealedPath: "secrets/ghost", NewRevealedPath: "secrets/casper",
+	}), nil)
+
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
+func TestVerifySecretRenameRejectsPathTraversal(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/db", AccessGroups: []string{"admin"},
+	}), nil)
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretRename{
+		OldRevealedPath: "secrets/db", NewRevealedPath: "../../.ssh/authorized_keys",
+	}), nil)
+
+	err := verifyStateFail(t, al, EmptyKeyring())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "..")
+}
+
+func TestVerifySecretRenameRequiresAccess(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	bob := newTestUser(t, "bob")
+	tellUser(t, al, admin, bob, []string{"dev"})
+
+	// ops-only secret bob (dev) cannot reach.
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/ops_db", AccessGroups: []string{"ops"},
+	}), nil)
+
+	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretRename{
+		OldRevealedPath: "secrets/ops_db", NewRevealedPath: "secrets/mine",
+	}), nil)
+
+	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 }

@@ -13,7 +13,7 @@ func integritySetup(t *testing.T) (*SecretManager, *VerifiedState) {
 	t.Helper()
 	mgr := testSecretManager(t)
 	secret := testSecret(t, mgr, "secrets/db", "password123")
-	sig, err := secret.Seal(mgr.cryptPath(secret.RevealedPath), "testuser")
+	sig, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
 	state := &VerifiedState{
@@ -56,7 +56,7 @@ func TestIntegrityExtraFile(t *testing.T) {
 
 	// Seal an extra secret that is not registered in state.
 	extra := testSecret(t, mgr, "secrets/extra", "extra-content")
-	_, err := extra.Seal(mgr.cryptPath(extra.RevealedPath), "testuser")
+	_, err := sealSecret(mgr, extra, mgr.recipientsFor(extra), mgr.cryptPath(extra), "testuser")
 	require.NoError(t, err)
 
 	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
@@ -86,7 +86,7 @@ func TestIntegrityMultipleSecrets(t *testing.T) {
 	var secrets []VerifiedSecret
 	for _, p := range []string{"secrets/a", "secrets/b", "secrets/c"} {
 		s := testSecret(t, mgr, p, "content-"+p)
-		sig, err := s.Seal(mgr.cryptPath(s.RevealedPath), "testuser")
+		sig, err := sealSecret(mgr, s, mgr.recipientsFor(s), mgr.cryptPath(s), "testuser")
 		require.NoError(t, err)
 		sigs = append(sigs, sig)
 		secrets = append(secrets, VerifiedSecret{RevealedPath: p, AccessGroups: []string{"admin"}})
@@ -181,13 +181,9 @@ func TestIntegrityRejectsUnauthorizedSealer(t *testing.T) {
 	}
 
 	writeSecret(t, sesamDir, "secrets/admin-only", "bob's payload")
-	bad := &secret{
-		Mgr:          bobMgr,
-		RevealedPath: "secrets/admin-only",
-		Recipients:   kr.Recipients([]string{"admin"}),
-	}
+	recps := kr.Recipients([]string{"admin"})
 	cryptPath := filepath.Join(sesamDir, ".sesam", "objects", "secrets/admin-only.sesam")
-	sig, err := bad.Seal(cryptPath, "bob")
+	sig, err := sealSecret(bobMgr, "secrets/admin-only", recps, cryptPath, "bob")
 	require.NoError(t, err)
 
 	state.LastSealRootHash = buildRootHash([]*secretFooter{sig})

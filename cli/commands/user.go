@@ -37,10 +37,48 @@ func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		}
 	}
 
-	return r.UserTell(ctx, user, recipients, groups)
+	if err := r.UserTell(ctx, user, recipients, groups); err != nil {
+		return err
+	}
+
+	if cmd.Bool("no-seal") {
+		return nil
+	}
+
+	return r.SealAll()
 }
 
-// HandleKill removes a user/group relation.
 func HandleKill(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	return r.UserKill(cmd.String("user"))
+	if err := r.UserKill(cmd.String("user")); err != nil {
+		return err
+	}
+
+	if cmd.Bool("no-seal") {
+		return nil
+	}
+
+	return r.SealAll()
+}
+
+func HandleUserChangeGroups(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+	err := r.UserChangeGroups(cmd.String("user"), cmd.StringSlice("group"))
+	if err != nil {
+		return err
+	}
+
+	if cmd.Bool("no-seal") {
+		return nil
+	}
+
+	return r.SealAll()
+}
+
+func HandleRenameUser(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+	oldName := cmd.StringArg("olduser")
+	newName := cmd.StringArg("newuser")
+	if oldName == "" || newName == "" {
+		return fmt.Errorf("need <olduser> and <newuser>")
+	}
+
+	return r.RenameUser(oldName, newName)
 }

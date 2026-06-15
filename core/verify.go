@@ -121,6 +121,17 @@ func (s *VerifiedState) UsersForSecret(revealedPath string) []string {
 	return users
 }
 
+func (s *VerifiedState) AdminUserCount() (adminUsersFound int, adminName string) {
+	for _, user := range s.Users {
+		if user.IsAdmin() {
+			adminUsersFound++
+			adminName = user.Name
+		}
+	}
+
+	return
+}
+
 // SealerAuthorized reports whether `user` is allowed to seal `revealedPath`,
 // i.e. whether the secret exists in the verified state and `user` has
 // access to it via group membership. Used by reveal- and integrity-time
@@ -294,6 +305,74 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 	return nil
 }
 
+func verifyUserRename(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
+	if _, err := state.RequireAdmin(entry); err != nil {
+		return err
+	}
+
+	renameDetails, err := parseDetail[DetailUserRename](entry)
+	if err != nil {
+		return fmt.Errorf("parse user rename detail: %w", err)
+	}
+
+	if err := ValidUserName(renameDetails.NewName); err != nil {
+		return fmt.Errorf("invalid new user name %q", renameDetails.NewName)
+	}
+
+	if _, exists := state.UserExists(renameDetails.NewName); exists {
+		return fmt.Errorf("new user already exists: %s", renameDetails.NewName)
+	}
+
+	user, exists := state.UserExists(renameDetails.OldName)
+	if !exists {
+		return fmt.Errorf(
+			"user %s to rename does not exist; seq_id=%d",
+			renameDetails.OldName,
+			entry.SeqID,
+		)
+	}
+
+	kr.RenameUser(renameDetails.OldName, renameDetails.NewName)
+	user.Name = renameDetails.NewName
+	return nil
+}
+
+func verifyUserChangeGroups(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
+	if _, err := state.RequireAdmin(entry); err != nil {
+		return err
+	}
+
+	ucg, err := parseDetail[DetailUserChangeGroups](entry)
+	if err != nil {
+		return fmt.Errorf("parse user change groups detail: %w", err)
+	}
+
+	user, exists := state.UserExists(ucg.User)
+	if !exists {
+		return fmt.Errorf(
+			"user %s to change groups does not exist; seq_id=%d",
+			ucg.User,
+			entry.SeqID,
+		)
+	}
+
+	adminUsersFound, adminName := state.AdminUserCount()
+	if adminUsersFound == 1 && adminName == user.Name {
+		if !slices.Contains(ucg.NewGroups, "admin") {
+			return fmt.Errorf(
+				"trying to change access of last admin user to %v: %s (seq_id=%d)",
+				user.Name,
+				ucg.NewGroups,
+				entry.SeqID,
+			)
+		}
+	}
+
+	user.Groups = deduplicate(ucg.NewGroups)
+	state.SealRequiredSeqID = entry.SeqID
+	return nil
+}
+
 func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
 	if _, err := state.RequireAdmin(entry); err != nil {
 		return err
@@ -313,18 +392,10 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 		)
 	}
 
-	adminUsersFound := 0
-	adminName := ""
-	for _, user := range state.Users {
-		if user.IsAdmin() {
-			adminUsersFound++
-			adminName = user.Name
-		}
-	}
-
 	// only one admin there:
 	// - if the admin is the one we gonna delete: forbid.
 	// - if we delete another user: allow.
+	adminUsersFound, adminName := state.AdminUserCount()
 	if adminUsersFound == 1 && adminName == user.Name {
 		return fmt.Errorf("trying to delete last admin user: %s (seq_id=%d)", user.Name, entry.SeqID)
 	}
@@ -339,8 +410,8 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 	return nil
 }
 
-func verifySecretChange(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
-	scd, err := parseDetail[DetailSecretChange](entry)
+func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
+	scd, err := parseDetail[DetailSecretAdd](entry)
 	if err != nil {
 		return fmt.Errorf("parse detail: %w", err)
 	}
@@ -350,41 +421,95 @@ func verifySecretChange(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 		return err
 	}
 
-	scd.Groups = deduplicate(scd.Groups)
-	if !slices.Contains(scd.Groups, "admin") {
-		scd.Groups = append(scd.Groups, "admin")
+	scd.AccessGroups = deduplicate(scd.AccessGroups)
+	if !slices.Contains(scd.AccessGroups, "admin") {
+		scd.AccessGroups = append(scd.AccessGroups, "admin")
 	}
 
-	existingSecret, exists := state.SecretExists(scd.RevealedPath)
+	_, exists := state.SecretExists(scd.RevealedPath)
 	if exists {
-		// secret exists
-		hasAccess := state.UserHasAccess(entry.ChangedBy, existingSecret.AccessGroups)
-		if !hasAccess {
-			return fmt.Errorf(
-				"user %s may not change details of %s",
-				entry.ChangedBy,
-				scd.RevealedPath,
-			)
-		}
-
-		existingSecret.AccessGroups = scd.Groups
-	} else {
-		hasAccess := state.UserHasAccess(entry.ChangedBy, scd.Groups)
-		if !hasAccess {
-			return fmt.Errorf(
-				"would add secret that %s has no access to: %s",
-				entry.ChangedBy,
-				scd.RevealedPath,
-			)
-		}
-
-		// secret does not exist
-		state.Secrets = append(state.Secrets, VerifiedSecret{
-			RevealedPath: scd.RevealedPath,
-			AccessGroups: scd.Groups,
-		})
+		return fmt.Errorf("cannot add already existing secret: %s", scd.RevealedPath)
 	}
 
+	hasAccess := state.UserHasAccess(entry.ChangedBy, scd.AccessGroups)
+	if !hasAccess {
+		return fmt.Errorf(
+			"would add secret that %s has no access to: %s",
+			entry.ChangedBy,
+			scd.RevealedPath,
+		)
+	}
+
+	// secret does not exist
+	state.Secrets = append(state.Secrets, VerifiedSecret{
+		RevealedPath: scd.RevealedPath,
+		AccessGroups: scd.AccessGroups,
+	})
+
+	state.SealRequiredSeqID = entry.SeqID
+	return nil
+}
+
+func verifySecretChangeAccess(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
+	sca, err := parseDetail[DetailSecretChangeAccess](entry)
+	if err != nil {
+		return fmt.Errorf("parse detail: %w", err)
+	}
+
+	existingSecret, exists := state.SecretExists(sca.RevealedPath)
+	if !exists {
+		return fmt.Errorf("trying to change access of not existing secret: %s", sca.RevealedPath)
+	}
+
+	hasAccess := state.UserHasAccess(entry.ChangedBy, existingSecret.AccessGroups)
+	if !hasAccess {
+		return fmt.Errorf(
+			"would change access to secret that %s has no access to: %s",
+			entry.ChangedBy,
+			sca.RevealedPath,
+		)
+	}
+
+	sca.AccessGroups = deduplicate(sca.AccessGroups)
+	if !slices.Contains(sca.AccessGroups, "admin") {
+		sca.AccessGroups = append(sca.AccessGroups, "admin")
+	}
+
+	existingSecret.AccessGroups = sca.AccessGroups
+	state.SealRequiredSeqID = entry.SeqID
+	return nil
+}
+
+func verifySecretRename(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
+	scr, err := parseDetail[DetailSecretRename](entry)
+	if err != nil {
+		return fmt.Errorf("parse detail: %w", err)
+	}
+
+	if err := validSecretPathFormat(log.SesamDir, scr.NewRevealedPath); err != nil {
+		return err
+	}
+
+	if _, exists := state.SecretExists(scr.NewRevealedPath); exists {
+		return fmt.Errorf("cannot move secret over existing secret: %q", scr.NewRevealedPath)
+	}
+
+	existingSecret, exists := state.SecretExists(scr.OldRevealedPath)
+	if !exists {
+		return fmt.Errorf("trying to rename not existing secret: %s", scr.OldRevealedPath)
+	}
+
+	hasAccess := state.UserHasAccess(entry.ChangedBy, existingSecret.AccessGroups)
+	if !hasAccess {
+		return fmt.Errorf(
+			"would rename secret that %s has no access to: %s",
+			entry.ChangedBy,
+			scr.OldRevealedPath,
+		)
+	}
+
+	// change in state to new name:
+	existingSecret.RevealedPath = scr.NewRevealedPath
 	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
@@ -590,14 +715,21 @@ func verify(state *VerifiedState) error {
 			err = verifyInit(log, &newState, entry, kr)
 		case OpUserTell:
 			err = verifyUserTell(log, &newState, entry, kr)
-		case OpUserKill:
-			err = verifyUserKill(log, &newState, entry, kr)
+		case OpUserChangeGroups:
+			// NOTE:
+			err = verifyUserChangeGroups(log, &newState, entry, kr)
 		case OpSeal:
 			err = verifySeal(log, &newState, entry)
-		case OpSecretChange:
-			err = verifySecretChange(log, &newState, entry)
+		case OpSecretAdd:
+			err = verifySecretAdd(log, &newState, entry)
 		case OpSecretRemove:
 			err = verifySecretRemove(log, &newState, entry)
+		case OpSecretChangeAccess:
+			err = verifySecretChangeAccess(log, &newState, entry)
+		case OpSecretRename:
+			err = verifySecretRename(log, &newState, entry)
+		case OpUserKill, OpUserRename:
+			// done later
 		default:
 			err = fmt.Errorf("unexpected core.Operation: %#v", entry.Operation)
 		}
@@ -614,6 +746,20 @@ func verify(state *VerifiedState) error {
 
 		if signatureUser != entry.ChangedBy {
 			return fmt.Errorf("signature was made by %s, not %s (seq_id=%d)", signatureUser, entry.ChangedBy, entry.SeqID)
+		}
+
+		// we verify operations there that need to carry out their keyring changes after verify.
+		// example: an admin renames himself as single user -> if keyring was already changed then
+		// the verify check would have failed if we'd do it before because entry.ChangedBy is with the old name.
+		switch entry.Operation {
+		case OpUserKill:
+			err = verifyUserKill(log, &newState, entry, kr)
+		case OpUserRename:
+			err = verifyUserRename(log, &newState, entry, kr)
+		}
+
+		if err != nil {
+			return err
 		}
 
 		if previousEntry != nil {
