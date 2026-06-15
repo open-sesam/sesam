@@ -76,10 +76,10 @@ func TestTellUserNonAdmin(t *testing.T) {
 	al := initAuditLog(t, sesamDir, admin)
 
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
-		User:        "bob",
-		Groups:      []string{"dev"},
-		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{bob.SignPubKey},
+		User:       "bob",
+		Groups:     []string{"dev"},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: []string{bob.SignPubKey},
 	}), nil)
 	require.NoError(t, err)
 
@@ -138,10 +138,10 @@ func TestKillUsersNonAdmin(t *testing.T) {
 	al := initAuditLog(t, sesamDir, admin)
 
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
-		User:        "bob",
-		Groups:      []string{"dev"},
-		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{bob.SignPubKey},
+		User:       "bob",
+		Groups:     []string{"dev"},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: []string{bob.SignPubKey},
 	}), nil)
 	require.NoError(t, err)
 
@@ -288,10 +288,10 @@ func nonAdminUserManager(t *testing.T) *UserManager {
 	al := initAuditLog(t, sesamDir, admin)
 
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
-		User:        "bob",
-		Groups:      []string{"dev"},
-		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{bob.SignPubKey},
+		User:       "bob",
+		Groups:     []string{"dev"},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: []string{bob.SignPubKey},
 	}), nil)
 	require.NoError(t, err)
 

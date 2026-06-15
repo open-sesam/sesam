@@ -98,10 +98,10 @@ func TestAddEntryChaining(t *testing.T) {
 
 	bob := newTestUser(t, "bob")
 	e := newAuditEntry("admin", &DetailUserTell{
-		User:        "bob",
-		Groups:      []string{"dev"},
-		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{bob.SignPubKey},
+		User:       "bob",
+		Groups:     []string{"dev"},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: []string{bob.SignPubKey},
 	})
 
 	_, err := al.AddEntry(admin.Signer, e, nil)
@@ -131,10 +131,10 @@ func TestStoreAndLoad(t *testing.T) {
 
 	bob := newTestUser(t, "bob")
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
-		User:        "bob",
-		Groups:      []string{"dev"},
-		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{bob.SignPubKey},
+		User:       "bob",
+		Groups:     []string{"dev"},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: []string{bob.SignPubKey},
 	}), nil)
 	require.NoError(t, err)
 
@@ -295,7 +295,7 @@ func TestIterateStopsOnError(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: []string{bob.SignPubKey},
 	}), nil)
 
 	var count int

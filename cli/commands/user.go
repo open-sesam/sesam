@@ -106,3 +106,7 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 
 	return r.SealAll()
 }
+
+func HandleUserRegenerateSignKey(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+	return r.UserRegenerateSignKey(cmd.String("user"))
+}

@@ -40,12 +40,13 @@ const (
 	OpSeal         = Operation("seal")
 
 	// Update operations:
-	OpUserRename         = Operation("user.rename")
-	OpUserChangeGroups   = Operation("user.change_groups")
-	OpSecretMove         = Operation("secret.move")
-	OpSecretChangeAccess = Operation("secret.change_access")
-	OpUserAddRecipients  = Operation("user.add_recipients")
-	OpUserRmRecipients   = Operation("user.rm_recipients")
+	OpUserRename            = Operation("user.rename")
+	OpUserChangeGroups      = Operation("user.change_groups")
+	OpSecretMove            = Operation("secret.move")
+	OpSecretChangeAccess    = Operation("secret.change_access")
+	OpUserAddRecipients     = Operation("user.add_recipients")
+	OpUserRmRecipients      = Operation("user.rm_recipients")
+	OpUserRegenerateSignKey = Operation("user.regenerate_sign_key")
 )
 
 // AuditDetail is a type constraint covering all valid detail types.
@@ -61,7 +62,8 @@ type AuditDetail interface {
 		DetailUserRename |
 		DetailUserChangeGroups |
 		DetailUserAddRecipients |
-		DetailUserRmRecipients
+		DetailUserRmRecipients |
+		DetailUserRegenerateSignKey
 }
 
 type AuditEntry struct {
@@ -206,10 +208,8 @@ type DetailUserTell struct {
 	// PubKeys of that user over time.
 	PubKeys []UserPubKey `json:"pub_keys"`
 
-	// SignPubKeys of that user.
-	// This should most likely just be one,
-	// but due to key-rotation it might be in theory several.
-	SignPubKeys []string `json:"sign_pub_key"`
+	// SignPubKey of that user.
+	SignPubKey string `json:"sign_pub_key"`
 }
 
 // DetailUserKill describes the operation of removing a user from the repo.
@@ -251,6 +251,11 @@ type DetailUserAddRecipients struct {
 type DetailUserRmRecipients struct {
 	User    string       `json:"user"`
 	PubKeys []UserPubKey `json:"pub_keys"`
+}
+
+type DetailUserRegenerateSignKey struct {
+	User          string `json:"user"`
+	NewSignPubKey string `json:"new_sign_pub_key"`
 }
 
 // DetailSecretAdd describes the operation of adding a new secret. Changing the
@@ -379,6 +384,8 @@ func operationFor(detail any) Operation {
 		return OpUserAddRecipients
 	case *DetailUserRmRecipients:
 		return OpUserRmRecipients
+	case *DetailUserRegenerateSignKey:
+		return OpUserRegenerateSignKey
 	default:
 		panic(fmt.Sprintf("unknown detail type: %T", detail))
 	}

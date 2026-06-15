@@ -62,10 +62,10 @@ func newTestUser(t testing.TB, name string) *testUser {
 
 func (tu *testUser) DetailUserTell(groups []string) DetailUserTell {
 	return DetailUserTell{
-		User:        tu.Name,
-		Groups:      groups,
-		PubKeys:     []UserPubKey{{Key: tu.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{tu.SignPubKey},
+		User:       tu.Name,
+		Groups:     groups,
+		PubKeys:    []UserPubKey{{Key: tu.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: []string{tu.SignPubKey},
 	}
 }
 

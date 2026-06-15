@@ -86,8 +86,8 @@ func TestChangeSecretGroupsUnauthorized(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	_, err := mgr.AuditLog.AddEntry(mgr.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{bob.SignPubKey},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: []string{bob.SignPubKey},
 	}), nil)
 	require.NoError(t, err)
 	require.NoError(t, verify(mgr.State))
@@ -220,7 +220,7 @@ func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	_, err := mgr.AuditLog.AddEntry(mgr.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: []string{bob.SignPubKey},
 	}), nil)
 	require.NoError(t, err)
 	require.NoError(t, verify(mgr.State))
@@ -558,7 +558,7 @@ func TestSealRejectsUnauthorizedUser(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	_, err := mgr.AuditLog.AddEntry(mgr.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: []string{bob.SignPubKey},
 	}), nil)
 	require.NoError(t, err)
 	require.NoError(t, verify(mgr.State))
@@ -628,10 +628,10 @@ func TestSealAllNonAdminPreservesCiphertextItCannotDecrypt(t *testing.T) {
 
 	// Add bob to the dev group.
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
-		User:        "bob",
-		Groups:      []string{"dev"},
-		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{bob.SignPubKey},
+		User:       "bob",
+		Groups:     []string{"dev"},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: []string{bob.SignPubKey},
 	}), nil)
 	require.NoError(t, err)
 

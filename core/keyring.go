@@ -30,12 +30,9 @@ type Keyring interface {
 	// TODO: comment.
 	RemoveRecipient(user string, recp *Recipient) error
 
-	// AddSignPubKey adds a signing key for a a specific user.
-	// Most of the time a user has only a single key, except for key rotation.
+	// SetSignPubKey sets the signing key for a a specific user.
 	// For now, only ed25519 keys are supported in `pub`.
-	// Adding the same key twice for a user is a no-op.
-	// Adding a signing key a different user already uses returns DuplicatePubkeyError.
-	AddSignPubKey(user string, pub []byte) error // TODO: Make that a SetSignPubKey.
+	SetSignPubKey(user string, pub []byte) error
 
 	// DeleteUser removes a user from they Keyring.
 	// It will return true if the user existed.
@@ -60,22 +57,21 @@ type Keyring interface {
 // MemoryKeyring is a simple Keyring implementation that holds public keys in memory only.
 type MemoryKeyring struct {
 	recipients map[string]Recipients
-	signPubs   map[string][][]byte
+	signPubs   map[string][]byte
 }
 
 func EmptyKeyring() *MemoryKeyring {
 	return &MemoryKeyring{
 		recipients: make(map[string]Recipients),
-		signPubs:   make(map[string][][]byte),
+		signPubs:   make(map[string][]byte),
 	}
 }
 
-// addKey is a generic helper since AddRecipient and AddSignPubKey is basically the same flow.
-func addKey[T any, S ~[]T](user string, key T, m map[string]S, equal func(T, T) bool) error {
+func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) error {
 	var isDuplicate bool
-	for existingUser, keys := range m {
+	for existingUser, keys := range mk.recipients {
 		for _, other := range keys {
-			if equal(other, key) {
+			if other.Equal(recp) {
 				if user == existingUser {
 					// key exists, but is just a duplicate of user.
 					isDuplicate = true
@@ -85,24 +81,17 @@ func addKey[T any, S ~[]T](user string, key T, m map[string]S, equal func(T, T) 
 				// another user already is using this key.
 				return &DuplicatePubkeyError{
 					user:   user,
-					pubkey: fmt.Sprintf("%v", key),
+					pubkey: fmt.Sprintf("%v", recp),
 				}
 			}
 		}
 	}
 
-	// TODO: AddRecipient and AddSignPubKey are independent, one user might not be in the other...
 	if !isDuplicate {
-		m[user] = append(m[user], key)
+		mk.recipients[user] = append(mk.recipients[user], recp)
 	}
 
 	return nil
-}
-
-func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) error {
-	return addKey(user, recp, mk.recipients, func(a, b *Recipient) bool {
-		return a.Equal(b)
-	})
 }
 
 func (mk *MemoryKeyring) RemoveRecipient(user string, toDelete *Recipient) error {
@@ -129,8 +118,19 @@ func (mk *MemoryKeyring) RemoveRecipient(user string, toDelete *Recipient) error
 	return nil
 }
 
-func (mk *MemoryKeyring) AddSignPubKey(user string, key []byte) error {
-	return addKey(user, key, mk.signPubs, bytes.Equal)
+func (mk *MemoryKeyring) SetSignPubKey(user string, newKey []byte) error {
+	// make sure there are no duplicates:
+	for _, pubKey := range mk.signPubs {
+		if bytes.Equal(pubKey, newKey) {
+			return &DuplicatePubkeyError{
+				user:   user,
+				pubkey: fmt.Sprintf("%v", newKey),
+			}
+		}
+	}
+
+	mk.signPubs[user] = newKey
+	return nil
 }
 
 func (mk *MemoryKeyring) DeleteUser(user string) bool {
@@ -163,28 +163,20 @@ func (mk *MemoryKeyring) Verify(domain SignDomain, data []byte, signature, userH
 	// In most cases we know which user we expect to have made the signature.
 	// In this case we can just hit this one first.
 	if userHint != "" {
-		signPubKeys, ok := mk.signPubs[userHint]
+		signPubKey, ok := mk.signPubs[userHint]
 		if ok {
-			for _, signPubKey := range signPubKeys {
-				if err := mk.verifySingle(domain, signPubKey, data, signature); err != nil {
-					continue
-				}
-
+			if err := mk.verifySingle(domain, signPubKey, data, signature); err == nil {
 				return userHint, nil
 			}
 		}
 	}
 
-	for user, signPubKeys := range mk.signPubs {
+	for user, signPubKey := range mk.signPubs {
 		if user == userHint {
 			continue
 		}
 
-		for _, signPubKey := range signPubKeys {
-			if err := mk.verifySingle(domain, signPubKey, data, signature); err != nil {
-				continue
-			}
-
+		if err := mk.verifySingle(domain, signPubKey, data, signature); err == nil {
 			return user, nil
 		}
 	}

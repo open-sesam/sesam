@@ -13,7 +13,7 @@ import (
 type VerifiedUser struct {
 	Name       string     `json:"name"`
 	Groups     []string   `json:"groups"`
-	SignPubKey []string   `json:"sign_pub_key"`
+	SignPubKey string     `json:"sign_pub_key"`
 	Recps      Recipients `json:"recipients"`
 }
 
@@ -251,24 +251,14 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s already exists", tell.User)
 	}
 
-	if len(tell.SignPubKeys) == 0 {
-		return fmt.Errorf("user %s needs at least one signing pub key", tell.User)
+	signPubKeyData, _, err := multicodeDecode(tell.SignPubKey)
+	if err != nil {
+		return fmt.Errorf("bad signing key %v", tell.SignPubKey)
 	}
 
-	if len(tell.SignPubKeys) > 10 {
-		return fmt.Errorf("user %s may not have more than 10 signing keys", tell.User)
-	}
-
-	for _, signPubKey := range tell.SignPubKeys {
-		signPubKeyData, _, err := multicodeDecode(signPubKey)
-		if err != nil {
-			return fmt.Errorf("bad signing key %v", signPubKey)
-		}
-
-		if err := kr.AddSignPubKey(tell.User, signPubKeyData); err != nil {
-			// will trigger on duplicate keys.
-			return err
-		}
+	if err := kr.SetSignPubKey(tell.User, signPubKeyData); err != nil {
+		// will trigger on duplicate keys.
+		return err
 	}
 
 	if len(tell.PubKeys) == 0 {
@@ -297,7 +287,7 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 
 	state.Users = append(state.Users, VerifiedUser{
 		Name:       tell.User,
-		SignPubKey: tell.SignPubKeys,
+		SignPubKey: tell.SignPubKey,
 		Recps:      recps,
 		Groups:     deduplicate(tell.Groups),
 	})
@@ -334,6 +324,33 @@ func verifyUserRename(log *AuditLog, state *VerifiedState, entry *AuditEntrySign
 
 	kr.RenameUser(renameDetails.OldName, renameDetails.NewName)
 	user.Name = renameDetails.NewName
+	return nil
+}
+
+func verifyUserRegenerateSignKey(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
+	if _, err := state.RequireAdmin(entry); err != nil {
+		return err
+	}
+
+	dursk, err := parseDetail[DetailUserRegenerateSignKey](entry)
+	if err != nil {
+		return fmt.Errorf("parse detail: %w", err)
+	}
+
+	user, exists := state.UserExists(dursk.User)
+	if !exists {
+		return fmt.Errorf(
+			"user %s to regen sign key does not exit; seq_id=%d",
+			dursk.User,
+			entry.SeqID,
+		)
+	}
+
+	if err := kr.SetSignPubKey(dursk.User, []byte(dursk.NewSignPubKey)); err != nil {
+		return err
+	}
+
+	user.SignPubKey = dursk.NewSignPubKey
 	return nil
 }
 
@@ -836,6 +853,8 @@ func verify(state *VerifiedState) error {
 			err = verifyUserKill(log, &newState, entry, kr)
 		case OpUserRename:
 			err = verifyUserRename(log, &newState, entry, kr)
+		case OpUserRegenerateSignKey:
+			err = verifyUserRegenerateSignKey(log, &newState, entry, kr)
 		}
 
 		if err != nil {

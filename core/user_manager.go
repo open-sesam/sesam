@@ -91,6 +91,7 @@ func (um *UserManager) TellUser(
 		return err
 	}
 
+	// TODO: add recipient/rm-recipients probably needs to rewrite the signing key.
 	newUserSigner, err := GenerateSignKey(
 		um.sesamDir,
 		user,
@@ -107,10 +108,10 @@ func (um *UserManager) TellUser(
 	if err := um.state.FeedEntry(
 		um.signer,
 		newAuditEntry(um.signer.UserName(), &DetailUserTell{
-			User:        user,
-			Groups:      groups,
-			PubKeys:     recps.UserPubKeys(),
-			SignPubKeys: []string{newUserSignKeyStr},
+			User:       user,
+			Groups:     groups,
+			PubKeys:    recps.UserPubKeys(),
+			SignPubKey: newUserSignKeyStr,
 		}),
 	); err != nil {
 		return err
@@ -248,6 +249,36 @@ func (um *UserManager) UserRmRecipient(ctx context.Context, user string, pubKeyS
 	return um.log.RotateKey(um.signer, allRecps)
 }
 
+func (um *UserManager) UserRegenerateSignKey(user string) error {
+	if !um.signUser.IsAdmin() {
+		return fmt.Errorf("need to be admin for removing recipients from a user")
+	}
+
+	recps := um.state.keyring.Recipients([]string{user})
+	signer, err := GenerateSignKey(
+		um.sesamDir,
+		user,
+		recps.AgeRecipients(),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to generate signing key: %w", err)
+	}
+
+	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
+
+	if err := um.state.FeedEntry(
+		um.signer,
+		newAuditEntry(um.signer.UserName(), &DetailUserRegenerateSignKey{
+			User:          user,
+			NewSignPubKey: signKeyStr,
+		}),
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // InitAdminUser has to be called on init to create the initial user.
 // pluginUI is used when any of pubKeySpecs is a plugin recipient; pass nil
 // to default to a non-interactive UI.
@@ -272,10 +303,10 @@ func InitAdminUser(
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
 	auditLog, err := InitAuditLog(sesamDir, signer, recps, DetailUserTell{
-		User:        signer.UserName(),
-		Groups:      []string{"admin"},
-		PubKeys:     recps.UserPubKeys(),
-		SignPubKeys: []string{signKeyStr},
+		User:       signer.UserName(),
+		Groups:     []string{"admin"},
+		PubKeys:    recps.UserPubKeys(),
+		SignPubKey: signKeyStr,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to init audit log: %w", err)
