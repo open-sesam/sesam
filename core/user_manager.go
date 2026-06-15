@@ -51,6 +51,7 @@ func BuildUserManager(
 // the time we get here, so a SealAll failure puts the repo in a
 // partial state: log advanced, ciphertext recipients stale. The error
 // message points at `sesam seal` as the resync.
+// TODO: Should be done by cli...
 func (um *UserManager) resealAfterMembershipChange(op string) error {
 	if err := um.secMgr.SealAll(); err != nil {
 		return fmt.Errorf(
@@ -208,13 +209,19 @@ func (um *UserManager) UserAddRecipient(ctx context.Context, user string, pubKey
 		return err
 	}
 
-	return um.state.FeedEntry(
+	if err := um.state.FeedEntry(
 		um.signer,
 		newAuditEntry(um.signer.UserName(), &DetailUserAddRecipients{
 			User:    user,
 			PubKeys: recps.UserPubKeys(),
 		}),
-	)
+	); err != nil {
+		return err
+	}
+
+	// make sure new recipients can also decrypt the log.
+	allRecps := AllRecipients(um.state.keyring)
+	return um.log.WriteAuditKey(allRecps)
 }
 
 func (um *UserManager) UserRmRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
@@ -227,13 +234,18 @@ func (um *UserManager) UserRmRecipient(ctx context.Context, user string, pubKeyS
 		return err
 	}
 
-	return um.state.FeedEntry(
+	if err := um.state.FeedEntry(
 		um.signer,
 		newAuditEntry(um.signer.UserName(), &DetailUserRmRecipients{
 			User:    user,
 			PubKeys: recps.UserPubKeys(),
 		}),
-	)
+	); err != nil {
+		return err
+	}
+
+	allRecps := AllRecipients(um.state.keyring)
+	return um.log.RotateKey(um.signer, allRecps)
 }
 
 // InitAdminUser has to be called on init to create the initial user.

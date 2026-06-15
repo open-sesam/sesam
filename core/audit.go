@@ -376,7 +376,7 @@ func operationFor(detail any) Operation {
 	case *DetailUserChangeGroups:
 		return OpUserChangeGroups
 	case *DetailUserAddRecipients:
-		return OpUserRmRecipients
+		return OpUserAddRecipients
 	case *DetailUserRmRecipients:
 		return OpUserRmRecipients
 	default:

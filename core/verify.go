@@ -456,7 +456,7 @@ func verifyUserRmRecipients(log *AuditLog, state *VerifiedState, entry *AuditEnt
 
 	durr, err := parseDetail[DetailUserRmRecipients](entry)
 	if err != nil {
-		return fmt.Errorf("parse user.add_recipients detail: %w", err)
+		return fmt.Errorf("parse user.rm_recipients detail: %w", err)
 	}
 
 	user, exists := state.UserExists(durr.User)
@@ -796,6 +796,8 @@ func verify(state *VerifiedState) error {
 			err = verifyUserChangeGroups(log, &newState, entry, kr)
 		case OpUserAddRecipients:
 			err = verifyUserAddRecipients(log, &newState, entry, kr)
+		case OpUserRmRecipients:
+			err = verifyUserRmRecipients(log, &newState, entry, kr)
 		case OpSeal:
 			err = verifySeal(log, &newState, entry)
 		case OpSecretAdd:
@@ -834,8 +836,6 @@ func verify(state *VerifiedState) error {
 			err = verifyUserKill(log, &newState, entry, kr)
 		case OpUserRename:
 			err = verifyUserRename(log, &newState, entry, kr)
-		case OpUserRmRecipients:
-			err = verifyUserRmRecipients(log, &newState, entry, kr)
 		}
 
 		if err != nil {
