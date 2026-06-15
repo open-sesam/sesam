@@ -22,6 +22,10 @@ exec sesam log
 stdout 'changed user groups of bob to dev, ops'
 exec sesam verify
 
+# Before the rename bob's signing key lives under his old name.
+exists .sesam/signkeys/bob.age
+! exists .sesam/signkeys/robert.age
+
 # Rename bob to robert.
 exec sesam user rename bob robert
 exec sesam show .sesam/audit/log.jsonl
@@ -30,6 +34,10 @@ stdout '"robert"'
 exec sesam log
 stdout 'changed user name bob to robert'
 exec sesam verify
+
+# The signing key file is renamed too: bob.age is gone, robert.age exists.
+exists .sesam/signkeys/robert.age
+! exists .sesam/signkeys/bob.age
 
 # After the rename only robert is known, bob is gone.
 exec sesam user list

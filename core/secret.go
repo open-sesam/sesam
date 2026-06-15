@@ -195,6 +195,10 @@ func revealSecret(sm *SecretManager, revealedPath string) error {
 	// TODO: Seal and reveal should carry over permissions and other attrs from the original file.
 	// Git can only differentiate between executable and normal files, not between 0600 and 0644.
 	// So default to 0600 to avoid troubles with ssh keys for now?
+	//
+	// Ideas:
+	// - Either give each secret in the config a permission param
+	// - or store the original permission in the audit log, which is then used to restore it.
 	_ = dstFd.Chmod(0o600)
 	return dstFd.CloseAtomicallyReplace()
 }
