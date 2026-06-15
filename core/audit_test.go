@@ -194,12 +194,12 @@ func TestLoadCorruptTrailingEntryRejected(t *testing.T) {
 func TestBuildRootHash(t *testing.T) {
 	t.Run("order independent", func(t *testing.T) {
 		sigs1 := []*secretFooter{
-			{RevealedPath: "b", Hash: "hash-b"},
-			{RevealedPath: "a", Hash: "hash-a"},
+			{RevealedPath: "b", CipherTextHash: "hash-b"},
+			{RevealedPath: "a", CipherTextHash: "hash-a"},
 		}
 		sigs2 := []*secretFooter{
-			{RevealedPath: "a", Hash: "hash-a"},
-			{RevealedPath: "b", Hash: "hash-b"},
+			{RevealedPath: "a", CipherTextHash: "hash-a"},
+			{RevealedPath: "b", CipherTextHash: "hash-b"},
 		}
 
 		h1 := buildRootHash(sigs1)
@@ -209,8 +209,8 @@ func TestBuildRootHash(t *testing.T) {
 	})
 
 	t.Run("different content produces different hash", func(t *testing.T) {
-		h1 := buildRootHash([]*secretFooter{{RevealedPath: "a", Hash: "hash-a"}})
-		h2 := buildRootHash([]*secretFooter{{RevealedPath: "a", Hash: "hash-different"}})
+		h1 := buildRootHash([]*secretFooter{{RevealedPath: "a", CipherTextHash: "hash-a"}})
+		h2 := buildRootHash([]*secretFooter{{RevealedPath: "a", CipherTextHash: "hash-different"}})
 		require.NotEqual(t, h1, h2)
 	})
 
@@ -220,7 +220,7 @@ func TestBuildRootHash(t *testing.T) {
 	})
 
 	t.Run("single sig", func(t *testing.T) {
-		h := buildRootHash([]*secretFooter{{RevealedPath: "a", Hash: "h"}})
+		h := buildRootHash([]*secretFooter{{RevealedPath: "a", CipherTextHash: "h"}})
 		require.NotEmpty(t, h)
 	})
 }

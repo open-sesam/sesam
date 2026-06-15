@@ -102,8 +102,8 @@ func (p *PluginUI) requestValue(name, prompt string, secret bool) (string, error
 
 func (p *PluginUI) readValue(secret bool) (string, error) {
 	if secret {
-		if f, ok := p.stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) { //nolint:gosec
-			b, err := term.ReadPassword(int(f.Fd())) //nolint:gosec
+		if f, ok := p.stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+			b, err := term.ReadPassword(int(f.Fd()))
 			_, _ = fmt.Fprintln(p.stderr)
 			if err != nil {
 				return "", err

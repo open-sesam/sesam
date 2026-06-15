@@ -16,6 +16,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/gofrs/flock"
+	"github.com/google/renameio"
 	"github.com/open-sesam/sesam/core"
 )
 
@@ -39,6 +42,8 @@ type Repo struct {
 	pluginUI *core.PluginUI
 	gitRepo  *git.Repository
 	lock     *flock.Flock
+
+	whoami string
 
 	identityPaths []string
 	identities    core.Identities
@@ -198,6 +203,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 
 	r := newRepo(resolvedDir, gitRepo, idPaths, opts.RepoOpts)
+	r.whoami = opts.InitialUserName
 	success := false
 	defer func() {
 		if !success {
@@ -364,6 +370,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to map identity to user: %w", err)
 	}
+	r.whoami = whoami
 
 	signer, err := core.LoadSignKey(resolvedDir, whoami, signIdentity)
 	if err != nil {
@@ -746,11 +753,7 @@ func (r *Repo) Whoami() (string, error) {
 		return "", ErrClosed
 	}
 
-	whoami, _, err := identityToUser(r.identities, r.keyring.ListUsers())
-	if err != nil {
-		return "", fmt.Errorf("failed to identify current user: %w", err)
-	}
-	return whoami, nil
+	return r.whoami, nil
 }
 
 func (r *Repo) Log(fn func(e *core.AuditEntrySigned) error) error {
@@ -795,4 +798,269 @@ func (r *Repo) UserChangeGroups(user string, groups []string) error {
 	}
 
 	return r.user.UserChangeGroups(user, groups)
+}
+
+type SecretState int
+
+const (
+	SecretStateNone = SecretState(iota)
+	SecretStateNoSealedPath
+	SecretStateNoRevealedPath
+	SecretStateUserHasNoAccess
+	SecretStateInSync
+	SecretStateNotInSync
+	SecretStateUnmanaged
+)
+
+func (s SecretState) String() string {
+	var desc string
+	switch s {
+	case SecretStateNoSealedPath:
+		desc = "unsealed"
+	case SecretStateNoRevealedPath:
+		desc = "unrevealed"
+	case SecretStateUserHasNoAccess:
+		desc = "no_access"
+	case SecretStateInSync:
+		desc = "in_sync"
+	case SecretStateNotInSync:
+		desc = "out_of_sync"
+	case SecretStateUnmanaged:
+		desc = "unmanaged"
+	default:
+		desc = "undefined"
+	}
+
+	return desc
+}
+
+func (s SecretState) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf("%q", s.String())), nil
+}
+
+// StatusForFile describes wether the sealed file differs from the revealed file.
+//
+// Cases:
+//
+//  1. Seal exists, Revealed does not exist => Not yet revealed, because cleaned.
+//  2. Seal exists, Revealed does not exist => Not revealed, because user has no access.
+//  3. Seal exists not, Reveaed exists      => Not yet sealed.
+//  4. Both exist and user has access to it => Either equal or not.
+type StatusForFile struct {
+	RevealedPath string      `json:"revealed_path"`
+	State        SecretState `json:"state"`
+
+	// AccessGroups are the groups granted access to this secret. Empty for
+	// unmanaged files (SecretStateNoSesamSecret).
+	AccessGroups []string `json:"access_groups,omitempty"`
+
+	// AccessUsers are the users having access to this file.
+	AccessUsers []string `json:"access_users,omitempty"`
+}
+
+// Status describes how the revealed state compares to the sealed state
+type Status struct {
+	// Files are the reports for each known secret
+	Files []StatusForFile `json:"files"`
+
+	// DiffDir is only set when WriteDiffDirs is true.
+	DiffDir string `json:"-"`
+}
+
+// StatusOpts can be given to Status()
+type StatusOpts struct {
+	// WriteDiffDirs will return a tmp directory that has a sealed/ and revealed/ sub-directory.
+	// It contains the whole repo in a way that can be easily passed to `git diff`.
+	// You are supposed to delete this directory after use.
+	WriteDiffDirs bool
+
+	// IgnoreUnmanaged will ignore files not managed by sesam.
+	IgnoreUnmanaged bool
+}
+
+func (r *Repo) cleanablePaths() ([]string, error) {
+	paths := []string{}
+	err := cleanup(r.gitRepo, r.sesamDir, func(path string) (bool, error) {
+		paths = append(paths, path)
+		return false, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return paths, nil
+}
+
+// Status computes a comparison between the revealed and sealed state in the repo.
+func (r *Repo) Status(opts StatusOpts) (*Status, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return nil, ErrClosed
+	}
+
+	var status Status
+
+	secretMap := make(map[string]*core.VerifiedSecret)
+	for idx := range r.vstate.Secrets {
+		secretMap[r.vstate.Secrets[idx].RevealedPath] = &r.vstate.Secrets[idx]
+	}
+
+	if !opts.IgnoreUnmanaged {
+		allPaths, err := r.cleanablePaths()
+		if err != nil {
+			return nil, fmt.Errorf("failed to list all paths: %w", err)
+		}
+
+		for _, path := range allPaths {
+			if _, ok := secretMap[path]; !ok {
+				secretMap[path] = nil
+			}
+		}
+	}
+
+	for revealedPath, secret := range secretMap {
+		// Unmanaged files have no associated secret (and no access groups).
+		if secret == nil {
+			status.Files = append(status.Files, StatusForFile{
+				RevealedPath: revealedPath,
+				State:        SecretStateUnmanaged,
+			})
+			continue
+		}
+
+		add := func(state SecretState) {
+			sff := StatusForFile{
+				RevealedPath: revealedPath,
+				State:        state,
+				AccessGroups: slices.Clone(secret.AccessGroups),
+				AccessUsers:  r.vstate.UserForGroups(secret.AccessGroups),
+			}
+
+			sort.Strings(sff.AccessGroups)
+			sort.Strings(sff.AccessUsers)
+			status.Files = append(status.Files, sff)
+		}
+
+		if !r.vstate.UserHasAccess(r.whoami, secret.AccessGroups) {
+			add(SecretStateUserHasNoAccess)
+			continue
+		}
+
+		absPath := filepath.Join(r.sesamDir, revealedPath)
+		if !core.PathExists(absPath) {
+			add(SecretStateNoRevealedPath)
+			continue
+		}
+
+		sealedPath := r.secret.SealedPath(revealedPath)
+		if !core.PathExists(sealedPath) {
+			add(SecretStateNoSealedPath)
+			continue
+		}
+
+		same, err := r.secret.EqualPlaintext(revealedPath, r.identities)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"failed to compare %s and %s: %w",
+				revealedPath,
+				sealedPath,
+				err,
+			)
+		}
+
+		if same {
+			add(SecretStateInSync)
+		} else {
+			add(SecretStateNotInSync)
+		}
+	}
+
+	sort.Slice(status.Files, func(i, j int) bool {
+		return status.Files[i].RevealedPath < status.Files[j].RevealedPath
+	})
+
+	if opts.WriteDiffDirs {
+		tmpDir, err := r.statusToDiffDir(&status)
+		if err != nil {
+			return nil, err
+		}
+
+		status.DiffDir = tmpDir
+	}
+
+	return &status, nil
+}
+
+func (r *Repo) statusToDiffDir(status *Status) (diffDir string, err error) {
+	rootTmpDir := r.secret.TmpDir()
+	tmpDir, err := os.MkdirTemp(rootTmpDir, "status-diff-")
+	if err != nil {
+		return "", fmt.Errorf("failed to make temp dir for diff: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(tmpDir)
+		}
+	}()
+
+	sealTmpDir := filepath.Join(tmpDir, "sealed")
+	plainTmpDir := filepath.Join(tmpDir, "revealed")
+
+	for _, file := range status.Files {
+		sealTmpPath := filepath.Join(sealTmpDir, file.RevealedPath)
+		if err := os.MkdirAll(filepath.Dir(sealTmpPath), 0o700); err != nil {
+			return "", fmt.Errorf("failed to make sub temp dir for diff: %w", err)
+		}
+
+		switch file.State {
+		case SecretStateNoSealedPath, SecretStateUserHasNoAccess, SecretStateNone:
+			// can't decrypt path - put a dummy file there.
+			desc, _ := file.State.MarshalJSON()
+			if err := renameio.WriteFile(sealTmpPath, desc, 0o600); err != nil {
+				return "", fmt.Errorf("failed write sealed state file: %w", err)
+			}
+		case SecretStateInSync:
+			// no need to write same files.
+		default:
+			//nolint:gosec
+			sealFd, err := os.OpenFile(sealTmpPath, os.O_CREATE|os.O_WRONLY|os.O_SYNC, 0o600)
+			if err != nil {
+				return "", fmt.Errorf("failed to open sealed file: %w", err)
+			}
+
+			if _, err := core.ShowSecret(r.sesamDir, r.identities, file.RevealedPath, sealFd); err != nil {
+				_ = sealFd.Close()
+				return "", err
+			}
+
+			if err := sealFd.Close(); err != nil {
+				return "", fmt.Errorf("failed to close seal file: %w", err)
+			}
+		}
+
+		plainTmpPath := filepath.Join(plainTmpDir, file.RevealedPath)
+		if err := os.MkdirAll(filepath.Dir(plainTmpPath), 0o700); err != nil {
+			return "", fmt.Errorf("failed to make sub temp dir for diff: %w", err)
+		}
+
+		switch file.State {
+		case SecretStateNoRevealedPath, SecretStateNone, SecretStateUserHasNoAccess:
+			// can't link revealed path, write dummy file.
+			desc := fmt.Sprintf("-- sesam: %s --", file.State.String())
+			if err := renameio.WriteFile(plainTmpPath, []byte(desc), 0o600); err != nil {
+				return "", fmt.Errorf("failed write revealed state file: %w", err)
+			}
+		case SecretStateInSync:
+			// no need to write same files.
+		default:
+			if err := os.Link(filepath.Join(r.sesamDir, file.RevealedPath), plainTmpPath); err != nil {
+				return "", fmt.Errorf("failed to link revealed file: %w", err)
+			}
+		}
+	}
+
+	return tmpDir, nil
 }

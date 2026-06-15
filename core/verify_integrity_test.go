@@ -175,13 +175,16 @@ func TestIntegrityRejectsUnauthorizedSealer(t *testing.T) {
 		},
 	}
 
+	// Bob is a recipient of the file (so he can derive the content-hash key
+	// and seal) but not an authorized sealer of admin-only per the policy.
 	bobMgr := &SecretManager{
-		SesamDir: sesamDir,
-		Signer:   bob.Signer,
+		SesamDir:   sesamDir,
+		Identities: Identities{bob.Identity},
+		Signer:     bob.Signer,
 	}
 
 	writeSecret(t, sesamDir, "secrets/admin-only", "bob's payload")
-	recps := kr.Recipients([]string{"admin"})
+	recps := kr.Recipients([]string{"admin", "bob"})
 	cryptPath := filepath.Join(sesamDir, ".sesam", "objects", "secrets/admin-only.sesam")
 	sig, err := sealSecret(bobMgr, "secrets/admin-only", recps, cryptPath, "bob")
 	require.NoError(t, err)

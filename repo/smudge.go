@@ -366,7 +366,7 @@ func (h *filterProcessHandler) echoThroughSpill(scanner *pktline.Scanner, encode
 				return nil, encErr
 			}
 		}
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -578,22 +578,6 @@ func RunSmudgeFilter(ctx context.Context, sesamDir string, identityPaths []strin
 	}
 
 	return handler.Run(ctx, in, out)
-}
-
-// cleanWorktree removes stale untracked files from sesamDir, excluding the
-// given identity file paths. It is called at most once per filter session
-// (guarded by filterProcessHandler.cleaned).
-func cleanWorktree(sesamDir string, identityPaths []string) error {
-	repo, err := openGitRepo(sesamDir)
-	if err != nil {
-		return err
-	}
-
-	allowFn := func(path string) (bool, error) {
-		return true, nil
-	}
-
-	return cleanup(repo, sesamDir, allowFn, identityPaths...)
 }
 
 // openSpillFile creates a scratch file inside sesamDir/.sesam/tmp using

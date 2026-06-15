@@ -170,7 +170,7 @@ func readAllSignaturesForDir(objectsDir string) ([]*secretFooter, error) {
 		}
 		defer closeLogged(fd)
 
-		_, sigDesc, err := readSignature(fd)
+		_, sigDesc, err := readFooter(fd)
 		if err != nil {
 			return err
 		}

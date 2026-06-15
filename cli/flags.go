@@ -49,13 +49,21 @@ func groupFlag(required bool, usage string) cli.Flag {
 	}
 }
 
+func recipientsFlag(required bool) cli.Flag {
+	return &cli.StringSliceFlag{
+		Name:     "recipient",
+		Required: required,
+		Usage:    "Recipient key spec (e.g. github:alice) - can be given several times",
+	}
+}
+
 // flagsGeneral are shared by most top-level commands.
 //
 // They describe the operator identity and repository/config roots.
 var flagsGeneral = []cli.Flag{
 	&cli.StringSliceFlag{
 		Name:    "identity",
-		Aliases: []string{"i", "id"},
+		Aliases: []string{"i"},
 		Usage:   "Path to the age identity (can be given several times)",
 		Sources: cli.EnvVars("SESAM_ID", "SESAM_IDENTITY"),
 	},
@@ -95,7 +103,7 @@ var flagsGeneral = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name:  "verify-mode",
-		Usage: "Adjust how strong or weak the disk state is verified",
+		Usage: "Adjust how strong or weak the disk state is verified ('all', or 'no-disk')",
 		Value: "all",
 	},
 }
@@ -138,11 +146,7 @@ var flagsMove = []cli.Flag{}
 // flagsTell contains controls for adding users.
 var flagsTell = []cli.Flag{
 	userFlag(false, "User name to add"),
-	&cli.StringSliceFlag{
-		Name:     "recipient",
-		Required: true,
-		Usage:    "Recipient key spec (e.g. github:alice) - can be given several times",
-	},
+	recipientsFlag(true),
 	groupFlag(true, "Group assignment (repeatable)"),
 	flagNoSeal,
 }
@@ -167,11 +171,49 @@ var flagsUserChangeGroups = []cli.Flag{
 	flagNoSeal,
 }
 
+var flagsUserAddRecipient = []cli.Flag{
+	userFlag(true, "Which user receives the new recipient"),
+	recipientsFlag(true),
+	flagNoSeal,
+}
+
+var flagsUserRemoveRecipient = []cli.Flag{
+	userFlag(true, "Which user looses the specified recipient"),
+	recipientsFlag(true),
+	flagNoSeal,
+}
+
 var flagsShow = []cli.Flag{}
 
-var flagsLog = []cli.Flag{flagJSON}
+var flagsLog = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "full",
+		Aliases: []string{"f"},
+		Usage:   "Show full timestamps and ids instead of shortened ones",
+	},
+	flagJSON,
+}
 
 var flagsID = []cli.Flag{flagJSON}
+
+var flagsStatus = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "diff",
+		Aliases: []string{"d"},
+		Usage:   "Show the actual diff using git (extra args are passed to git)",
+	},
+	&cli.BoolFlag{
+		Name:    "users",
+		Aliases: []string{"u"},
+		Usage:   "Show users instead of groups",
+	},
+	&cli.BoolFlag{
+		Name:    "all",
+		Aliases: []string{"a"},
+		Usage:   "Also show in-sync secrets and unmanaged files (hidden by default)",
+	},
+	flagJSON,
+}
 
 var flagsVerify = []cli.Flag{
 	&cli.BoolFlag{

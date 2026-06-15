@@ -456,3 +456,129 @@ func TestRepoOpts_PluginUI(t *testing.T) {
 	require.NotNil(t, RepoOpts{}.pluginUI(), "non-interactive default")
 	require.NotNil(t, RepoOpts{Interactive: true}.pluginUI(), "interactive variant")
 }
+
+// --- Status ----------------------------------------------------------------
+
+// writeRepoFile writes content to dir/rel, creating parent dirs as needed.
+func writeRepoFile(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	full := filepath.Join(dir, rel)
+	require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o700))
+	require.NoError(t, os.WriteFile(full, []byte(content), 0o600))
+}
+
+// statusStates runs Status and collapses the report into a path->state map so
+// tests can assert on the specific secrets they created (ignoring the
+// bootstrap README.md and any other entries).
+func statusStates(t *testing.T, r *Repo, opts StatusOpts) map[string]SecretState {
+	t.Helper()
+	st, err := r.Status(opts)
+	require.NoError(t, err)
+
+	out := make(map[string]SecretState, len(st.Files))
+	for _, f := range st.Files {
+		out[f.RevealedPath] = f.State
+	}
+	return out
+}
+
+func TestRepoStatusStates(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	add := func(rel, content string) {
+		t.Helper()
+		writeRepoFile(t, dir, rel, content)
+		require.NoError(t, r.SecretAdd([]string{rel}, []string{"admin"}))
+	}
+
+	add("secrets/same", "identical")
+	add("secrets/diff", "original")
+	add("secrets/unrevealed", "gone-soon")
+	add("secrets/unsealed", "seal-removed")
+
+	// Add only records the audit entry; seal writes the ciphertext objects.
+	require.NoError(t, r.SealAll())
+	require.NoError(t, r.Close())
+
+	// Reload so the runtime user (whoami) is resolved - Status needs it to
+	// evaluate access, and Init alone does not populate it.
+	r = reloadSesamRepo(t, dir, admin)
+
+	// diff: change the revealed plaintext without re-sealing.
+	writeRepoFile(t, dir, "secrets/diff", "changed!")
+	// unrevealed: drop the revealed plaintext (sealed object stays).
+	require.NoError(t, os.Remove(filepath.Join(dir, "secrets/unrevealed")))
+	// unsealed: drop the sealed object (revealed plaintext stays).
+	require.NoError(t, os.Remove(r.secret.SealedPath("secrets/unsealed")))
+	// unmanaged: an untracked file sesam does not know about.
+	writeRepoFile(t, dir, "loose.txt", "junk")
+
+	t.Run("each state is classified", func(t *testing.T) {
+		m := statusStates(t, r, StatusOpts{})
+		require.Equal(t, SecretStateInSync, m["secrets/same"])
+		require.Equal(t, SecretStateNotInSync, m["secrets/diff"])
+		require.Equal(t, SecretStateNoRevealedPath, m["secrets/unrevealed"])
+		require.Equal(t, SecretStateNoSealedPath, m["secrets/unsealed"])
+		require.Equal(t, SecretStateUnmanaged, m["loose.txt"])
+	})
+
+	t.Run("ignore-unmanaged drops loose files but keeps secrets", func(t *testing.T) {
+		m := statusStates(t, r, StatusOpts{IgnoreUnmanaged: true})
+		_, ok := m["loose.txt"]
+		require.False(t, ok, "unmanaged file must not appear")
+		require.Equal(t, SecretStateInSync, m["secrets/same"])
+	})
+}
+
+// A user without access to a secret must see it reported as no-access, and
+// Status must not try to decrypt it (the user is not a recipient).
+func TestRepoStatusUserHasNoAccess(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	dir, r := bootstrapRepo(t, admin)
+
+	// A secret in a group bob will never belong to.
+	writeRepoFile(t, dir, "secrets/ops", "ops-only")
+	require.NoError(t, r.SecretAdd([]string{"secrets/ops"}, []string{"ops"}))
+
+	// Tell bob, but only into "dev" - he has no access to the "ops" secret.
+	require.NoError(t, r.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"dev"}))
+	require.NoError(t, r.Close())
+
+	rb := reloadSesamRepo(t, dir, bob)
+	m := statusStates(t, rb, StatusOpts{})
+	require.Equal(t, SecretStateUserHasNoAccess, m["secrets/ops"])
+}
+
+// With WriteDiffDirs the diff dir must hold the decrypted *sealed* content
+// under sealed/ and the working-tree plaintext under revealed/, mirroring the
+// secret's revealed path, so `git diff --no-index sealed revealed` works.
+func TestRepoStatusDiffDir(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	writeRepoFile(t, dir, "secrets/diff", "v1-sealed")
+	require.NoError(t, r.SecretAdd([]string{"secrets/diff"}, []string{"admin"}))
+	require.NoError(t, r.SealAll())
+	require.NoError(t, r.Close())
+
+	// Reload so whoami is resolved (Init does not set it).
+	r = reloadSesamRepo(t, dir, admin)
+
+	// Modify the working copy so sealed and revealed differ.
+	writeRepoFile(t, dir, "secrets/diff", "v2-working")
+
+	st, err := r.Status(StatusOpts{WriteDiffDirs: true})
+	require.NoError(t, err)
+	require.NotEmpty(t, st.DiffDir)
+	t.Cleanup(func() { _ = os.RemoveAll(st.DiffDir) })
+
+	sealed, err := os.ReadFile(filepath.Join(st.DiffDir, "sealed", "secrets/diff"))
+	require.NoError(t, err)
+	require.Equal(t, "v1-sealed", string(sealed), "sealed/ holds the decrypted sealed content")
+
+	revealed, err := os.ReadFile(filepath.Join(st.DiffDir, "revealed", "secrets/diff"))
+	require.NoError(t, err)
+	require.Equal(t, "v2-working", string(revealed), "revealed/ holds the working-tree plaintext")
+}
