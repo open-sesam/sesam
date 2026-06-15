@@ -315,7 +315,7 @@ func (sm *SecretManager) MoveSecret(oldRevealedPath, newRevealedPath string) err
 		}
 	}
 
-	// NOTE: This is not particularly crash-safe. We could use the SealAll()
+	// TODO: This is not particularly crash-safe. We could use the SealAll()
 	// mechanism of using a stageDir, but without re-rencrypting everything to
 	// make things better.
 
