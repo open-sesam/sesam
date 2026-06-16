@@ -43,25 +43,6 @@ func BuildUserManager(
 	}, nil
 }
 
-// resealAfterMembershipChange re-encrypts every managed secret with the
-// post-change recipient list. Called at the end of TellUser and
-// KillUsers so a single command leaves disk and audit log consistent.
-//
-// The audit entry from the membership change is already committed by
-// the time we get here, so a SealAll failure puts the repo in a
-// partial state: log advanced, ciphertext recipients stale. The error
-// message points at `sesam seal` as the resync.
-// TODO: Should be done by cli...
-func (um *UserManager) resealAfterMembershipChange(op string) error {
-	if err := um.secMgr.SealAll(); err != nil {
-		return fmt.Errorf(
-			"%s succeeded but auto re-seal failed (run `sesam seal` to resync): %w",
-			op, err,
-		)
-	}
-	return nil
-}
-
 func (um *UserManager) TellUser(
 	ctx context.Context,
 	user string, pubKeySpecs []string,
@@ -91,7 +72,6 @@ func (um *UserManager) TellUser(
 		return err
 	}
 
-	// TODO: add recipient/rm-recipients probably needs to rewrite the signing key.
 	newUserSigner, err := GenerateSignKey(
 		um.sesamDir,
 		user,
@@ -117,7 +97,7 @@ func (um *UserManager) TellUser(
 		return err
 	}
 
-	return um.resealAfterMembershipChange("tell")
+	return nil
 }
 
 func (um *UserManager) ShowUser(user string, dst io.Writer) (bool, error) {
@@ -157,7 +137,7 @@ func (um *UserManager) KillUsers(user string) error {
 		return err
 	}
 
-	return um.resealAfterMembershipChange("kill")
+	return nil
 }
 
 func (um *UserManager) RenameUser(oldName, newName string) error {
@@ -222,7 +202,16 @@ func (um *UserManager) UserAddRecipient(ctx context.Context, user string, pubKey
 
 	// make sure new recipients can also decrypt the log.
 	allRecps := AllRecipients(um.state.keyring)
-	return um.log.WriteAuditKey(allRecps)
+	if err := um.log.WriteAuditKey(allRecps); err != nil {
+		return err
+	}
+
+	signRecps := um.state.keyring.Recipients([]string{user})
+	if len(signRecps) == 0 {
+		return fmt.Errorf("found no recipients for user: %s", user)
+	}
+
+	return um.UserRegenerateSignKey(user)
 }
 
 func (um *UserManager) UserRmRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
@@ -230,7 +219,7 @@ func (um *UserManager) UserRmRecipient(ctx context.Context, user string, pubKeyS
 		return fmt.Errorf("need to be admin for removing recipients from a user")
 	}
 
-	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, um.state.pluginUI)
+	toDeleteRecps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, um.state.pluginUI)
 	if err != nil {
 		return err
 	}
@@ -239,26 +228,33 @@ func (um *UserManager) UserRmRecipient(ctx context.Context, user string, pubKeyS
 		um.signer,
 		newAuditEntry(um.signer.UserName(), &DetailUserRmRecipients{
 			User:    user,
-			PubKeys: recps.UserPubKeys(),
+			PubKeys: toDeleteRecps.UserPubKeys(),
 		}),
 	); err != nil {
 		return err
 	}
 
 	allRecps := AllRecipients(um.state.keyring)
-	return um.log.RotateKey(um.signer, allRecps)
+	if err := um.log.RotateKey(um.signer, allRecps); err != nil {
+		return err
+	}
+
+	// recipient changed, so the recipients for the private sign key changed.
+	// as admin user we might not have access to it, so we have to give the user
+	// a new signing key. It's cheap, so not a problem really.
+	return um.UserRegenerateSignKey(user)
 }
 
 func (um *UserManager) UserRegenerateSignKey(user string) error {
 	if !um.signUser.IsAdmin() {
-		return fmt.Errorf("need to be admin for removing recipients from a user")
+		return fmt.Errorf("need to be admin for regnerating signing keys")
 	}
 
-	recps := um.state.keyring.Recipients([]string{user})
+	newRecps := um.state.keyring.Recipients([]string{user})
 	signer, err := GenerateSignKey(
 		um.sesamDir,
 		user,
-		recps.AgeRecipients(),
+		newRecps.AgeRecipients(),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to generate signing key: %w", err)

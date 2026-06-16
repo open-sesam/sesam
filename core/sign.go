@@ -105,33 +105,13 @@ func GenerateSignKey(sesamDir, user string, userRecipient []age.Recipient) (Sign
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
 
-	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkeys", user+".age")
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate signing key %s: %w", signKeyPath, err)
+		return nil, fmt.Errorf("failed to generate signing key %s: %w", user, err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(signKeyPath), 0o700); err != nil {
-		return nil, fmt.Errorf("failed to mkdir signing key dir: %w", err)
-	}
-
-	ageBuf := &bytes.Buffer{}
-	wc, err := age.Encrypt(ageBuf, userRecipient...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to encrypt signing key: %w", err)
-	}
-
-	privMh := MulticodeEncode(priv[:], MhEd25519Priv)
-	if _, err := wc.Write([]byte(privMh)); err != nil {
-		return nil, fmt.Errorf("failed to encrypt signing key: %w", err)
-	}
-
-	if err := wc.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close encrypted writer: %w", err)
-	}
-
-	if err := renameio.WriteFile(signKeyPath, ageBuf.Bytes(), 0o600); err != nil {
-		return nil, fmt.Errorf("failed to write signing key %s: %w", signKeyPath, err)
+	if err := WriteSignKey(sesamDir, user, userRecipient, priv); err != nil {
+		return nil, fmt.Errorf("failed to write signkey for %s: %w", user, err)
 	}
 
 	return &ed25519Signer{
@@ -139,6 +119,34 @@ func GenerateSignKey(sesamDir, user string, userRecipient []age.Recipient) (Sign
 		priv: priv,
 		user: user,
 	}, nil
+}
+
+func WriteSignKey(sesamDir, user string, userRecipient []age.Recipient, priv ed25519.PrivateKey) error {
+	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkeys", user+".age")
+	if err := os.MkdirAll(filepath.Dir(signKeyPath), 0o700); err != nil {
+		return fmt.Errorf("failed to mkdir signing key dir: %w", err)
+	}
+
+	ageBuf := &bytes.Buffer{}
+	wc, err := age.Encrypt(ageBuf, userRecipient...)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt signing key: %w", err)
+	}
+
+	privMh := MulticodeEncode(priv[:], MhEd25519Priv)
+	if _, err := wc.Write([]byte(privMh)); err != nil {
+		return fmt.Errorf("failed to encrypt signing key: %w", err)
+	}
+
+	if err := wc.Close(); err != nil {
+		return fmt.Errorf("failed to close encrypted writer: %w", err)
+	}
+
+	if err := renameio.WriteFile(signKeyPath, ageBuf.Bytes(), 0o600); err != nil {
+		return fmt.Errorf("failed to write signing key %s: %w", signKeyPath, err)
+	}
+
+	return nil
 }
 
 // readAllSignatures finds all .sesam files under .sesam/objects/ and parses their signature footers.

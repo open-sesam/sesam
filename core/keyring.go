@@ -27,12 +27,14 @@ type Keyring interface {
 	// is returned.
 	AddRecipient(user string, recp *Recipient) error
 
-	// TODO: comment.
+	// RemoveRecipient removes the recipient `recp` from the recipients of `user`.
+	// An error will be returned when there's only one recipient left and there's a match.
+	// An error will be returned when there was no match.
 	RemoveRecipient(user string, recp *Recipient) error
 
 	// SetSignPubKey sets the signing key for a a specific user.
 	// For now, only ed25519 keys are supported in `pub`.
-	SetSignPubKey(user string, pub []byte) error
+	SetSignPubKey(user string, pub ed25519.PublicKey) error
 
 	// DeleteUser removes a user from they Keyring.
 	// It will return true if the user existed.
@@ -57,13 +59,13 @@ type Keyring interface {
 // MemoryKeyring is a simple Keyring implementation that holds public keys in memory only.
 type MemoryKeyring struct {
 	recipients map[string]Recipients
-	signPubs   map[string][]byte
+	signPubs   map[string]ed25519.PublicKey
 }
 
 func EmptyKeyring() *MemoryKeyring {
 	return &MemoryKeyring{
 		recipients: make(map[string]Recipients),
-		signPubs:   make(map[string][]byte),
+		signPubs:   make(map[string]ed25519.PublicKey),
 	}
 }
 
@@ -118,7 +120,7 @@ func (mk *MemoryKeyring) RemoveRecipient(user string, toDelete *Recipient) error
 	return nil
 }
 
-func (mk *MemoryKeyring) SetSignPubKey(user string, newKey []byte) error {
+func (mk *MemoryKeyring) SetSignPubKey(user string, newKey ed25519.PublicKey) error {
 	// make sure there are no duplicates:
 	for _, pubKey := range mk.signPubs {
 		if bytes.Equal(pubKey, newKey) {

@@ -346,7 +346,12 @@ func verifyUserRegenerateSignKey(log *AuditLog, state *VerifiedState, entry *Aud
 		)
 	}
 
-	if err := kr.SetSignPubKey(dursk.User, []byte(dursk.NewSignPubKey)); err != nil {
+	signPubKeyData, _, err := multicodeDecode(dursk.NewSignPubKey)
+	if err != nil {
+		return fmt.Errorf("bad signing key %v", dursk.NewSignPubKey)
+	}
+
+	if err := kr.SetSignPubKey(dursk.User, signPubKeyData); err != nil {
 		return err
 	}
 

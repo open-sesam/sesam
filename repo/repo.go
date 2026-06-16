@@ -822,6 +822,17 @@ func (r *Repo) UserRmRecipient(ctx context.Context, user string, pubKeySpecs []s
 	return r.user.UserRmRecipient(ctx, user, pubKeySpecs)
 }
 
+func (r *Repo) UserRegenerateSignKey(user string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
+
+	return r.user.UserRegenerateSignKey(user)
+}
+
 type SecretState int
 
 const (
