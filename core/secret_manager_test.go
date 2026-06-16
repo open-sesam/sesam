@@ -87,7 +87,7 @@ func TestChangeSecretGroupsUnauthorized(t *testing.T) {
 	_, err := mgr.AuditLog.AddEntry(mgr.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
 		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKey: []string{bob.SignPubKey},
+		SignPubKey: bob.SignPubKey,
 	}), nil)
 	require.NoError(t, err)
 	require.NoError(t, verify(mgr.State))
@@ -220,7 +220,7 @@ func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	_, err := mgr.AuditLog.AddEntry(mgr.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 	}), nil)
 	require.NoError(t, err)
 	require.NoError(t, verify(mgr.State))
@@ -558,7 +558,7 @@ func TestSealRejectsUnauthorizedUser(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	_, err := mgr.AuditLog.AddEntry(mgr.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 	}), nil)
 	require.NoError(t, err)
 	require.NoError(t, verify(mgr.State))
@@ -631,7 +631,7 @@ func TestSealAllNonAdminPreservesCiphertextItCannotDecrypt(t *testing.T) {
 		User:       "bob",
 		Groups:     []string{"dev"},
 		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKey: []string{bob.SignPubKey},
+		SignPubKey: bob.SignPubKey,
 	}), nil)
 	require.NoError(t, err)
 

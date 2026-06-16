@@ -31,7 +31,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 		User:       whoami,
 		Groups:     []string{"admin"},
 		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
-		SignPubKey: []string{signKeyStr},
+		SignPubKey: signKeyStr,
 	})
 	require.NoError(t, err)
 
@@ -112,7 +112,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 		User:       "admin",
 		Groups:     []string{"admin"},
 		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
-		SignPubKey: []string{signKeyStr},
+		SignPubKey: signKeyStr,
 	})
 	require.NoError(t, err)
 	gitCommitAll(t, repo, "init")
@@ -130,7 +130,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 		User:       "bob",
 		Groups:     []string{"dev"},
 		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKey: []string{bobSignKeyStr},
+		SignPubKey: bobSignKeyStr,
 	}), nil)
 	require.NoError(t, err)
 
@@ -194,7 +194,7 @@ func TestIntegrationTamperDetection(t *testing.T) {
 		User:       "admin",
 		Groups:     []string{"admin"},
 		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
-		SignPubKey: []string{signKeyStr},
+		SignPubKey: signKeyStr,
 	})
 	require.NoError(t, err)
 	gitCommitAll(t, repo, "init")
@@ -222,7 +222,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 		User:       "admin",
 		Groups:     []string{"admin"},
 		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
-		SignPubKey: []string{signKeyStr},
+		SignPubKey: signKeyStr,
 	})
 	require.NoError(t, err)
 	gitCommitAll(t, repo, "init")
@@ -321,7 +321,7 @@ func TestKeySourcePreservedThroughReplay(t *testing.T) {
 		User:       "admin",
 		Groups:     []string{"admin"},
 		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySource("github:admin")}},
-		SignPubKey: []string{signKeyStr},
+		SignPubKey: signKeyStr,
 	})
 	require.NoError(t, err)
 
@@ -334,7 +334,7 @@ func TestKeySourcePreservedThroughReplay(t *testing.T) {
 		User:       "bob",
 		Groups:     []string{"dev"},
 		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySource("github:bob")}},
-		SignPubKey: []string{bobSignKeyStr},
+		SignPubKey: bobSignKeyStr,
 	}), nil)
 	require.NoError(t, err)
 

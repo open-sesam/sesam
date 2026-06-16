@@ -146,6 +146,16 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 			"removed " + pluralize("recipient", len(d.PubKeys)) + " of " + c(d.User, userColor) + " (" + c(shortPubKeys(d.PubKeys, full), groupColor) + ")",
 		}
 
+	case core.OpUserRegenerateSignKey:
+		d, ok := e.RawDetail().(*core.DetailUserRegenerateSignKey)
+		if !ok {
+			return unknown
+		}
+		return logLine{
+			"~", userColor,
+			"regenerated signing key of " + c(d.User, userColor),
+		}
+
 	case core.OpSecretAdd:
 		d, ok := e.RawDetail().(*core.DetailSecretAdd)
 		if !ok {

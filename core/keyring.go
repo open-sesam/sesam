@@ -121,9 +121,12 @@ func (mk *MemoryKeyring) RemoveRecipient(user string, toDelete *Recipient) error
 }
 
 func (mk *MemoryKeyring) SetSignPubKey(user string, newKey ed25519.PublicKey) error {
-	// make sure there are no duplicates:
-	for _, pubKey := range mk.signPubs {
-		if bytes.Equal(pubKey, newKey) {
+	// Reject only if *another* user already holds this key, so keys stay
+	// unique across users (mirrors AddRecipient). Re-setting a user's own
+	// key is allowed - replay re-applies init/tell entries into a populated
+	// keyring, and a regen replaces the user's existing key in place.
+	for existingUser, pubKey := range mk.signPubs {
+		if existingUser != user && bytes.Equal(pubKey, newKey) {
 			return &DuplicatePubkeyError{
 				user:   user,
 				pubkey: fmt.Sprintf("%v", newKey),

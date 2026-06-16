@@ -340,7 +340,7 @@ func verifyUserRegenerateSignKey(log *AuditLog, state *VerifiedState, entry *Aud
 	user, exists := state.UserExists(dursk.User)
 	if !exists {
 		return fmt.Errorf(
-			"user %s to regen sign key does not exit; seq_id=%d",
+			"user %s to regen sign key does not exist; seq_id=%d",
 			dursk.User,
 			entry.SeqID,
 		)
@@ -830,8 +830,10 @@ func verify(state *VerifiedState) error {
 			err = verifySecretChangeAccess(log, &newState, entry)
 		case OpSecretMove:
 			err = verifySecretMove(log, &newState, entry)
-		case OpUserKill, OpUserRename:
-			// done later
+		case OpUserKill, OpUserRename, OpUserRegenerateSignKey:
+			// done later (after the signature check) - these mutate signing
+			// keys or the signer's own name, which the signature check needs
+			// to see in its pre-change form.
 		default:
 			err = fmt.Errorf("unexpected core.Operation: %#v", entry.Operation)
 		}
