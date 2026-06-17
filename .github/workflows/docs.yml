@@ -60,7 +60,7 @@ jobs:
         run: |
           mkdir -p public/docs
           cp -r docs/book/. public/docs/
-          cp docs/landing/index.html public/
+          cp docs/landing/index.html docs/landing/bg.png docs/landing/bg.webp public/
           cp docs/src/sesam_bg.png docs/src/arabic-pattern.svg docs/src/arabic-pattern-dark.svg public/
           cp docs/book/favicon.svg docs/book/favicon.png public/
 

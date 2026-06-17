@@ -50,7 +50,7 @@ managers](https://opensesam.org/docs/alternatives.html).
 
 - Rotation and exchange of secrets.
 - Better support for env-file based workflows.
-- Allow merging of git branches with secrets in them.
+- allow merging of git branches with secrets in them.
 - Possibly also a TUI.
 
 # Quickstart Links
@@ -72,8 +72,12 @@ We use AI-based assistants so far for:
   - Reviewing / Auditing.
   - Ideation / Design feedback.
   - Building test suites.
-  - Occasional clearly scoped code change. 
+  - Writing HTML/CSS.
+  - Occasional clearly scoped code change.
 
 The majority of the code is still hand-written to make sure we don't lose touch
 to what we build. To be clear: **This is not a vibe-coded project.** The design
-was done by an experienced software engineer the old-fashioned way.
+was done by an experienced software engineer the old-fashioned way. If you want
+to read more about our stance regarding AI-usage in software development you can read
+some [slides](https://sahib.github.io/misc/the-vibes-that-i-summoned/slides.pdf) here ([with notes](https://sahib.github.io/misc/the-vibes-that-i-summoned/slides-with-notes.pdf))
+

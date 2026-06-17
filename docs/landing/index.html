@@ -4,6 +4,18 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>sesam — encrypted, multi-user secrets in your git repo</title>
+
+<!-- Apply a *saved* theme choice before first paint. With no saved choice we
+     leave data-theme unset so the prefers-color-scheme media query drives the
+     theme — that keeps it working without JS and updating live with the OS. -->
+<script>
+  (function () {
+    try {
+      var saved = localStorage.getItem("sesam-theme");
+      if (saved) document.documentElement.dataset.theme = saved;
+    } catch (e) {}
+  })();
+</script>
 <meta name="description" content="sesam is a git-native secret manager: multi-user age encryption and a signed, replayable audit log. Your secrets live in the repo — versioned, decentralized, offline-ready." />
 
 <!-- Open Graph / social -->
@@ -42,10 +54,49 @@
   /* terminal accent hues, tuned to harmonise with the brand palette */
   --t-user:        #2f8f7d;
   --t-secret:      #b5683c;
+  /* theme-driven visuals (day defaults): sun shown, moon & stars hidden */
+  --sun-display:   block;
+  --moon-display:  none;
+  --sky-display:   none;
+  --scene-opacity: 0.85;
 }
 
+/* Dark palette (night). Applied when the visitor explicitly picked dark, OR the
+   OS prefers dark and they haven't explicitly picked light. The two selectors
+   share the same body but can't be merged across the @media boundary, so the
+   declarations are defined once in a custom-property set and referenced below.
+   Theme resolution, in order of precedence:
+     1. saved choice            → html[data-theme="dark"|"light"]   (JS)
+     2. OS preference           → @media (prefers-color-scheme)     (works w/o JS,
+                                                                      updates live) */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --emerald:       #6fc088;
+  --emerald-hover: #8cd4a3;
+  --emerald-muted: #4a9566;
+  --gold:          #d4b56a;
+  --gold-light:    #e8cd88;
+  --clay:          #b8955c;
+  --orange:        #e8a040;
+  --page-bg:       #1e1c17;
+  --surface:       #272319;
+  --surface-alt:   #2c2820;
+  --border-subtle: #3d3628;
+  --text:          #e8e3d8;
+  --text-muted:    #8a8476;
+  --logo-inner:    #1e1c17;
+  --arabic:        url("arabic-pattern-dark.svg");
+  --term-bg:       #16140f;
+  --t-user:        #5ec9b4;
+  --t-secret:      #d99a6a;
+  --sun-display:   none;
+  --moon-display:  block;
+  --sky-display:   block;
+  --scene-opacity: 0.5;
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --emerald:       #6fc088;
     --emerald-hover: #8cd4a3;
     --emerald-muted: #4a9566;
@@ -64,6 +115,10 @@
     --term-bg:       #16140f;
     --t-user:        #5ec9b4;
     --t-secret:      #d99a6a;
+    --sun-display:   none;
+    --moon-display:  block;
+    --sky-display:   block;
+    --scene-opacity: 0.5;
   }
 }
 
@@ -84,6 +139,8 @@ body {
   font-weight: 300;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  /* smooth the sun/moon theme toggle */
+  transition: background-color 0.35s ease, color 0.35s ease;
 }
 
 a { color: var(--emerald); text-decoration: none; }
@@ -120,30 +177,6 @@ main {
 }
 .beta::before { content: "✦"; font-size: 0.8em; }
 
-/* --- Logo medallion (mirrors the docs sidebar-logo, enlarged) --- */
-.medallion {
-  width: 184px;
-  height: 184px;
-  background:
-    url("sesam_bg.png") center / 88% no-repeat,
-    url("arabic-pattern.svg") center / 56px 56px repeat,
-    var(--logo-inner);
-  border-radius: 50%;
-  border: 4px solid var(--emerald);
-  box-shadow:
-    0 0 0 2px var(--gold),
-    0 0 0 9px color-mix(in srgb, var(--emerald) 20%, transparent),
-    0 4px 20px rgba(0, 0, 0, 0.18);
-  transition: box-shadow 0.3s ease, transform 0.3s ease;
-}
-.medallion:hover {
-  transform: rotate(-3deg) scale(1.03);
-  box-shadow:
-    0 0 0 2px var(--gold),
-    0 0 0 9px color-mix(in srgb, var(--emerald) 35%, transparent),
-    0 6px 28px rgba(0, 0, 0, 0.28);
-}
-
 /* --- Wordmark --- */
 h1 {
   font-family: "Josefin Sans", sans-serif;
@@ -171,6 +204,8 @@ h1 .open { color: var(--gold); font-weight: 600; }
   max-width: 30ch;
   margin: 0 0 2.2rem;
   color: var(--text);
+  /* legibility halo where the tagline overlaps the mountain on tall viewports */
+  text-shadow: 0 0 4px var(--page-bg), 0 0 8px var(--page-bg), 0 0 12px var(--page-bg);
 }
 .tagline b { font-weight: 500; color: var(--emerald-hover); }
 
@@ -271,30 +306,158 @@ h1 .open { color: var(--gold); font-weight: 600; }
 }
 .btn-primary:hover { background: var(--emerald-hover); color: var(--logo-inner); }
 .btn-ghost {
-  background: transparent;
+  background: var(--surface-alt);
   color: var(--text);
   border: 1px solid var(--border-subtle);
 }
-.btn-ghost:hover { color: var(--emerald); border-color: var(--emerald); }
+.btn-ghost:hover { color: var(--emerald); border-color: var(--emerald); background: var(--surface); }
 
 /* secondary text links */
 .subnav {
-  margin-top: 1.5rem;
+  margin: 0.2rem 0 2rem;
   font-size: 0.92rem;
   color: var(--text-muted);
+  /* legibility halo where the subnav overlaps the illustration */
+  text-shadow: 0 0 4px var(--page-bg), 0 0 8px var(--page-bg), 0 0 12px var(--page-bg);
 }
 .subnav a { margin: 0 0.55em; }
 
-/* --- Footer --- */
-footer {
-  text-align: center;
-  padding: 2rem 1.5rem 2rem;
-  font-size: 0.8rem;
-  color: var(--text-muted);
+/* --- Sky ---
+   A fixed layer behind all content (z-index -1). Light mode (day): a bright sun
+   glowing in the upper-right. Dark mode (night): white stars scattered across
+   the sky, with a subset gently twinkling. */
+/* --- Sky: starfield (night only) ---
+   Gradients are defined unconditionally; --sky-display (day=none, night=block)
+   decides whether the layer shows, so no theme-specific selectors are needed. */
+.sky {
+  display: var(--sky-display);
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
 }
-footer .star { color: var(--gold); }
-footer a { color: var(--text-muted); text-decoration: underline; text-underline-offset: 2px; }
-footer a:hover { color: var(--emerald); }
+.sky::before,
+.sky::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+}
+/* steady stars across the whole sky */
+.sky::before {
+  background-image:
+    radial-gradient(1.3px 1.3px at 5% 12%,  rgba(255,255,255,.85), transparent),
+    radial-gradient(1px 1px     at 12% 28%, rgba(255,255,255,.6),  transparent),
+    radial-gradient(1.4px 1.4px at 18% 6%,  rgba(255,255,255,.8),  transparent),
+    radial-gradient(1px 1px     at 24% 20%, rgba(255,255,255,.55), transparent),
+    radial-gradient(1.2px 1.2px at 31% 35%, rgba(255,255,255,.7),  transparent),
+    radial-gradient(1px 1px     at 9% 38%,  rgba(255,255,255,.5),  transparent),
+    radial-gradient(1.3px 1.3px at 38% 10%, rgba(255,255,255,.8),  transparent),
+    radial-gradient(1px 1px     at 44% 25%, rgba(255,255,255,.55), transparent),
+    radial-gradient(1.5px 1.5px at 50% 14%, rgba(255,255,255,.9),  transparent),
+    radial-gradient(1px 1px     at 56% 33%, rgba(255,255,255,.6),  transparent),
+    radial-gradient(1.2px 1.2px at 62% 7%,  rgba(255,255,255,.75), transparent),
+    radial-gradient(1px 1px     at 68% 23%, rgba(255,255,255,.55), transparent),
+    radial-gradient(1.3px 1.3px at 80% 12%, rgba(255,255,255,.8),  transparent),
+    radial-gradient(1px 1px     at 86% 29%, rgba(255,255,255,.6),  transparent),
+    radial-gradient(1.4px 1.4px at 92% 9%,  rgba(255,255,255,.85), transparent),
+    radial-gradient(1px 1px     at 96% 24%, rgba(255,255,255,.55), transparent),
+    radial-gradient(1px 1px     at 33% 5%,  rgba(255,255,255,.6),  transparent),
+    radial-gradient(1.2px 1.2px at 15% 17%, rgba(255,255,255,.7),  transparent),
+    radial-gradient(1px 1px     at 71% 16%, rgba(255,255,255,.6),  transparent);
+}
+/* twinkling subset */
+.sky::after {
+  background-image:
+    radial-gradient(1.6px 1.6px at 8% 22%,  #fff, transparent),
+    radial-gradient(1.6px 1.6px at 28% 12%, #fff, transparent),
+    radial-gradient(2px 2px     at 41% 30%, #fff, transparent),
+    radial-gradient(1.6px 1.6px at 53% 8%,  #fff, transparent),
+    radial-gradient(1.6px 1.6px at 66% 28%, #fff, transparent),
+    radial-gradient(2px 2px     at 77% 19%, #fff, transparent),
+    radial-gradient(1.6px 1.6px at 90% 20%, #fff, transparent);
+  animation: twinkle 4.5s ease-in-out infinite;
+}
+@keyframes twinkle { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .sky::after { animation: none !important; }
+}
+
+/* --- Sun (day) & moon (night): the celestial toggle ---
+   Both are real buttons in the upper-right corner; --sun-display / --moon-display
+   show exactly one per theme. Clicking either flips the theme (see script). They
+   sit above content (z-index 4) so they stay clickable, but only their small
+   discs capture clicks — the glows are box-shadow / filter and don't. */
+.sun, .moon {
+  position: fixed;
+  top: 9%;
+  right: 9%;
+  /* identical box so the two share the same centre — no jump when toggling */
+  width: 60px;
+  height: 60px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  z-index: 4;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.sun:focus-visible, .moon:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 5px;
+}
+
+/* a soft sun — warm-white core with a muted, clay-toned glow that melts into
+   the sandy page rather than reading as a bright yellow disc */
+.sun {
+  display: var(--sun-display);
+  background: radial-gradient(circle,
+    #fdf7ea 0%,
+    color-mix(in srgb, var(--gold-light) 55%, var(--page-bg)) 55%,
+    color-mix(in srgb, var(--clay) 55%, var(--page-bg)) 100%);
+  box-shadow:
+    0 0 26px 6px   color-mix(in srgb, var(--clay) 30%, transparent),
+    0 0 60px 24px  color-mix(in srgb, var(--clay) 14%, transparent),
+    0 0 120px 60px color-mix(in srgb, var(--clay) 6%, transparent);
+}
+
+/* a pale disc carved into a crescent by a transparent bite (mask) offset toward
+   the upper-right, so the night sky shows through rather than a flat dark disc */
+.moon {
+  display: var(--moon-display);
+  background: #e8e3d3;
+  -webkit-mask: radial-gradient(circle 30px at 44px 20px, transparent 29px, #fff 30px);
+          mask: radial-gradient(circle 30px at 44px 20px, transparent 29px, #fff 30px);
+  filter: drop-shadow(0 0 7px color-mix(in srgb, #e8e3d3 30%, transparent));
+}
+
+/* on narrow screens the centred wordmark reaches the corner — tuck them up */
+@media (max-width: 560px) {
+  .sun, .moon { top: 5%; right: 7%; }
+}
+
+/* --- Cave-of-treasures backdrop, fixed to the foot of the page ---
+   The artwork has a transparent background, so it overlays the page directly —
+   no mask or fade needed; its own silhouette blends into the page. It is sized
+   to the full viewport width (the art is deliberately wide) and pinned to the
+   bottom, at z-index -1 so it sits behind all content. */
+.scene {
+  position: fixed;
+  left: 0;
+  /* nudged below the fold so the peak clears the content above the terminal;
+     vw-based so the shift stays proportional to the (width-scaled) artwork */
+  bottom: -5vw;
+  width: 100%;
+  z-index: -1;
+  pointer-events: none;
+  user-select: none;
+  /* softened so the terminal & buttons sit cleanly on top; --scene-opacity is
+     0.85 by day and 0.5 at night (the light, sandy art needs more taming on the
+     dark page) */
+  opacity: var(--scene-opacity);
+  transition: opacity 0.35s ease;
+}
 </style>
 
 <!-- Without JS the loop can't run, so show the full command + output statically. -->
@@ -304,15 +467,26 @@ footer a:hover { color: var(--emerald); }
 </style></noscript>
 </head>
 <body>
+<div class="sky" aria-hidden="true"></div>
+<button class="sun" type="button" aria-label="Switch to dark mode"></button>
+<button class="moon" type="button" aria-label="Switch to light mode"></button>
+<picture>
+  <source srcset="bg.webp" type="image/webp" />
+  <img class="scene" src="bg.png" alt="" aria-hidden="true" />
+</picture>
 <main>
   <span class="beta">beta — pre-1.0, expect change</span>
 
-  <a class="medallion" href="/docs/whatis.html" aria-label="What is sesam?"></a>
-
-  <h1><span class="open">open</span> sesam</h1>
+  <h1><span class="open">open</span>sesam</h1>
   <div class="rule"></div>
 
   <p class="tagline">Encrypted, multi-user secrets that <br /><b>live in your git repo</b>.</p>
+
+  <nav class="subnav">
+    <a href="/docs/installation.html">Install</a> ·
+    <a href="/docs/design.html">Design</a> ·
+    <a href="/docs/alternatives.html">Why another tool?</a>
+  </nav>
 
   <div class="term" aria-hidden="true">
     <div class="term-bar"><i></i><i></i><i></i><span>~/work/secrets</span></div>
@@ -326,20 +500,10 @@ footer a:hover { color: var(--emerald); }
   </div>
 
   <div class="cta">
-    <a class="btn btn-primary" href="/docs/whatis.html">Enter the docs →</a>
+    <a class="btn btn-primary" href="/docs/whatis.html"><svg viewBox="0 0 24 24" width="1.1em" height="1.1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4h6a3 3 0 0 1 3 3v13a2.5 2.5 0 0 0-2.5-2.5H2z"/><path d="M22 4h-6a3 3 0 0 0-3 3v13a2.5 2.5 0 0 1 2.5-2.5H22z"/></svg>Enter the docs →</a>
     <a class="btn btn-ghost" href="https://github.com/open-sesam/sesam">★ GitHub</a>
   </div>
-
-  <nav class="subnav">
-    <a href="/docs/installation.html">Install</a> ·
-    <a href="/docs/design.html">Design</a> ·
-    <a href="/docs/alternatives.html">Why another tool?</a>
-  </nav>
 </main>
-
-<footer>
-  <span class="star">✦</span>  Built on <a href="https://github.com/FiloSottile/age">age</a> · GPLv3 
-</footer>
 <script>
 // Replays the `sesam log` terminal: type the command, stream the rows in
 // (newest first, matching real output), hold, then loop after a pause.
@@ -383,6 +547,25 @@ footer a:hover { color: var(--emerald); }
   }
 
   loop();
+})();
+
+// Easter egg: clicking the sun (day) or moon (night) toggles the theme. The
+// current theme may come from an explicit choice (data-theme) or, if unset,
+// from the OS preference — resolve that before flipping.
+(function () {
+  var root = document.documentElement;
+  function current() {
+    if (root.dataset.theme) return root.dataset.theme;
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  function toggle() {
+    var next = current() === "dark" ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("sesam-theme", next); } catch (e) {}
+  }
+  document.querySelectorAll(".sun, .moon").forEach(function (el) {
+    el.addEventListener("click", toggle);
+  });
 })();
 </script>
 </body>
