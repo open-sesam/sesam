@@ -50,10 +50,24 @@ jobs:
         if: steps.book-cache.outputs.cache-hit != 'true'
         run: cd docs && mdbook build
 
+      # Assemble the published site: the standalone landing page at the root
+      # (opensesam.org/) and the mdBook under /docs/. The book is built with
+      # site-url = "/docs/" (book.toml) so its internal links resolve there.
+      # The landing page references a few shared assets by bare filename, so we
+      # copy them next to it at the root too. Runs even on a book cache hit,
+      # since the landing source is not part of the book cache key.
+      - name: Assemble site
+        run: |
+          mkdir -p public/docs
+          cp -r docs/book/. public/docs/
+          cp docs/landing/index.html public/
+          cp docs/src/sesam_bg.png docs/src/arabic-pattern.svg docs/src/arabic-pattern-dark.svg public/
+          cp docs/book/favicon.svg docs/book/favicon.png public/
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/book
+          path: public
 
       - name: Deploy to GitHub Pages
         id: deployment

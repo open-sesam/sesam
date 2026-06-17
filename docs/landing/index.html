@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>sesam — encrypted, multi-user secrets in your git repo</title>
+<meta name="description" content="sesam is a git-native secret manager: multi-user age encryption and a signed, replayable audit log. Your secrets live in the repo — versioned, decentralized, offline-ready." />
+
+<!-- Open Graph / social -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="sesam — open the cave" />
+<meta property="og:description" content="Encrypted, multi-user secrets that live in your git repo." />
+<meta property="og:url" content="https://opensesam.org/" />
+<meta property="og:image" content="https://opensesam.org/sesam_bg.png" />
+
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600;700&family=Rubik:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+/* ==========================================================================
+   sesam landing — emerald · clay · gold (shares the docs design tokens)
+   ========================================================================== */
+:root {
+  --emerald:       #2d6e3f;
+  --emerald-hover: #3a7d4e;
+  --emerald-muted: #5a9e6e;
+  --gold:          #b8963e;
+  --gold-light:    #d4b56a;
+  --clay:          #c4a265;
+  --orange:        #d4880c;
+  --page-bg:       #f8f5ef;
+  --surface:       #f4f1eb;
+  --surface-alt:   #f0ebe0;
+  --border-subtle: #ddd5c5;
+  --text:          #2c2c2c;
+  --text-muted:    #7d7a70;
+  --logo-inner:    #f8f5ef;
+  --arabic:        url("arabic-pattern.svg");
+  --term-bg:       #fbf9f4;
+  /* terminal accent hues, tuned to harmonise with the brand palette */
+  --t-user:        #2f8f7d;
+  --t-secret:      #b5683c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --emerald:       #6fc088;
+    --emerald-hover: #8cd4a3;
+    --emerald-muted: #4a9566;
+    --gold:          #d4b56a;
+    --gold-light:    #e8cd88;
+    --clay:          #b8955c;
+    --orange:        #e8a040;
+    --page-bg:       #1e1c17;
+    --surface:       #272319;
+    --surface-alt:   #2c2820;
+    --border-subtle: #3d3628;
+    --text:          #e8e3d8;
+    --text-muted:    #8a8476;
+    --logo-inner:    #1e1c17;
+    --arabic:        url("arabic-pattern-dark.svg");
+    --term-bg:       #16140f;
+    --t-user:        #5ec9b4;
+    --t-secret:      #d99a6a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--page-bg);
+  background-image: var(--arabic);
+  background-repeat: repeat;
+  background-size: 80px 80px;
+  color: var(--text);
+  font-family: "Rubik", system-ui, sans-serif;
+  font-weight: 300;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--emerald); text-decoration: none; }
+a:hover { color: var(--gold); }
+
+/* --- Layout --- */
+main {
+  flex: 1;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: clamp(2rem, 6vh, 4.5rem) 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* --- Beta pill --- */
+.beta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--orange);
+  border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  border-radius: 999px;
+  padding: 0.3em 0.9em;
+  margin-bottom: 1.8rem;
+}
+.beta::before { content: "✦"; font-size: 0.8em; }
+
+/* --- Logo medallion (mirrors the docs sidebar-logo, enlarged) --- */
+.medallion {
+  width: 184px;
+  height: 184px;
+  background:
+    url("sesam_bg.png") center / 88% no-repeat,
+    url("arabic-pattern.svg") center / 56px 56px repeat,
+    var(--logo-inner);
+  border-radius: 50%;
+  border: 4px solid var(--emerald);
+  box-shadow:
+    0 0 0 2px var(--gold),
+    0 0 0 9px color-mix(in srgb, var(--emerald) 20%, transparent),
+    0 4px 20px rgba(0, 0, 0, 0.18);
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+.medallion:hover {
+  transform: rotate(-3deg) scale(1.03);
+  box-shadow:
+    0 0 0 2px var(--gold),
+    0 0 0 9px color-mix(in srgb, var(--emerald) 35%, transparent),
+    0 6px 28px rgba(0, 0, 0, 0.28);
+}
+
+/* --- Wordmark --- */
+h1 {
+  font-family: "Josefin Sans", sans-serif;
+  font-weight: 700;
+  font-size: clamp(2.8rem, 9vw, 5rem);
+  letter-spacing: 0.12em;
+  line-height: 1;
+  margin: 1.6rem 0 0;
+  color: var(--emerald);
+  text-transform: lowercase;
+}
+h1 .open { color: var(--gold); font-weight: 600; }
+
+/* gold rule under the wordmark, echoing the docs h1 border */
+.rule {
+  width: 84px;
+  height: 2px;
+  margin: 1.1rem 0 1.4rem;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+}
+
+.tagline {
+  font-size: clamp(1.05rem, 2.6vw, 1.35rem);
+  font-weight: 300;
+  max-width: 30ch;
+  margin: 0 0 2.2rem;
+  color: var(--text);
+}
+.tagline b { font-weight: 500; color: var(--emerald-hover); }
+
+/* --- Terminal --- */
+.term {
+  width: 100%;
+  max-width: 560px;
+  text-align: left;
+  background: var(--term-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
+  overflow: hidden;
+  margin-bottom: 2.4rem;
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+}
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.6em 0.9em;
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.term-bar i {
+  width: 11px; height: 11px; border-radius: 50%;
+  display: inline-block;
+}
+.term-bar i:nth-child(1) { background: #e06c5a; }
+.term-bar i:nth-child(2) { background: var(--gold-light); }
+.term-bar i:nth-child(3) { background: var(--emerald-muted); }
+.term-bar span {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+.term-body {
+  padding: 1.05em 1.15em 1.25em;
+  line-height: 1.75;
+  white-space: pre;
+  overflow-x: auto;
+}
+/* semantic colours, mirroring `sesam log` */
+.term-body .prompt { color: var(--emerald); font-weight: 600; }
+.term-body .seq    { color: var(--text-muted); }
+.term-body .time   { color: var(--emerald-muted); }
+.term-body .hash   { color: var(--text-muted); }
+.term-body .user   { color: var(--t-user); font-weight: 500; }
+.term-body .secret { color: var(--t-secret); }
+.term-body .group  { color: var(--gold); }
+.term-body .repo   { color: var(--emerald-hover); font-weight: 600; }
+
+/* typed command — text is driven by the loop script below; the cursor is a
+   blinking right border that sits after whatever has been typed so far. */
+.typed {
+  display: inline-block;
+  white-space: pre;
+  border-right: 2px solid var(--emerald);
+  animation: blink 0.9s step-end infinite;
+  vertical-align: bottom;
+}
+@keyframes blink { 50% { border-color: transparent; } }
+
+/* output rows fade in one after another (toggled by the script) */
+.row { opacity: 0; transition: opacity 0.35s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  .typed { animation: none; border-right: none; }
+  .row { opacity: 1; transition: none; }
+}
+
+/* --- CTAs --- */
+.cta {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.btn {
+  font-family: "Josefin Sans", sans-serif;
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: 0.03em;
+  padding: 0.72em 1.5em;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  transition: transform 0.12s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.btn:hover { transform: translateY(-2px); }
+.btn-primary {
+  background: var(--emerald);
+  color: var(--logo-inner);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 60%, transparent);
+}
+.btn-primary:hover { background: var(--emerald-hover); color: var(--logo-inner); }
+.btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border-subtle);
+}
+.btn-ghost:hover { color: var(--emerald); border-color: var(--emerald); }
+
+/* secondary text links */
+.subnav {
+  margin-top: 1.5rem;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+}
+.subnav a { margin: 0 0.55em; }
+
+/* --- Footer --- */
+footer {
+  text-align: center;
+  padding: 2rem 1.5rem 2rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+footer .star { color: var(--gold); }
+footer a { color: var(--text-muted); text-decoration: underline; text-underline-offset: 2px; }
+footer a:hover { color: var(--emerald); }
+</style>
+
+<!-- Without JS the loop can't run, so show the full command + output statically. -->
+<noscript><style>
+  .typed::after { content: "sesam log"; }
+  .row { opacity: 1; }
+</style></noscript>
+</head>
+<body>
+<main>
+  <span class="beta">beta — pre-1.0, expect change</span>
+
+  <a class="medallion" href="/docs/whatis.html" aria-label="What is sesam?"></a>
+
+  <h1><span class="open">open</span> sesam</h1>
+  <div class="rule"></div>
+
+  <p class="tagline">Encrypted, multi-user secrets that <br /><b>live in your git repo</b>.</p>
+
+  <div class="term" aria-hidden="true">
+    <div class="term-bar"><i></i><i></i><i></i><span>~/work/secrets</span></div>
+    <div class="term-body"><span class="prompt">$</span> <span class="cmd typed"></span>
+<span class="row"><span class="seq">#6</span> <span class="user">~</span> <span class="time">2026 Apr 19 08:30</span>  <span class="user">alice</span>  set groups of <span class="user">bob</span> to <span class="group">backend, ops</span></span>
+<span class="row"><span class="seq">#5</span> <span class="secret">→</span> <span class="time">2026 Mar 02 10:48</span>  <span class="user">bob</span>    renamed <span class="secret">db/prod.env</span> → <span class="secret">db/prod.toml</span></span>
+<span class="row"><span class="seq">#4</span> <span class="repo">✓</span> <span class="time">2026 Feb 08 14:22</span>  <span class="user">bob</span>    <span class="repo">sealed 2 secrets</span> <span class="hash">9f2c1a0b</span></span>
+<span class="row"><span class="seq">#3</span> <span class="secret">+</span> <span class="time">2026 Feb 08 14:22</span>  <span class="user">bob</span>    added <span class="secret">db/prod.env</span> (<span class="group">backend, admin</span>)</span>
+<span class="row"><span class="seq">#2</span> <span class="user">+</span> <span class="time">2026 Jan 06 09:15</span>  <span class="user">alice</span>  told <span class="user">bob</span> into <span class="group">backend</span></span>
+<span class="row"><span class="seq">#1</span> <span class="repo">★</span> <span class="time">2026 Jan 06 09:14</span>  <span class="user">alice</span>  <span class="repo">initialized repo</span> <span class="hash">7f3a9c2e</span></span></div>
+  </div>
+
+  <div class="cta">
+    <a class="btn btn-primary" href="/docs/whatis.html">Enter the docs →</a>
+    <a class="btn btn-ghost" href="https://github.com/open-sesam/sesam">★ GitHub</a>
+  </div>
+
+  <nav class="subnav">
+    <a href="/docs/installation.html">Install</a> ·
+    <a href="/docs/design.html">Design</a> ·
+    <a href="/docs/alternatives.html">Why another tool?</a>
+  </nav>
+</main>
+
+<footer>
+  <span class="star">✦</span>  Built on <a href="https://github.com/FiloSottile/age">age</a> · GPLv3 
+</footer>
+<script>
+// Replays the `sesam log` terminal: type the command, stream the rows in
+// (newest first, matching real output), hold, then loop after a pause.
+(function () {
+  var typed = document.querySelector(".typed");
+  var rows = Array.prototype.slice.call(document.querySelectorAll(".term-body .row"));
+  if (!typed) return;
+
+  var CMD = "sesam log";
+
+  // Respect reduced-motion: render the final state once, no looping.
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    typed.textContent = CMD;
+    rows.forEach(function (r) { r.style.opacity = 1; });
+    return;
+  }
+
+  var sleep = function (ms) { return new Promise(function (res) { setTimeout(res, ms); }); };
+
+  async function loop() {
+    while (true) {
+      typed.textContent = "";
+      rows.forEach(function (r) { r.style.opacity = 0; });
+      await sleep(700);
+
+      for (var i = 0; i < CMD.length; i++) {
+        typed.textContent += CMD[i];
+        await sleep(75);
+      }
+      await sleep(450);
+
+      for (var j = 0; j < rows.length; j++) {
+        rows[j].style.opacity = 1;
+        await sleep(260);
+      }
+
+      await sleep(6000);                                   // hold the output
+      rows.forEach(function (r) { r.style.opacity = 0; }); // fade out together
+      await sleep(900);                                    // pause before replay
+    }
+  }
+
+  loop();
+})();
+</script>
+</body>
+</html>
