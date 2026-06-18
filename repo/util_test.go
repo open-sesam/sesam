@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +10,32 @@ import (
 	"github.com/open-sesam/sesam/core"
 	"github.com/stretchr/testify/require"
 )
+
+type repoMockPassphraseProvider struct {
+	passphrase []byte
+}
+
+func (m *repoMockPassphraseProvider) ReadPassphrase(string) ([]byte, error) {
+	return m.passphrase, nil
+}
+
+func (m *repoMockPassphraseProvider) PassphraseVerified([]byte, bool) {}
+
+func encryptRepoIdentityForTest(t *testing.T, plaintext string, passphrase []byte) string {
+	t.Helper()
+
+	recipient, err := age.NewScryptRecipient(string(passphrase))
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	w, err := age.Encrypt(&buf, recipient)
+	require.NoError(t, err)
+	_, err = w.Write([]byte(plaintext))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	return buf.String()
+}
 
 func TestExpandHomeDir(t *testing.T) {
 	home, err := os.UserHomeDir()
@@ -151,6 +178,27 @@ func TestLoadIdentities_FailureModes(t *testing.T) {
 			require.Len(t, ids, 1)
 		})
 	}
+}
+
+func TestLoadIdentitiesWithEncryptedAgeIdentity(t *testing.T) {
+	ageID, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+
+	passphrase := []byte("test-passphrase-123")
+	key := encryptRepoIdentityForTest(t, ageID.String()+"\n", passphrase)
+	path := filepath.Join(t.TempDir(), "encrypted.age")
+	require.NoError(t, os.WriteFile(path, []byte(key), 0o600))
+
+	ids, err := loadIdentitiesWith(
+		[]string{path},
+		func(string) core.PassphraseProvider {
+			return &repoMockPassphraseProvider{passphrase: passphrase}
+		},
+		core.NewNonInteractivePluginUI(),
+	)
+	require.NoError(t, err)
+	require.Len(t, ids, 1)
+	require.Equal(t, []string{ageID.Recipient().String()}, ids.RecipientStrings())
 }
 
 func TestSplitObjectPath(t *testing.T) {

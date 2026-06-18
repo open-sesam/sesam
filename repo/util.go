@@ -96,9 +96,9 @@ func loadIdentitiesWith(identityPaths []string, newProvider func(keyFingerprint 
 			return nil, fmt.Errorf("failed to read identity %s: %w", expandedPath, err)
 		}
 
-		key := strings.TrimSpace(string(data))
+		key := string(data)
 		prompt := fmt.Sprintf("🔐 Passphrase for %s: ", filepath.Base(expandedPath))
-		provider := newProvider(core.KeyFingerprint([]byte(key)))
+		provider := newProvider(core.KeyFingerprint(data))
 		identity, err := core.ParseIdentity(key, provider, pluginUI, prompt)
 		if err != nil {
 			return nil, err
