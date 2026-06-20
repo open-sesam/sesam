@@ -1,14 +1,19 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"filippo.io/age"
+	"filippo.io/age/armor"
 	"github.com/rogpeppe/go-internal/testscript"
 )
+
+const askpassTestPassphrase = "askpass-test-passphrase"
 
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
@@ -40,30 +45,50 @@ func TestWorkflows(t *testing.T) {
 			}
 			e.Setenv("TMPDIR", tmpDir)
 
-			writeIdentity := func(name string) (*age.X25519Identity, error) {
+			writeIdentity := func(name string) (*age.X25519Identity, string, error) {
 				id, err := age.GenerateX25519Identity()
 				if err != nil {
-					return nil, fmt.Errorf("generate age identity: %w", err)
+					return nil, "", fmt.Errorf("generate age identity: %w", err)
 				}
 
 				keyPath := filepath.Join(idDir, name+".age")
 				f, err := os.Create(keyPath)
 				if err != nil {
-					return nil, err
+					return nil, "", err
 				}
 				fmt.Fprintf(f, "%s\n", id)
-				f.Close()
+				if err := f.Close(); err != nil {
+					return nil, "", err
+				}
 				e.Setenv(name+"_KEY", keyPath)
 				e.Setenv(name+"_PUBKEY", id.Recipient().String())
-				return id, nil
+				return id, keyPath, nil
 			}
 
-			if _, err := writeIdentity("ADMIN"); err != nil {
+			_, adminKeyPath, err := writeIdentity("ADMIN")
+			if err != nil {
 				return err
 			}
-			if _, err := writeIdentity("BOB"); err != nil {
+			if _, _, err := writeIdentity("BOB"); err != nil {
 				return err
 			}
+
+			adminKey, err := os.ReadFile(adminKeyPath)
+			if err != nil {
+				return err
+			}
+			adminEncryptedKeyPath := filepath.Join(idDir, "ADMIN.encrypted.age")
+			if err := writeEncryptedIdentity(adminEncryptedKeyPath, adminKey, askpassTestPassphrase); err != nil {
+				return err
+			}
+			e.Setenv("ADMIN_ENCRYPTED_KEY", adminEncryptedKeyPath)
+
+			askpassPath := filepath.Join(idDir, "askpass")
+			askpassScript := fmt.Sprintf("#!/bin/sh\nprintf %%s %q\n", askpassTestPassphrase)
+			if err := os.WriteFile(askpassPath, []byte(askpassScript), 0o700); err != nil {
+				return err
+			}
+			e.Setenv("ASKPASS_HELPER", askpassPath)
 
 			// Plugin identity for the mock age-plugin-sesamtest binary
 			// registered via TestMain. Used by plugin_workflow.txt to
@@ -81,4 +106,29 @@ func TestWorkflows(t *testing.T) {
 			return nil
 		},
 	})
+}
+
+func writeEncryptedIdentity(path string, plaintext []byte, passphrase string) error {
+	recipient, err := age.NewScryptRecipient(passphrase)
+	if err != nil {
+		return err
+	}
+
+	var buf bytes.Buffer
+	armorWriter := armor.NewWriter(&buf)
+	writer, err := age.Encrypt(armorWriter, recipient)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(writer, bytes.NewReader(plaintext)); err != nil {
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	if err := armorWriter.Close(); err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, buf.Bytes(), 0o600)
 }
