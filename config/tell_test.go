@@ -33,16 +33,22 @@ secrets:
 // loadUsersGroups reloads main and returns user names plus the group map.
 func loadUsersGroups(t *testing.T, main string) ([]string, map[string][]string) {
 	t.Helper()
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
+	cr, err := Load(main)
+	require.NoError(t, err)
+
+	users, err := cr.Users()
+	require.NoError(t, err)
 
 	var names []string
-	for _, u := range cr.MainFile.Config.Users {
+	for _, u := range users {
 		names = append(names, u.Name)
 	}
 	sort.Strings(names)
 
-	return names, cr.MainFile.Config.Groups
+	groups, err := cr.Groups()
+	require.NoError(t, err)
+
+	return names, groups
 }
 
 // TestTell_AddsUserAndGroups adds a user, joining an existing group and a new
@@ -51,8 +57,8 @@ func TestTell_AddsUserAndGroups(t *testing.T) {
 	dir := t.TempDir()
 	main := writeUserMain(t, dir)
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
+	cr, err := Load(main)
+	require.NoError(t, err)
 	require.NoError(t, cr.Tell("bob", []string{"keyB"}, []string{"admin", "dev"}))
 	require.NoError(t, cr.Save())
 
@@ -69,14 +75,14 @@ func TestTell_NoDuplicateOnResave(t *testing.T) {
 	dir := t.TempDir()
 	main := writeUserMain(t, dir)
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
+	cr, err := Load(main)
+	require.NoError(t, err)
 	require.NoError(t, cr.Tell("bob", []string{"keyB"}, []string{"admin"}))
 	require.NoError(t, cr.Save())
 
 	// Reload and save again with no changes.
-	cr2 := NewConfigRepository()
-	require.NoError(t, cr2.Load(main))
+	cr2, err := Load(main)
+	require.NoError(t, err)
 	require.NoError(t, cr2.Save())
 
 	names, groups := loadUsersGroups(t, main)
@@ -89,8 +95,8 @@ func TestTell_DuplicateUserErrors(t *testing.T) {
 	dir := t.TempDir()
 	main := writeUserMain(t, dir)
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
+	cr, err := Load(main)
+	require.NoError(t, err)
 	require.Error(t, cr.Tell("axolotl", []string{"keyX"}, []string{"admin"}))
 }
 
@@ -102,8 +108,8 @@ func TestTell_CreatesUsersAndGroups(t *testing.T) {
 	const body = "version: 1\nsecrets:\n  - path: existing.txt\n    access:\n      - admin\n"
 	require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
+	cr, err := Load(main)
+	require.NoError(t, err)
 	require.NoError(t, cr.Tell("bob", []string{"keyB"}, []string{"admin"}))
 	require.NoError(t, cr.Save())
 
@@ -117,16 +123,19 @@ func TestTell_PreservesUserKeys(t *testing.T) {
 	dir := t.TempDir()
 	main := writeUserMain(t, dir)
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
+	cr, err := Load(main)
+	require.NoError(t, err)
 	require.NoError(t, cr.Tell("bob", []string{"keyB1", "keyB2"}, []string{"admin"}))
 	require.NoError(t, cr.Save())
 
-	cr2 := NewConfigRepository()
-	require.NoError(t, cr2.Load(main))
+	cr2, err := Load(main)
+	require.NoError(t, err)
+
+	users, err := cr2.Users()
+	require.NoError(t, err)
 
 	keysByName := map[string][]string{}
-	for _, u := range cr2.MainFile.Config.Users {
+	for _, u := range users {
 		keysByName[u.Name] = u.Key
 	}
 	require.Equal(t, []string{"keyA"}, keysByName["axolotl"])

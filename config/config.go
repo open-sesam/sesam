@@ -1,99 +1,54 @@
 package config
 
 import (
-	"fmt"
-
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 )
 
-// Config holds the top-level keys of a sesam YAML file. Every file — the
-// entry file and each transitively-included one — shares this shape: there
-// is no `config:` wrapper. Sub-files typically carry only `secrets:` and
-// leave general/users/groups zero, which is why every field is optional.
-type Config struct {
-	Users   []User              `yaml:"users,omitempty" json:"users,omitempty"`
-	Groups  map[string][]string `yaml:"groups,omitempty" json:"groups,omitempty"`
-	Secrets []Secret            `yaml:"secrets,omitempty" json:"secrets,omitempty"`
-}
-
-// FileSource carries the parsed AST plus the decoded config for one on-disk
-// YAML file. Every file the repository touches — the entry file and each
-// transitively-included one — gets exactly one FileSource.
+// FileSource carries the parsed AST for one on-disk YAML file. Every file the
+// repository touches — the entry file and each transitively-included one —
+// gets exactly one FileSource.
 //
-// The AST under RootNode is the source of truth for everything that
-// originated on disk. Save re-encodes it untouched, preserving every
-// original byte, comment, and formatting choice for items the API hasn't
-// edited. RootNode is nil for files that don't exist on disk yet; Save
-// writes those fresh from the in-memory state.
+// RootNode is the single source of truth. The file is parsed with
+// parser.ParseComments, so comments live on the nodes themselves: inserting a
+// node carries its comment in, cutting a node carries its comment out, and
+// Save re-renders the tree verbatim via RootNode.String(). RootNode is nil
+// only for a file created in memory that has not had its first item added yet;
+// the first insert builds the root, and Save skips any source still nil.
 type FileSource struct {
-	Path       string
-	RootNode   ast.Node
-	CommentMap yaml.CommentMap
-	Config     *Config
-
-	// NewIncludes are include paths the API has queued; Save appends them
-	// to the existing secrets sequence (or, for new files, emits them as
-	// part of the fresh content). Existing includes live in RootNode and
-	// aren't tracked here.
-	NewIncludes []string
+	Path     string
+	RootNode ast.Node
 }
 
 /////////////////
 // USER CONFIG //
 /////////////////
 
-// User struct represents a single user. Multiple users can be defined
+// User is a data view of a single entry in the main file's users: sequence. It
+// is decoded from / marshaled to the AST on demand; the AST stays
+// authoritative.
 type User struct {
-	Name        string   `yaml:"name" json:"name"`
-	Description string   `yaml:"desc,omitempty" json:"description,omitempty"`
-	Key         []string `yaml:"key,omitempty" json:"key"`
-
-	node *ast.MappingNode `yaml:"-" json:"-"` // origin AST node; nil for users added via the API since load
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"desc,omitempty"`
+	Key         []string `yaml:"key,omitempty"`
 }
 
 ///////////////////
 // SECRET CONFIG //
 ///////////////////
 
-// SecretType represents the different types of secrets
-type SecretType string
-
-const (
-	SSHKey   = SecretType("ssh_key")
-	Password = SecretType("password")
-	Template = SecretType("template")
-	Custom   = SecretType("custom")
-)
-
-// VerifySecretType verifies if the given string matches a valid secret type
-func VerifySecretType(v string) error {
-	secretType := SecretType(v)
-	switch secretType {
-	case SSHKey, Password, Template, Custom:
-		return nil
-	default:
-	}
-
-	return fmt.Errorf("unknown secret type: %s (valid options: ssh_key,password,template,custom)", v)
-}
-
-// Secret represents one entry in a sesam YAML's secrets: sequence. When
-// Include is set (and the other fields are zero) the value represents an
-// `- include: <path>` placeholder rather than a real secret — only used at
-// marshal time for newly-added includes; the merged Secrets list holds
-// only real secrets (Include == "").
+// Secret is a data view of one entry in a secrets: sequence. When Include is
+// set (and the other fields are zero) the value represents an
+// `- include: <path>` placeholder rather than a real secret. Like User it is a
+// view over the AST, used both to decode existing entries and to marshal new
+// nodes before they are inserted.
 type Secret struct {
-	Include     string   `yaml:"include,omitempty" json:"include,omitempty"`
-	Name        string   `yaml:"name,omitempty" json:"name,omitempty"`
-	Path        string   `yaml:"path,omitempty" json:"path,omitempty"`
-	Access      []string `yaml:"access,omitempty" json:"access,omitempty"`
-	Description string   `yaml:"description,omitempty" json:"description,omitempty"`
-	Rotate      []any    `yaml:"rotate,omitempty" json:"rotate,omitempty"`
-	Swap        []Swap   `yaml:"swap,omitempty" json:"swap,omitempty"`
-
-	Source *FileSource      `yaml:"-" json:"-"`
-	node   *ast.MappingNode `yaml:"-" json:"-"` // origin AST node; nil for items added via the API since load
+	Include     string   `yaml:"include,omitempty"`
+	Name        string   `yaml:"name,omitempty"`
+	Path        string   `yaml:"path,omitempty"`
+	Access      []string `yaml:"access,omitempty"`
+	Description string   `yaml:"description,omitempty"`
+	Rotate      []any    `yaml:"rotate,omitempty"`
+	Swap        []Swap   `yaml:"swap,omitempty"`
 }
 
 // Swap struct repesents the swap config of a secret. Multiple commands can be defined here

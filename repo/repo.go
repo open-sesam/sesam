@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/gofrs/flock"
+	"github.com/open-sesam/sesam/config"
 	"github.com/open-sesam/sesam/core"
 )
 
@@ -51,7 +52,8 @@ type Repo struct {
 	secret   *core.SecretManager
 	user     *core.UserManager
 
-	mu sync.Mutex
+	configRepo *config.ConfigRepository
+	mu         sync.Mutex
 }
 
 // RepoOpts controls runtime behavior shared across all Repo operations.
@@ -119,7 +121,10 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, err
 	}
 
-	r := newRepo(resolvedDir, gitRepo, ids, opts)
+	// NOTE: we do not have a config repository yet, since there is no config.
+	// make sure that no CRUD operations are executed until the configRepo is
+	// initialized. Otherwise, this will panic.
+	r := newRepo(resolvedDir, nil, gitRepo, ids, opts)
 	success := false
 	defer func() {
 		if !success {
@@ -149,6 +154,12 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 	if err := createInitialConfig(configPath, initialUserName, identities.RecipientStrings()); err != nil {
 		return nil, err
 	}
+
+	configRepo, err := config.Load(configPath)
+	if err != nil {
+		return nil, err
+	}
+	r.configRepo = configRepo
 
 	signer, auditLog, err := core.InitAdminUser(ctx, resolvedDir, initialUserName, identities.RecipientStrings(), r.pluginUI)
 	if err != nil {
@@ -210,13 +221,18 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 
 // Load loads an existing sesam repository at sesamDir. The on-disk repo
 // lock is held until Close.
-func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
+func Load(sesamDir, sesamConf string, ids []string, opts RepoOpts) (*Repo, error) {
 	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
 	if err != nil {
 		return nil, err
 	}
 
-	r := newRepo(resolvedDir, gitRepo, ids, opts)
+	configRepo, err := config.Load(sesamConf)
+	if err != nil {
+		return nil, err
+	}
+
+	r := newRepo(resolvedDir, configRepo, gitRepo, ids, opts)
 	success := false
 	defer func() {
 		if !success {
@@ -272,13 +288,16 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	return r, nil
 }
 
-func newRepo(sesamDir string, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
+func newRepo(sesamDir string, configRepo *config.ConfigRepository, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
+	// TODO:
+	sesamDirAbs, _ := filepath.Abs(sesamDir)
 	return &Repo{
-		sesamDir:      sesamDir,
+		sesamDir:      sesamDirAbs,
 		opts:          opts,
 		gitRepo:       gitRepo,
 		pluginUI:      opts.pluginUI(),
 		identityPaths: ids,
+		configRepo:    configRepo,
 	}
 }
 
@@ -464,7 +483,11 @@ func (r *Repo) UserTell(ctx context.Context, user string, recipients, groups []s
 	if err := r.user.TellUser(ctx, user, recipients, groups); err != nil {
 		return fmt.Errorf("failed to add user: %w", err)
 	}
-	return nil
+
+	if err := r.configRepo.Tell(user, recipients, groups); err != nil {
+		return fmt.Errorf("failed to add user %q to config: %w", user, err)
+	}
+	return r.configRepo.Save()
 }
 
 // UserKill removes `user` from the list of authenticated users.
@@ -480,13 +503,42 @@ func (r *Repo) UserKill(user string) error {
 	if err := r.user.KillUsers(user); err != nil {
 		return fmt.Errorf("failed to remove user: %w", err)
 	}
-	return nil
+
+	if err := r.configRepo.Kill(user); err != nil {
+		return fmt.Errorf("failed to remove user %q from config: %w", user, err)
+	}
+	return r.configRepo.Save()
 }
 
-// SecretAdd adds the secret at each path to the secrets known by sesam.
-// A path can be a directory, in which case the operation is recursive.
-// All secrets are immediately re-sealed.
-func (r *Repo) SecretAdd(revealedPaths, groups []string) error {
+// toAbs resolves a caller-supplied secret path to an absolute on-disk path.
+// Relative paths are interpreted against the sesam dir, matching the revealed
+// paths the secret manager and config record.
+func (r *Repo) toAbs(p string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(r.sesamDir, p)
+}
+
+// toRevealed converts an absolute on-disk path to the secret manager's
+// coordinate: a path relative to the sesam dir.
+func (r *Repo) toRevealed(abs string) (string, error) {
+	rel, err := filepath.Rel(r.sesamDir, abs)
+	if err != nil {
+		return "", fmt.Errorf("secret path %q is outside the sesam dir %q: %w", abs, r.sesamDir, err)
+	}
+	return rel, nil
+}
+
+// SecretAdd adds the secret(s) at each path to the secrets known by sesam. A
+// path can be a single file, several files, or a directory (added recursively).
+// When nested is set, subdirectories get their own sesam.yml chained via
+// includes; otherwise everything is flattened into the main file.
+//
+// The config layer owns the directory expansion and layout decisions and
+// reports back the concrete secret files that were newly added; each of those
+// is mirrored into the secret manager.
+func (r *Repo) SecretAdd(revealedPaths, groups []string, nested bool) error {
 	if len(revealedPaths) == 0 {
 		return fmt.Errorf("missing secret path: pass at least one path")
 	}
@@ -502,17 +554,41 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string) error {
 	}
 
 	return withWorkingDir(r.sesamDir, func() error {
-		for _, revealedPath := range revealedPaths {
-			if err := r.secret.AddSecret(revealedPath, groups); err != nil {
-				return fmt.Errorf("failed to add secret %q: %w", revealedPath, err)
+		// 1. Update the config. It expands directories / applies the nested
+		//    layout and returns the absolute paths of the files newly added.
+		var added []string
+		for _, p := range revealedPaths {
+			abs := r.toAbs(p)
+			// TODO: refactor the directory traversal to happen in the repo. AST surgery should be for every single
+			// secret then. (includes also)
+			// TODO: absolute and relative paths are not working as intended, error:
+			// ERR exit error=secret path "subdir/blub2" is outside the sesam dir "/home/johnny/repos/sesam-test": Rel: can't make subdir/blub2 relative to /home/johnny/repos/sesam-test
+			paths, err := r.configRepo.AddSecrets(abs, nested, groups)
+			if err != nil {
+				return fmt.Errorf("failed to add secret %q to config: %w", p, err)
+			}
+			added = append(added, paths...)
+		}
+
+		// 2. Mirror every newly added file into the secret manager.
+		for _, abs := range added {
+			rel, err := r.toRevealed(abs)
+			if err != nil {
+				return err
+			}
+			if err := r.secret.AddSecret(rel, groups); err != nil {
+				return fmt.Errorf("failed to add secret %q: %w", rel, err)
 			}
 		}
-		return nil
+
+		return r.configRepo.Save()
 	})
 }
 
-// SecretRemove removes managed secrets at the given paths.
-// All secrets are immediately re-sealed.
+// SecretRemove stops tracking the secret(s) at each path. A path can be a
+// single file, several files, or a directory (removed recursively). The config
+// entries are dropped and the encrypted objects deleted; the plaintext files
+// are left on disk for the user to delete.
 func (r *Repo) SecretRemove(revealedPaths []string) error {
 	if len(revealedPaths) == 0 {
 		return fmt.Errorf("missing secret path: pass at least one path")
@@ -521,12 +597,36 @@ func (r *Repo) SecretRemove(revealedPaths []string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for _, revealedPath := range revealedPaths {
-		if err := r.secret.RemoveSecret(revealedPath); err != nil {
-			return fmt.Errorf("failed to remove secret %q: %w", revealedPath, err)
-		}
+	if r.isClosed() {
+		return ErrClosed
 	}
-	return nil
+
+	return withWorkingDir(r.sesamDir, func() error {
+		// 1. Drop the entries from the config; it returns the absolute paths of
+		//    the secrets that were removed (expanding directories).
+		var removed []string
+		for _, p := range revealedPaths {
+			abs := r.toAbs(p)
+			paths, err := r.configRepo.RemoveSecrets(abs)
+			if err != nil {
+				return fmt.Errorf("failed to remove secret %q from config: %w", p, err)
+			}
+			removed = append(removed, paths...)
+		}
+
+		// 2. Mirror every removal into the secret manager.
+		for _, abs := range removed {
+			rel, err := r.toRevealed(abs)
+			if err != nil {
+				return err
+			}
+			if err := r.secret.RemoveSecret(rel); err != nil {
+				return fmt.Errorf("failed to remove secret %q: %w", rel, err)
+			}
+		}
+
+		return r.configRepo.Save()
+	})
 }
 
 // VerifyOptions selects which verification checks Verify should run.

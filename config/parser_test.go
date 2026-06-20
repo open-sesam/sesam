@@ -7,26 +7,32 @@ import (
 )
 
 func Test_readYamlFile(t *testing.T) {
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load("../test/files/test_readYamlFile.yaml"))
+	cr, err := Load("../test/files/test_read_yaml_file.yaml")
+	require.NoError(t, err)
 
-	// Compare the data fields only; resolveUsers attaches an unexported origin
-	// node that require.Equal would otherwise diff on.
-	require.Len(t, cr.MainFile.Config.Users, 1)
-	require.Equal(t, "test_user", cr.MainFile.Config.Users[0].Name)
-	require.Equal(t, []string{"key"}, cr.MainFile.Config.Users[0].Key)
-	require.Equal(t, map[string][]string{"group1": {"test_user"}}, cr.MainFile.Config.Groups)
+	users, err := cr.Users()
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	require.Equal(t, "test_user", users[0].Name)
+	require.Equal(t, []string{"key"}, users[0].Key)
+
+	groups, err := cr.Groups()
+	require.NoError(t, err)
+	require.Equal(t, map[string][]string{"group1": {"test_user"}}, groups)
 }
 
 // Test_resolveIncludeSecretsOnly verifies that a sub-file carrying only a
 // top-level secrets: key (which goccy parses as a single *ast.MappingValueNode
 // rather than an *ast.MappingNode) resolves and merges into the main file.
 func Test_resolveIncludeSecretsOnly(t *testing.T) {
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load("../test/files/main_with_include.yaml"))
+	cr, err := Load("../test/files/main_with_include.yaml")
+	require.NoError(t, err)
+
+	secrets, err := cr.Secrets()
+	require.NoError(t, err)
 
 	var paths []string
-	for _, s := range cr.MainFile.Config.Secrets {
+	for _, s := range secrets {
 		paths = append(paths, s.Path)
 	}
 

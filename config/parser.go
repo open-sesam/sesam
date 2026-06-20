@@ -4,14 +4,17 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
+	"github.com/google/renameio"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -20,42 +23,58 @@ var schemaFS embed.FS
 
 const schemaFile = "sesam_schema.json"
 
-// ConfigRepository holds every loaded file plus the merged secrets view.
-// MainFile is the top level file passed to Load; it is also present in
-// SourceFiles (keyed by path) so Save can iterate one map and treat every
-// file uniformly.
+// ConfigRepository holds every loaded file. MainFile is the top level file
+// passed to Load; it is also present in SourceFiles (keyed by path) so Save can
+// iterate one map and treat every file uniformly.
+//
+// There is no merged secrets list stored anywhere: the AST under each file's
+// RootNode is the source of truth, and the flattened view is derived on demand
+// (Secrets) by walking it.
 type ConfigRepository struct {
 	MainFile    *FileSource
 	SourceFiles map[string]*FileSource
 	JSONSchema  *jsonschema.Schema
 }
 
-func NewConfigRepository() *ConfigRepository {
-	return &ConfigRepository{
-		SourceFiles: map[string]*FileSource{},
-	}
+// secretEntry is a transient view of one real (non-include) secret, pairing its
+// decoded data with the AST node and the file it came from. It is recomputed
+// from the AST on demand and never stored.
+type secretEntry struct {
+	source *FileSource
+	node   *ast.MappingNode
+	secret Secret
 }
 
-// Load is the entry function for ConfigRepository. Main sesam.yml file
-// should be passed to Load.
-func (c *ConfigRepository) Load(path string) error {
-	// Load the JSON schema from the embedded FS so every config struct can be
-	// validated later (on load and before save).
+// Load is the entry function for ConfigRepository. The main sesam.yml file
+// should be passed to Load. It parses the file and every transitively-included
+// file into the AST, validating each against the JSON schema as it goes.
+func Load(path string) (*ConfigRepository, error) {
+	// Load the JSON schema from the embedded FS so every file can be validated
+	// later (on load and before save).
+	configRepo := &ConfigRepository{
+		SourceFiles: map[string]*FileSource{},
+	}
+
 	sch, err := compileSchema()
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to compile json schema: %w", err)
 	}
-	c.JSONSchema = sch
+	configRepo.JSONSchema = sch
 
-	src, err := c.loadFile(path)
+	src, err := configRepo.loadTree(path)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to load config tree: %w", err)
+	}
+	configRepo.MainFile = src
+
+	// Walk the merged secrets once now so structural errors (a non-mapping
+	// secrets item, a dangling include) surface at load time rather than on the
+	// first read.
+	if _, err := configRepo.secretEntries(); err != nil {
+		return nil, fmt.Errorf("config structure seems off: %w", err)
 	}
 
-	c.MainFile = src
-	c.SourceFiles[path] = src
-
-	return c.resolve()
+	return configRepo, nil
 }
 
 // compileSchema reads and compiles the embedded sesam JSON schema.
@@ -98,101 +117,83 @@ func (c *ConfigRepository) validate(v any, path string) error {
 	return nil
 }
 
+// loadFile parses one file into the AST (comments attached to nodes) and
+// validates it against the schema. It does not follow includes.
 func (c *ConfigRepository) loadFile(path string) (*FileSource, error) {
-	root, cm, err := readYAMLFile(path)
+	//nolint:gosec // config paths are supplied by the user/repo layout, not untrusted input
+	bs, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg := &Config{}
-	if err := yaml.NodeToValue(root, cfg); err != nil {
+	file, err := parser.ParseBytes(bs, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
+	if len(file.Docs) == 0 || file.Docs[0].Body == nil {
+		return nil, fmt.Errorf("%s: empty YAML document", path)
+	}
+
+	// Validate against the schema by decoding the raw bytes into a generic
+	// value, so every key on disk (including ones no struct models) is checked.
+	var doc any
+	if err := yaml.Unmarshal(bs, &doc); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := c.validate(doc, path); err != nil {
 		return nil, err
 	}
 
-	// Validate every sesam.yml against the schema as it is loaded.
-	if err := c.validate(cfg, path); err != nil {
+	return &FileSource{Path: path, RootNode: file.Docs[0].Body}, nil
+}
+
+// loadTree loads path (unless already loaded) and recurses into every include
+// it declares, registering each file in SourceFiles.
+func (c *ConfigRepository) loadTree(path string) (*FileSource, error) {
+	if existing, ok := c.SourceFiles[path]; ok {
+		return existing, nil
+	}
+
+	src, err := c.loadFile(path)
+	if err != nil {
 		return nil, err
 	}
+	c.SourceFiles[path] = src
 
-	return &FileSource{
-		Path:       path,
-		RootNode:   root,
-		CommentMap: cm,
-		Config:     cfg,
-	}, nil
-}
-
-func readYAMLFile(path string) (ast.Node, yaml.CommentMap, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer f.Close()
-
-	cm := yaml.CommentMap{}
-	decoder := yaml.NewDecoder(f, yaml.CommentToMap(cm))
-
-	var root ast.Node
-	if err := decoder.Decode(&root); err != nil {
-		return nil, nil, err
-	}
-
-	return root, cm, nil
-}
-
-// Resolve walks the main file's secrets sequence plus every transitively
-// included file, replaces MainFile.Config.Secrets with the merged flat list,
-// and sets each Secret.Source back-pointer to the file it came from. Each
-// FileSource records its include placeholders so Save can re-emit them.
-func (c *ConfigRepository) resolve() error {
-	flat, err := c.resolveSource(c.MainFile)
-	if err != nil {
-		return err
-	}
-
-	c.MainFile.Config.Secrets = flat
-
-	return c.resolveUsers()
-}
-
-// resolveUsers re-decodes the main file's users sequence, attaching each
-// user's origin AST node. Save uses the node to tell loaded users (node set)
-// apart from ones added via the API (node nil), so only the new ones are
-// appended. Users live only in the main file. A main file without a users:
-// key is left untouched.
-func (c *ConfigRepository) resolveUsers() error {
-	seq, err := usersNode(c.MainFile.RootNode)
-	if err != nil {
-		return nil
-	}
-
-	users := make([]User, 0, len(seq.Values))
-	for i, item := range seq.Values {
-		mapNode, ok := item.(*ast.MappingNode)
-		if !ok {
-			return fmt.Errorf("%s: users[%d] is not a mapping (got %T)", c.MainFile.Path, i, item)
+	for _, inc := range fileIncludes(src.RootNode) {
+		p := filepath.Join(filepath.Dir(path), inc)
+		if _, err := c.loadTree(p); err != nil {
+			return nil, fmt.Errorf("loading include %s: %w", p, err)
 		}
-
-		var u User
-		if err := yaml.NodeToValue(mapNode, &u); err != nil {
-			return fmt.Errorf("%s: decoding users[%d]: %w", c.MainFile.Path, i, err)
-		}
-
-		u.node = mapNode
-		users = append(users, u)
 	}
 
-	c.MainFile.Config.Users = users
-	return nil
+	return src, nil
 }
 
-func (c *ConfigRepository) resolveSource(src *FileSource) ([]Secret, error) {
+// secretEntries walks the main file and every included file, returning one
+// entry per real secret in include order. The list is derived fresh from the
+// AST every call.
+func (c *ConfigRepository) secretEntries() ([]secretEntry, error) {
+	return c.collectSecrets(c.MainFile, map[string]bool{})
+}
+
+// collectSecrets returns the real secrets in src, splicing in the secrets of
+// any included file at the point the include appears. visiting holds the files
+// on the current include chain so a cycle (a file that transitively includes
+// itself) is detected and rejected instead of recursing forever.
+func (c *ConfigRepository) collectSecrets(src *FileSource, visiting map[string]bool) ([]secretEntry, error) {
+	if visiting[src.Path] {
+		return nil, fmt.Errorf("include loop detected at %s", src.Path)
+	}
+	visiting[src.Path] = true
+	defer delete(visiting, src.Path)
+
 	seq, err := secretsNode(src.RootNode)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("missing secrets: key")
 	}
 
-	var flat []Secret
+	var out []secretEntry
 	for i, item := range seq.Values {
 		mapNode, ok := item.(*ast.MappingNode)
 		if !ok {
@@ -200,19 +201,17 @@ func (c *ConfigRepository) resolveSource(src *FileSource) ([]Secret, error) {
 		}
 
 		if inc, ok := includePath(mapNode); ok {
-			path := filepath.Join(filepath.Dir(src.Path), inc)
-			sub, err := c.loadFile(path)
-			if err != nil {
-				return nil, fmt.Errorf("loading include %s: %w", path, err)
+			p := filepath.Join(filepath.Dir(src.Path), inc)
+			sub, ok := c.SourceFiles[p]
+			if !ok {
+				return nil, fmt.Errorf("%s: include %s is not loaded", src.Path, inc)
 			}
 
-			c.SourceFiles[path] = sub
-
-			subSecrets, err := c.resolveSource(sub)
+			subEntries, err := c.collectSecrets(sub, visiting)
 			if err != nil {
 				return nil, err
 			}
-			flat = append(flat, subSecrets...)
+			out = append(out, subEntries...)
 			continue
 		}
 
@@ -221,36 +220,183 @@ func (c *ConfigRepository) resolveSource(src *FileSource) ([]Secret, error) {
 			return nil, fmt.Errorf("%s: decoding secrets[%d]: %w", src.Path, i, err)
 		}
 
-		s.Source = src
-		s.node = mapNode
-		flat = append(flat, s)
+		out = append(out, secretEntry{source: src, node: mapNode, secret: s})
 	}
 
-	return flat, nil
+	return out, nil
 }
 
-// allIncludes returns every include path attached to this file — both ones
-// currently in the AST and ones queued in NewIncludes.
-func (s *FileSource) allIncludes() []string {
-	var paths []string
-	if s.RootNode != nil {
-		if seq, err := secretsNode(s.RootNode); err == nil && seq != nil {
-			for _, item := range seq.Values {
-				m, ok := item.(*ast.MappingNode)
-				if !ok {
-					continue
-				}
-				if inc, ok := includePath(m); ok {
-					paths = append(paths, inc)
-				}
-			}
+// TODO: could use some optimization, as it's executed for every addSecret call. If adding
+// multiple secrets at once (or large directories), it's probably easier to compute once and
+// update when addSecret is called.
+//
+// trackedRevealedPaths returns the set of absolute on-disk paths of every real
+// secret declared across all loaded files. It walks each file's own secrets
+// directly (not via includes) so it is independent of include reachability —
+// covering sub-files that are mid-creation and not yet wired up — which makes
+// it the basis for both global dedup and reporting which secrets a mutation
+// added. The same physical file tracked by two files collapses to one entry,
+// which is exactly the duplicate we refuse to create.
+func (c *ConfigRepository) trackedRevealedPaths() map[string]bool {
+	set := map[string]bool{}
+	for _, src := range c.SourceFiles {
+		for _, s := range ownSecrets(src) {
+			set[filepath.Join(filepath.Dir(src.Path), s.Path)] = true
 		}
 	}
-	return append(paths, s.NewIncludes...)
+	return set
+}
+
+// Secrets returns the merged, flattened secrets across the main file and all
+// included files, in include order, decoded fresh from the AST.
+func (c *ConfigRepository) Secrets() ([]Secret, error) {
+	entries, err := c.secretEntries()
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]Secret, len(entries))
+	for i, e := range entries {
+		out[i] = e.secret
+	}
+	return out, nil
+}
+
+// Users returns the users declared in the main file, decoded from its AST. A
+// main file without a users: key yields an empty slice.
+func (c *ConfigRepository) Users() ([]User, error) {
+	seq, err := usersNode(c.MainFile.RootNode)
+	if err != nil {
+		return nil, nil //nolint:nilerr // absent users: key means no users
+	}
+
+	users := make([]User, 0, len(seq.Values))
+	for i, item := range seq.Values {
+		mapNode, ok := item.(*ast.MappingNode)
+		if !ok {
+			return nil, fmt.Errorf("%s: users[%d] is not a mapping (got %T)", c.MainFile.Path, i, item)
+		}
+
+		var u User
+		if err := yaml.NodeToValue(mapNode, &u); err != nil {
+			return nil, fmt.Errorf("%s: decoding users[%d]: %w", c.MainFile.Path, i, err)
+		}
+		users = append(users, u)
+	}
+
+	return users, nil
+}
+
+// Groups returns the group→members mapping from the main file. A main file
+// without a groups: key yields an empty map.
+func (c *ConfigRepository) Groups() (map[string][]string, error) {
+	m, err := groupsNode(c.MainFile.RootNode)
+	if err != nil {
+		// Absent groups: key means no groups.
+		return map[string][]string{}, nil //nolint:nilerr // absent groups: key is not an error
+	}
+
+	var groups map[string][]string
+	if err := yaml.NodeToValue(m, &groups); err != nil {
+		return nil, fmt.Errorf("%s: decoding groups: %w", c.MainFile.Path, err)
+	}
+	return groups, nil
+}
+
+// Save writes every loaded file back to disk. Each file's RootNode already
+// reflects every edit — nodes were inserted or cut in place — so Save just
+// re-renders the AST (comments and original formatting included) and validates
+// it before writing.
+func (c *ConfigRepository) Save() error {
+	for _, src := range c.SourceFiles {
+		if err := c.writeFile(src); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// writeFile renders src's AST to YAML and validates the result against the JSON
+// schema before writing. RootNode.String() preserves the node-attached
+// comments and original formatting that yaml.Encoder would otherwise drop. A
+// source whose RootNode is still nil (created in memory but never given an
+// item) has nothing to persist and is skipped.
+func (c *ConfigRepository) writeFile(src *FileSource) error {
+	if src.RootNode == nil {
+		return nil
+	}
+
+	out := src.RootNode.String()
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+
+	// Validate the document we are about to write by decoding it back into a
+	// generic value the JSON schema can check.
+	var doc any
+	if err := yaml.Unmarshal([]byte(out), &doc); err != nil {
+		return fmt.Errorf("%s: decoding for validation: %w", src.Path, err)
+	}
+	if err := c.validate(doc, src.Path); err != nil {
+		return err
+	}
+
+	return renameio.WriteFile(src.Path, []byte(out), 0o644)
+}
+
+////////////////////
+// AST NAVIGATION //
+////////////////////
+
+// fileIncludes returns the include paths declared in a file's secrets sequence.
+func fileIncludes(root ast.Node) []string {
+	seq, err := secretsNode(root)
+	if err != nil {
+		return nil
+	}
+
+	var paths []string
+	for _, item := range seq.Values {
+		m, ok := item.(*ast.MappingNode)
+		if !ok {
+			continue
+		}
+		if inc, ok := includePath(m); ok {
+			paths = append(paths, inc)
+		}
+	}
+	return paths
+}
+
+// ownSecrets returns the real (non-include) secrets declared directly in src,
+// without descending into includes.
+func ownSecrets(src *FileSource) []Secret {
+	seq, err := secretsNode(src.RootNode)
+	if err != nil {
+		return nil
+	}
+
+	var out []Secret
+	for _, item := range seq.Values {
+		m, ok := item.(*ast.MappingNode)
+		if !ok {
+			continue
+		}
+		if _, isInc := includePath(m); isInc {
+			continue
+		}
+
+		var s Secret
+		if yaml.NodeToValue(m, &s) == nil {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func usersNode(root ast.Node) (*ast.SequenceNode, error) {
-	mv, err := findUsersValue(root)
+	mv, err := findRootValue(root, "users")
 	if err != nil {
 		return nil, err
 	}
@@ -279,22 +425,10 @@ func groupsNode(root ast.Node) (*ast.MappingNode, error) {
 	return m, nil
 }
 
-// findMappingValue returns the child key/value pair of m whose key matches, or
-// nil when absent.
-func findMappingValue(m *ast.MappingNode, key string) *ast.MappingValueNode {
-	for _, mv := range m.Values {
-		if mv.Key.String() == key {
-			return mv
-		}
-	}
-
-	return nil
-}
-
-// secretsNode returns the *ast.SequenceNode at the root's secrets: key, or
-// an error if the structure doesn't match.
+// secretsNode returns the *ast.SequenceNode at the root's secrets: key, or an
+// error if the structure doesn't match.
 func secretsNode(root ast.Node) (*ast.SequenceNode, error) {
-	mv, err := findSecretsValue(root)
+	mv, err := findRootValue(root, "secrets")
 	if err != nil {
 		return nil, err
 	}
@@ -307,9 +441,21 @@ func secretsNode(root ast.Node) (*ast.SequenceNode, error) {
 	return seq, nil
 }
 
-// findRootValue returns the top-level MappingValueNode whose key matches, or
-// an error if absent. A file whose only top-level key is e.g. `secrets:` (a
-// typical sub-file) parses to a single *ast.MappingValueNode rather than an
+// findMappingValue returns the child key/value pair of m whose key matches, or
+// nil when absent.
+func findMappingValue(m *ast.MappingNode, key string) *ast.MappingValueNode {
+	for _, mv := range m.Values {
+		if mv.Key.String() == key {
+			return mv
+		}
+	}
+
+	return nil
+}
+
+// findRootValue returns the top-level MappingValueNode whose key matches, or an
+// error if absent. A file whose only top-level key is e.g. `secrets:` (a
+// typical sub-file) can parse to a single *ast.MappingValueNode rather than an
 // *ast.MappingNode, so both shapes are handled.
 func findRootValue(root ast.Node, key string) (*ast.MappingValueNode, error) {
 	for _, mv := range rootMappingValues(root) {
@@ -319,14 +465,6 @@ func findRootValue(root ast.Node, key string) (*ast.MappingValueNode, error) {
 	}
 
 	return nil, fmt.Errorf("no %s: key in root", key)
-}
-
-func findSecretsValue(root ast.Node) (*ast.MappingValueNode, error) {
-	return findRootValue(root, "secrets")
-}
-
-func findUsersValue(root ast.Node) (*ast.MappingValueNode, error) {
-	return findRootValue(root, "users")
 }
 
 // rootMappingValues returns the top-level key/value pairs of a YAML document
@@ -357,116 +495,137 @@ func includePath(m *ast.MappingNode) (string, bool) {
 	return "", false
 }
 
-// Save writes every loaded file back to disk. The AST under each file's
-// RootNode is the source of truth — existing items keep their exact
-// on-disk form (comments, formatting, ordering) because nothing rewrites
-// them. Only newly-added secrets (those with no origin AST node) and
-// queued NewIncludes are appended via SequenceNode.Merge. Files with a
-// nil RootNode (created in-memory by AddSecrets for a directory that
-// didn't have a sesam.yml yet) are written fresh.
-func (c *ConfigRepository) Save() error {
-	newOwned := map[*FileSource][]Secret{}
-	for _, s := range c.MainFile.Config.Secrets {
-		if s.Source == nil {
-			return fmt.Errorf("secret %q has no Source; call Resolve before Save", s.Path)
-		}
+//////////////////
+// AST MUTATION //
+//////////////////
 
-		if s.node == nil {
-			newOwned[s.Source] = append(newOwned[s.Source], s)
-		}
+// appendSecretsItems appends the given secret/include items to src's secrets
+// sequence. It creates the file's root and/or its secrets: key when missing, so
+// it works uniformly for an existing file and a brand-new in-memory one.
+func appendSecretsItems(src *FileSource, items []Secret) error {
+	if len(items) == 0 {
+		return nil
 	}
 
-	for _, src := range c.SourceFiles {
-		if err := c.writeFile(src, newOwned[src]); err != nil {
+	// A brand-new file: build the whole document from the items.
+	if src.RootNode == nil {
+		root, err := marshalBody(map[string][]Secret{"secrets": items})
+		if err != nil {
 			return err
 		}
+		src.RootNode = root
+		return nil
 	}
 
-	return nil
-}
-
-// writeFile encodes src back to disk and validates the result against the
-// JSON schema before writing. A file already on disk (RootNode != nil) has its
-// new secrets/includes merged into the existing AST so comments, formatting
-// and ordering survive untouched; a file created in-memory (RootNode == nil)
-// is written fresh from a Config built out of its owned secrets and queued
-// includes.
-func (c *ConfigRepository) writeFile(src *FileSource, newSecrets []Secret) error {
-	encOpts := []yaml.EncodeOption{yaml.IndentSequence(true)}
-
-	var toEncode any
-	if src.RootNode == nil {
-		items := make([]Secret, 0, len(newSecrets)+len(src.NewIncludes))
-		items = append(items, newSecrets...)
-		for _, inc := range src.NewIncludes {
-			items = append(items, Secret{Include: inc})
-		}
-
-		toEncode = Config{Secrets: items}
-	} else {
-		if len(newSecrets) > 0 || len(src.NewIncludes) > 0 {
-			newSeq, err := buildNewSecretItems(newSecrets, src.NewIncludes)
-			if err != nil {
-				return fmt.Errorf("%s: building new items: %w", src.Path, err)
-			}
-
-			existingSeq, err := secretsNode(src.RootNode)
-			if err != nil {
-				return fmt.Errorf("%s: %w", src.Path, err)
-			}
-
-			// SequenceNode.Merge aligns the new subtree's columns to the
-			// existing sequence's indentation and appends its values.
-			existingSeq.Merge(newSeq)
-		}
-
-		// Users and groups live only in the main file. Append any users added
-		// since load and reconcile group memberships into its AST.
-		if src == c.MainFile {
-			if err := c.mergeNewUsers(src); err != nil {
-				return err
-			}
-
-			if err := c.mergeGroups(src); err != nil {
-				return err
-			}
-		}
-
-		toEncode = src.RootNode
-		encOpts = append(encOpts, yaml.WithComment(src.CommentMap))
+	seq, err := secretsNode(src.RootNode)
+	if err != nil {
+		// Root exists but has no usable secrets: sequence — add the key.
+		return appendRootKey(src, map[string][]Secret{"secrets": items})
 	}
 
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf, encOpts...)
-	if err := enc.Encode(toEncode); err != nil {
-		return fmt.Errorf("%s: encoding: %w", src.Path, err)
-	}
-
-	// Validate the document we are about to write. The encoder emits YAML, so
-	// decode it back into a generic value the JSON schema can check.
-	var doc any
-	if err := yaml.Unmarshal(buf.Bytes(), &doc); err != nil {
-		return fmt.Errorf("%s: decoding for validation: %w", src.Path, err)
-	}
-
-	if err := c.validate(doc, src.Path); err != nil {
+	newSeq, err := marshalSeq(items)
+	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(src.Path, buf.Bytes(), 0o644)
+	// SequenceNode.Merge aligns the new subtree's columns to the existing
+	// sequence's indentation and appends its values.
+	seq.Merge(newSeq)
+	return nil
 }
 
-// buildNewSecretItems marshals `secrets` + `includes` as a YAML sequence and
-// reparses to recover an *ast.SequenceNode suitable for SequenceNode.Merge.
-func buildNewSecretItems(secrets []Secret, includes []string) (*ast.SequenceNode, error) {
-	items := make([]Secret, 0, len(secrets)+len(includes))
-	items = append(items, secrets...)
-	for _, inc := range includes {
-		items = append(items, Secret{Include: inc})
+// appendRootKey adds the top-level key(s) in v to src's root mapping, aligning
+// columns via MappingNode.Merge. A single-key root (*ast.MappingValueNode) is
+// normalized to a mapping first. Used to create a secrets:/users:/groups:
+// section that did not exist on disk.
+func appendRootKey(src *FileSource, v any) error {
+	rootMN, ok := src.RootNode.(*ast.MappingNode)
+	if !ok {
+		mv, ok := src.RootNode.(*ast.MappingValueNode)
+		if !ok {
+			return fmt.Errorf("%s: root is not a mapping (got %T)", src.Path, src.RootNode)
+		}
+		rootMN = ast.Mapping(mv.GetToken(), false, mv)
+		src.RootNode = rootMN
 	}
 
-	return marshalSeq(items)
+	mn, err := marshalMapping(v)
+	if err != nil {
+		return err
+	}
+
+	rootMN.Merge(mn)
+	return nil
 }
+
+// addMissingMembers appends to seq any member not already present.
+func addMissingMembers(seq *ast.SequenceNode, members []string) error {
+	present := make(map[string]bool, len(seq.Values))
+	for _, v := range seq.Values {
+		present[v.GetToken().Value] = true
+	}
+
+	var missing []string
+	for _, m := range members {
+		if !present[m] {
+			missing = append(missing, m)
+		}
+	}
+
+	if len(missing) == 0 {
+		return nil
+	}
+
+	newSeq, err := marshalSeq(missing)
+	if err != nil {
+		return err
+	}
+
+	seq.Merge(newSeq)
+	return nil
+}
+
+// removeSeqValue removes Values[i] from seq together with the head comment that
+// belongs to it. goccy attaches the first item's head comment to the sequence
+// node itself (not to ValueHeadComments[0]); every other item's head comment
+// lives in ValueHeadComments[i]. Handling index 0 specially keeps a removed
+// item's comment from being inherited by whichever item shifts into its slot.
+func removeSeqValue(seq *ast.SequenceNode, i int) {
+	if i < 0 || i >= len(seq.Values) {
+		return
+	}
+
+	seq.Values = slices.Delete(seq.Values, i, i+1)
+
+	vhc := seq.ValueHeadComments
+	if i == 0 {
+		// The new first item's head comment (old index 1) must move onto the
+		// sequence; the removed item's comment lived there and is dropped.
+		var promoted *ast.CommentGroupNode
+		if len(vhc) > 1 {
+			promoted = vhc[1]
+		}
+		seq.Comment = promoted
+
+		if len(vhc) > 0 {
+			seq.ValueHeadComments = slices.Delete(vhc, 0, 1)
+		}
+		if len(seq.ValueHeadComments) > 0 {
+			// Its comment now lives on seq.Comment; clear the slot so it is not
+			// rendered twice.
+			seq.ValueHeadComments[0] = nil
+		}
+		return
+	}
+
+	if i < len(vhc) {
+		seq.ValueHeadComments = slices.Delete(vhc, i, i+1)
+	}
+}
+
+///////////////////
+// AST MARSHALING //
+///////////////////
 
 // marshalSeq marshals v (a slice) to YAML and reparses it into an
 // *ast.SequenceNode suitable for SequenceNode.Merge, which aligns the new
@@ -501,13 +660,17 @@ func marshalMapping(v any) (*ast.MappingNode, error) {
 	return m, nil
 }
 
+// marshalBody marshals v to YAML and reparses it into an AST node. Sequences
+// are emitted indented (yaml.IndentSequence) so freshly-built nodes match the
+// block style sesam files use, and parsing keeps comments on nodes for
+// consistency with loaded files.
 func marshalBody(v any) (ast.Node, error) {
-	bs, err := yaml.Marshal(v)
+	bs, err := yaml.MarshalWithOptions(v, yaml.IndentSequence(true))
 	if err != nil {
 		return nil, err
 	}
 
-	file, err := parser.ParseBytes(bs, 0)
+	file, err := parser.ParseBytes(bs, parser.ParseComments)
 	if err != nil {
 		return nil, err
 	}
@@ -517,127 +680,4 @@ func marshalBody(v any) (ast.Node, error) {
 	}
 
 	return file.Docs[0].Body, nil
-}
-
-// mergeNewUsers appends users added since load (node nil) to the main file's
-// users sequence, creating the users: key if it is missing.
-func (c *ConfigRepository) mergeNewUsers(src *FileSource) error {
-	var fresh []User
-	for _, u := range c.MainFile.Config.Users {
-		if u.node == nil {
-			fresh = append(fresh, u)
-		}
-	}
-
-	if len(fresh) == 0 {
-		return nil
-	}
-
-	seq, err := usersNode(src.RootNode)
-	if err != nil {
-		// No users: key yet — add the whole sequence as a new top-level key.
-		return appendRootKey(src.RootNode, map[string][]User{"users": fresh})
-	}
-
-	newSeq, err := marshalSeq(fresh)
-	if err != nil {
-		return fmt.Errorf("%s: building new users: %w", src.Path, err)
-	}
-
-	seq.Merge(newSeq)
-	return nil
-}
-
-// mergeGroups reconciles in-memory group memberships into the main file's
-// groups mapping: missing members are appended to existing groups and entirely
-// new groups are added. Existing members are left untouched, so re-saving does
-// not duplicate them. The groups: key is created if missing.
-func (c *ConfigRepository) mergeGroups(src *FileSource) error {
-	if len(c.MainFile.Config.Groups) == 0 {
-		return nil
-	}
-
-	groups, err := groupsNode(src.RootNode)
-	if err != nil {
-		// No groups: key yet — add the whole mapping.
-		return appendRootKey(src.RootNode, map[string]map[string][]string{"groups": c.MainFile.Config.Groups})
-	}
-
-	// Deterministic order so newly-added groups land predictably.
-	names := make([]string, 0, len(c.MainFile.Config.Groups))
-	for name := range c.MainFile.Config.Groups {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-
-	for _, name := range names {
-		members := c.MainFile.Config.Groups[name]
-
-		mv := findMappingValue(groups, name)
-		if mv == nil {
-			newGroup, err := marshalMapping(map[string][]string{name: members})
-			if err != nil {
-				return fmt.Errorf("%s: building group %q: %w", src.Path, name, err)
-			}
-
-			groups.Merge(newGroup)
-			continue
-		}
-
-		seq, ok := mv.Value.(*ast.SequenceNode)
-		if !ok {
-			return fmt.Errorf("%s: group %q is not a sequence (got %T)", src.Path, name, mv.Value)
-		}
-
-		if err := addMissingMembers(seq, members); err != nil {
-			return fmt.Errorf("%s: group %q: %w", src.Path, name, err)
-		}
-	}
-
-	return nil
-}
-
-// addMissingMembers appends to seq any member not already present.
-func addMissingMembers(seq *ast.SequenceNode, members []string) error {
-	present := make(map[string]bool, len(seq.Values))
-	for _, v := range seq.Values {
-		present[v.GetToken().Value] = true
-	}
-
-	var missing []string
-	for _, m := range members {
-		if !present[m] {
-			missing = append(missing, m)
-		}
-	}
-
-	if len(missing) == 0 {
-		return nil
-	}
-
-	newSeq, err := marshalSeq(missing)
-	if err != nil {
-		return err
-	}
-
-	seq.Merge(newSeq)
-	return nil
-}
-
-// appendRootKey adds the top-level key(s) in v to a root mapping node, aligning
-// columns via MappingNode.Merge. Used to create a users:/groups: section that
-// did not exist on disk.
-func appendRootKey(root ast.Node, v any) error {
-	rootMN, ok := root.(*ast.MappingNode)
-	if !ok {
-		return fmt.Errorf("root is not a mapping (got %T)", root)
-	}
-
-	mn, err := marshalMapping(v)
-	if err != nil {
-		return err
-	}
-
-	rootMN.Merge(mn)
-	return nil
 }

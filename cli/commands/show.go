@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/open-sesam/sesam/config"
 	"github.com/open-sesam/sesam/core"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
@@ -49,7 +48,7 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 
 	// Last resort: the object might be a user name. This needs the audit
 	// log + managers, so we accept the load cost only on this branch.
-	return WithRepo(func(ctx context.Context, cmd *cli.Command, r *repo.Repo, _ *config.ConfigRepository) error {
+	return WithRepo(func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		ok, err = r.ShowUser(object, os.Stdout)
 		if ok {
 			return err

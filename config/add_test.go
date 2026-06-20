@@ -6,7 +6,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/test-go/testify/require"
+	"github.com/stretchr/testify/require"
 )
 
 // writeMainFile writes a minimal main sesam.yml (one existing secret) into dir
@@ -34,11 +34,14 @@ func exists(path string) bool {
 // the sorted, merged secret paths.
 func resolvedPaths(t *testing.T, mainPath string) []string {
 	t.Helper()
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(mainPath))
+	cr, err := Load(mainPath)
+	require.NoError(t, err)
+
+	secrets, err := cr.Secrets()
+	require.NoError(t, err)
 
 	var paths []string
-	for _, s := range cr.MainFile.Config.Secrets {
+	for _, s := range secrets {
 		paths = append(paths, s.Path)
 	}
 	sort.Strings(paths)
@@ -49,15 +52,17 @@ func resolvedPaths(t *testing.T, mainPath string) []string {
 // to the main file with its bare name, and no extra sesam.yml is created.
 func TestAddSecrets_FileAtMainLevel(t *testing.T) {
 	dir := t.TempDir()
-	main := writeMainFile(t, dir)
+	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "token.txt"))
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.NoError(t, cr.AddSecrets(filepath.Join(dir, "token.txt"), true, []string{"group1"}))
+	cr, err := Load(mainPath)
+	require.NoError(t, err)
+
+	_, err = cr.AddSecrets(filepath.Join(dir, "token.txt"), true, []string{"group1"})
+	require.NoError(t, err)
 	require.NoError(t, cr.Save())
 
-	require.Equal(t, []string{"existing.txt", "token.txt"}, resolvedPaths(t, main))
+	require.Equal(t, []string{"existing.txt", "token.txt"}, resolvedPaths(t, mainPath))
 	require.False(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
 }
 
@@ -66,17 +71,19 @@ func TestAddSecrets_FileAtMainLevel(t *testing.T) {
 // secret path is relative to that sub file.
 func TestAddSecrets_FileInSubdirOwnFile(t *testing.T) {
 	dir := t.TempDir()
-	main := writeMainFile(t, dir)
+	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "sub", "api.key"))
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.NoError(t, cr.AddSecrets(filepath.Join(dir, "sub", "api.key"), true, []string{"group1"}))
+	cr, err := Load(mainPath)
+	require.NoError(t, err)
+
+	_, err = cr.AddSecrets(filepath.Join(dir, "sub", "api.key"), true, []string{"group1"})
+	require.NoError(t, err)
 	require.NoError(t, cr.Save())
 
 	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
 	// Path is "api.key" (relative to sub/sesam.yml), not "sub/api.key".
-	require.Equal(t, []string{"api.key", "existing.txt"}, resolvedPaths(t, main))
+	require.Equal(t, []string{"api.key", "existing.txt"}, resolvedPaths(t, mainPath))
 }
 
 // TestAddSecrets_FileInSubdirMainFile: a file in a subdirectory with
@@ -84,16 +91,18 @@ func TestAddSecrets_FileInSubdirOwnFile(t *testing.T) {
 // subdirectory prefix, and no sub/sesam.yml is created.
 func TestAddSecrets_FileInSubdirMainFile(t *testing.T) {
 	dir := t.TempDir()
-	main := writeMainFile(t, dir)
+	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "sub", "api.key"))
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.NoError(t, cr.AddSecrets(filepath.Join(dir, "sub", "api.key"), false, []string{"group1"}))
+	cr, err := Load(mainPath)
+	require.NoError(t, err)
+
+	_, err = cr.AddSecrets(filepath.Join(dir, "sub", "api.key"), false, []string{"group1"})
+	require.NoError(t, err)
 	require.NoError(t, cr.Save())
 
 	require.False(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
-	require.Equal(t, []string{"existing.txt", "sub/api.key"}, resolvedPaths(t, main))
+	require.Equal(t, []string{"existing.txt", "sub/api.key"}, resolvedPaths(t, mainPath))
 }
 
 // TestAddSecrets_DirectoryFlatten: passing a directory with ownSesamFile=false
@@ -102,28 +111,31 @@ func TestAddSecrets_FileInSubdirMainFile(t *testing.T) {
 // Re-running is idempotent.
 func TestAddSecrets_DirectoryFlatten(t *testing.T) {
 	dir := t.TempDir()
-	main := writeMainFile(t, dir)
+	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "a.txt"))
 	touch(t, filepath.Join(dir, "sub", "b.txt"))
 	touch(t, filepath.Join(dir, "sub", "deep", "c.txt"))
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.NoError(t, cr.AddSecrets(dir, false, []string{"group1"}))
+	cr, err := Load(mainPath)
+	require.NoError(t, err)
+	_, err = cr.AddSecrets(dir, false, []string{"group1"})
+	require.NoError(t, err)
 	require.NoError(t, cr.Save())
 
 	require.False(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
 	require.False(t, exists(filepath.Join(dir, "sub", "deep", "sesam.yml")))
 
 	want := []string{"a.txt", "existing.txt", "sub/b.txt", "sub/deep/c.txt"}
-	require.Equal(t, want, resolvedPaths(t, main))
+	require.Equal(t, want, resolvedPaths(t, mainPath))
 
 	// Idempotent: a second run over the same tree adds nothing.
-	cr2 := NewConfigRepository()
-	require.NoError(t, cr2.Load(main))
-	require.NoError(t, cr2.AddSecrets(dir, false, []string{"group1"}))
+
+	cr2, err := Load(mainPath)
+	require.NoError(t, err)
+	_, err = cr2.AddSecrets(dir, false, []string{"group1"})
+	require.NoError(t, err)
 	require.NoError(t, cr2.Save())
-	require.Equal(t, want, resolvedPaths(t, main))
+	require.Equal(t, want, resolvedPaths(t, mainPath))
 }
 
 // TestAddSecrets_DirectoryOwnFile: passing a directory with ownSesamFile=true
@@ -131,14 +143,15 @@ func TestAddSecrets_DirectoryFlatten(t *testing.T) {
 // top-level files land in the main file.
 func TestAddSecrets_DirectoryOwnFile(t *testing.T) {
 	dir := t.TempDir()
-	main := writeMainFile(t, dir)
+	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "a.txt"))
 	touch(t, filepath.Join(dir, "sub", "b.txt"))
 	touch(t, filepath.Join(dir, "sub", "deep", "c.txt"))
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.NoError(t, cr.AddSecrets(dir, true, []string{"group1"}))
+	cr, err := Load(mainPath)
+	require.NoError(t, err)
+	_, err = cr.AddSecrets(dir, true, []string{"group1"})
+	require.NoError(t, err)
 	require.NoError(t, cr.Save())
 
 	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
@@ -146,15 +159,16 @@ func TestAddSecrets_DirectoryOwnFile(t *testing.T) {
 
 	// Paths are relative to each owning sesam.yml.
 	want := []string{"a.txt", "b.txt", "c.txt", "existing.txt"}
-	require.Equal(t, want, resolvedPaths(t, main))
+	require.Equal(t, want, resolvedPaths(t, mainPath))
 }
 
 // TestAddSecrets_MissingPath surfaces a stat error for a non-existent path.
 func TestAddSecrets_MissingPath(t *testing.T) {
 	dir := t.TempDir()
-	main := writeMainFile(t, dir)
+	mainPath := writeMainFile(t, dir)
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.Error(t, cr.AddSecrets(filepath.Join(dir, "nope.txt"), true, []string{"group1"}))
+	cr, err := Load(mainPath)
+	require.NoError(t, err)
+	_, err = cr.AddSecrets(filepath.Join(dir, "nope.txt"), true, []string{"group1"})
+	require.Error(t, err)
 }

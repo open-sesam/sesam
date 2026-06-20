@@ -7,6 +7,10 @@
     "pubkey": {
       "type": "string",
       "description": "Public key of this user, either as literal, forge-id, file path or link"
+    },
+    "non-empty-string": {
+      "type": "string",
+      "minLength": 1
     }
   },
   "type": "object",
@@ -28,11 +32,11 @@
         ],
         "properties": {
           "name": {
-            "type": "string",
-            "description": "Name of a user - can be email TODO: Maybe enforce mails for future uses?"
+            "$ref": "#/$defs/non-empty-string",
+            "description": "Name of a user"
           },
           "desc": {
-            "type": "string",
+            "$ref": "#/$defs/non-empty-string",
             "description": "Description or full name of this user"
           },
           "key": {
@@ -57,7 +61,7 @@
       "additionalProperties": {
         "type": "array",
         "items": {
-          "type": "string",
+          "$ref": "#/$defs/non-empty-string",
           "description": "One of the names described in users above"
         }
       }
@@ -74,7 +78,7 @@
             ],
             "properties": {
               "include": {
-                "type": "string",
+                "$ref": "#/$defs/non-empty-string",
                 "description": "An include path to another sub sesam.yml file"
               }
             }
@@ -87,17 +91,17 @@
             ],
             "properties": {
               "path": {
-                "type": "string",
+                "$ref": "#/$defs/non-empty-string",
                 "description": "Path to the decrypted secret"
               },
               "access": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "$ref": "#/$defs/non-empty-string"
                 }
               },
               "description": {
-                "type": "string",
+                "$ref": "#/$defs/non-empty-string",
                 "description": "Description of the secret"
               }
             }

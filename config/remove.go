@@ -20,64 +20,61 @@ import (
 // from disk and its include entry dropped from the parent file, cascading
 // upward; the main file is never deleted.
 //
-// The plaintext files referenced by the removed secrets are deleted from disk
-// only when purge is true; otherwise just the config entries are removed.
-func (c *ConfigRepository) RemoveSecrets(path string, purge bool) error {
+// Only the config entries are removed; the referenced plaintext files are left
+// on disk for the user to delete themselves.
+//
+// It returns the absolute on-disk paths of the secrets that were removed so the
+// caller can mirror the change into the secret manager.
+func (c *ConfigRepository) RemoveSecrets(path string) ([]string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	target := filepath.Clean(path)
 
-	var kept, removed []Secret
-	for _, s := range c.MainFile.Config.Secrets {
-		if matchesTarget(c.revealedPath(s), target, info.IsDir()) {
-			removed = append(removed, s)
-		} else {
-			kept = append(kept, s)
+	entries, err := c.secretEntries()
+	if err != nil {
+		return nil, err
+	}
+
+	var removed []secretEntry
+	for _, e := range entries {
+		if matchesTarget(revealedPath(e), target, info.IsDir()) {
+			removed = append(removed, e)
 		}
 	}
 
 	if len(removed) == 0 {
-		return fmt.Errorf("no secrets found for %q", path)
+		return nil, fmt.Errorf("no secrets found for %q", path)
 	}
 
-	// Drop each removed secret's entry from its source file's AST. Save only
-	// re-encodes the AST, so deleting the node is what makes the removal stick.
-	for _, s := range removed {
-		if s.node == nil {
-			continue
-		}
-
-		if err := removeNode(s.Source, s.node); err != nil {
-			return err
-		}
+	removedPaths := make([]string, 0, len(removed))
+	for _, e := range removed {
+		removedPaths = append(removedPaths, revealedPath(e))
 	}
 
-	c.MainFile.Config.Secrets = kept
+	// Cut each removed secret's node from its source file's AST. Save only
+	// re-renders the AST, so deleting the node is what makes the removal stick.
+	for _, e := range removed {
+		if err := removeNode(e.source, e.node); err != nil {
+			return nil, err
+		}
+	}
 
 	// Delete any subdirectory file emptied by the removal (and the include
 	// that points at it), cascading upward.
 	if err := c.pruneEmptySources(); err != nil {
-		return err
+		return nil, err
 	}
 
-	if purge {
-		for _, s := range removed {
-			if err := os.Remove(c.revealedPath(s)); err != nil && !os.IsNotExist(err) {
-				return err
-			}
-		}
-	}
-
-	return nil
+	return removedPaths, nil
 }
 
 // revealedPath is the on-disk location of a secret's plaintext file: its Path
 // is recorded relative to the directory of the sesam.yml that owns it.
-func (c *ConfigRepository) revealedPath(s Secret) string {
-	return filepath.Join(filepath.Dir(s.Source.Path), s.Path)
+func revealedPath(e secretEntry) string {
+	return filepath.Join(filepath.Dir(e.source.Path), e.secret.Path)
 }
 
 // matchesTarget reports whether revealed (a secret's plaintext path) should be
@@ -97,17 +94,18 @@ func matchesTarget(revealed, target string, targetIsDir bool) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// removeNode deletes a single mapping node from a source file's secrets
-// sequence.
+// removeNode cuts a single mapping node from a source file's secrets sequence,
+// carrying its head comment out with it.
 func removeNode(src *FileSource, node *ast.MappingNode) error {
 	seq, err := secretsNode(src.RootNode)
 	if err != nil {
 		return fmt.Errorf("%s: %w", src.Path, err)
 	}
 
-	seq.Values = slices.DeleteFunc(seq.Values, func(v ast.Node) bool {
+	idx := slices.IndexFunc(seq.Values, func(v ast.Node) bool {
 		return v == ast.Node(node)
 	})
+	removeSeqValue(seq, idx)
 
 	return nil
 }
@@ -144,10 +142,6 @@ func (c *ConfigRepository) pruneEmptySources() error {
 // isEmptySource reports whether src no longer carries any secret or include
 // entry and can therefore be deleted.
 func isEmptySource(src *FileSource) bool {
-	if len(src.NewIncludes) > 0 {
-		return false
-	}
-
 	seq, err := secretsNode(src.RootNode)
 	if err != nil {
 		return false
@@ -169,28 +163,28 @@ func (c *ConfigRepository) deleteSource(path string) error {
 	return nil
 }
 
-// removeIncludeTo drops any include entry resolving to target from every
-// loaded file (AST entries and queued includes alike).
+// removeIncludeTo cuts any include entry resolving to target from every loaded
+// file, carrying its comment out with it.
 func (c *ConfigRepository) removeIncludeTo(target string) {
 	target = filepath.Clean(target)
 
 	for _, src := range c.SourceFiles {
 		dir := filepath.Dir(src.Path)
 
-		if seq, err := secretsNode(src.RootNode); err == nil {
-			seq.Values = slices.DeleteFunc(seq.Values, func(v ast.Node) bool {
-				m, ok := v.(*ast.MappingNode)
-				if !ok {
-					return false
-				}
-
-				inc, ok := includePath(m)
-				return ok && filepath.Clean(filepath.Join(dir, inc)) == target
-			})
+		seq, err := secretsNode(src.RootNode)
+		if err != nil {
+			continue
 		}
 
-		src.NewIncludes = slices.DeleteFunc(src.NewIncludes, func(inc string) bool {
-			return filepath.Clean(filepath.Join(dir, inc)) == target
-		})
+		for i := 0; i < len(seq.Values); {
+			m, ok := seq.Values[i].(*ast.MappingNode)
+			if ok {
+				if inc, isInc := includePath(m); isInc && filepath.Clean(filepath.Join(dir, inc)) == target {
+					removeSeqValue(seq, i)
+					continue // a value shifted into slot i; re-check it
+				}
+			}
+			i++
+		}
 	}
 }

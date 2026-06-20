@@ -1,13 +1,12 @@
 package config
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"github.com/goccy/go-yaml"
 )
 
 // AddSecrets adds the secret(s) at path — a single file or a directory — to
@@ -33,17 +32,39 @@ import (
 // (type/access/description) is left empty — the user fills it in afterwards.
 // Re-running is idempotent: existing entries (matched by Path / include path)
 // are left alone, new files are appended.
-func (c *ConfigRepository) AddSecrets(path string, ownSesamFile bool, access []string) error {
+//
+// It returns the absolute on-disk paths of the secrets that were newly added
+// (existing entries, skipped for idempotency, are not included) so the caller
+// can mirror the change into the secret manager.
+func (c *ConfigRepository) AddSecrets(path string, nested bool, access []string) ([]string, error) {
+	// TODO: an already included secret should give back an error with where the secret is already added (path to this sesam.yml)
+	before := c.trackedRevealedPaths()
+
 	info, err := os.Stat(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if info.IsDir() {
-		return c.addSecretsDir(path, ownSesamFile, access)
+		err = c.addSecretsDir(path, nested, access)
+	} else {
+		err = c.addSecretsFile(path, nested, access)
+	}
+	if err != nil {
+		return nil, err
 	}
 
-	return c.addSecretsFile(path, ownSesamFile, access)
+	after := c.trackedRevealedPaths()
+
+	var added []string
+	for p := range after {
+		if !before[p] {
+			added = append(added, p)
+		}
+	}
+	slices.Sort(added)
+
+	return added, nil
 }
 
 // addSecretsDir lays out a directory's secrets according to ownSesamFile.
@@ -51,8 +72,8 @@ func (c *ConfigRepository) AddSecrets(path string, ownSesamFile bool, access []s
 // When true, each subdirectory gets its own sesam.yml: the recursion writes
 // straight into MainFile when dirPath is the main file's own directory (no
 // include to add), otherwise dirPath/sesam.yml is referenced from MainFile.
-func (c *ConfigRepository) addSecretsDir(dirPath string, ownSesamFile bool, access []string) error {
-	if !ownSesamFile {
+func (c *ConfigRepository) addSecretsDir(dirPath string, nested bool, access []string) error {
+	if !nested {
 		return c.addSecretsFlat(dirPath, access)
 	}
 
@@ -98,20 +119,25 @@ func (c *ConfigRepository) addSecretsFlat(dirPath string, access []string) error
 			return err
 		}
 
-		c.addSecret(c.MainFile, rel, access)
-		return nil
+		return c.addSecret(c.MainFile, rel, access)
 	})
 }
 
 // addSecretsFile adds one file. Files next to the main sesam.yml (or any file
 // when ownSesamFile is false) land in the main file; otherwise the file's
 // directory gets its own sesam.yml, included from the main file.
-func (c *ConfigRepository) addSecretsFile(filePath string, ownSesamFile bool, access []string) error {
+func (c *ConfigRepository) addSecretsFile(filePath string, nested bool, access []string) error {
+	// Already tracked by some sesam.yml: adding it again is a no-op. Bail before
+	// creating a sub-file/include for a secret we would only skip.
+	if c.trackedRevealedPaths()[filepath.Clean(filePath)] {
+		return nil
+	}
+
 	mainDir := filepath.Dir(c.MainFile.Path)
 	fileDir := filepath.Dir(filePath)
 
 	src := c.MainFile
-	if ownSesamFile && !sameDir(fileDir, mainDir) {
+	if nested && !sameDir(fileDir, mainDir) {
 		sesamPath := filepath.Join(fileDir, "sesam.yml")
 		s, err := c.loadOrCreate(sesamPath)
 		if err != nil {
@@ -126,16 +152,22 @@ func (c *ConfigRepository) addSecretsFile(filePath string, ownSesamFile bool, ac
 	}
 
 	// Path is recorded relative to its own sesam.yml's directory.
-	rel, err := filepath.Rel(filepath.Dir(src.Path), filePath)
+	fmt.Printf("target path: %s\n", filePath)
+	abs, err := filepath.Abs(filepath.Dir(src.Path))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("filepath dir of src.path: %s\n", abs)
+
+	rel, err := filepath.Rel(abs, filePath)
 	if err != nil {
 		return err
 	}
 
-	c.addSecret(src, rel, access)
-	return nil
+	return c.addSecret(src, rel, access)
 }
 
-// includeFromMain queues an include of sesamPath in MainFile, unless one is
+// includeFromMain adds an include of sesamPath to MainFile, unless one is
 // already present.
 func (c *ConfigRepository) includeFromMain(sesamPath string) error {
 	incPath, err := filepath.Rel(filepath.Dir(c.MainFile.Path), sesamPath)
@@ -143,28 +175,25 @@ func (c *ConfigRepository) includeFromMain(sesamPath string) error {
 		return err
 	}
 
-	if slices.Contains(c.MainFile.allIncludes(), incPath) {
+	if slices.Contains(fileIncludes(c.MainFile.RootNode), incPath) {
 		return nil
 	}
 
-	c.appendInclude(c.MainFile, incPath)
-	return nil
+	return c.appendInclude(c.MainFile, incPath)
 }
 
-// addSecret appends a Secret owned by src with the given relative path, unless
-// an identical entry already exists.
-func (c *ConfigRepository) addSecret(src *FileSource, relPath string, access []string) {
-	for _, s := range c.MainFile.Config.Secrets {
-		if s.Source == src && s.Path == relPath {
-			return
-		}
+// addSecret inserts a secret node owned by src with the given relative path,
+// unless the physical file it points at is already tracked by some sesam.yml
+// (src itself or any other loaded file). This keeps a secret from being written
+// twice — including the case where a file already declared in a sub-file would
+// otherwise be re-added to the main file, or vice versa.
+func (c *ConfigRepository) addSecret(src *FileSource, relPath string, access []string) error {
+	abs := filepath.Join(filepath.Dir(src.Path), relPath)
+	if c.trackedRevealedPaths()[abs] {
+		return nil
 	}
 
-	c.MainFile.Config.Secrets = append(c.MainFile.Config.Secrets, Secret{
-		Path:   relPath,
-		Source: src,
-		Access: access,
-	})
+	return appendSecretsItems(src, []Secret{{Path: relPath, Access: access}})
 }
 
 // addSecretsRecursive processes one directory: recurses into subdirs first
@@ -226,82 +255,55 @@ func (c *ConfigRepository) addSecretsRecursive(dirPath string, access []string) 
 		return "", err
 	}
 
-	seenPaths := map[string]bool{}
-	for _, s := range c.MainFile.Config.Secrets {
-		if s.Source == src && s.Path != "" {
-			seenPaths[s.Path] = true
+	for _, name := range files {
+		if err := c.addSecret(src, name, access); err != nil {
+			return "", err
 		}
 	}
 
 	seenIncludes := map[string]bool{}
-	for _, inc := range src.allIncludes() {
+	for _, inc := range fileIncludes(src.RootNode) {
 		seenIncludes[inc] = true
-	}
-
-	for _, name := range files {
-		if seenPaths[name] {
-			continue
-		}
-
-		c.MainFile.Config.Secrets = append(c.MainFile.Config.Secrets, Secret{
-			Path:   name,
-			Source: src,
-			Access: access,
-		})
 	}
 
 	for _, inc := range includeRels {
 		if seenIncludes[inc] {
 			continue
 		}
-		c.appendInclude(src, inc)
+		if err := c.appendInclude(src, inc); err != nil {
+			return "", err
+		}
 	}
 
 	return sesamPath, nil
 }
 
-// loadOrCreate returns the FileSource for `path`, loading it from disk if it
-// exists (and integrating its secrets into MainFile.Config.Secrets) or
-// bootstrapping an empty in-memory FileSource that Save() will write out.
+// loadOrCreate returns the FileSource for `path`, loading it (and every file it
+// includes) from disk if it exists, or bootstrapping an empty in-memory
+// FileSource that Save() will write out once it has its first item.
 func (c *ConfigRepository) loadOrCreate(path string) (*FileSource, error) {
 	if existing, ok := c.SourceFiles[path]; ok {
 		return existing, nil
 	}
 
 	if _, err := os.Stat(path); err == nil {
-		src, err := c.loadFile(path)
-		if err != nil {
-			return nil, err
-		}
-
-		c.SourceFiles[path] = src
-		flat, err := c.resolveSource(src)
-		if err != nil {
-			return nil, err
-		}
-
-		c.MainFile.Config.Secrets = append(c.MainFile.Config.Secrets, flat...)
-		return src, nil
+		return c.loadTree(path)
 	}
 
 	return c.newFile(path), nil
 }
 
-// newFile registers an in-memory FileSource for a path that doesn't exist
-// on disk yet. Its RootNode stays nil; Save uses writeFreshFile for these.
+// newFile registers an in-memory FileSource for a path that doesn't exist on
+// disk yet. Its RootNode stays nil until the first secret/include is added,
+// which builds the document; Save writes it like any other file.
 func (c *ConfigRepository) newFile(path string) *FileSource {
-	src := &FileSource{
-		Path:       path,
-		CommentMap: yaml.CommentMap{},
-		Config:     &Config{},
-	}
-
+	src := &FileSource{Path: path}
 	c.SourceFiles[path] = src
 	return src
 }
 
-// appendInclude queues a new include path on src; Save appends it on the
-// next write.
-func (c *ConfigRepository) appendInclude(src *FileSource, includePath string) {
-	src.NewIncludes = append(src.NewIncludes, includePath)
+// appendInclude inserts an include node pointing at includePath into src's
+// secrets sequence.
+func (c *ConfigRepository) appendInclude(src *FileSource, includePath string) error {
+	return appendSecretsItems(src, []Secret{{Include: includePath}})
 }

@@ -89,7 +89,7 @@ func TestLoad_Negative(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Load(tc.dirFn(t), tc.idPaths, RepoOpts{})
+			_, err := Load(tc.dirFn(t), "../test/files/main_with_include.yaml", tc.idPaths, RepoOpts{})
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantErr)
 		})
@@ -149,7 +149,7 @@ func TestRepo_Whoami_UnknownIdentity(t *testing.T) {
 	stranger := writeTestIdentity(t, "stranger")
 
 	dir := bootstrappedDir(t, admin)
-	r, err := Load(dir, []string{stranger.Path}, RepoOpts{})
+	r, err := Load(dir, filepath.Join(dir, "sesam.yml"), []string{stranger.Path}, RepoOpts{})
 	require.Error(t, err, "Load should refuse an identity that cannot decrypt the audit log")
 	require.Contains(t, err.Error(), "failed to load audit log")
 	require.Nil(t, r)
@@ -183,7 +183,7 @@ func TestRepo_SecretAdd_RejectsBadInputs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := r.SecretAdd(tc.paths, tc.groups)
+			err := r.SecretAdd(tc.paths, tc.groups, false)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantErr)
 		})
@@ -198,7 +198,7 @@ func TestRepo_SecretAddRemove_RoundTrip(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(plaintext), 0o700))
 	require.NoError(t, os.WriteFile(plaintext, []byte("hunter2\n"), 0o600))
 
-	require.NoError(t, r.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}))
+	require.NoError(t, r.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}, false))
 
 	secrets, err := r.ListSecrets()
 	require.NoError(t, err)

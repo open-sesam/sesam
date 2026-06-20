@@ -14,12 +14,13 @@ func buildConfig(t *testing.T, ownSesamFile bool, files ...string) (string, stri
 	dir := t.TempDir()
 	main := writeMainFile(t, dir)
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
+	cr, err := Load(main)
+	require.NoError(t, err)
 	for _, f := range files {
 		p := filepath.Join(dir, f)
 		touch(t, p)
-		require.NoError(t, cr.AddSecrets(p, ownSesamFile, []string{"group1"}))
+		_, err = cr.AddSecrets(p, ownSesamFile, []string{"group1"})
+		require.NoError(t, err)
 	}
 	require.NoError(t, cr.Save())
 
@@ -31,13 +32,14 @@ func buildConfig(t *testing.T, ownSesamFile bool, files ...string) (string, stri
 func TestRemoveSecrets_FileFromMain(t *testing.T) {
 	dir, main := buildConfig(t, false, "token.txt")
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.NoError(t, cr.RemoveSecrets(filepath.Join(dir, "token.txt"), false))
+	cr, err := Load(main)
+	require.NoError(t, err)
+	_, err = cr.RemoveSecrets(filepath.Join(dir, "token.txt"))
+	require.NoError(t, err)
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"existing.txt"}, resolvedPaths(t, main))
-	require.True(t, exists(filepath.Join(dir, "token.txt")), "plaintext kept without purge")
+	require.True(t, exists(filepath.Join(dir, "token.txt")), "plaintext is left for the user to delete")
 }
 
 // TestRemoveSecrets_FileFromSubfile removes the only secret in a subdirectory
@@ -47,14 +49,15 @@ func TestRemoveSecrets_FileFromSubfile(t *testing.T) {
 
 	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.NoError(t, cr.RemoveSecrets(filepath.Join(dir, "sub", "api.key"), false))
+	cr, err := Load(main)
+	require.NoError(t, err)
+	_, err = cr.RemoveSecrets(filepath.Join(dir, "sub", "api.key"))
+	require.NoError(t, err)
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"existing.txt"}, resolvedPaths(t, main))
 	require.False(t, exists(filepath.Join(dir, "sub", "sesam.yml")), "empty sub file removed")
-	require.True(t, exists(filepath.Join(dir, "sub", "api.key")), "plaintext kept without purge")
+	require.True(t, exists(filepath.Join(dir, "sub", "api.key")), "plaintext is left for the user to delete")
 }
 
 // TestRemoveSecrets_SubfileKeepsSecret removes one of several secrets in a
@@ -62,9 +65,10 @@ func TestRemoveSecrets_FileFromSubfile(t *testing.T) {
 func TestRemoveSecrets_SubfileKeepsSecret(t *testing.T) {
 	dir, main := buildConfig(t, true, "sub/b.txt", "sub/c.txt")
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.NoError(t, cr.RemoveSecrets(filepath.Join(dir, "sub", "b.txt"), false))
+	cr, err := Load(main)
+	require.NoError(t, err)
+	_, err = cr.RemoveSecrets(filepath.Join(dir, "sub", "b.txt"))
+	require.NoError(t, err)
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"c.txt", "existing.txt"}, resolvedPaths(t, main))
@@ -79,9 +83,10 @@ func TestRemoveSecrets_Directory(t *testing.T) {
 	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
 	require.True(t, exists(filepath.Join(dir, "sub", "deep", "sesam.yml")))
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.NoError(t, cr.RemoveSecrets(filepath.Join(dir, "sub"), false))
+	cr, err := Load(main)
+	require.NoError(t, err)
+	_, err = cr.RemoveSecrets(filepath.Join(dir, "sub"))
+	require.NoError(t, err)
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"a.txt", "existing.txt"}, resolvedPaths(t, main))
@@ -89,34 +94,23 @@ func TestRemoveSecrets_Directory(t *testing.T) {
 	require.False(t, exists(filepath.Join(dir, "sub", "deep", "sesam.yml")))
 }
 
-// TestRemoveSecrets_Purge deletes the plaintext file when purge is set.
-func TestRemoveSecrets_Purge(t *testing.T) {
-	dir, main := buildConfig(t, false, "token.txt")
-
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.NoError(t, cr.RemoveSecrets(filepath.Join(dir, "token.txt"), true))
-	require.NoError(t, cr.Save())
-
-	require.Equal(t, []string{"existing.txt"}, resolvedPaths(t, main))
-	require.False(t, exists(filepath.Join(dir, "token.txt")), "plaintext purged")
-}
-
 // TestRemoveSecrets_NotFound errors when nothing matches the path.
 func TestRemoveSecrets_NotFound(t *testing.T) {
 	dir, main := buildConfig(t, false)
 	touch(t, filepath.Join(dir, "stray.txt"))
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.Error(t, cr.RemoveSecrets(filepath.Join(dir, "stray.txt"), false))
+	cr, err := Load(main)
+	require.NoError(t, err)
+	_, err = cr.RemoveSecrets(filepath.Join(dir, "stray.txt"))
+	require.Error(t, err)
 }
 
 // TestRemoveSecrets_MissingPath surfaces a stat error for a non-existent path.
 func TestRemoveSecrets_MissingPath(t *testing.T) {
 	dir, main := buildConfig(t, false)
 
-	cr := NewConfigRepository()
-	require.NoError(t, cr.Load(main))
-	require.Error(t, cr.RemoveSecrets(filepath.Join(dir, "nope.txt"), false))
+	cr, err := Load(main)
+	require.NoError(t, err)
+	_, err = cr.RemoveSecrets(filepath.Join(dir, "nope.txt"))
+	require.Error(t, err)
 }

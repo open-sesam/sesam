@@ -7,13 +7,12 @@ import (
 	"sort"
 	"text/tabwriter"
 
-	"github.com/open-sesam/sesam/config"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
 
 // HandleListSecrets prints tracked secret metadata.
-func HandleListSecrets(_ context.Context, cmd *cli.Command, r *repo.Repo, configRepo *config.ConfigRepository) error {
+func HandleListSecrets(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	secrets, err := r.ListSecrets()
 	if err != nil {
 		return err
@@ -56,7 +55,7 @@ func HandleListSecrets(_ context.Context, cmd *cli.Command, r *repo.Repo, config
 }
 
 // HandleListUsers lists users, groups, and access bindings.
-func HandleListUsers(_ context.Context, cmd *cli.Command, r *repo.Repo, configRepo *config.ConfigRepository) error {
+func HandleListUsers(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	users, err := r.ListUsers()
 	if err != nil {
 		return err

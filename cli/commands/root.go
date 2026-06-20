@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-sesam/sesam/config"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
 
 // HandleVerify verifies repository audit and crypt state.
-func HandleVerify(_ context.Context, _ *cli.Command, r *repo.Repo, configRepo *config.ConfigRepository) error {
+func HandleVerify(_ context.Context, _ *cli.Command, r *repo.Repo) error {
 	report, err := r.Verify(repo.VerifyOptions{Integrity: true})
 	if err != nil {
 		return err
@@ -26,7 +25,7 @@ func HandleVerify(_ context.Context, _ *cli.Command, r *repo.Repo, configRepo *c
 }
 
 // HandleID identifies the current user from configured identities.
-func HandleID(_ context.Context, _ *cli.Command, r *repo.Repo, configRepo *config.ConfigRepository) error {
+func HandleID(_ context.Context, _ *cli.Command, r *repo.Repo) error {
 	whoami, err := r.Whoami()
 	if err != nil {
 		return err

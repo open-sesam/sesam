@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-sesam/sesam/config"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
@@ -47,7 +46,7 @@ func HandleClean(ctx context.Context, cmd *cli.Command) error {
 	return WithRepo(HandleCleanWithRepo)(ctx, cmd)
 }
 
-func HandleCleanWithRepo(ctx context.Context, cmd *cli.Command, r *repo.Repo, _ *config.ConfigRepository) error {
+func HandleCleanWithRepo(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	dryRun := cmd.Bool("dry-run")
 	quiet := cmd.Bool("quiet")
 
