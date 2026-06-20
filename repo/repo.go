@@ -676,14 +676,13 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string, nested bool) error {
 	//       Same when being in a sub-dir and doing "add ../secret.txt" We should resolve that here.
 	//       We should only care it is inside of the sesam dir.
 	// TODO: When walking "." then we should skip .sesam and .git
-
+	// TODO: Since secrets get skipped if they are already added (to avoid duplication), changing the
+	// groups of a secret and therefore creating a 'change_access' event does not work currently
 	var added []string
 	for _, p := range revealedPaths {
 		abs := r.toAbs(p)
 		// TODO: refactor the directory traversal to happen in the repo. AST surgery should be for every single
 		// secret then. (includes also)
-		// TODO: absolute and relative paths are not working as intended, error:
-		// ERR exit error=secret path "subdir/blub2" is outside the sesam dir "/home/johnny/repos/sesam-test": Rel: can't make subdir/blub2 relative to /home/johnny/repos/sesam-test
 		paths, err := r.configRepo.AddSecrets(abs, nested, groups)
 		if err != nil {
 			return fmt.Errorf("failed to add secret %q to config: %w", p, err)
