@@ -1,0 +1,55 @@
+# Shell completion for leaf commands offers useful values (file paths, existing
+# secret paths, user names, flags incl. globals) instead of the bare "help"
+# command that urfave/cli's default completer prints. Completion is driven by
+# the hidden --generate-shell-completion flag the shell scripts append.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Seal the README created by sesam init so a sealed object exists on disk under
+# .sesam/objects for the secret-path completion below.
+exec sesam seal
+
+# `sesam add <TAB>`: the positional is a brand-new path, so completion prints
+# nothing and lets the shell fall back to its own file completion. The key
+# regression guard: it must NOT print the "help" command.
+exec sesam add --generate-shell-completion
+! stdout .
+
+# `sesam add --g<TAB>`: completes the command's own --group flag.
+exec sesam add --g --generate-shell-completion
+stdout '--group'
+
+# `sesam add --s<TAB>`: inherited global flags are offered too.
+exec sesam add --s --generate-shell-completion
+stdout '--sesam-dir'
+
+# `sesam rm <TAB>`: completes existing secret paths globbed from .sesam/objects
+# (no decryption needed), not "help".
+exec sesam rm --generate-shell-completion
+stdout 'README\.md'
+! stdout '^help$'
+
+# `sesam rm -<TAB>`: flag completion folds in both command and global flags.
+exec sesam rm - --generate-shell-completion
+stdout '--identity'
+
+# Add a second user so user-name completion has more than the admin.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+
+# `sesam kill --user <TAB>`: completes known user names from .sesam/signkeys.
+exec sesam kill --user --generate-shell-completion
+stdout '^admin$'
+stdout '^bob$'
+
+# `sesam tell --user <TAB>`: unlike `kill`, `tell` adds a NEW user, so it must
+# NOT complete existing user names (and must never print the bare "help").
+exec sesam tell --user --generate-shell-completion
+! stdout '^bob$'
+! stdout '^admin$'
+! stdout '^help$'

@@ -137,9 +137,9 @@ func TestIntegrationMultiUser(t *testing.T) {
 	secretPath := "secrets/api_key"
 	writeSecret(t, sesamDir, secretPath, "sk-12345")
 
-	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailSecretChange{
+	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: secretPath,
-		Groups:       []string{"dev"},
+		AccessGroups: []string{"dev"},
 	}), nil)
 	require.NoError(t, err)
 
@@ -255,9 +255,9 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	gitCommitAll(t, repo, "add and seal")
 
 	// 3. Change groups (add dev).
-	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailSecretChange{
+	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailSecretChangeAccess{
 		RevealedPath: "secrets/token",
-		Groups:       []string{"admin", "dev"},
+		AccessGroups: []string{"admin", "dev"},
 	}), nil)
 	require.NoError(t, err)
 

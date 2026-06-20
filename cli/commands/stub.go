@@ -1,11 +1,14 @@
 package commands
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
 
-// handleStub returns a consistent not-implemented error.
-//
-// CLI callers should treat this as a feature-gap signal rather than a runtime
-// failure in cryptographic operations.
-func handleStub(name string) error {
-	return fmt.Errorf("command %q is not implemented yet", name)
+	"github.com/urfave/cli/v3"
+)
+
+func HandleStub(_ context.Context, _ *cli.Command) error {
+	return fmt.Errorf("command %v is not implemented yet", strings.Join(os.Args[0:], " "))
 }

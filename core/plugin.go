@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"filippo.io/age/plugin"
+	"github.com/muesli/termenv"
 	"golang.org/x/term"
 )
 
@@ -57,11 +58,21 @@ func (p *PluginUI) ClientUI() *plugin.ClientUI {
 	}
 }
 
+// tag renders the "[sesam-<name>]" prompt prefix through termenv so plugin
+// prompts match the rest of the CLI's output. It is built lazily from stderr
+// (rather than cached on the struct) so directly-constructed PluginUIs — e.g.
+// in tests — need no extra field; termenv degrades to plain text when stderr
+// is not a colour-capable terminal.
+func (p *PluginUI) tag(name string) string {
+	out := termenv.NewOutput(p.stderr)
+	return out.String(fmt.Sprintf("[sesam-%s]", name)).Bold().String()
+}
+
 func (p *PluginUI) displayMessage(name, message string) error {
 	if !p.interactive {
 		return ErrNoTTY
 	}
-	_, err := fmt.Fprintf(p.stderr, "[sesam-%s] %s\n", name, message)
+	_, err := fmt.Fprintf(p.stderr, "%s %s\n", p.tag(name), message)
 	return err
 }
 
@@ -69,7 +80,7 @@ func (p *PluginUI) requestValue(name, prompt string, secret bool) (string, error
 	if !p.interactive {
 		return "", ErrNoTTY
 	}
-	if _, err := fmt.Fprintf(p.stderr, "[sesam-%s] %s ", name, prompt); err != nil {
+	if _, err := fmt.Fprintf(p.stderr, "%s %s ", p.tag(name), prompt); err != nil {
 		return "", err
 	}
 
@@ -83,7 +94,7 @@ func (p *PluginUI) requestValue(name, prompt string, secret bool) (string, error
 	// Hint at it now so the upcoming silence isn't mistaken for a hang.
 	// Harmless when the plugin doesn't actually need a touch.
 	if secret {
-		_, _ = fmt.Fprintf(p.stderr, "[sesam-%s] touch your security key now if it starts to flash\n", name)
+		_, _ = fmt.Fprintf(p.stderr, "%s touch your security key now if it starts to flash\n", p.tag(name))
 	}
 
 	return value, nil
@@ -115,7 +126,7 @@ func (p *PluginUI) confirm(name, prompt, yes, no string) (bool, error) {
 	if no == "" {
 		no = "no"
 	}
-	if _, err := fmt.Fprintf(p.stderr, "[sesam-%s] %s [%s/%s] ", name, prompt, yes, no); err != nil {
+	if _, err := fmt.Fprintf(p.stderr, "%s %s [%s/%s] ", p.tag(name), prompt, yes, no); err != nil {
 		return false, err
 	}
 	line, err := bufio.NewReader(p.stdin).ReadString('\n')
@@ -135,12 +146,12 @@ func (p *PluginUI) announcePluginCall(name string) {
 	if !p.interactive {
 		return
 	}
-	_, _ = fmt.Fprintf(p.stderr, "[sesam-%s] starting — enter PIN if prompted, then touch your security key when it flashes\n", name)
+	_, _ = fmt.Fprintf(p.stderr, "%s starting — enter PIN if prompted, then touch your security key when it flashes\n", p.tag(name))
 }
 
 func (p *PluginUI) waitTimer(name string) {
 	if !p.interactive {
 		return
 	}
-	_, _ = fmt.Fprintf(p.stderr, "[sesam-%s] waiting — touch your security key now if it is flashing\n", name)
+	_, _ = fmt.Fprintf(p.stderr, "%s waiting — touch your security key now if it is flashing\n", p.tag(name))
 }

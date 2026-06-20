@@ -20,14 +20,14 @@ exec git sesam id
 stdout '^admin$'
 
 # Subcommand routing works (multi-word verbs + secondary args).
-exec git sesam list secrets
+exec git sesam ls
 stdout 'README\.md'
 stdout 'admin'
 
-# A freshly-initialized repo passes `verify`.
+# A freshly-initialized repo passes `verify` (status lines go to stderr via slog).
 exec git sesam verify
-stdout '^verify ok$'
+stderr 'Integrity: ok$'
 
 # Extra flags pass through the alias intact.
-exec git sesam list secrets --json
+exec git sesam ls --json
 stdout '"RevealedPath": "README.md"'

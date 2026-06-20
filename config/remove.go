@@ -26,6 +26,13 @@ import (
 // It returns the absolute on-disk paths of the secrets that were removed so the
 // caller can mirror the change into the secret manager.
 func (c *ConfigRepository) RemoveSecrets(path string) ([]string, error) {
+	// Resolve to absolute so it lines up with the (absolute) revealed paths the
+	// entries carry, and so the returned paths are absolute.
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve secret path %q: %w", path, err)
+	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err

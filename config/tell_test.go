@@ -6,7 +6,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/test-go/testify/require"
+	"github.com/stretchr/testify/require"
 )
 
 // writeUserMain writes a main sesam.yml with one user, one group and one

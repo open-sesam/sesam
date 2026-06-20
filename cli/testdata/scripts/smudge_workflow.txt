@@ -24,7 +24,7 @@ exec git commit -m 'update readme'
 # Confirm the working tree now contains the modified content.
 exec cat README.md
 stdout 'modified readme'
-! stdout 'sesam bootstrap'
+! stdout '# Sesam Cheatsheet'
 
 # Check out the OLD encrypted object from the first commit.
 # Git calls smudge with the old blob; smudge must reveal the original plaintext.
@@ -32,7 +32,7 @@ exec git checkout HEAD~1
 
 # README.md must now have the original content from the first commit.
 exec cat README.md
-stdout 'sesam bootstrap'
+stdout '# Sesam Cheatsheet'
 ! stdout 'modified readme'
 
 # Go back to the new commit

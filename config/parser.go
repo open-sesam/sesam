@@ -48,7 +48,18 @@ type secretEntry struct {
 // Load is the entry function for ConfigRepository. The main sesam.yml file
 // should be passed to Load. It parses the file and every transitively-included
 // file into the AST, validating each against the JSON schema as it goes.
+//
+// The path is resolved to absolute first so MainFile.Path — and every
+// SourceFiles path derived from it — is absolute. That keeps the on-disk
+// (revealed) paths reported by AddSecrets/RemoveSecrets absolute regardless of
+// whether the caller passed a relative config path.
 func Load(path string) (*ConfigRepository, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve config path %q: %w", path, err)
+	}
+	path = abs
+
 	// Load the JSON schema from the embedded FS so every file can be validated
 	// later (on load and before save).
 	configRepo := &ConfigRepository{
@@ -125,6 +136,8 @@ func (c *ConfigRepository) loadFile(path string) (*FileSource, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// fmt.Printf("FILE:\n%s\n", string(bs))
 
 	file, err := parser.ParseBytes(bs, parser.ParseComments)
 	if err != nil {
@@ -342,6 +355,7 @@ func (c *ConfigRepository) writeFile(src *FileSource) error {
 		return err
 	}
 
+	// fmt.Printf("SAVING FILE:\n%s\n", string(out))
 	return renameio.WriteFile(src.Path, []byte(out), 0o644)
 }
 

@@ -37,6 +37,14 @@ import (
 // (existing entries, skipped for idempotency, are not included) so the caller
 // can mirror the change into the secret manager.
 func (c *ConfigRepository) AddSecrets(path string, nested bool, access []string) ([]string, error) {
+	// Resolve to absolute so the path lines up with the (absolute) source-file
+	// paths the layout logic records and reports — both addSecretsFile's Rel and
+	// the returned revealed paths assume this.
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve secret path %q: %w", path, err)
+	}
+
 	// TODO: an already included secret should give back an error with where the secret is already added (path to this sesam.yml)
 	before := c.trackedRevealedPaths()
 
@@ -152,12 +160,10 @@ func (c *ConfigRepository) addSecretsFile(filePath string, nested bool, access [
 	}
 
 	// Path is recorded relative to its own sesam.yml's directory.
-	fmt.Printf("target path: %s\n", filePath)
 	abs, err := filepath.Abs(filepath.Dir(src.Path))
 	if err != nil {
 		return err
 	}
-	fmt.Printf("filepath dir of src.path: %s\n", abs)
 
 	rel, err := filepath.Rel(abs, filePath)
 	if err != nil {

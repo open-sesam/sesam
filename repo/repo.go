@@ -16,20 +16,21 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
 	"github.com/gofrs/flock"
-	"github.com/open-sesam/sesam/config"
+	"github.com/google/renameio"
+	sesamConf "github.com/open-sesam/sesam/config"
 	"github.com/open-sesam/sesam/core"
 )
 
 const defaultLockTimeout = 30 * time.Second
-
-// keyringFingerprint is the OS-keyring entry name used to cache the runtime
-// passphrase of encrypted age identities.
-const keyringFingerprint = "sesam.identity.runtime"
 
 var ErrClosed = errors.New("sesam repo is closed")
 
@@ -43,6 +44,8 @@ type Repo struct {
 	gitRepo  *git.Repository
 	lock     *flock.Flock
 
+	whoami string
+
 	identityPaths []string
 	identities    core.Identities
 
@@ -52,21 +55,63 @@ type Repo struct {
 	secret   *core.SecretManager
 	user     *core.UserManager
 
-	configRepo *config.ConfigRepository
+	configRepo *sesamConf.ConfigRepository
 	mu         sync.Mutex
+}
+
+type VerifyMode string
+
+const (
+	// VerifyModeAll runs the default check (chain verify + root hash verify)
+	VerifyModeAll = "all"
+
+	// VerifyModeNoDisk will skip the root hash check
+	VerifyModeNoDisk = "no-disk"
+
+	VerifyModeDefault = VerifyModeAll
+)
+
+func ToVerifyMode(s string) (VerifyMode, error) {
+	switch s {
+	case VerifyModeAll:
+	case VerifyModeNoDisk:
+	default:
+		return VerifyMode(""), fmt.Errorf("invalid verify mode: %s", s)
+	}
+
+	return VerifyMode(s), nil
 }
 
 // RepoOpts controls runtime behavior shared across all Repo operations.
 type RepoOpts struct {
 	// Interactive should be true when we can talk to the user via the terminal.
-	// TODO: later we should check things like ssh-askpass to allow password
-	// decryption without running in the foreground. Then we might need to split
-	// up options here too (one for interactive terminal and one for interactive UI)
 	Interactive bool
 
 	// LockTimeout bounds how long acquiring the on-disk repo lock waits.
 	// Zero means use the default.
 	LockTimeout time.Duration
+
+	// VerifyMode defines how the on-disk state is verified
+	VerifyMode VerifyMode
+}
+
+type RepoInitOpts struct {
+	RepoOpts
+
+	// InitialUserName is the name of the first admin user.
+	// If empty, we try to guess it from the git config.
+	InitialUserName string
+
+	// InitStep receives logs whenever something interesting happens
+	InitStep func(fmt string, args ...any)
+}
+
+func (rio *RepoInitOpts) PrintStep(fmt string, args ...any) {
+	if rio.InitStep == nil {
+		return
+	}
+
+	rio.InitStep(fmt, args...)
 }
 
 func (opts RepoOpts) lockTimeout() time.Duration {
@@ -90,7 +135,32 @@ func LoadIdentities(identityPaths []string, opts RepoOpts) (core.Identities, err
 		idLoader = loadIdentitiesKeyringOnly
 	}
 
-	return idLoader(identityPaths, keyringFingerprint, opts.pluginUI())
+	return idLoader(identityPaths, opts.pluginUI())
+}
+
+func guessInitUserNameFromGitConfig(repo *git.Repository) (string, error) {
+	// This checks:
+	// - repo .git/config
+	// - ~/.gitconfig
+	// - /etc/gitconfig
+	cfg, err := repo.ConfigScoped(config.SystemScope)
+	if err != nil {
+		return "", fmt.Errorf("failed to read git config: %w", err)
+	}
+
+	if cfg.User.Email != "" {
+		return strings.ToLower(cfg.User.Email), nil
+	}
+
+	if cfg.User.Name != "" {
+		n := cfg.User.Name
+		n = strings.ReplaceAll(n, " ", "_")
+		n = strings.ReplaceAll(n, "/", "_")
+		n = strings.ToLower(n)
+		return n, nil
+	}
+
+	return "", fmt.Errorf("user.email is not set in git-config - please pass --user")
 }
 
 // ResolveSesamDir resolves the sesam repository root. It walks up from
@@ -103,15 +173,12 @@ func ResolveSesamDir(sesamPath string) (string, error) {
 
 // Init initializes a new sesam repository at sesamDir.
 //
-// initialUserName becomes the first admin user; ids are paths to the admin's
-// age identity files. The sesam config is written to <sesamDir>/sesam.yml.
-// On success the returned Repo holds the on-disk lock and has the secret /
-// user managers ready for use; the caller must Close it.
-func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, opts RepoOpts) (*Repo, error) {
-	if err := core.ValidUserName(initialUserName); err != nil {
-		return nil, fmt.Errorf("invalid initial user %q: %w", initialUserName, err)
-	}
-
+// ids are paths to the admin's age identity files. The sesam config is written
+// to <sesamDir>/sesam.yml. On success the returned Repo holds the on-disk lock
+// and has the secret / user managers ready for use; the caller must Close it.
+//
+// The initial user's name is derived from git config (if possible) or taken from the options if given explicitly.
+func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitOpts) (*Repo, error) {
 	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
 	if err != nil {
 		return nil, err
@@ -121,10 +188,24 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, err
 	}
 
-	// NOTE: we do not have a config repository yet, since there is no config.
-	// make sure that no CRUD operations are executed until the configRepo is
-	// initialized. Otherwise, this will panic.
-	r := newRepo(resolvedDir, nil, gitRepo, ids, opts)
+	if opts.InitialUserName == "" {
+		opts.InitialUserName, err = guessInitUserNameFromGitConfig(gitRepo)
+		if err != nil {
+			return nil, err
+		}
+
+		opts.PrintStep(
+			"Guessed initial user's name from git-config as `%s` (use --user to override)",
+			opts.InitialUserName,
+		)
+	}
+
+	if err := core.ValidUserName(opts.InitialUserName); err != nil {
+		return nil, fmt.Errorf("invalid initial user %q: %w", opts.InitialUserName, err)
+	}
+
+	r := newRepo(resolvedDir, nil, gitRepo, idPaths, opts.RepoOpts)
+	r.whoami = opts.InitialUserName
 	success := false
 	defer func() {
 		if !success {
@@ -136,12 +217,15 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		}
 	}()
 
-	identities, err := loadIdentities(ids, "sesam.id."+initialUserName, r.pluginUI)
+	identities, err := loadIdentities(idPaths, r.pluginUI)
 	if err != nil {
 		return nil, err
 	}
 	r.identities = identities
 
+	opts.PrintStep("Will use identities at %q…", strings.Join(idPaths, ", "))
+
+	opts.PrintStep("Creating repo at »%s«…", filepath.Join(resolvedDir, ".sesam"))
 	if err := ensureSesamDirs(resolvedDir); err != nil {
 		return nil, err
 	}
@@ -150,25 +234,43 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, err
 	}
 
+	opts.PrintStep("Creating initial sesam.yml")
 	configPath := filepath.Join(resolvedDir, "sesam.yml")
-	if err := createInitialConfig(configPath, initialUserName, identities.RecipientStrings()); err != nil {
+	if err := createInitialConfig(
+		configPath,
+		opts.InitialUserName,
+		identities.RecipientStrings(),
+	); err != nil {
 		return nil, err
 	}
 
-	configRepo, err := config.Load(configPath)
+	configRepo, err := sesamConf.Load(configPath)
 	if err != nil {
 		return nil, err
 	}
 	r.configRepo = configRepo
 
-	signer, auditLog, err := core.InitAdminUser(ctx, resolvedDir, initialUserName, identities.RecipientStrings(), r.pluginUI)
+	opts.PrintStep("Creating initial user »%s«…", opts.InitialUserName)
+	signer, auditLog, err := core.InitAdminUser(
+		ctx,
+		resolvedDir,
+		opts.InitialUserName,
+		identities.RecipientStrings(),
+		r.pluginUI,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize admin user: %w", err)
 	}
 	r.auditLog = auditLog
 
 	r.keyring = core.EmptyKeyring()
-	vstate, err := core.Verify(auditLog, r.keyring, r.pluginUI)
+
+	verifyFn := core.Verify
+	if opts.VerifyMode == VerifyModeNoDisk {
+		verifyFn = core.VerifyChain
+	}
+
+	vstate, err := verifyFn(auditLog, r.keyring, r.pluginUI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}
@@ -184,25 +286,31 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, fmt.Errorf("failed to build user manager: %w", err)
 	}
 
+	opts.PrintStep("Adjusting .gitgnore to ignore all revealed files…")
 	if err := ensureDefaultGitIgnore(resolvedDir); err != nil {
 		return nil, err
 	}
+
+	opts.PrintStep("Telling git when to call sesam…")
 	if err := ensureDefaultGitAttributes(resolvedDir); err != nil {
 		return nil, err
 	}
-	if err := ensureGitConfig(gitRepo, resolvedDir); err != nil {
+
+	opts.PrintStep("Adjusting git config…")
+	if err := ensureGitConfig(gitRepo, resolvedDir, opts); err != nil {
 		return nil, err
 	}
+
+	opts.PrintStep("Creating initial README.md as first secret…")
 	if err := ensureSesamReadme(resolvedDir); err != nil {
 		return nil, err
 	}
 
-	if err := withWorkingDir(resolvedDir, func() error {
-		return r.secret.AddSecret("README.md", []string{"admin"})
-	}); err != nil {
+	if err := r.secret.AddSecret("README.md", []string{"admin"}); err != nil {
 		return nil, fmt.Errorf("failed to bootstrap readme secret: %w", err)
 	}
 
+	opts.PrintStep("Making sure the rains come down in Africa…")
 	if err := ensureTmpKeepFile(resolvedDir); err != nil {
 		return nil, err
 	}
@@ -211,23 +319,25 @@ func Init(ctx context.Context, sesamDir, initialUserName string, ids []string, o
 		return nil, err
 	}
 
+	opts.PrintStep("Staging all files…")
 	if err := stageInitFiles(gitRepo, resolvedDir, configPath); err != nil {
 		return nil, err
 	}
 
+	opts.PrintStep("Welcome to…")
 	success = true
 	return r, nil
 }
 
 // Load loads an existing sesam repository at sesamDir. The on-disk repo
 // lock is held until Close.
-func Load(sesamDir, sesamConf string, ids []string, opts RepoOpts) (*Repo, error) {
+func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
 	if err != nil {
 		return nil, err
 	}
 
-	configRepo, err := config.Load(sesamConf)
+	configRepo, err := sesamConf.Load(filepath.Join(sesamDir, "sesam.yml"))
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +368,12 @@ func Load(sesamDir, sesamConf string, ids []string, opts RepoOpts) (*Repo, error
 	}
 	r.auditLog = auditLog
 
-	vstate, err := core.Verify(auditLog, r.keyring, r.pluginUI)
+	verifyFn := core.Verify
+	if opts.VerifyMode == VerifyModeNoDisk {
+		verifyFn = core.VerifyChain
+	}
+
+	vstate, err := verifyFn(auditLog, r.keyring, r.pluginUI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}
@@ -268,6 +383,7 @@ func Load(sesamDir, sesamConf string, ids []string, opts RepoOpts) (*Repo, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to map identity to user: %w", err)
 	}
+	r.whoami = whoami
 
 	signer, err := core.LoadSignKey(resolvedDir, whoami, signIdentity)
 	if err != nil {
@@ -288,7 +404,7 @@ func Load(sesamDir, sesamConf string, ids []string, opts RepoOpts) (*Repo, error
 	return r, nil
 }
 
-func newRepo(sesamDir string, configRepo *config.ConfigRepository, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
+func newRepo(sesamDir string, configRepo *sesamConf.ConfigRepository, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
 	// TODO:
 	sesamDirAbs, _ := filepath.Abs(sesamDir)
 	return &Repo{
@@ -542,8 +658,11 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string, nested bool) error {
 	if len(revealedPaths) == 0 {
 		return fmt.Errorf("missing secret path: pass at least one path")
 	}
-	if len(groups) == 0 {
-		return fmt.Errorf("missing group: pass at least one group")
+
+	for _, revealedPath := range revealedPaths {
+		if err := core.IsForbiddenPath(r.sesamDir, revealedPath); err != nil {
+			return err
+		}
 	}
 
 	r.mu.Lock()
@@ -553,36 +672,37 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string, nested bool) error {
 		return ErrClosed
 	}
 
-	return withWorkingDir(r.sesamDir, func() error {
-		// 1. Update the config. It expands directories / applies the nested
-		//    layout and returns the absolute paths of the files newly added.
-		var added []string
-		for _, p := range revealedPaths {
-			abs := r.toAbs(p)
-			// TODO: refactor the directory traversal to happen in the repo. AST surgery should be for every single
-			// secret then. (includes also)
-			// TODO: absolute and relative paths are not working as intended, error:
-			// ERR exit error=secret path "subdir/blub2" is outside the sesam dir "/home/johnny/repos/sesam-test": Rel: can't make subdir/blub2 relative to /home/johnny/repos/sesam-test
-			paths, err := r.configRepo.AddSecrets(abs, nested, groups)
-			if err != nil {
-				return fmt.Errorf("failed to add secret %q to config: %w", p, err)
-			}
-			added = append(added, paths...)
-		}
+	// TODO: When being outside the repo something like repo/secret.txt should also work as path.
+	//       Same when being in a sub-dir and doing "add ../secret.txt" We should resolve that here.
+	//       We should only care it is inside of the sesam dir.
+	// TODO: When walking "." then we should skip .sesam and .git
 
-		// 2. Mirror every newly added file into the secret manager.
-		for _, abs := range added {
-			rel, err := r.toRevealed(abs)
-			if err != nil {
-				return err
-			}
-			if err := r.secret.AddSecret(rel, groups); err != nil {
-				return fmt.Errorf("failed to add secret %q: %w", rel, err)
-			}
+	var added []string
+	for _, p := range revealedPaths {
+		abs := r.toAbs(p)
+		// TODO: refactor the directory traversal to happen in the repo. AST surgery should be for every single
+		// secret then. (includes also)
+		// TODO: absolute and relative paths are not working as intended, error:
+		// ERR exit error=secret path "subdir/blub2" is outside the sesam dir "/home/johnny/repos/sesam-test": Rel: can't make subdir/blub2 relative to /home/johnny/repos/sesam-test
+		paths, err := r.configRepo.AddSecrets(abs, nested, groups)
+		if err != nil {
+			return fmt.Errorf("failed to add secret %q to config: %w", p, err)
 		}
+		added = append(added, paths...)
+	}
 
-		return r.configRepo.Save()
-	})
+	// 2. Mirror every newly added file into the secret manager.
+	for _, abs := range added {
+		rel, err := r.toRevealed(abs)
+		if err != nil {
+			return err
+		}
+		if err := r.secret.AddSecret(rel, groups); err != nil {
+			return fmt.Errorf("failed to add secret %q: %w", rel, err)
+		}
+	}
+
+	return r.configRepo.Save()
 }
 
 // SecretRemove stops tracking the secret(s) at each path. A path can be a
@@ -601,32 +721,27 @@ func (r *Repo) SecretRemove(revealedPaths []string) error {
 		return ErrClosed
 	}
 
-	return withWorkingDir(r.sesamDir, func() error {
-		// 1. Drop the entries from the config; it returns the absolute paths of
-		//    the secrets that were removed (expanding directories).
-		var removed []string
-		for _, p := range revealedPaths {
-			abs := r.toAbs(p)
-			paths, err := r.configRepo.RemoveSecrets(abs)
-			if err != nil {
-				return fmt.Errorf("failed to remove secret %q from config: %w", p, err)
-			}
-			removed = append(removed, paths...)
+	var removed []string
+	for _, p := range revealedPaths {
+		abs := r.toAbs(p)
+		paths, err := r.configRepo.RemoveSecrets(abs)
+		if err != nil {
+			return fmt.Errorf("failed to remove secret %q from config: %w", p, err)
 		}
+		removed = append(removed, paths...)
+	}
 
-		// 2. Mirror every removal into the secret manager.
-		for _, abs := range removed {
-			rel, err := r.toRevealed(abs)
-			if err != nil {
-				return err
-			}
-			if err := r.secret.RemoveSecret(rel); err != nil {
-				return fmt.Errorf("failed to remove secret %q: %w", rel, err)
-			}
+	for _, abs := range removed {
+		rel, err := r.toRevealed(abs)
+		if err != nil {
+			return err
 		}
+		if err := r.secret.RemoveSecret(rel); err != nil {
+			return fmt.Errorf("failed to remove secret %q: %w", rel, err)
+		}
+	}
 
-		return r.configRepo.Save()
-	})
+	return r.configRepo.Save()
 }
 
 // VerifyOptions selects which verification checks Verify should run.
@@ -649,11 +764,11 @@ type VerifyOptions struct {
 
 // VerifyReport carries the per-check outcome from Verify.
 type VerifyReport struct {
-	// Integrity is the report from the integrity check. nil if Integrity was
-	// not requested.
-	Integrity *core.IntegrityReport
-
-	// TODO: Truncation, KeyReuse, ForgeCheck reports
+	Success          bool                   `json:"success"`
+	Integrity        *core.IntegrityReport  `json:"integrity,omitempty"`
+	TruncateError    error                  `json:"truncate_error,omitempty"`
+	ForgeCheckReport *core.ForgeReport      `json:"forge_report,omitempty"`
+	SharedPublicKeys []core.SharedPublicKey `json:"shared_public_keys,omitempty"`
 }
 
 // OK reports whether every requested check passed.
@@ -661,9 +776,20 @@ func (rep *VerifyReport) OK() bool {
 	if rep == nil {
 		return true
 	}
+
 	if rep.Integrity != nil && !rep.Integrity.OK() {
 		return false
 	}
+
+	if rep.TruncateError != nil {
+		return false
+	}
+
+	if len(rep.SharedPublicKeys) > 0 {
+		return false
+	}
+
+	// NOTE: ForgeCheckReport may exist, they're more informal.
 	return true
 }
 
@@ -672,7 +798,7 @@ func (rep *VerifyReport) OK() bool {
 // audit log cannot be decrypted or is inconsistent) and are returned as
 // `err`. All other consistency checks have their results placed in the
 // returned report.
-func (r *Repo) Verify(opts VerifyOptions) (*VerifyReport, error) {
+func (r *Repo) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -684,13 +810,27 @@ func (r *Repo) Verify(opts VerifyOptions) (*VerifyReport, error) {
 
 	if opts.Integrity {
 		report.Integrity = core.VerifyIntegrity(r.sesamDir, r.vstate, r.keyring)
+		if report.Integrity.IsZero() {
+			report.Integrity = nil
+		}
 	}
 
-	// TODO: Truncation, KeyReuse, ForgeCheck.
-	_ = opts.Truncation
-	_ = opts.KeyReuse
-	_ = opts.ForgeCheck
+	if opts.ForgeCheck {
+		report.ForgeCheckReport = core.VerifyForgeIds(ctx, r.vstate, r.keyring, r.opts.pluginUI())
+		if report.ForgeCheckReport.IsZero() {
+			report.ForgeCheckReport = nil
+		}
+	}
 
+	if opts.Truncation {
+		report.TruncateError = core.VerifyHistory(r.sesamDir, r.gitRepo, r.identities, r.opts.pluginUI())
+	}
+
+	if opts.KeyReuse {
+		report.SharedPublicKeys = core.VerifyKeyReuse(r.keyring)
+	}
+
+	report.Success = report.OK()
 	return report, nil
 }
 
@@ -704,9 +844,314 @@ func (r *Repo) Whoami() (string, error) {
 		return "", ErrClosed
 	}
 
-	whoami, _, err := identityToUser(r.identities, r.keyring.ListUsers())
-	if err != nil {
-		return "", fmt.Errorf("failed to identify current user: %w", err)
+	return r.whoami, nil
+}
+
+func (r *Repo) Log(fn func(e *core.AuditEntrySigned) error) error {
+	ents := r.auditLog.Entries
+	for idx := len(ents) - 1; idx >= 0; idx-- {
+		if err := fn(&ents[idx]); err != nil {
+			return err
+		}
 	}
-	return whoami, nil
+
+	return nil
+}
+
+func (r *Repo) MoveSecret(oldRevealedPath, newRevealedPath string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
+
+	return r.secret.MoveSecret(oldRevealedPath, newRevealedPath)
+}
+
+func (r *Repo) RenameUser(oldName, newName string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
+
+	return r.user.RenameUser(oldName, newName)
+}
+
+func (r *Repo) UserChangeGroups(user string, groups []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return ErrClosed
+	}
+
+	return r.user.UserChangeGroups(user, groups)
+}
+
+type SecretState int
+
+const (
+	SecretStateNone = SecretState(iota)
+	SecretStateNoSealedPath
+	SecretStateNoRevealedPath
+	SecretStateUserHasNoAccess
+	SecretStateInSync
+	SecretStateNotInSync
+	SecretStateUnmanaged
+)
+
+func (s SecretState) String() string {
+	var desc string
+	switch s {
+	case SecretStateNoSealedPath:
+		desc = "unsealed"
+	case SecretStateNoRevealedPath:
+		desc = "unrevealed"
+	case SecretStateUserHasNoAccess:
+		desc = "no_access"
+	case SecretStateInSync:
+		desc = "in_sync"
+	case SecretStateNotInSync:
+		desc = "out_of_sync"
+	case SecretStateUnmanaged:
+		desc = "unmanaged"
+	default:
+		desc = "undefined"
+	}
+
+	return desc
+}
+
+func (s SecretState) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf("%q", s.String())), nil
+}
+
+// StatusForFile describes wether the sealed file differs from the revealed file.
+//
+// Cases:
+//
+//  1. Seal exists, Revealed does not exist => Not yet revealed, because cleaned.
+//  2. Seal exists, Revealed does not exist => Not revealed, because user has no access.
+//  3. Seal exists not, Reveaed exists      => Not yet sealed.
+//  4. Both exist and user has access to it => Either equal or not.
+type StatusForFile struct {
+	RevealedPath string      `json:"revealed_path"`
+	State        SecretState `json:"state"`
+
+	// AccessGroups are the groups granted access to this secret. Empty for
+	// unmanaged files (SecretStateNoSesamSecret).
+	AccessGroups []string `json:"access_groups,omitempty"`
+
+	// AccessUsers are the users having access to this file.
+	AccessUsers []string `json:"access_users,omitempty"`
+}
+
+// Status describes how the revealed state compares to the sealed state
+type Status struct {
+	// Files are the reports for each known secret
+	Files []StatusForFile `json:"files"`
+
+	// DiffDir is only set when WriteDiffDirs is true.
+	DiffDir string `json:"-"`
+}
+
+// StatusOpts can be given to Status()
+type StatusOpts struct {
+	// WriteDiffDirs will return a tmp directory that has a sealed/ and revealed/ sub-directory.
+	// It contains the whole repo in a way that can be easily passed to `git diff`.
+	// You are supposed to delete this directory after use.
+	WriteDiffDirs bool
+
+	// IgnoreUnmanaged will ignore files not managed by sesam.
+	IgnoreUnmanaged bool
+}
+
+func (r *Repo) cleanablePaths() ([]string, error) {
+	paths := []string{}
+	err := cleanup(r.gitRepo, r.sesamDir, func(path string) (bool, error) {
+		paths = append(paths, path)
+		return false, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return paths, nil
+}
+
+// Status computes a comparison between the revealed and sealed state in the repo.
+func (r *Repo) Status(opts StatusOpts) (*Status, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
+		return nil, ErrClosed
+	}
+
+	var status Status
+
+	secretMap := make(map[string]*core.VerifiedSecret)
+	for idx := range r.vstate.Secrets {
+		secretMap[r.vstate.Secrets[idx].RevealedPath] = &r.vstate.Secrets[idx]
+	}
+
+	if !opts.IgnoreUnmanaged {
+		allPaths, err := r.cleanablePaths()
+		if err != nil {
+			return nil, fmt.Errorf("failed to list all paths: %w", err)
+		}
+
+		for _, path := range allPaths {
+			if _, ok := secretMap[path]; !ok {
+				secretMap[path] = nil
+			}
+		}
+	}
+
+	for revealedPath, secret := range secretMap {
+		// Unmanaged files have no associated secret (and no access groups).
+		if secret == nil {
+			status.Files = append(status.Files, StatusForFile{
+				RevealedPath: revealedPath,
+				State:        SecretStateUnmanaged,
+			})
+			continue
+		}
+
+		add := func(state SecretState) {
+			sff := StatusForFile{
+				RevealedPath: revealedPath,
+				State:        state,
+				AccessGroups: slices.Clone(secret.AccessGroups),
+				AccessUsers:  r.vstate.UserForGroups(secret.AccessGroups),
+			}
+
+			sort.Strings(sff.AccessGroups)
+			sort.Strings(sff.AccessUsers)
+			status.Files = append(status.Files, sff)
+		}
+
+		if !r.vstate.UserHasAccess(r.whoami, secret.AccessGroups) {
+			add(SecretStateUserHasNoAccess)
+			continue
+		}
+
+		absPath := filepath.Join(r.sesamDir, revealedPath)
+		if !core.PathExists(absPath) {
+			add(SecretStateNoRevealedPath)
+			continue
+		}
+
+		sealedPath := r.secret.SealedPath(revealedPath)
+		if !core.PathExists(sealedPath) {
+			add(SecretStateNoSealedPath)
+			continue
+		}
+
+		same, err := r.secret.EqualPlaintext(revealedPath, r.identities)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"failed to compare %s and %s: %w",
+				revealedPath,
+				sealedPath,
+				err,
+			)
+		}
+
+		if same {
+			add(SecretStateInSync)
+		} else {
+			add(SecretStateNotInSync)
+		}
+	}
+
+	sort.Slice(status.Files, func(i, j int) bool {
+		return status.Files[i].RevealedPath < status.Files[j].RevealedPath
+	})
+
+	if opts.WriteDiffDirs {
+		tmpDir, err := r.statusToDiffDir(&status)
+		if err != nil {
+			return nil, err
+		}
+
+		status.DiffDir = tmpDir
+	}
+
+	return &status, nil
+}
+
+func (r *Repo) statusToDiffDir(status *Status) (diffDir string, err error) {
+	rootTmpDir := r.secret.TmpDir()
+	tmpDir, err := os.MkdirTemp(rootTmpDir, "status-diff-")
+	if err != nil {
+		return "", fmt.Errorf("failed to make temp dir for diff: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(tmpDir)
+		}
+	}()
+
+	sealTmpDir := filepath.Join(tmpDir, "sealed")
+	plainTmpDir := filepath.Join(tmpDir, "revealed")
+
+	for _, file := range status.Files {
+		sealTmpPath := filepath.Join(sealTmpDir, file.RevealedPath)
+		if err := os.MkdirAll(filepath.Dir(sealTmpPath), 0o700); err != nil {
+			return "", fmt.Errorf("failed to make sub temp dir for diff: %w", err)
+		}
+
+		switch file.State {
+		case SecretStateNoSealedPath, SecretStateUserHasNoAccess, SecretStateNone:
+			// can't decrypt path - put a dummy file there.
+			desc, _ := file.State.MarshalJSON()
+			if err := renameio.WriteFile(sealTmpPath, desc, 0o600); err != nil {
+				return "", fmt.Errorf("failed write sealed state file: %w", err)
+			}
+		case SecretStateInSync:
+			// no need to write same files.
+		default:
+			//nolint:gosec
+			sealFd, err := os.OpenFile(sealTmpPath, os.O_CREATE|os.O_WRONLY|os.O_SYNC, 0o600)
+			if err != nil {
+				return "", fmt.Errorf("failed to open sealed file: %w", err)
+			}
+
+			if _, err := core.ShowSecret(r.sesamDir, r.identities, file.RevealedPath, sealFd); err != nil {
+				_ = sealFd.Close()
+				return "", err
+			}
+
+			if err := sealFd.Close(); err != nil {
+				return "", fmt.Errorf("failed to close seal file: %w", err)
+			}
+		}
+
+		plainTmpPath := filepath.Join(plainTmpDir, file.RevealedPath)
+		if err := os.MkdirAll(filepath.Dir(plainTmpPath), 0o700); err != nil {
+			return "", fmt.Errorf("failed to make sub temp dir for diff: %w", err)
+		}
+
+		switch file.State {
+		case SecretStateNoRevealedPath, SecretStateNone, SecretStateUserHasNoAccess:
+			// can't link revealed path, write dummy file.
+			desc := fmt.Sprintf("-- sesam: %s --", file.State.String())
+			if err := renameio.WriteFile(plainTmpPath, []byte(desc), 0o600); err != nil {
+				return "", fmt.Errorf("failed write revealed state file: %w", err)
+			}
+		case SecretStateInSync:
+			// no need to write same files.
+		default:
+			if err := os.Link(filepath.Join(r.sesamDir, file.RevealedPath), plainTmpPath); err != nil {
+				return "", fmt.Errorf("failed to link revealed file: %w", err)
+			}
+		}
+	}
+
+	return tmpDir, nil
 }

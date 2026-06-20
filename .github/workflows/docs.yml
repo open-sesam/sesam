@@ -32,20 +32,10 @@ jobs:
         with:
           fetch-depth: 0 # needed for mdbook-gitinfo
 
-      - uses: cargo-bins/cargo-binstall@v1.18.1
-
-      - name: Cache cargo binaries
-        uses: actions/cache@v4
+      - name: Set up mdBook and preprocessors
+        uses: jdx/mise-action@v4
         with:
-          path: ~/.cargo/bin
-          key: mdbook-${{ runner.os }}-${{ hashFiles('.github/workflows/docs.yml') }}
-
-      - name: Install mdBook and preprocessors
-        run: |
-          cargo binstall --no-confirm mdbook@0.4.52 mdbook-admonish@1.18.0 mdbook-pagetoc@0.2.2
-          curl -sSL https://github.com/CompEng0001/mdbook-gitinfo/releases/download/v1.2.0/mdbook-gitinfo-linux \
-            -o ~/.cargo/bin/mdbook-gitinfo
-          chmod +x ~/.cargo/bin/mdbook-gitinfo
+          install_args: "mdbook cargo:mdbook-admonish cargo:mdbook-pagetoc cargo:mdbook-gitinfo"
 
       - name: Cache mdbook build
         id: book-cache
