@@ -1,14 +1,17 @@
 package core
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/pem"
+	"io"
 	"strings"
 	"testing"
 
 	"filippo.io/age"
+	"filippo.io/age/armor"
 	"filippo.io/age/plugin"
 	"github.com/stretchr/testify/require"
 	"github.com/zalando/go-keyring"
@@ -47,6 +50,32 @@ func (m *mockPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
 func (m *mockPassphraseProvider) PassphraseVerified(_ []byte, success bool) {
 	m.verifiedCalled = true
 	m.verifiedSuccess = success
+}
+
+func encryptIdentityForTest(t *testing.T, plaintext string, passphrase []byte, armored bool) string {
+	t.Helper()
+
+	recipient, err := age.NewScryptRecipient(string(passphrase))
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	w := io.Writer(&buf)
+	var armorWriter io.WriteCloser
+	if armored {
+		armorWriter = armor.NewWriter(&buf)
+		w = armorWriter
+	}
+
+	ageWriter, err := age.Encrypt(w, recipient)
+	require.NoError(t, err)
+	_, err = ageWriter.Write([]byte(plaintext))
+	require.NoError(t, err)
+	require.NoError(t, ageWriter.Close())
+	if armorWriter != nil {
+		require.NoError(t, armorWriter.Close())
+	}
+
+	return buf.String()
 }
 
 func TestParseIdentityAgeNative(t *testing.T) {
@@ -226,6 +255,62 @@ func TestParseIdentityAgeKeyWithComments(t *testing.T) {
 	id, err := ParseIdentity(file, nil, nil, "")
 	require.NoError(t, err)
 	require.Equal(t, ageID.Recipient().String(), id.Public().String())
+}
+
+func TestParseIdentityEncryptedAgeNativeWithPassphrase(t *testing.T) {
+	ageID, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+
+	passphrase := []byte("test-passphrase-123")
+	key := encryptIdentityForTest(t, ageID.String()+"\n", passphrase, false)
+	mock := &mockPassphraseProvider{passphrase: passphrase}
+
+	id, err := ParseIdentity(key, mock, nil, "Passphrase for admin.age: ")
+	require.NoError(t, err)
+	require.True(t, mock.called, "passphrase provider should have been called")
+	require.Equal(t, "Passphrase for admin.age: ", mock.lastPrompt)
+	require.Equal(t, ageID.Recipient().String(), id.Public().String())
+	require.True(t, mock.verifiedCalled, "PassphraseVerified must be called")
+	require.True(t, mock.verifiedSuccess, "a correct passphrase must report success")
+}
+
+func TestParseIdentityEncryptedAgeArmored(t *testing.T) {
+	ageID, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+
+	passphrase := []byte("test-passphrase-123")
+	key := encryptIdentityForTest(t, ageID.String()+"\n", passphrase, true)
+	mock := &mockPassphraseProvider{passphrase: passphrase}
+
+	id, err := ParseIdentity(key, mock, nil, "")
+	require.NoError(t, err)
+	require.Equal(t, ageID.Recipient().String(), id.Public().String())
+	require.True(t, mock.verifiedCalled, "PassphraseVerified must be called")
+	require.True(t, mock.verifiedSuccess, "a correct passphrase must report success")
+}
+
+func TestParseIdentityEncryptedAgeRequiresPassphraseProvider(t *testing.T) {
+	ageID, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+
+	key := encryptIdentityForTest(t, ageID.String()+"\n", []byte("correct"), false)
+	_, err = ParseIdentity(key, nil, nil, "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no passphrase supplied")
+}
+
+func TestParseIdentityEncryptedAgeWrongPassphrase(t *testing.T) {
+	ageID, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+
+	key := encryptIdentityForTest(t, ageID.String()+"\n", []byte("correct"), false)
+	mock := &mockPassphraseProvider{passphrase: []byte("wrong")}
+
+	_, err = ParseIdentity(key, mock, nil, "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to decrypt age identity")
+	require.True(t, mock.verifiedCalled, "PassphraseVerified must be called even on failure")
+	require.False(t, mock.verifiedSuccess, "a wrong passphrase must report failure")
 }
 
 func TestScanAgeIdentity(t *testing.T) {
