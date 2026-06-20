@@ -53,14 +53,6 @@ func loadIdentities(identityPaths []string, pluginUI *core.PluginUI) (core.Ident
 	return loadIdentitiesWith(identityPaths, RepoOpts{Interactive: true}.passphraseProvider, pluginUI)
 }
 
-// loadIdentitiesKeyringOnly is like loadIdentities but never prompts on stdin.
-// It is required for the long-running smudge filter, where stdin is owned by
-// the git pkt-line protocol and a passphrase prompt would corrupt the stream.
-// If the keyring has no entry for an encrypted identity, parsing fails.
-func loadIdentitiesKeyringOnly(identityPaths []string, pluginUI *core.PluginUI) (core.Identities, error) {
-	return loadIdentitiesWith(identityPaths, RepoOpts{}.passphraseProvider, pluginUI)
-}
-
 func askpassRequired() string {
 	for _, name := range []string{"SESAM_ASKPASS_REQUIRED", "GIT_ASKPASS_REQUIRED", "SSH_ASKPASS_REQUIRED"} {
 		switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {

@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -399,7 +400,7 @@ func (ap *AskpassProvider) ReadPassphrase(prompt string) ([]byte, error) {
 		prompt = "Passphrase: "
 	}
 
-	out, err := exec.Command(program, prompt).Output()
+	out, err := exec.CommandContext(context.Background(), program, prompt).Output() // #nosec G204 -- askpass helper is explicitly configured by the user/environment.
 	if err != nil {
 		return nil, fmt.Errorf("askpass failed: %w", err)
 	}
