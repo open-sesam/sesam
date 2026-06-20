@@ -15,7 +15,7 @@ The term *user* does not necessarily refer to a person. A user can also be a mac
 ```
 
 You might think of a password manager now, which is not too far off. A password manager is usually targeted at managing an individual secrets,
-while a secret manager is focused on sharing some of those secrets with other users in a team and machines.
+while a secret manager is focused on sharing some of those secrets with other users in a team and machines. If you already know what a secret manager is then you might be interested in [Why we build another tool](/alternatives.md).
 
 ## Features
 

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"os"
@@ -23,7 +24,7 @@ type testUser struct {
 	SignPubKey string // multicode-encoded
 }
 
-func newTestUser(t *testing.T, name string) *testUser {
+func newTestUser(t testing.TB, name string) *testUser {
 	t.Helper()
 
 	ageID, err := age.GenerateX25519Identity()
@@ -69,7 +70,7 @@ func (tu *testUser) DetailUserTell(groups []string) DetailUserTell {
 }
 
 // testRepo creates a temp dir with all required .sesam subdirectories.
-func testRepo(t *testing.T) string {
+func testRepo(t testing.TB) string {
 	t.Helper()
 	sesamDir := t.TempDir()
 
@@ -91,15 +92,15 @@ func testKeyring(t *testing.T, users ...*testUser) *MemoryKeyring {
 	t.Helper()
 	kr := EmptyKeyring()
 	for _, u := range users {
-		kr.AddSignPubKey(u.Name, u.Signer.PublicKey())
-		kr.AddRecipient(u.Name, u.Recipient)
+		require.NoError(t, kr.AddSignPubKey(u.Name, u.Signer.PublicKey()))
+		require.NoError(t, kr.AddRecipient(u.Name, u.Recipient))
 	}
 
 	return kr
 }
 
 // initAuditLog creates a fresh audit log with the given user as admin.
-func initAuditLog(t *testing.T, sesamDir string, admin *testUser) *AuditLog {
+func initAuditLog(t testing.TB, sesamDir string, admin *testUser) *AuditLog {
 	t.Helper()
 
 	al, err := InitAuditLog(
@@ -112,7 +113,36 @@ func initAuditLog(t *testing.T, sesamDir string, admin *testUser) *AuditLog {
 		t.Fatal(err)
 	}
 
+	// Real init (InitAdminUser) writes the admin's signing key to disk via
+	// GenerateSignKey; mirror that so on-disk fixtures match production and
+	// operations like RenameUser (which moves the key file) can find it.
+	persistSignKey(t, sesamDir, admin)
+
 	return al
+}
+
+// persistSignKey writes u's signing key to disk under
+// .sesam/signkeys/<user>.age, encrypted to u's own recipient — the same shape
+// GenerateSignKey produces during a real init/tell. It reuses u's existing key
+// so the in-memory signer and the on-disk file stay consistent.
+func persistSignKey(t testing.TB, sesamDir string, u *testUser) {
+	t.Helper()
+
+	signer, ok := u.Signer.(*ed25519Signer)
+	require.True(t, ok, "test user signer must be *ed25519Signer")
+
+	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkeys", u.Name+".age")
+	require.NoError(t, os.MkdirAll(filepath.Dir(signKeyPath), 0o700))
+
+	ageBuf := &bytes.Buffer{}
+	wc, err := age.Encrypt(ageBuf, u.Recipient.Recipient)
+	require.NoError(t, err)
+
+	if _, err := wc.Write([]byte(MulticodeEncode(signer.priv[:], MhEd25519Priv))); err != nil {
+		t.Fatal(err)
+	}
+	require.NoError(t, wc.Close())
+	require.NoError(t, os.WriteFile(signKeyPath, ageBuf.Bytes(), 0o600))
 }
 
 // loadAuditLog loads an existing audit log using the given users' identities.
@@ -185,9 +215,9 @@ func testSecretManagerFull(t *testing.T) *SecretManager {
 	al := initAuditLog(t, sesamDir, admin)
 
 	// Add a secret to the audit log.
-	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChange{
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
 		RevealedPath: "secrets/test",
-		Groups:       []string{"admin"},
+		AccessGroups: []string{"admin"},
 	}), nil)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{

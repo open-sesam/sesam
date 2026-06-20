@@ -119,7 +119,7 @@ will not find them anymore.
 ## Listing secrets
 
 ```bash
-$ sesam list secrets
+$ sesam ls
 ├── README.sesam
 └── dir
     └── of

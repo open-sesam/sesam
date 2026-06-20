@@ -33,6 +33,8 @@ footer = "Built {{date}}{{sep}}commit: {{hash}}"
 scroll_offset = 10 # pixels added to scroll position for active header detection (default: 10)
 
 [output.html]
+git-repository-url = "https://github.com/open-sesam/sesam"
+git-repository-icon = "fa-github"
 additional-css = [
   "theme/pagetoc.css",
   "./mdbook-admonish.css",

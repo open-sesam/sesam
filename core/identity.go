@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -16,13 +18,12 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
+	"filippo.io/age/armor"
 	"filippo.io/age/plugin"
 	"github.com/chzyer/readline"
 	"github.com/zalando/go-keyring"
 	"golang.org/x/crypto/ssh"
 )
-
-// TODO: We might need to think about a way to destroy identities in memory after they are not longer needed.
 
 // comparablePublicKey is a public key that can be compared with another key safely.
 type comparablePublicKey interface {
@@ -55,6 +56,7 @@ type Identities []*Identity
 // but should forward it to their fallback.
 type PassphraseProvider interface {
 	ReadPassphrase(prompt string) ([]byte, error)
+	PassphraseVerified(passphrase []byte, success bool)
 }
 
 // StdinPassphraseProvider is a simple PassphraseProvider that reads a password from stdin.
@@ -70,7 +72,7 @@ type AskpassProvider struct {
 type PassphraseChain []PassphraseProvider
 
 // KeyringPassphraseProvider tries to read the passphrase from the system
-// keyring (GNOME Keyring, KWallet, macOS Keychain, Windows Credential Manager).
+// keyring (GNOME Keyring, KWallet, macOS Keychain, ...).
 // If no entry exists, it falls back to prompting via the given fallback provider
 // and caches the passphrase in the keyring on success.
 type KeyringPassphraseProvider struct {
@@ -80,11 +82,26 @@ type KeyringPassphraseProvider struct {
 
 	// Fallback is used to prompt the user when the keyring has no entry.
 	Fallback PassphraseProvider
+
+	// fromKeyring records whether the last ReadPassphrase served a cached
+	// value (vs. a fresh fallback prompt), so passphraseVerified knows
+	// whether it still needs to cache and passphraseFailed knows whether
+	// there is a stale entry to evict.
+	fromKeyring bool
 }
 
 const keyringService = "sesam"
 
 var errAskpassUnavailable = errors.New("askpass unavailable")
+
+// KeyFingerprint returns a stable, per-key identifier for use as the OS-keyring
+// item name when caching an encrypted identity's passphrase. It is derived from
+// the key bytes, so each distinct key gets its own keyring entry (fixing cross-
+// key passphrase collisions) while the same key reuses its cache across runs.
+func KeyFingerprint(key []byte) string {
+	sum := sha256.Sum256(key)
+	return "sesam.identity." + hex.EncodeToString(sum[:16])
+}
 
 func newStringPubKey(s string) stringPubKey {
 	// just make sure we don't have formatting accidents...
@@ -235,6 +252,12 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *
 		}, nil
 	case strings.HasPrefix(ageLine, "AGE-PLUGIN-"):
 		return parsePluginIdentity(ageLine, recipientHint, pluginUI)
+
+	// Encrypted age identities may be stored either as raw age files
+	// ("age-encryption.org/v1") or in ASCII-armored form
+	// ("-----BEGIN AGE ENCRYPTED FILE-----").
+	case strings.HasPrefix(ageLine, "-----BEGIN AGE"), strings.HasPrefix(ageLine, "age-encryption.org/v1"):
+		return parseEncryptedAgeIdentity(key, passphraseProvider, pluginUI, prompt)
 	}
 
 	// Try parsing it as an unencrypted SSH key first, since it's apparently not age.
@@ -261,6 +284,14 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *
 
 	rawKey, err = ssh.ParseRawPrivateKeyWithPassphrase([]byte(key), passphrase)
 	if err != nil {
+		// make sure the passphrase is deleted.
+		passphraseProvider.PassphraseVerified(passphrase, false)
+	} else {
+		// cache if we used keyring.
+		passphraseProvider.PassphraseVerified(passphrase, true)
+	}
+
+	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt SSH key: %w", err)
 	}
 
@@ -274,7 +305,7 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *
 // both the key and the prefix so either format is accepted. Empty strings
 // if no match.
 func scanAgeIdentity(data string) (identityLine, publicKey string) {
-	for _, raw := range strings.Split(data, "\n") {
+	for raw := range strings.SplitSeq(data, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
@@ -407,28 +438,104 @@ func (chain PassphraseChain) ReadPassphrase(prompt string) ([]byte, error) {
 	return nil, fmt.Errorf("no passphrase provider available")
 }
 
+func (ap *AskpassProvider) PassphraseVerified(passphrase []byte, success bool) {
+	// no-op
+}
+
+func (chain PassphraseChain) PassphraseVerified(passphrase []byte, success bool) {
+	// The keyring provider owns caching/eviction for the chain fallback.
+}
+
+func (spp *StdinPassphraseProvider) PassphraseVerified(passphrase []byte, success bool) {
+	// no-op
+}
+
 func (kpp *KeyringPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
 	stored, err := keyring.Get(keyringService, kpp.KeyFingerprint)
 	if err == nil {
+		kpp.fromKeyring = true
 		return []byte(stored), nil
 	}
 
+	kpp.fromKeyring = false
 	if kpp.Fallback == nil {
 		return nil, fmt.Errorf("no passphrase in keyring and no fallback provider")
 	}
 
-	passphrase, err := kpp.Fallback.ReadPassphrase(prompt)
+	// Do NOT cache here: we don't yet know if this passphrase is correct.
+	// Caching happens in passphraseVerified, once decryption has succeeded.
+	return kpp.Fallback.ReadPassphrase(prompt)
+}
+
+// DeleteAllCachedPassphrases will delete all cached passphrases in the keyring.
+func DeleteAllCachedPassphrases() error {
+	return keyring.DeleteAll(keyringService)
+}
+
+// PassphraseVerified is told whether the passphrase from ReadPassphrase actually
+// unlocked the key, so the keyring holds only verified passphrases:
+//   - a freshly prompted passphrase is cached only once it is known to be correct
+//     (so a wrong guess is never persisted);
+//   - a cached passphrase that turns out to be wrong is evicted, so the next
+//     attempt re-prompts instead of failing forever.
+func (kpp *KeyringPassphraseProvider) PassphraseVerified(passphrase []byte, success bool) {
+	if kpp.fromKeyring {
+		if !success {
+			if err := keyring.Delete(keyringService, kpp.KeyFingerprint); err != nil {
+				slog.Warn("failed to evict stale passphrase from keyring", slog.Any("err", err))
+			}
+		}
+		return
+	}
+
+	// Freshly prompted: only cache it if it worked; otherwise there is nothing
+	// stored to clean up.
+	if success {
+		// Non-fatal if this fails (e.g. no keyring daemon).
+		if err := keyring.Set(keyringService, kpp.KeyFingerprint, string(passphrase)); err != nil {
+			slog.Warn("failed to cache passphrase in keyring", slog.Any("err", err))
+		}
+	}
+}
+
+func parseEncryptedAgeIdentity(
+	key string,
+	passphraseProvider PassphraseProvider,
+	pluginUI *PluginUI,
+	prompt string,
+) (*Identity, error) {
+	if passphraseProvider == nil {
+		return nil, fmt.Errorf("no passphrase supplied")
+	}
+	passphrase, err := passphraseProvider.ReadPassphrase(prompt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read passphrase: %w", err)
+	}
+
+	var r io.Reader = strings.NewReader(key)
+	if strings.HasPrefix(key, "-----BEGIN AGE") {
+		r = armor.NewReader(r)
+	}
+
+	id, err := age.NewScryptIdentity(string(passphrase))
 	if err != nil {
 		return nil, err
 	}
 
-	// Cache for next time. Non-fatal if this fails (e.g. no keyring daemon).
-	err = keyring.Set(keyringService, kpp.KeyFingerprint, string(passphrase))
+	plaintext, err := age.Decrypt(r, id)
 	if err != nil {
-		slog.Warn("failed to set key in keyring", slog.Any("err", err))
+		passphraseProvider.PassphraseVerified(passphrase, false)
+		return nil, fmt.Errorf("failed to decrypt age identity: %w", err)
 	}
 
-	return passphrase, nil
+	data, err := io.ReadAll(plaintext)
+	if err != nil {
+		passphraseProvider.PassphraseVerified(passphrase, false)
+		return nil, fmt.Errorf("failed to read decrypted age identity: %w", err)
+	}
+	passphraseProvider.PassphraseVerified(passphrase, true)
+
+	return ParseIdentity(string(data), nil, pluginUI, prompt)
 }
 
 // IdentityToUser checks which public key corresponds to which recipient public key.

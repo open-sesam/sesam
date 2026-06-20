@@ -4,19 +4,34 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"fmt"
-	"slices"
 )
+
+// DuplicatePubkeyError is returned when a key (recipient or signing key) is
+// added for one user while another user already holds the same key. Keys must
+// be unique across users so that `sesam id` can map a key back to a single user.
+type DuplicatePubkeyError struct {
+	user   string
+	pubkey string
+}
+
+func (e *DuplicatePubkeyError) Error() string {
+	return fmt.Sprintf("user %s already has recipient %s", e.user, e.pubkey)
+}
 
 // Keyring is a collection of public keys (both for sign-verify and encryption)
 type Keyring interface {
 	// AddRecipient adds a recipient to `user`. It is the public part of a keypair
-	// the user can use to encrypt files.
-	AddRecipient(user string, recp *Recipient)
+	// the user can use to encrypt files. If `recp` is already linked to this ` user`
+	// it is a no-op. If `recp` is already used by any other user, then DuplicatePubkeyError
+	// is returned.
+	AddRecipient(user string, recp *Recipient) error
 
 	// AddSignPubKey adds a signing key for a a specific user.
 	// Most of the time a user has only a single key, except for key rotation.
 	// For now, only ed25519 keys are supported in `pub`.
-	AddSignPubKey(user string, pub []byte)
+	// Adding the same key twice for a user is a no-op.
+	// Adding a signing key a different user already uses returns DuplicatePubkeyError.
+	AddSignPubKey(user string, pub []byte) error
 
 	// DeleteUser removes a user from they Keyring.
 	// It will return true if the user existed.
@@ -32,6 +47,10 @@ type Keyring interface {
 
 	// ListUsers() returns all users and recipients.
 	ListUsers() map[string]Recipients
+
+	// RenameUser() renames existing oldUser to newUser.
+	// If oldUser does not exists it's a no-op.
+	RenameUser(oldUser, newUser string)
 }
 
 // MemoryKeyring is a simple Keyring implementation that holds public keys in memory only.
@@ -47,36 +66,42 @@ func EmptyKeyring() *MemoryKeyring {
 	}
 }
 
-func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) {
-	recps, ok := mk.recipients[user]
-	if !ok {
-		mk.recipients[user] = []*Recipient{recp}
-		return
+// addKey is a generic helper since AddRecipient and AddSignPubKey is basically the same flow.
+func addKey[T any, S ~[]T](user string, key T, m map[string]S, equal func(T, T) bool) error {
+	var isDuplicate bool
+	for existingUser, keys := range m {
+		for _, other := range keys {
+			if equal(other, key) {
+				if user == existingUser {
+					// key exists, but is just a duplicate of user.
+					isDuplicate = true
+					break
+				}
+
+				// another user already is using this key.
+				return &DuplicatePubkeyError{
+					user:   user,
+					pubkey: fmt.Sprintf("%v", key),
+				}
+			}
+		}
 	}
 
-	if slices.ContainsFunc(recps, func(other *Recipient) bool {
-		return other.Equal(recp)
-	}) {
-		return
+	if !isDuplicate {
+		m[user] = append(m[user], key)
 	}
 
-	mk.recipients[user] = append(recps, recp)
+	return nil
 }
 
-func (mk *MemoryKeyring) AddSignPubKey(user string, key []byte) {
-	signPubs, ok := mk.signPubs[user]
-	if !ok {
-		mk.signPubs[user] = [][]byte{key}
-		return
-	}
+func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) error {
+	return addKey(user, recp, mk.recipients, func(a, b *Recipient) bool {
+		return a.Equal(b)
+	})
+}
 
-	if slices.ContainsFunc(signPubs, func(other []byte) bool {
-		return bytes.Equal(other, key)
-	}) {
-		return
-	}
-
-	mk.signPubs[user] = append(mk.signPubs[user], key)
+func (mk *MemoryKeyring) AddSignPubKey(user string, key []byte) error {
+	return addKey(user, key, mk.signPubs, bytes.Equal)
 }
 
 func (mk *MemoryKeyring) DeleteUser(user string) bool {
@@ -159,4 +184,18 @@ func AllRecipients(kr Keyring) Recipients {
 	}
 
 	return recps
+}
+
+func (mk *MemoryKeyring) RenameUser(oldUser, newUser string) {
+	recps, ok1 := mk.recipients[oldUser]
+	signPubs, ok2 := mk.signPubs[oldUser]
+	if !ok1 || !ok2 {
+		return
+	}
+
+	delete(mk.recipients, oldUser)
+	mk.recipients[newUser] = recps
+
+	delete(mk.signPubs, oldUser)
+	mk.signPubs[newUser] = signPubs
 }

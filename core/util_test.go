@@ -46,6 +46,10 @@ func TestValidUserName(t *testing.T) {
 		"user_42",
 		"a",
 		"a-b-c",
+		"alice.bob",
+		"user@host",
+		"c.pohl@hermanbionic.com",
+		"Alice",
 	}
 
 	for _, name := range valid {
@@ -61,12 +65,10 @@ func TestValidUserNameRejects(t *testing.T) {
 		{"empty", ""},
 		{"dot-dot", ".."},
 		{"path traversal", "../admin"},
+		{"dot-dot in email", "a..b@host"},
 		{"slash", "alice/bob"},
 		{"backslash", `alice\bob`},
 		{"space", "alice bob"},
-		{"uppercase", "Alice"},
-		{"dot", "alice.bob"},
-		{"at sign", "user@host"},
 		{"colon", "user:name"},
 		{"unicode", "alicё"},
 		{"too long", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
@@ -85,15 +87,76 @@ func (fc failCloser) Close() error {
 	return errors.New("close failed")
 }
 
-func TestValidSecretPathFormatSesamSubdir(t *testing.T) {
+func TestIsForbiddenPathSesamSubdir(t *testing.T) {
 	// A relative path that points inside .sesam/ must be rejected.
-	err := validSecretPathFormat(".", filepath.Join(".sesam", "signkeys", "admin.age"))
+	err := IsForbiddenPath(".", filepath.Join(".sesam", "signkeys", "admin.age"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), ".sesam")
 }
 
 func TestValidSecretPathFormatNormalPath(t *testing.T) {
 	require.NoError(t, validSecretPathFormat(".", "secrets/db_password"))
+}
+
+// sesam.yml is sesam's own config and must never be sealed as a secret,
+// regardless of which directory it lives in.
+func TestIsForbiddenPathRejectsSesamYml(t *testing.T) {
+	cases := []string{
+		"sesam.yml",
+		filepath.Join("config", "sesam.yml"),
+		filepath.Join("a", "b", "sesam.yml"),
+	}
+
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			err := IsForbiddenPath(".", path)
+			require.Error(t, err, "should reject %q", path)
+			require.Contains(t, err.Error(), "sesam.yml")
+		})
+	}
+}
+
+// Anything living inside a .sesam directory must be rejected no matter where
+// the component appears in the path, and independent of whether sesamDir is
+// relative or absolute (the leading-prefix check alone misses both).
+func TestIsForbiddenPathRejectsDotSesam(t *testing.T) {
+	cases := []struct {
+		name        string
+		sesamDir    string
+		revealed    string
+		wantMessage string
+	}{
+		{"leading", ".", filepath.Join(".sesam", "secret"), ".sesam"},
+		{"signkey", ".", filepath.Join(".sesam", "signkeys", "admin.age"), ".sesam"},
+		{"nested component", ".", filepath.Join("a", ".sesam", "b"), ".sesam"},
+		{"bare", ".", ".sesam", ".sesam"},
+		{"absolute sesam dir", "/repo/root", filepath.Join(".sesam", "secret"), ".sesam"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := IsForbiddenPath(tc.sesamDir, tc.revealed)
+			require.Error(t, err, "should reject %q", tc.revealed)
+			require.Contains(t, err.Error(), tc.wantMessage)
+		})
+	}
+}
+
+// A regular secret path that merely mentions "sesam" must still be allowed -
+// only the exact .sesam component and sesam.yml file are forbidden.
+func TestIsForbiddenPathAllowsLookalikes(t *testing.T) {
+	cases := []string{
+		filepath.Join("sesam", "secret"),       // dir named "sesam", not ".sesam"
+		filepath.Join("secrets", "sesam.yaml"), // .yaml, not .yml
+		"sesam.yml.bak",                        // not exactly sesam.yml
+		filepath.Join("my.sesam.dir", "x"),     // component contains, isn't, .sesam
+	}
+
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			require.NoError(t, IsForbiddenPath(".", path), "should accept %q", path)
+		})
+	}
 }
 
 func TestCloseLoggedNoError(t *testing.T) {

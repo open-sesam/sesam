@@ -27,17 +27,23 @@ const (
 	sesamInitialHashSeed = "sesam.init"
 )
 
-// Operation specifies what operation a specific entry describes.
+// Operation specifies what Operation a specific entry describes.
 // It is unlikely you need to use this directly.
-type operation string
+type Operation string
 
 const (
-	opInit         = operation("init")
-	opUserTell     = operation("user.tell")
-	opUserKill     = operation("user.kill")
-	opSecretChange = operation("secret.change")
-	opSecretRemove = operation("secret.remove")
-	opSeal         = operation("seal")
+	OpInit         = Operation("init")
+	OpUserTell     = Operation("user.tell")
+	OpUserKill     = Operation("user.kill")
+	OpSecretAdd    = Operation("secret.add")
+	OpSecretRemove = Operation("secret.remove")
+	OpSeal         = Operation("seal")
+
+	// Upadte operations:
+	OpUserRename         = Operation("user.rename")
+	OpUserChangeGroups   = Operation("user.change_groups")
+	OpSecretMove         = Operation("secret.move")
+	OpSecretChangeAccess = Operation("secret.change_access")
 )
 
 // AuditDetail is a type constraint covering all valid detail types.
@@ -45,15 +51,19 @@ type AuditDetail interface {
 	DetailInit |
 		DetailUserTell |
 		DetailUserKill |
-		DetailSecretChange |
+		DetailSecretAdd |
 		DetailSecretRemove |
-		DetailSeal
+		DetailSeal |
+		DetailSecretMove |
+		DetailSecretChangeAccess |
+		DetailUserRename |
+		DetailUserChangeGroups
 }
 
-type auditEntry struct {
+type AuditEntry struct {
 	// Operation describes the operation that happened.
 	// See above for a full list.
-	Operation operation `json:"operation"`
+	Operation Operation `json:"operation"`
 
 	// ChangedBy is the user that executed the operation.
 	ChangedBy string `json:"changed_by"`
@@ -74,14 +84,14 @@ type auditEntry struct {
 	Time time.Time `json:"time"`
 }
 
-func (ae *auditEntry) Sign(signer Signer) (*auditEntrySigned, error) {
+func (ae *AuditEntry) Sign(signer Signer) (*AuditEntrySigned, error) {
 	wholeEntryJSON, err := json.Marshal(ae)
 	if err != nil {
 		return nil, fmt.Errorf("marshal current entry: %w", err)
 	}
 
-	aes := &auditEntrySigned{
-		auditEntry: *ae,
+	aes := &AuditEntrySigned{
+		AuditEntry: *ae,
 	}
 
 	aes.Signature, err = signer.Sign(SesamDomainSignAuditTag, wholeEntryJSON)
@@ -92,9 +102,13 @@ func (ae *auditEntry) Sign(signer Signer) (*auditEntrySigned, error) {
 	return aes, nil
 }
 
+func (ae *AuditEntry) RawDetail() any {
+	return ae.unmarshaledDetail
+}
+
 // AuditEntrySigned contains a regular AuditEntry but includes the signature based on it.
-type auditEntrySigned struct {
-	auditEntry
+type AuditEntrySigned struct {
+	AuditEntry
 
 	// Signature is a signature made by the user in `ChangedBy` of this entry.
 	//
@@ -108,7 +122,7 @@ type auditEntrySigned struct {
 
 // Encrypt encrypts the json representation of `aes` using `aead` and then base64 encodes it.
 // The resulting data will include a newline
-func (aes *auditEntrySigned) Encrypt(aead cipher.AEAD) ([]byte, error) {
+func (aes *AuditEntrySigned) Encrypt(aead cipher.AEAD) ([]byte, error) {
 	sigJSON, err := json.Marshal(aes)
 	if err != nil {
 		return nil, fmt.Errorf("marshal signed entry: %w", err)
@@ -205,21 +219,40 @@ type DetailUserKill struct {
 	User string `json:"user"`
 }
 
-// DetailSecretChange describes the operation of adding/changing a secret.
+type DetailUserRename struct {
+	OldName string `json:"old_name"`
+	NewName string `json:"new_name"`
+}
+
+type DetailUserChangeGroups struct {
+	User      string   `json:"user"`
+	NewGroups []string `json:"new_groups"`
+}
+
+type DetailSecretMove struct {
+	OldRevealedPath string `json:"old_revealed_path"`
+	NewRevealedPath string `json:"new_revealed_path"`
+}
+
+type DetailSecretChangeAccess struct {
+	RevealedPath string   `json:"revealed_path"`
+	AccessGroups []string `json:"access_groups"`
+}
+
+// DetailSecretAdd describes the operation of adding a new secret. Changing the
+// access list of an existing secret is a separate operation
+// (DetailSecretChangeAccess), and renaming is DetailSecretRename.
 //
 // Verification:
 //
-// - "admin" may be part of `Groups`, but is implicitly added anyways.
-// - `Groups` may not be empty.
-// - `Groups` should not have duplicates.
-// - If secret exists: Only users that already have access to it may issue another Change.
-//
-// Note:
-//
-// - When changing the access list it is okay to issue another SecretMod
-type DetailSecretChange struct {
+// - The secret must not already exist (adding an existing secret is an error).
+// - "admin" may be part of `AccessGroups`, but is implicitly added anyways.
+// - An empty `AccessGroups` is therefore valid and means "admin only".
+// - `AccessGroups` should not have duplicates.
+// - The author must have access to at least one of the proposed groups.
+type DetailSecretAdd struct {
 	RevealedPath string   `json:"revealed_path"`
-	Groups       []string `json:"groups"`
+	AccessGroups []string `json:"access_groups"`
 }
 
 // DetailSecretRemove is the act of removing a secret.
@@ -286,7 +319,7 @@ type DetailSeal struct {
 //
 // In all cases verify would complain about it and warn an user about Eve.
 type AuditLog struct {
-	Entries []auditEntrySigned `json:"entries"`
+	Entries []AuditEntrySigned `json:"entries"`
 
 	// SesamDir is the dir in which .sesam resides.
 	SesamDir string `json:"-"`
@@ -306,20 +339,28 @@ type AuditLog struct {
 }
 
 // operationFor returns the operation type for a given detail struct.
-func operationFor(detail any) operation {
+func operationFor(detail any) Operation {
 	switch detail.(type) {
 	case *DetailInit:
-		return opInit
+		return OpInit
 	case *DetailUserTell:
-		return opUserTell
+		return OpUserTell
 	case *DetailUserKill:
-		return opUserKill
-	case *DetailSecretChange:
-		return opSecretChange
+		return OpUserKill
+	case *DetailSecretAdd:
+		return OpSecretAdd
 	case *DetailSecretRemove:
-		return opSecretRemove
+		return OpSecretRemove
 	case *DetailSeal:
-		return opSeal
+		return OpSeal
+	case *DetailSecretMove:
+		return OpSecretMove
+	case *DetailSecretChangeAccess:
+		return OpSecretChangeAccess
+	case *DetailUserRename:
+		return OpUserRename
+	case *DetailUserChangeGroups:
+		return OpUserChangeGroups
 	default:
 		panic(fmt.Sprintf("unknown detail type: %T", detail))
 	}
@@ -328,9 +369,9 @@ func operationFor(detail any) operation {
 // NewAuditEntry creates a new entry with compile-time type safety on the detail.
 // The operation is derived from the detail type.
 // SeqID, PreviousHash and Time are filled by AuditLog.AddEntry().
-func newAuditEntry[T AuditDetail](changedBy string, detail *T) *auditEntry {
+func newAuditEntry[T AuditDetail](changedBy string, detail *T) *AuditEntry {
 	detailJSON, _ := json.Marshal(detail)
-	return &auditEntry{
+	return &AuditEntry{
 		Operation:         operationFor(detail),
 		ChangedBy:         changedBy,
 		Time:              time.Now().UTC(),
@@ -341,7 +382,7 @@ func newAuditEntry[T AuditDetail](changedBy string, detail *T) *auditEntry {
 
 // ParseDetail unmarshals the detail into the given type.
 // The result is cached so repeated calls don't re-unmarshal.
-func parseDetail[T AuditDetail](e *auditEntrySigned) (*T, error) {
+func parseDetail[T AuditDetail](e *AuditEntrySigned) (*T, error) {
 	if e.unmarshaledDetail != nil {
 		if d, ok := e.unmarshaledDetail.(*T); ok {
 			return d, nil
@@ -360,20 +401,20 @@ func parseDetail[T AuditDetail](e *auditEntrySigned) (*T, error) {
 }
 
 // Hash computes the current hash of the entry when all fields (including signature) are set.
-func (aes *auditEntrySigned) Hash() string {
+func (aes *AuditEntrySigned) Hash() string {
 	// include signature:
 	sigJSON, _ := json.Marshal(aes)
 	return hashData(sigJSON)
 }
 
-func (aes *auditEntrySigned) String() string {
+func (aes *AuditEntrySigned) String() string {
 	sigJSON, _ := json.MarshalIndent(aes, "", "  ")
 	return string(sigJSON)
 }
 
-func (aes *auditEntrySigned) Verify(kr Keyring) (string, error) {
+func (aes *AuditEntrySigned) Verify(kr Keyring) (string, error) {
 	// do not include signature:
-	wholeEntryJSON, err := json.Marshal(aes.auditEntry)
+	wholeEntryJSON, err := json.Marshal(aes.AuditEntry)
 	if err != nil {
 		return "", err
 	}
@@ -604,7 +645,7 @@ func (al *AuditLog) Close() error {
 //
 // The `verify` function is called before append the log to the file on disk, use this to make
 // sure that the log verifies as correctly by calling state.Update().
-func (al *AuditLog) AddEntry(signer Signer, e *auditEntry, verify func() error) (*auditEntrySigned, error) {
+func (al *AuditLog) AddEntry(signer Signer, e *AuditEntry, verify func() error) (*AuditEntrySigned, error) {
 	if al.closed {
 		return nil, os.ErrClosed
 	}
@@ -657,7 +698,7 @@ func (al *AuditLog) AsJSON(w io.Writer) error {
 	return enc.Encode(al)
 }
 
-func (al *AuditLog) Iterate(fn func(idx int, entry *auditEntrySigned) error) error {
+func (al *AuditLog) Iterate(fn func(idx int, entry *AuditEntrySigned) error) error {
 	if al.closed {
 		return os.ErrClosed
 	}
@@ -778,7 +819,7 @@ func loadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
 			return nil, fmt.Errorf("decrypt line %d: %w", lineNumber, err)
 		}
 
-		var entry auditEntrySigned
+		var entry AuditEntrySigned
 		if err := json.Unmarshal(jsonData, &entry); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal line %d: %w", lineNumber, err)
 		}
@@ -833,7 +874,7 @@ func buildRootHash(sigs []*secretFooter) string {
 
 	b := bytes.NewBuffer(nil)
 	for _, sig := range sigs {
-		b.WriteString(sig.Hash)
+		b.WriteString(sig.CipherTextHash)
 		b.WriteByte('\n')
 	}
 

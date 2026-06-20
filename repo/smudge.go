@@ -199,7 +199,6 @@ func negotiateCapabilities(scanner *pktline.Scanner, encoder *pktline.Encoder) e
 	}
 
 	// we only do smudge right now, we might add `git add` later.
-	// TODO: Can we change paths when using the clean filter?
 	if err := encoder.EncodeString("capability=smudge\n"); err != nil {
 		return err
 	}
@@ -267,57 +266,25 @@ func (h *filterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 
 	if !h.cleaned {
 		h.cleaned = true
-		if err := cleanWorktree(h.SesamDir, h.IdentityPaths); err != nil {
-			slog.Warn("smudge: cleanup failed", slog.String("err", err.Error()))
-		}
+		// TODO: I noticed that smudge is also being run on "git diff".
+		// This has the side effect that revealed files are getting removed, then re-checked out
+		// from the sealed files. Any change in the revealed files would be overwritten.
+		// We maybe need to rethink how this is done.
+		// Not deleting old files on checkout is of course kind annoying as well.
+		// if err := cleanWorktree(h.SesamDir, h.IdentityPaths); err != nil {
+		// 	slog.Warn("smudge: cleanup failed", slog.String("err", err.Error()))
+		// }
 	}
 
 	if err := writeStatus(encoder, "success"); err != nil {
 		return err
 	}
 
-	spill, err := openSpillFile(h.SesamDir)
+	spill, err := h.echoThroughSpill(scanner, encoder)
 	if err != nil {
 		return err
 	}
-
 	defer func() { _ = spill.Cleanup() }()
-
-	// Each Scan() yields one input pkt-line (≤ MaxPayloadSize bytes). We
-	// forward it as-is via Encode (one new pkt-line of equal size) and, if
-	// we have a spill open, tee it to disk so reveal can read the full blob.
-	for {
-		if !scanner.Scan() {
-			if err := scanner.Err(); err != nil {
-				return err
-			}
-			return fmt.Errorf("%w: EOF in middle of content", errProtocol)
-		}
-		chunk := scanner.Bytes()
-		if len(chunk) == 0 {
-			break // input flush == end of content
-		}
-		if err := encoder.Encode(chunk); err != nil {
-			return err
-		}
-
-		if _, err := spill.Write(chunk); err != nil {
-			return fmt.Errorf("spill write: %w", err)
-		}
-	}
-	// First flush mirrors end-of-content; second flush is end-of-response
-	// (an empty trailing list with no `status=...` packet means success).
-	if err := encoder.Flush(); err != nil {
-		return err
-	}
-	if err := encoder.Flush(); err != nil {
-		return err
-	}
-
-	if _, err := spill.Seek(0, io.SeekStart); err != nil {
-		slog.Warn("smudge: failed to seek spill", slog.String("path", pathname), slog.String("err", err.Error()))
-		return nil
-	}
 
 	revealed, err := core.RevealBlob(
 		h.SesamDir,
@@ -347,6 +314,79 @@ func (h *filterProcessHandler) handleSmudgeRequest(scanner *pktline.Scanner, enc
 		slog.Debug("smudge: not a recipient, skipping reveal", slog.String("path", pathname))
 	}
 	return nil
+}
+
+// echoThroughSpill drains the entire content stream into a fresh spill file
+// and then echoes it back to git unchanged, re-chunked into protocol-sized
+// packets. Draining fully BEFORE writing is what avoids the pipe-buffer
+// deadlock: git streams the whole request and only then reads the reply, so
+// echoing chunks mid-read would block once both ~64 KiB pipe buffers fill
+// (any blob larger than a pipe buffer would hang `git diff` / `git checkout`).
+// Spilling to disk keeps memory flat regardless of blob size.
+//
+// On success the returned spill is rewound to the start so callers can read
+// the blob again (e.g. smudge reveals from it); the caller owns Cleanup.
+func (h *filterProcessHandler) echoThroughSpill(scanner *pktline.Scanner, encoder *pktline.Encoder) (*renameio.PendingFile, error) {
+	spill, err := openSpillFile(h.SesamDir)
+	if err != nil {
+		return nil, err
+	}
+
+	ok := false
+	defer func() {
+		if !ok {
+			_ = spill.Cleanup()
+		}
+	}()
+
+	for {
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w: EOF in middle of content", errProtocol)
+		}
+		chunk := scanner.Bytes()
+		if len(chunk) == 0 {
+			break // input flush == end of content
+		}
+		if _, err := spill.Write(chunk); err != nil {
+			return nil, fmt.Errorf("spill write: %w", err)
+		}
+	}
+
+	if _, err := spill.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("spill seek for response: %w", err)
+	}
+	buf := make([]byte, pktline.MaxPayloadSize)
+	for {
+		n, err := spill.Read(buf)
+		if n > 0 {
+			if encErr := encoder.Encode(buf[:n]); encErr != nil {
+				return nil, encErr
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("spill read for response: %w", err)
+		}
+	}
+	// First flush mirrors end-of-content; second flush is end-of-response
+	// (an empty trailing list with no `status=...` packet means success).
+	if err := encoder.Flush(); err != nil {
+		return nil, err
+	}
+	if err := encoder.Flush(); err != nil {
+		return nil, err
+	}
+
+	if _, err := spill.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("spill rewind: %w", err)
+	}
+	ok = true
+	return spill, nil
 }
 
 // loadAuditView reads the audit log (preferring the git **index** copy -
@@ -388,12 +428,20 @@ func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring,
 		return nil, nil, fmt.Errorf("read git index: %w", err)
 	}
 
-	// Index entries are repo-root-relative with forward slashes.
-	// sesamDir is the same shape (resolved from --sesam-dir, default
-	// "."); path.Join collapses "." correctly when sesam lives at the
-	// worktree root. ToSlash guards against an OS-native --sesam-dir
-	// (e.g. "sub\dir" on Windows), which path.Join would not normalize.
-	auditPath := path.Join(filepath.ToSlash(sesamDir), ".sesam/audit/log.jsonl")
+	// Index entries are worktree-root-relative with forward slashes.
+	// sesamDir may be absolute (callers no longer chdir into the repo) or
+	// relative, so translate it into a worktree-root-relative slash path
+	// before matching index names. path.Join collapses "." correctly when
+	// sesam lives at the worktree root.
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve worktree for %q: %w", sesamDir, err)
+	}
+	relDir, err := repoRootRelative(wt.Filesystem.Root(), sesamDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	auditPath := path.Join(relDir, ".sesam/audit/log.jsonl")
 
 	blobIdx := slices.IndexFunc(idx.Entries, func(e *index.Entry) bool {
 		return e.Name == auditPath
@@ -424,7 +472,7 @@ func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring,
 	// Pull it from the index too — without it, verifyInit reports a bogus
 	// truncation error and the whole index path silently degrades to the
 	// worktree fallback.
-	initPath := path.Join(sesamDir, ".sesam/audit/init")
+	initPath := path.Join(relDir, ".sesam/audit/init")
 	initIdx := slices.IndexFunc(idx.Entries, func(e *index.Entry) bool {
 		return e.Name == initPath
 	})
@@ -452,6 +500,26 @@ func loadAuditViewFromIndex(sesamDir string, ids core.Identities) (core.Keyring,
 		return nil, nil, fmt.Errorf("verify audit chain (index version): %w", err)
 	}
 	return kr, state.SealerAuthorized, nil
+}
+
+// repoRootRelative converts sesamDir into a slash path relative to the git
+// worktree root — the shape git uses for index entry names. It accepts either
+// an absolute sesamDir or one relative to the current directory, so callers
+// need not chdir into the repository.
+func repoRootRelative(worktreeRoot, sesamDir string) (string, error) {
+	absRoot, err := filepath.Abs(worktreeRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolve worktree root %q: %w", worktreeRoot, err)
+	}
+	absSesam, err := filepath.Abs(sesamDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve sesam dir %q: %w", sesamDir, err)
+	}
+	rel, err := filepath.Rel(absRoot, absSesam)
+	if err != nil {
+		return "", fmt.Errorf("relativize %q against worktree root %q: %w", absSesam, absRoot, err)
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 func loadAuditViewFromWorktree(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
@@ -487,10 +555,9 @@ func RunSmudgeFilter(ctx context.Context, sesamDir string, identityPaths []strin
 	if err != nil {
 		return err
 	}
-
 	ids, err := loadIdentitiesWith(
 		identityPaths,
-		RepoOpts{AskpassProgram: askpassProgram}.passphraseProvider(keyringFingerprint),
+		RepoOpts{AskpassProgram: askpassProgram}.passphraseProvider,
 		core.NewNonInteractivePluginUI(),
 	)
 	if err != nil {
@@ -514,22 +581,6 @@ func RunSmudgeFilter(ctx context.Context, sesamDir string, identityPaths []strin
 	}
 
 	return handler.Run(ctx, in, out)
-}
-
-// cleanWorktree removes stale untracked files from sesamDir, excluding the
-// given identity file paths. It is called at most once per filter session
-// (guarded by filterProcessHandler.cleaned).
-func cleanWorktree(sesamDir string, identityPaths []string) error {
-	repo, err := openGitRepo(sesamDir)
-	if err != nil {
-		return err
-	}
-
-	allowFn := func(path string) (bool, error) {
-		return true, nil
-	}
-
-	return cleanup(repo, sesamDir, allowFn, identityPaths...)
 }
 
 // openSpillFile creates a scratch file inside sesamDir/.sesam/tmp using
