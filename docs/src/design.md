@@ -4,14 +4,45 @@ This document describes the general design ideas behind `sesam`.
 Some familiarity is assumed, i.e. the other chapters of this manual
 should have been read and ideally the reader also tried `sesam`.
 
-## General ideas
+## General concepts
 
-- `git` integration is important, but still mostly decoupled. Everything can still be done via normal sesam commands.
-- The concept behind git-crypt is nice, but fails in practice (files are either revealed or locked + git tooling)
-- Concept of adding `.crypt` files along-side the actual files is very annoying in practice (like git-secret does)
-- Where possible we re-use well regarded projects like SSH and age.
-- Private key handling should be in the control of the user.
-- The revealed files are a subset of the files that are sealed. Not all users can reveal all files.
+### Short overview
+
+This is a *very* brief summary of what components we have.
+
+- **secret:** A single age-encrypted file with a footer that can be decrypted by all configured recipients.
+- **footer**: Each file has a footer, storing the revealed content's path, it's encrypted and decrypted hash (here as HMAC) and a signature.
+- **repo:** The place where `sesam` stores all of it's state (i.e. `.sesam/`). That's the main part you want to commit.
+- **recpient:** A public key attached to a user, required fro decryption (terminology copied from `age`).
+- **identity:** The private key used by users, required for decryption (terminology copied from `age`). 
+- **audit log**: A log that keeps track of what file operations were done on the repository. It is signed and append-only,
+  so that tampering would be immediately detected. By replaying the log we can defer the **verified state**.
+- **verified state:** The state that we expect in the repository. Contains information about all users, groups and secrets.
+- **config:** The `sesam.yml` file(s) on disk. They may diverge from what the **verified state** describes. If this is the case,
+  `sesam config diff` will show the differences. We call this the *desired state*.
+- **keyring:** When rebuilding the application from the audit-log we collect all public keys of all users in this structure.
+- **signkey:** Each user has a private signature key only he can read. We store those age-encrypted in the repo.
+- **user:** Users are user IDs that have a signkey, one or more identities, one or more recipients an that are in one or more groups.
+
+<div style="text-align: center;">
+  <img src="architecture_overview_light.svg" width="900" />
+</div>
+
+### Design guidelines
+
+Those are a couple of rough directions we try to adhere when modifying `sesam`.
+
+- `git` integration is important. We don't support other version control systems, and using `sesam` outside of a `git` repository
+  might be possible, but definitely way less powerful.
+- If possible, all state should be in `.sesam` and all state should be as small as possible.
+- Revealed files and encrypted files should be two different places. Tools like `agebox` and `git-crypt` flipping around between
+  them (even with `smudge` filter) never works well in the end.
+- Where possible we re-use well regarded projects and standards like SSH and age. Use what developers (i.e. users) already have.
+- The revealed files are a subset of the files that are sealed. Not all users can reveal all files. Keep that in mind.
+- Private key handling should be in the control of the user. There are so many ways to provide a key, we just need to optimize
+  for the most common ones.
+- `sesam` should support several .sesam dirs per git repo, `.git` and `.sesam` don't need to be in the same folder.
+- We use [multicode](https://github.com/sj14/multicode) to encode hashes, priv/pub keys and signatures in a self-describing way.
 
 ### Why `age` and `ssh`?
 
@@ -162,7 +193,6 @@ really doing weird stuff) that we're on the same partition, which makes
 renaming files atomically easier.
 
 ## Cryptography
-
 
 ### Short facts
 
@@ -362,7 +392,12 @@ apply and verify will complain. There are situations where this could be valid t
 
 #### Supply chain attacks
 
-TODO: Figure out what we can do to make sure sesam is a trusted binary.
+A very hard thing to mitigate. We don't do very well here yet.
+
+- We try to use only few, trusted and well established libraries.
+- We use `govulncheck` to stay informed about know vulns.
+- [In the future](https://github.com/open-sesam/sesam/issues/32) we also want to sign our binaries to at least
+  avoid binary based supply chain attacks.
 
 ### Possible improvements
 
@@ -380,18 +415,6 @@ TODO: Figure out what we can do to make sure sesam is a trusted binary.
 ----
 
 ## Implementation
-
-### Overview
-
-
-<div style="text-align: center;">
-  <img src="architecture_overview_light.svg" width="900" />
-</div>
-
-### Other notes
-
-- `sesam` should support several .sesam dirs per git repo, `.git` and `.sesam` don't need to be in the same folder.
-- We use [multicode](https://github.com/sj14/multicode) to encode hashes, priv/pub keys and signatures in a self-describing way.
 
 ### Audit log Specifics
 
@@ -415,20 +438,28 @@ Entry structure:
 Operation types:
 
 
-| Operation        | Detail fields                                  | Notes                                           |
-|------------------|------------------------------------------------|-------------------------------------------------|
-| `init`           | InitUUID, Admin (embedded UserTell)            | Trust root. Pins first admin. See below.        |
-| `user.tell`      | User, PubKeys, SignPubKeys, Groups             | Must be signed by an admin.                     |
-| `user.kill`      | User                                           | Must not remove last user or last admin.        |
-| `secret.change`  | RevealedPath, Groups                           | Add or update a secret and its access list.     |
-| `secret.remove`  | RevealedPath                                   | Only users with access may remove.              |
-| `seal`           | RootHash, FilesSealed                          | Hash over all sorted signatures.                |
+| Operation                  | Detail fields                       | Notes                                          |
+|----------------------------|-------------------------------------|------------------------------------------------|
+| `init`                     | InitUUID, Admin (embedded UserTell) | Trust root. Pins the first admin. See below.   |
+| `user.tell`                | User, PubKeys, SignPubKeys, Groups  | Add a user. Must be signed by an admin.        |
+| `user.kill`                | User                                | Must not remove the last user or last admin.   |
+| `user.rename`              | OldName, NewName                    | May not rename to an existing user.            |
+| `user.change_groups`       | User, NewGroups                     | Replace a user's group membership.             |
+| `user.add_recipients`      | User, PubKeys                       | Add age recipient key(s) to a user.            |
+| `user.rm_recipients`       | User, PubKeys                       | Remove age recipient key(s) from a user.       |
+| `user.regenerate_sign_key` | User, NewSignPubKey                 | Rotate a user's signing key.                   |
+| `secret.add`               | RevealedPath, AccessGroups          | Add a new secret and its access list.          |
+| `secret.change_access`     | RevealedPath, AccessGroups          | Change an existing secret's access list.       |
+| `secret.move`              | OldRevealedPath, NewRevealedPath    | Rename or move a secret.                        |
+| `secret.remove`            | RevealedPath                        | Only users with access may remove.             |
+| `seal`                     | RootHash, FilesSealed               | Hash over all sorted signatures.               |
 
 
-Group membership is part of the `user.tell` detail. There are no separate
-group operations. Admin status is determined by membership in the "admin" group.
+Initial group membership is part of the `user.tell` detail; later changes go
+through `user.change_groups`. Admin status is determined by membership in the
+"admin" group.
 
 ```admonish note
-We will likely have more entry types later, e.g. to re-key a user.
+The set of operations may still grow as sesam gains features.
 ```
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>sesam — encrypted, multi-user secrets in your git repo</title>
+<title>sesam - a clever git secrets manager</title>
 
 <!-- Apply a *saved* theme choice before first paint. With no saved choice we
      leave data-theme unset so the prefers-color-scheme media query drives the
@@ -20,7 +20,7 @@
 
 <!-- Open Graph / social -->
 <meta property="og:type" content="website" />
-<meta property="og:title" content="sesam — open the cave" />
+<meta property="og:title" content="sesam — a clver git secrets manager" />
 <meta property="og:description" content="Encrypted, multi-user secrets that live in your git repo." />
 <meta property="og:url" content="https://opensesam.org/" />
 <meta property="og:image" content="https://opensesam.org/sesam_bg.png" />
@@ -28,7 +28,7 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600;700&family=Rubik:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&family=Rubik:wght@300;400;500;600&display=swap" rel="stylesheet" />
 
 <style>
 /* ==========================================================================
@@ -59,6 +59,15 @@
   --moon-display:  none;
   --sky-display:   none;
   --scene-opacity: 0.85;
+  --spark-max:     0.8;  /* treasure sparkle peak opacity (brighter still at night) */
+  /* day sky: flat behind the text, a barely-there cool dip, then warm sand at
+     the horizon — atmosphere, not a banner */
+  --sky: linear-gradient(to bottom,
+            var(--page-bg) 0%,
+            var(--page-bg) 30%,
+            #dce8ec 57%,
+            #ecdec0 83%,
+            #f0d9aa 100%);
 }
 
 /* Dark palette (night). Applied when the visitor explicitly picked dark, OR the
@@ -92,7 +101,17 @@
   --sun-display:   none;
   --moon-display:  block;
   --sky-display:   block;
-  --scene-opacity: 0.5;
+  --scene-opacity: 0.62;
+  --spark-max:     1;
+  /* night sky: deep indigo up top (so the stars sit in dusk, not flat black),
+     deepening through violet into a faint warm-magenta glow at the horizon
+     behind the dunes, then back into page-bg at the very bottom */
+  --sky: linear-gradient(to bottom,
+            #15172a 0%,
+            #1b1c33 34%,
+            #2c2342 60%,
+            #45304499 80%,
+            var(--page-bg) 100%);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -118,7 +137,14 @@
     --sun-display:   none;
     --moon-display:  block;
     --sky-display:   block;
-    --scene-opacity: 0.5;
+    --scene-opacity: 0.62;
+    --spark-max:     1;
+    --sky: linear-gradient(to bottom,
+              #15172a 0%,
+              #1b1c33 34%,
+              #2c2342 60%,
+              #45304499 80%,
+              var(--page-bg) 100%);
   }
 }
 
@@ -131,9 +157,15 @@ body {
   display: flex;
   flex-direction: column;
   background-color: var(--page-bg);
-  background-image: var(--arabic);
-  background-repeat: repeat;
-  background-size: 80px 80px;
+  /* two canvas layers: the arabic pattern tiles on TOP of a viewport-fixed sky
+     gradient (--sky). The gradient is page-bg behind the wordmark/tagline up
+     top — so text contrast is untouched — and only warms (day) or deepens into
+     a violet twilight (night) toward the horizon where it meets the scene. */
+  background-image: var(--arabic), var(--sky);
+  background-repeat: repeat, no-repeat;
+  background-size: 80px 80px, 100% 100%;
+  background-position: 0 0, bottom;
+  background-attachment: scroll, fixed;
   color: var(--text);
   font-family: "Rubik", system-ui, sans-serif;
   font-weight: 300;
@@ -179,16 +211,23 @@ main {
 
 /* --- Wordmark --- */
 h1 {
-  font-family: "Josefin Sans", sans-serif;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
   font-weight: 700;
-  font-size: clamp(2.8rem, 9vw, 5rem);
-  letter-spacing: 0.12em;
+  font-size: clamp(2.6rem, 8vw, 4.6rem);
+  letter-spacing: 0.04em;
   line-height: 1;
   margin: 1.6rem 0 0;
   color: var(--emerald);
   text-transform: lowercase;
 }
-h1 .open { color: var(--gold); font-weight: 600; }
+h1 .open { color: var(--gold); font-weight: 500; }
+h1 .fn-mark {
+  font-size: 0.3em;
+  font-weight: 500;
+  color: var(--gold);
+  vertical-align: super;
+  margin-left: 0.12em;
+}
 
 /* gold rule under the wordmark, echoing the docs h1 border */
 .rule {
@@ -220,7 +259,7 @@ h1 .open { color: var(--gold); font-weight: 600; }
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
   overflow: hidden;
   margin-bottom: 2.4rem;
-  font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.8rem;
 }
 .term-bar {
@@ -247,10 +286,9 @@ h1 .open { color: var(--gold); font-weight: 600; }
 .term-body {
   padding: 1.05em 1.15em 1.25em;
   line-height: 1.75;
-  white-space: pre;
   overflow-x: auto;
 }
-/* semantic colours, mirroring `sesam log` */
+/* semantic colours, mirroring `sesam log` / `sesam status` */
 .term-body .prompt { color: var(--emerald); font-weight: 600; }
 .term-body .seq    { color: var(--text-muted); }
 .term-body .time   { color: var(--emerald-muted); }
@@ -259,6 +297,15 @@ h1 .open { color: var(--gold); font-weight: 600; }
 .term-body .secret { color: var(--t-secret); }
 .term-body .group  { color: var(--gold); }
 .term-body .repo   { color: var(--emerald-hover); font-weight: 600; }
+.term-body .dim    { color: var(--text-muted); }
+.term-body .warn   { color: var(--orange); }
+.term-body .dir    { color: var(--emerald-muted); font-weight: 500; }
+/* fixed-width cell so the action/status glyph (+, ~, →, ✓, ★, M) never throws
+   the columns off, whatever advance width the font gives those symbols */
+.term-body .gl  { display: inline-block; width: 1.3ch; text-align: center; }
+/* each command's output; the script shows one at a time */
+.term-body .out { display: none; }
+.term-body .out.show { display: block; }
 
 /* typed command — text is driven by the loop script below; the cursor is a
    blinking right border that sits after whatever has been typed so far. */
@@ -272,7 +319,7 @@ h1 .open { color: var(--gold); font-weight: 600; }
 @keyframes blink { 50% { border-color: transparent; } }
 
 /* output rows fade in one after another (toggled by the script) */
-.row { opacity: 0; transition: opacity 0.35s ease; }
+.row { display: block; white-space: pre; opacity: 0; transition: opacity 0.35s ease; }
 
 @media (prefers-reduced-motion: reduce) {
   .typed { animation: none; border-right: none; }
@@ -342,6 +389,8 @@ h1 .open { color: var(--gold); font-weight: 600; }
   position: absolute;
   inset: 0;
   background-repeat: no-repeat;
+  /* a soft halo around each star so they read a touch brighter */
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.55));
 }
 /* steady stars across the whole sky */
 .sky::before {
@@ -364,7 +413,22 @@ h1 .open { color: var(--gold); font-weight: 600; }
     radial-gradient(1px 1px     at 96% 24%, rgba(255,255,255,.55), transparent),
     radial-gradient(1px 1px     at 33% 5%,  rgba(255,255,255,.6),  transparent),
     radial-gradient(1.2px 1.2px at 15% 17%, rgba(255,255,255,.7),  transparent),
-    radial-gradient(1px 1px     at 71% 16%, rgba(255,255,255,.6),  transparent);
+    radial-gradient(1px 1px     at 71% 16%, rgba(255,255,255,.6),  transparent),
+    radial-gradient(1px 1px     at 3% 25%,  rgba(255,255,255,.5),  transparent),
+    radial-gradient(1.2px 1.2px at 21% 40%, rgba(255,255,255,.65), transparent),
+    radial-gradient(1px 1px     at 28% 9%,  rgba(255,255,255,.55), transparent),
+    radial-gradient(1.3px 1.3px at 41% 19%, rgba(255,255,255,.75), transparent),
+    radial-gradient(1px 1px     at 47% 6%,  rgba(255,255,255,.5),  transparent),
+    radial-gradient(1.2px 1.2px at 53% 27%, rgba(255,255,255,.6),  transparent),
+    radial-gradient(1px 1px     at 59% 16%, rgba(255,255,255,.55), transparent),
+    radial-gradient(1.4px 1.4px at 65% 38%, rgba(255,255,255,.7),  transparent),
+    radial-gradient(1px 1px     at 74% 30%, rgba(255,255,255,.5),  transparent),
+    radial-gradient(1.2px 1.2px at 83% 21%, rgba(255,255,255,.65), transparent),
+    radial-gradient(1px 1px     at 88% 6%,  rgba(255,255,255,.55), transparent),
+    radial-gradient(1.3px 1.3px at 94% 34%, rgba(255,255,255,.75), transparent),
+    radial-gradient(1px 1px     at 99% 14%, rgba(255,255,255,.5),  transparent),
+    radial-gradient(1.2px 1.2px at 7% 6%,   rgba(255,255,255,.6),  transparent),
+    radial-gradient(1px 1px     at 36% 30%, rgba(255,255,255,.5),  transparent);
 }
 /* twinkling subset */
 .sky::after {
@@ -408,19 +472,42 @@ h1 .open { color: var(--gold); font-weight: 600; }
   outline-offset: 5px;
 }
 
-/* a soft sun — warm-white core with a muted, clay-toned glow that melts into
-   the sandy page rather than reading as a bright yellow disc */
+/* a soft sun — warm-white core that melts into the sandy page (the gradient
+   fades to transparent before the box edge, so there is no hard disc rim) with
+   a muted clay-toned glow */
 .sun {
   display: var(--sun-display);
   background: radial-gradient(circle,
     #fdf7ea 0%,
-    color-mix(in srgb, var(--gold-light) 55%, var(--page-bg)) 55%,
-    color-mix(in srgb, var(--clay) 55%, var(--page-bg)) 100%);
+    color-mix(in srgb, var(--gold-light) 60%, var(--page-bg)) 40%,
+    color-mix(in srgb, var(--clay) 45%, transparent) 66%,
+    transparent 82%);
   box-shadow:
     0 0 26px 6px   color-mix(in srgb, var(--clay) 30%, transparent),
     0 0 60px 24px  color-mix(in srgb, var(--clay) 14%, transparent),
     0 0 120px 60px color-mix(in srgb, var(--clay) 6%, transparent);
+  /* soften the whole disc so it blends into the sky rather than reading as a
+     crisp circle (also gently blurs the rays, which suits radiating light) */
+  filter: blur(2.5px);
 }
+/* sun rays: thin conic spokes masked into a ring around the disc (transparent
+   at the core, fading out past the rim) so the sun reads as radiating light.
+   pointer-events:none keeps the click target the 60px disc, not the rays. */
+.sun::before {
+  content: "";
+  position: absolute;
+  inset: -46%;
+  border-radius: 50%;
+  pointer-events: none;
+  background: repeating-conic-gradient(from 0deg,
+    color-mix(in srgb, var(--gold) 70%, transparent) 0deg 2.4deg,
+    transparent 2.4deg 30deg);
+  -webkit-mask: radial-gradient(circle closest-side, transparent 40%, #000 56%, transparent 82%);
+          mask: radial-gradient(circle closest-side, transparent 40%, #000 56%, transparent 82%);
+  filter: blur(0.8px);
+  animation: sun-rays 120s linear infinite;
+}
+@keyframes sun-rays { to { transform: rotate(360deg); } }
 
 /* a pale disc carved into a crescent by a transparent bite (mask) offset toward
    the upper-right, so the night sky shows through rather than a flat dark disc */
@@ -457,13 +544,85 @@ h1 .open { color: var(--gold); font-weight: 600; }
      dark page) */
   opacity: var(--scene-opacity);
   transition: opacity 0.35s ease;
+  /* a slow, barely-there shift in saturation/brightness/contrast gives the
+     scene a faintly living, slightly eerie quality */
+  animation: scene-breathe 10s ease-in-out infinite;
+}
+@keyframes scene-breathe {
+  0%, 100% { filter: saturate(0.95) brightness(0.85)contrast(0.85); }
+  50%      { filter: saturate(1.05)  brightness(1.05) contrast(1.05); }
+}
+
+/* --- Treasure sparkles ---
+   Quick golden twinkles over the hoard in the cave. The container matches the
+   scene's image box (same anchor + aspect-ratio) so the percentage positions
+   land on the treasure; --spark-max makes them brighter at night. */
+.sparkles {
+  position: fixed;
+  left: 0;
+  bottom: -5vw;
+  width: 100%;
+  aspect-ratio: 2784 / 1536;
+  z-index: -1;
+  pointer-events: none;
+}
+.spark {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  background: radial-gradient(circle, #fff7d6 0%, var(--gold) 50%, transparent 72%);
+  clip-path: polygon(50% 0%, 58% 42%, 100% 50%, 58% 58%, 50% 100%, 42% 58%, 0% 50%, 42% 42%);
+  opacity: 0;
+  animation: spark 1.5s ease-in-out infinite;
+}
+@keyframes spark {
+  0%, 100% { opacity: 0;                  transform: scale(0.3) rotate(0deg); }
+  50%      { opacity: var(--spark-max, 0.6); transform: scale(1) rotate(40deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scene { animation: none; }
+  .spark { animation: none; opacity: 0; }
+  .sun::before { animation: none; }
+}
+
+/* --- Footnote: the "open sesame" reference, pinned lower-left --- */
+.footnote {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  max-width: 18rem;
+  z-index: 4;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  /* a faint card keeps it readable over the busy caravan below */
+  padding: 0.5em 0.7em;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--page-bg) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 55%, transparent);
+  -webkit-backdrop-filter: blur(3px);
+          backdrop-filter: blur(3px);
+}
+.footnote sup { color: var(--gold); font-weight: 600; }
+.footnote i   { font-style: italic; }
+.footnote a {
+  color: var(--emerald);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.footnote a:hover { color: var(--gold); }
+/* on narrow screens it would crowd the centred content — drop it */
+@media (max-width: 620px) {
+  .footnote { display: none; }
 }
 </style>
 
-<!-- Without JS the loop can't run, so show the full command + output statically. -->
+<!-- Without JS the loop can't run, so show the log command + output statically. -->
 <noscript><style>
   .typed::after { content: "sesam log"; }
-  .row { opacity: 1; }
+  .out-log { display: block !important; }
+  .row { opacity: 1 !important; }
 </style></noscript>
 </head>
 <body>
@@ -474,6 +633,16 @@ h1 .open { color: var(--gold); font-weight: 600; }
   <source srcset="bg.webp" type="image/webp" />
   <img class="scene" src="bg.png" alt="" aria-hidden="true" />
 </picture>
+<div class="sparkles" aria-hidden="true">
+  <span class="spark" style="left:47%;top:50%;animation-delay:0s;animation-duration:1.3s"></span>
+  <span class="spark" style="left:50%;top:53%;animation-delay:.4s;animation-duration:1.6s"></span>
+  <span class="spark" style="left:45%;top:54%;animation-delay:.9s;animation-duration:1.4s"></span>
+  <span class="spark" style="left:49%;top:48%;animation-delay:.6s;animation-duration:1.1s"></span>
+  <span class="spark" style="left:52%;top:51%;animation-delay:1.2s;animation-duration:1.7s"></span>
+  <span class="spark" style="left:46%;top:52%;animation-delay:.2s;animation-duration:1.5s"></span>
+  <span class="spark" style="left:51%;top:55%;animation-delay:1.5s;animation-duration:1.2s"></span>
+  <span class="spark" style="left:48%;top:53%;animation-delay:.8s;animation-duration:1.9s"></span>
+</div>
 <main>
   <span class="beta">beta — pre-1.0, expect change</span>
 
@@ -490,13 +659,25 @@ h1 .open { color: var(--gold); font-weight: 600; }
 
   <div class="term" aria-hidden="true">
     <div class="term-bar"><i></i><i></i><i></i><span>~/work/secrets</span></div>
-    <div class="term-body"><span class="prompt">$</span> <span class="cmd typed"></span>
-<span class="row"><span class="seq">#6</span> <span class="user">~</span> <span class="time">2026 Apr 19 08:30</span>  <span class="user">alice</span>  set groups of <span class="user">bob</span> to <span class="group">backend, ops</span></span>
-<span class="row"><span class="seq">#5</span> <span class="secret">→</span> <span class="time">2026 Mar 02 10:48</span>  <span class="user">bob</span>    renamed <span class="secret">db/prod.env</span> → <span class="secret">db/prod.toml</span></span>
-<span class="row"><span class="seq">#4</span> <span class="repo">✓</span> <span class="time">2026 Feb 08 14:22</span>  <span class="user">bob</span>    <span class="repo">sealed 2 secrets</span> <span class="hash">9f2c1a0b</span></span>
-<span class="row"><span class="seq">#3</span> <span class="secret">+</span> <span class="time">2026 Feb 08 14:22</span>  <span class="user">bob</span>    added <span class="secret">db/prod.env</span> (<span class="group">backend, admin</span>)</span>
-<span class="row"><span class="seq">#2</span> <span class="user">+</span> <span class="time">2026 Jan 06 09:15</span>  <span class="user">alice</span>  told <span class="user">bob</span> into <span class="group">backend</span></span>
-<span class="row"><span class="seq">#1</span> <span class="repo">★</span> <span class="time">2026 Jan 06 09:14</span>  <span class="user">alice</span>  <span class="repo">initialized repo</span> <span class="hash">7f3a9c2e</span></span></div>
+    <div class="term-body">
+      <div class="cmdline"><span class="prompt">$</span> <span class="cmd typed"></span></div>
+      <div class="out out-log">
+        <div class="row"><span class="seq">#6</span> <span class="gl user">~</span> <span class="time">2026 Apr 19 08:30</span>  <span class="user">alice</span>  set groups of <span class="user">bob</span> to <span class="group">backend, ops</span></div>
+        <div class="row"><span class="seq">#5</span> <span class="gl secret">→</span> <span class="time">2026 Mar 02 10:48</span>  <span class="user">bob</span>    renamed <span class="secret">db/prod.env</span> → <span class="secret">db/prod.toml</span></div>
+        <div class="row"><span class="seq">#4</span> <span class="gl repo">✓</span> <span class="time">2026 Feb 08 14:22</span>  <span class="user">bob</span>    <span class="repo">sealed 2 secrets</span> <span class="hash">9f2c1a0b</span></div>
+        <div class="row"><span class="seq">#3</span> <span class="gl secret">+</span> <span class="time">2026 Feb 08 14:22</span>  <span class="user">bob</span>    added <span class="secret">db/prod.env</span> (<span class="group">backend, admin</span>)</div>
+        <div class="row"><span class="seq">#2</span> <span class="gl user">+</span> <span class="time">2026 Jan 06 09:15</span>  <span class="user">alice</span>  told <span class="user">bob</span> into <span class="group">backend</span></div>
+        <div class="row"><span class="seq">#1</span> <span class="gl repo">★</span> <span class="time">2026 Jan 06 09:14</span>  <span class="user">alice</span>  <span class="repo">initialized repo</span> <span class="hash">7f3a9c2e</span></div>
+      </div>
+      <div class="out out-status">
+        <div class="row"><span class="dim">.</span></div>
+        <div class="row"><span class="dim">├─</span> <span class="gl repo">✓</span> <span class="secret">.env</span> <span class="dim">(</span><span class="group">admin</span><span class="dim">)</span></div>
+        <div class="row"><span class="dim">╰─</span> <span class="dir">db</span></div>
+        <div class="row"><span class="dim">   ├─</span> <span class="gl warn">M</span> <span class="secret">prod.toml</span> <span class="dim">(</span><span class="group">backend, admin</span><span class="dim">)</span></div>
+        <div class="row"><span class="dim">   ╰─</span> <span class="gl repo">✓</span> <span class="secret">staging.toml</span> <span class="dim">(</span><span class="group">backend, ops</span><span class="dim">)</span></div>
+        <div class="row">  <span class="warn">1 out of sync</span> <span class="dim">·</span> <span class="repo">2 in sync</span></div>
+      </div>
+    </div>
   </div>
 
   <div class="cta">
@@ -504,33 +685,49 @@ h1 .open { color: var(--gold); font-weight: 600; }
     <a class="btn btn-ghost" href="https://github.com/open-sesam/sesam">★ GitHub</a>
   </div>
 </main>
+
 <script>
-// Replays the `sesam log` terminal: type the command, stream the rows in
-// (newest first, matching real output), hold, then loop after a pause.
+// Replays the terminal, alternating between `sesam log` and `sesam status`:
+// type the command, stream that command's rows in, hold, then move on.
 (function () {
   var typed = document.querySelector(".typed");
-  var rows = Array.prototype.slice.call(document.querySelectorAll(".term-body .row"));
   if (!typed) return;
 
-  var CMD = "sesam log";
+  var COMMANDS = [
+    { cmd: "sesam log",    out: document.querySelector(".out-log") },
+    { cmd: "sesam status --all", out: document.querySelector(".out-status") },
+  ].filter(function (c) { return c.out; });
+  if (!COMMANDS.length) return;
 
-  // Respect reduced-motion: render the final state once, no looping.
+  var rowsOf = function (c) {
+    return Array.prototype.slice.call(c.out.querySelectorAll(".row"));
+  };
+
+  // Respect reduced-motion: render the log output once, no looping.
   if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    typed.textContent = CMD;
-    rows.forEach(function (r) { r.style.opacity = 1; });
+    typed.textContent = COMMANDS[0].cmd;
+    COMMANDS[0].out.classList.add("show");
+    rowsOf(COMMANDS[0]).forEach(function (r) { r.style.opacity = 1; });
     return;
   }
 
   var sleep = function (ms) { return new Promise(function (res) { setTimeout(res, ms); }); };
 
   async function loop() {
+    var i = 0;
     while (true) {
+      var c = COMMANDS[i % COMMANDS.length];
+      var rows = rowsOf(c);
+
+      // reset: clear prompt, show only this command's (hidden) output
       typed.textContent = "";
+      COMMANDS.forEach(function (other) { other.out.classList.remove("show"); });
       rows.forEach(function (r) { r.style.opacity = 0; });
+      c.out.classList.add("show");
       await sleep(700);
 
-      for (var i = 0; i < CMD.length; i++) {
-        typed.textContent += CMD[i];
+      for (var k = 0; k < c.cmd.length; k++) {
+        typed.textContent += c.cmd[k];
         await sleep(75);
       }
       await sleep(450);
@@ -540,9 +737,10 @@ h1 .open { color: var(--gold); font-weight: 600; }
         await sleep(260);
       }
 
-      await sleep(6000);                                   // hold the output
+      await sleep(5500);                                   // hold the output
       rows.forEach(function (r) { r.style.opacity = 0; }); // fade out together
-      await sleep(900);                                    // pause before replay
+      await sleep(900);                                    // pause before next
+      i++;
     }
   }
 

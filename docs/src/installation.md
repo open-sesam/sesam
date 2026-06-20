@@ -3,6 +3,10 @@
 While this is in development, you can only clone the repo and compile it from source.
 We will update this document once binary distributions are available.
 
+## Releases
+
+Please check the [Releases tab](https://github.com/open-sesam/sesam/releases) for download options and release notes.
+
 # Compiling from source 
 
 We use [mise](https://mise.en.dev/) to manage our development tools. All you
@@ -48,7 +52,3 @@ This mostly depends on how `sesam` is used in the field and how much we feel we 
 
 However, after announcing the first test version to the world, we will think twice to change things around. We try to keep
 the repository layout stable and also the CLI concepts should mostly stay the same.
-
-## Releases
-
-Please check the [Releases tab](https://github.com/open-sesam/sesam/releases) for download options and release notes.
