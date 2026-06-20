@@ -54,6 +54,17 @@ type Keyring interface {
 	// RenameUser() renames existing oldUser to newUser.
 	// If oldUser does not exists it's a no-op.
 	RenameUser(oldUser, newUser string)
+
+	// Clone returns a deep copy of the keyring. It is used to snapshot the
+	// keyring before audit-log replay so the contents can be restored on a
+	// verification error (see Restore).
+	Clone() Keyring
+
+	// Restore replaces this keyring's contents with a deep copy of src's,
+	// WITHOUT changing the keyring's identity. The repo and managers hold the
+	// same *Keyring by pointer, so replay must roll back in place rather than
+	// swap the pointer. src is typically a value previously returned by Clone.
+	Restore(src Keyring)
 }
 
 // MemoryKeyring is a simple Keyring implementation that holds public keys in memory only.
@@ -210,6 +221,46 @@ func AllRecipients(kr Keyring) Recipients {
 	}
 
 	return recps
+}
+
+func cloneRecipientsMap(in map[string]Recipients) map[string]Recipients {
+	out := make(map[string]Recipients, len(in))
+	for user, recps := range in {
+		// *Recipient values are immutable after construction, so sharing the
+		// pointers is safe; we only need an independent slice header.
+		out[user] = slices.Clone(recps)
+	}
+
+	return out
+}
+
+func cloneSignPubs(in map[string]ed25519.PublicKey) map[string]ed25519.PublicKey {
+	out := make(map[string]ed25519.PublicKey, len(in))
+	for user, key := range in {
+		// ed25519.PublicKey is a []byte; copy it so a later in-place change
+		// cannot bleed into the snapshot.
+		out[user] = slices.Clone(key)
+	}
+
+	return out
+}
+
+func (mk *MemoryKeyring) Clone() Keyring {
+	return &MemoryKeyring{
+		recipients: cloneRecipientsMap(mk.recipients),
+		signPubs:   cloneSignPubs(mk.signPubs),
+	}
+}
+
+func (mk *MemoryKeyring) Restore(src Keyring) {
+	other, ok := src.(*MemoryKeyring)
+	if !ok {
+		panic(fmt.Sprintf("keyring restore: incompatible snapshot type %T", src))
+	}
+
+	// Deep copy so src stays independent and reusable after the restore.
+	mk.recipients = cloneRecipientsMap(other.recipients)
+	mk.signPubs = cloneSignPubs(other.signPubs)
 }
 
 func (mk *MemoryKeyring) RenameUser(oldUser, newUser string) {

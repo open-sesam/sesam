@@ -784,10 +784,41 @@ func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, erro
 	return &state, nil
 }
 
+func cloneVerifiedUsers(users []VerifiedUser) []VerifiedUser {
+	out := make([]VerifiedUser, len(users))
+	for i, u := range users {
+		u.Groups = slices.Clone(u.Groups)
+		u.Recps = slices.Clone(u.Recps)
+		out[i] = u
+	}
+
+	return out
+}
+
+func cloneVerifiedSecrets(secrets []VerifiedSecret) []VerifiedSecret {
+	out := make([]VerifiedSecret, len(secrets))
+	for i, s := range secrets {
+		s.AccessGroups = slices.Clone(s.AccessGroups)
+		out[i] = s
+	}
+
+	return out
+}
+
 func verify(state *VerifiedState) error {
 	log := state.auditLog
 	kr := state.keyring
+
+	// Replay must be all-or-nothing: a verification error part-way through has
+	// to leave the caller's keyring and state exactly as they were. The state is
+	// a value reached only through *VerifiedState, so we replay into a deep copy
+	// and commit it at the end. The keyring is shared by pointer with the repo
+	// and managers, so we cannot swap it - snapshot its contents and restore them
+	// in place on error instead.
+	snap := kr.Clone()
 	newState := *state
+	newState.Users = cloneVerifiedUsers(state.Users)
+	newState.Secrets = cloneVerifiedSecrets(state.Secrets)
 
 	var previousEntry *AuditEntrySigned
 	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
@@ -880,6 +911,10 @@ func verify(state *VerifiedState) error {
 		return nil
 	})
 	if err != nil {
+		// Roll the keyring back to its pre-replay contents (in place, so the
+		// repo's and managers' pointers stay valid). newState is simply
+		// discarded, leaving the caller's state untouched.
+		kr.Restore(snap)
 		return err
 	}
 
