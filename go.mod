@@ -6,6 +6,7 @@ require (
 	filippo.io/age v1.3.1
 	github.com/chzyer/readline v1.5.1
 	github.com/go-git/go-git/v5 v5.19.1
+	github.com/goccy/go-yaml v1.19.2
 	github.com/gofrs/flock v0.12.1
 	github.com/google/renameio v1.0.1
 	github.com/google/uuid v1.6.0
@@ -15,6 +16,7 @@ require (
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/neilotoole/jsoncolor v0.9.1
 	github.com/rogpeppe/go-internal v1.14.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli-docs/v3 v3.1.0
 	github.com/urfave/cli/v3 v3.8.0

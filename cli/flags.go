@@ -67,6 +67,7 @@ var flagsGeneral = []cli.Flag{
 		Usage:   "Path to the age identity (can be given several times)",
 		Sources: cli.EnvVars("SESAM_ID", "SESAM_IDENTITY"),
 	},
+	// TODO: main config must live in sesam-dir/ so we can remove this config flag
 	&cli.StringFlag{
 		Name:    "sesam-dir",
 		Aliases: []string{"r", "repo"},
@@ -144,6 +145,10 @@ var flagsReveal = []cli.Flag{}
 var flagsAdd = []cli.Flag{
 	groupFlag(false, "Group assignment for the secret (repeatable) - 'admin' is implicit"),
 	flagNoSeal,
+	&cli.BoolFlag{
+		Name:  "nested",
+		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file",
+	},
 }
 
 var flagsMove = []cli.Flag{}

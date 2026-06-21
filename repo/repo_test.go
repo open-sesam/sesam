@@ -74,7 +74,7 @@ func TestLoad_Negative(t *testing.T) {
 			name:    "no .sesam dir",
 			dirFn:   freshGitRepo,
 			idPaths: []string{admin.Path},
-			wantErr: "sesam directory missing",
+			wantErr: "failed to load config tree", // NOTE: config fails before aquire lock now
 		},
 		{
 			name: "no identity supplied",
@@ -132,7 +132,7 @@ func TestRepo_ListUsersAndSecrets_AfterInit(t *testing.T) {
 	require.Equal(t, "admin", users[0].Name)
 	require.Contains(t, users[0].Groups, "admin")
 
-	secrets, err := r.ListSecrets()
+	secrets, err := r.ListSecrets(nil)
 	require.NoError(t, err)
 	require.Len(t, secrets, 1, "init seeds the README.md secret")
 	require.Equal(t, "README.md", secrets[0].RevealedPath)
@@ -179,12 +179,12 @@ func TestRepo_SecretAdd_RejectsBadInputs(t *testing.T) {
 			wantErr: "missing secret path",
 		},
 		// Note: empty groups is intentionally NOT a bad input - it means
-		// "admin only" (see TestAddSecretEmptyGroups).
+		// "admin only" (see TestSecretAddEmptyGroups).
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := r.SecretAdd(tc.paths, tc.groups)
+			err := r.SecretAdd(tc.paths, tc.groups, false)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantErr)
 		})
@@ -199,9 +199,9 @@ func TestRepo_SecretAddRemove_RoundTrip(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(plaintext), 0o700))
 	require.NoError(t, os.WriteFile(plaintext, []byte("hunter2\n"), 0o600))
 
-	require.NoError(t, r.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}))
+	require.NoError(t, r.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}, false))
 
-	secrets, err := r.ListSecrets()
+	secrets, err := r.ListSecrets(nil)
 	require.NoError(t, err)
 	require.Len(t, secrets, 2, "README.md (from init) + the newly added secret")
 
@@ -212,7 +212,7 @@ func TestRepo_SecretAddRemove_RoundTrip(t *testing.T) {
 	require.Contains(t, paths, "secrets/api.token")
 
 	require.NoError(t, r.SecretRemove([]string{"secrets/api.token"}))
-	secrets, err = r.ListSecrets()
+	secrets, err = r.ListSecrets(nil)
 	require.NoError(t, err)
 	require.Len(t, secrets, 1, "only README.md remains")
 	require.Equal(t, "README.md", secrets[0].RevealedPath)
@@ -505,7 +505,7 @@ func TestRepoStatusStates(t *testing.T) {
 	add := func(rel, content string) {
 		t.Helper()
 		writeRepoFile(t, dir, rel, content)
-		require.NoError(t, r.SecretAdd([]string{rel}, []string{"admin"}))
+		require.NoError(t, r.SecretAdd([]string{rel}, []string{"admin"}, false))
 	}
 
 	add("secrets/same", "identical")
@@ -556,7 +556,7 @@ func TestRepoStatusUserHasNoAccess(t *testing.T) {
 
 	// A secret in a group bob will never belong to.
 	writeRepoFile(t, dir, "secrets/ops", "ops-only")
-	require.NoError(t, r.SecretAdd([]string{"secrets/ops"}, []string{"ops"}))
+	require.NoError(t, r.SecretAdd([]string{"secrets/ops"}, []string{"ops"}, false))
 
 	// Tell bob, but only into "dev" - he has no access to the "ops" secret.
 	require.NoError(t, r.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"dev"}))
@@ -575,7 +575,7 @@ func TestRepoStatusDiffDir(t *testing.T) {
 	dir, r := bootstrapRepo(t, admin)
 
 	writeRepoFile(t, dir, "secrets/diff", "v1-sealed")
-	require.NoError(t, r.SecretAdd([]string{"secrets/diff"}, []string{"admin"}))
+	require.NoError(t, r.SecretAdd([]string{"secrets/diff"}, []string{"admin"}, false))
 	require.NoError(t, r.SealAll())
 	require.NoError(t, r.Close())
 

@@ -58,18 +58,18 @@ func TestBuildUserManagerUnknownSigner(t *testing.T) {
 	require.Contains(t, err.Error(), "does not exist")
 }
 
-func TestTellUserSuccess(t *testing.T) {
+func TestUserTellSuccess(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
 
-	err := um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"})
+	err := um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"})
 	require.NoError(t, err)
 
 	_, exists := um.state.UserExists("bob")
 	require.True(t, exists)
 }
 
-func TestTellUserNonAdmin(t *testing.T) {
+func TestUserTellNonAdmin(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
 	bob := newTestUser(t, "bob")
@@ -96,42 +96,42 @@ func TestTellUserNonAdmin(t *testing.T) {
 	require.NoError(t, err)
 
 	charlie := newTestUser(t, "charlie")
-	err = um.TellUser(context.Background(), "charlie", []string{charlie.Recipient.String()}, []string{"dev"})
+	err = um.UserTell(context.Background(), "charlie", []string{charlie.Recipient.String()}, []string{"dev"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "admin")
 }
 
-func TestTellUserDuplicate(t *testing.T) {
+func TestUserTellDuplicate(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
 
-	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
 
-	err := um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"})
+	err := um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"})
 	require.Error(t, err, "re-adding an existing user should fail")
 }
 
-func TestTellUserInvalidName(t *testing.T) {
+func TestUserTellInvalidName(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 
-	err := um.TellUser(context.Background(), "Invalid User!", []string{}, []string{"dev"})
+	err := um.UserTell(context.Background(), "Invalid User!", []string{}, []string{"dev"})
 	require.Error(t, err)
 }
 
-func TestKillUsersSuccess(t *testing.T) {
+func TestUserKillSuccess(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
 
-	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
 	_, exists := um.state.UserExists("bob")
 	require.True(t, exists)
 
-	require.NoError(t, um.KillUsers("bob"))
+	require.NoError(t, um.UserKill("bob"))
 	_, exists = um.state.UserExists("bob")
 	require.False(t, exists)
 }
 
-func TestKillUsersNonAdmin(t *testing.T) {
+func TestUserKillNonAdmin(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
 	bob := newTestUser(t, "bob")
@@ -157,7 +157,7 @@ func TestKillUsersNonAdmin(t *testing.T) {
 	um, err := BuildUserManager(sesamDir, bob.Signer, al, state, secMgr)
 	require.NoError(t, err)
 
-	err = um.KillUsers("admin")
+	err = um.UserKill("admin")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "admin")
 }
@@ -186,14 +186,14 @@ func TestTellThenSealGivesNewRecipientAccess(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	writeSecret(t, sesamDir, "secrets/api", "shared")
-	require.NoError(t, secMgr.AddSecret("secrets/api", []string{"dev", "admin"}))
+	require.NoError(t, secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}))
 	require.NoError(t, secMgr.SealAll()) // sealed for admin only; "dev" is empty
 
 	um, err := BuildUserManager(sesamDir, admin.Signer, al, state, secMgr)
 	require.NoError(t, err)
 
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(
+	require.NoError(t, um.UserTell(
 		context.Background(),
 		"bob",
 		[]string{bob.Recipient.String()},
@@ -254,7 +254,7 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 	require.NoError(t, err)
 
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(
+	require.NoError(t, um.UserTell(
 		context.Background(),
 		"bob",
 		[]string{bob.Recipient.String()},
@@ -262,7 +262,7 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 	))
 
 	writeSecret(t, sesamDir, "secrets/api", "shared")
-	require.NoError(t, secMgr.AddSecret("secrets/api", []string{"dev", "admin"}))
+	require.NoError(t, secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}))
 	require.NoError(t, secMgr.SealAll())
 
 	// Sanity: bob can decrypt before kill.
@@ -276,7 +276,7 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 	require.True(t, ok, "bob should be a recipient before kill")
 
 	// Kill does not auto-seal; an explicit seal must drop bob from the recipients.
-	require.NoError(t, um.KillUsers("bob"))
+	require.NoError(t, um.UserKill("bob"))
 	require.NoError(t, secMgr.SealAll())
 
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
@@ -320,12 +320,12 @@ func nonAdminUserManager(t *testing.T) *UserManager {
 	return um
 }
 
-func TestRenameUserSuccess(t *testing.T) {
+func TestUserRenameSuccess(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
 
-	require.NoError(t, um.RenameUser("bob", "robert"))
+	require.NoError(t, um.UserRename("bob", "robert"))
 
 	_, exists := um.state.UserExists("bob")
 	require.False(t, exists, "old name must be gone from state")
@@ -339,36 +339,36 @@ func TestRenameUserSuccess(t *testing.T) {
 	require.Empty(t, um.secMgr.Keyring.Recipients([]string{"bob"}))
 }
 
-func TestRenameUserNonAdmin(t *testing.T) {
+func TestUserRenameNonAdmin(t *testing.T) {
 	um := nonAdminUserManager(t)
 
-	err := um.RenameUser("admin", "root")
+	err := um.UserRename("admin", "root")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "admin")
 }
 
-func TestRenameUserNotFound(t *testing.T) {
+func TestUserRenameNotFound(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 
-	err := um.RenameUser("ghost", "phantom")
+	err := um.UserRename("ghost", "phantom")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not exist")
 }
 
-func TestRenameUserToExistingName(t *testing.T) {
+func TestUserRenameToExistingName(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
 
-	err := um.RenameUser("bob", "admin")
+	err := um.UserRename("bob", "admin")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "already exists")
 }
 
-func TestRenameUserInvalidNewName(t *testing.T) {
+func TestUserRenameInvalidNewName(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 
-	err := um.RenameUser("admin", "Invalid Name!")
+	err := um.UserRename("admin", "Invalid Name!")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid new user name")
 }
@@ -376,7 +376,7 @@ func TestRenameUserInvalidNewName(t *testing.T) {
 func TestUserChangeGroupsSuccess(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
 
 	require.NoError(t, um.UserChangeGroups("bob", []string{"dev", "ops"}))
 
@@ -437,7 +437,7 @@ func TestShowUserNotFound(t *testing.T) {
 func TestUserAddRecipientSuccess(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(
+	require.NoError(t, um.UserTell(
 		context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"},
 	))
 
@@ -481,7 +481,7 @@ func TestUserRmRecipientSuccess(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
 	bobDevice := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(
+	require.NoError(t, um.UserTell(
 		context.Background(), "bob",
 		[]string{bob.Recipient.String(), bobDevice.Recipient.String()},
 		[]string{"dev"},
@@ -509,7 +509,7 @@ func TestUserRmRecipientSuccess(t *testing.T) {
 func TestUserRmRecipientLastRecipient(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(
+	require.NoError(t, um.UserTell(
 		context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"},
 	))
 
@@ -535,7 +535,7 @@ func TestUserRmRecipientNonAdmin(t *testing.T) {
 func TestUserRegenerateSignKeySuccess(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(
+	require.NoError(t, um.UserTell(
 		context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"},
 	))
 
@@ -574,7 +574,7 @@ func TestUserRegenerateSignKeySuccess(t *testing.T) {
 func TestUserRegenerateSignKeyReloads(t *testing.T) {
 	um, admin := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(
+	require.NoError(t, um.UserTell(
 		context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"},
 	))
 	require.NoError(t, um.UserRegenerateSignKey("bob"))

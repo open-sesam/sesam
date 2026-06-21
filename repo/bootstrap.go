@@ -121,24 +121,7 @@ func ensureSesamDirs(sesamDir string) error {
 		}
 	}
 
-	if err := ensureTmpKeepFile(sesamDir); err != nil {
-		return err
-	}
-
 	slog.Debug("initialized sesam directory", slog.String("path", filepath.Join(sesamDir, sesamSuffix)))
-	return nil
-}
-
-func ensureTmpKeepFile(sesamDir string) error {
-	keepPath := filepath.Join(sesamDir, sesamSuffix, "tmp", ".gitkeep")
-	if _, err := os.Stat(keepPath); os.IsNotExist(err) {
-		if err := renameio.WriteFile(keepPath, []byte("\n"), 0o600); err != nil {
-			return fmt.Errorf("failed to create %s: %w", keepPath, err)
-		}
-	} else if err != nil {
-		return fmt.Errorf("failed to access %s: %w", keepPath, err)
-	}
-
 	return nil
 }
 

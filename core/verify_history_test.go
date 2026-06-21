@@ -76,7 +76,7 @@ func (f *historyFixture) tellUser(t *testing.T, newUser *testUser, groups []stri
 	um, err := BuildUserManager(f.SesamDir, f.Admin.Signer, f.AuditLog, state, secMgr)
 	require.NoError(t, err)
 
-	require.NoError(t, um.TellUser(
+	require.NoError(t, um.UserTell(
 		context.Background(),
 		newUser.Name,
 		[]string{newUser.Recipient.String()},

@@ -43,6 +43,7 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 		if err != nil {
 			return err
 		}
+
 		defer func() {
 			closeErr := r.Close()
 			if closeErr == nil {
