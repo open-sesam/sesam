@@ -62,10 +62,10 @@ func newTestUser(t testing.TB, name string) *testUser {
 
 func (tu *testUser) DetailUserTell(groups []string) DetailUserTell {
 	return DetailUserTell{
-		User:        tu.Name,
-		Groups:      groups,
-		PubKeys:     []UserPubKey{{Key: tu.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{tu.SignPubKey},
+		User:       tu.Name,
+		Groups:     groups,
+		PubKeys:    []UserPubKey{{Key: tu.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: tu.SignPubKey,
 	}
 }
 
@@ -92,7 +92,7 @@ func testKeyring(t *testing.T, users ...*testUser) *MemoryKeyring {
 	t.Helper()
 	kr := EmptyKeyring()
 	for _, u := range users {
-		require.NoError(t, kr.AddSignPubKey(u.Name, u.Signer.PublicKey()))
+		require.NoError(t, kr.SetSignPubKey(u.Name, u.Signer.PublicKey()))
 		require.NoError(t, kr.AddRecipient(u.Name, u.Recipient))
 	}
 
