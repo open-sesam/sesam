@@ -1,0 +1,37 @@
+# Verify `sesam user add-recipient` adds a second recipient (device key) to a
+# user and re-wraps the audit key so the new key can decrypt the log.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Add bob as a dev with a single recipient.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+
+# Carol's key cannot decrypt the log yet - she is not a recipient of anyone.
+! exec sesam --identity $CAROL_KEY show .sesam/audit/log.jsonl
+
+# Add carol's key as a second recipient for bob (e.g. a new device).
+exec sesam user add-recipient --user bob --recipient $CAROL_PUBKEY
+
+# The audit log records the operation...
+exec sesam show .sesam/audit/log.jsonl
+stdout '"user.add_recipients"'
+stdout '"bob"'
+
+# ...and `sesam log` renders it with the add glyph and description.
+exec sesam log
+stdout 'add recipient of bob'
+
+# The newly added key can now decrypt the audit log (WriteAuditKey re-wrapped it).
+exec sesam --identity $CAROL_KEY show .sesam/audit/log.jsonl
+stdout '"user.add_recipients"'
+
+exec sesam verify
+
+# Adding a recipient to a non-existent user fails.
+! exec sesam user add-recipient --user ghost --recipient $CAROL_PUBKEY

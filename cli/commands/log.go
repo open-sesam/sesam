@@ -54,6 +54,15 @@ func groupsOrAdmin(groups []string) string {
 	return strings.Join(groups, ", ")
 }
 
+func shortPubKeys(pubs []core.UserPubKey, full bool) string {
+	ids := make([]string, 0, len(pubs))
+	for _, pub := range pubs {
+		ids = append(ids, shortID(pub.Key, full))
+	}
+
+	return strings.Join(ids, ", ")
+}
+
 // describeLogEntry maps an audit entry to a glyph (the action), a color (the
 // object) and a colored one-line description. Glyph encodes the action
 // (+ add, - remove, ~ change, → rename, ★ init, ✓ seal); color encodes the
@@ -115,6 +124,36 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 		return logLine{
 			"~", userColor,
 			"set groups of " + c(d.User, userColor) + " to " + c(groupsOrAdmin(d.NewGroups), groupColor),
+		}
+
+	case core.OpUserAddRecipients:
+		d, ok := e.RawDetail().(*core.DetailUserAddRecipients)
+		if !ok {
+			return unknown
+		}
+		return logLine{
+			"⊕", userColor,
+			"add " + pluralize("recipient", len(d.PubKeys)) + " of " + c(d.User, userColor) + " (" + c(shortPubKeys(d.PubKeys, full), groupColor) + ")",
+		}
+
+	case core.OpUserRmRecipients:
+		d, ok := e.RawDetail().(*core.DetailUserRmRecipients)
+		if !ok {
+			return unknown
+		}
+		return logLine{
+			"⊖", userColor,
+			"removed " + pluralize("recipient", len(d.PubKeys)) + " of " + c(d.User, userColor) + " (" + c(shortPubKeys(d.PubKeys, full), groupColor) + ")",
+		}
+
+	case core.OpUserRegenerateSignKey:
+		d, ok := e.RawDetail().(*core.DetailUserRegenerateSignKey)
+		if !ok {
+			return unknown
+		}
+		return logLine{
+			"~", userColor,
+			"regenerated signing key of " + c(d.User, userColor),
 		}
 
 	case core.OpSecretAdd:

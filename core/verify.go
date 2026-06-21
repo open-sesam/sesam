@@ -13,7 +13,7 @@ import (
 type VerifiedUser struct {
 	Name       string     `json:"name"`
 	Groups     []string   `json:"groups"`
-	SignPubKey []string   `json:"sign_pub_key"`
+	SignPubKey string     `json:"sign_pub_key"`
 	Recps      Recipients `json:"recipients"`
 }
 
@@ -176,6 +176,38 @@ func (s *VerifiedState) RequireAdmin(entry *AuditEntrySigned) (*VerifiedUser, er
 	return adminUser, nil
 }
 
+// requireUser returns the user `name` or an error naming the attempted
+// `action` and seq_id. `action` reads as a verb phrase, e.g. "rename" or
+// "remove recipients from".
+func (s *VerifiedState) requireUser(name, action string, entry *AuditEntrySigned) (*VerifiedUser, error) {
+	user, exists := s.UserExists(name)
+	if !exists {
+		return nil, fmt.Errorf("user %s to %s does not exist (seq_id=%d)", name, action, entry.SeqID)
+	}
+
+	return user, nil
+}
+
+// requireSecretAccess returns the secret at `path`, requiring both that it
+// exists and that the entry's author may act on it. `action` reads as a verb,
+// e.g. "remove" or "change access of". Used by the mutating secret operations;
+// secret.add checks non-existence instead and does not use this.
+func (s *VerifiedState) requireSecretAccess(path, action string, entry *AuditEntrySigned) (*VerifiedSecret, error) {
+	secret, exists := s.SecretExists(path)
+	if !exists {
+		return nil, fmt.Errorf("cannot %s non-existing secret %q (seq_id=%d)", action, path, entry.SeqID)
+	}
+
+	if !s.UserHasAccess(entry.ChangedBy, secret.AccessGroups) {
+		return nil, fmt.Errorf(
+			"user %s has no access to %q, cannot %s (seq_id=%d)",
+			entry.ChangedBy, path, action, entry.SeqID,
+		)
+	}
+
+	return secret, nil
+}
+
 // FeedEntry adds `entry` to audit log, then updates the state by verifying the entry.
 func (s *VerifiedState) FeedEntry(signer Signer, entry *AuditEntry) error {
 	if _, err := s.auditLog.AddEntry(signer, entry, func() error {
@@ -194,6 +226,35 @@ func groupsToMap(groups []string) map[string]bool {
 	}
 	groupMap["admin"] = true
 	return groupMap
+}
+
+// normalizeAccessGroups dedupes an access list and guarantees the implicit
+// "admin" group is present. This is the access-list counterpart to the implicit
+// admin membership baked into groupsToMap.
+func normalizeAccessGroups(groups []string) []string {
+	groups = deduplicate(groups)
+	if !slices.Contains(groups, "admin") {
+		groups = append(groups, "admin")
+	}
+	return groups
+}
+
+// resolveRecipients parses each UserPubKey into a Recipient, preserving its
+// Source. It only parses; callers decide whether to add or remove the keys
+// from the keyring.
+func resolveRecipients(pubKeys []UserPubKey, pluginUI *PluginUI) (Recipients, error) {
+	recps := make(Recipients, 0, len(pubKeys))
+	for _, pubKey := range pubKeys {
+		recp, err := ParseRecipient(pubKey.Key, pluginUI)
+		if err != nil {
+			return nil, fmt.Errorf("bad public key %v", pubKey)
+		}
+
+		recp.Source = pubKey.Source
+		recps = append(recps, recp)
+	}
+
+	return recps, nil
 }
 
 func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
@@ -251,24 +312,14 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s already exists", tell.User)
 	}
 
-	if len(tell.SignPubKeys) == 0 {
-		return fmt.Errorf("user %s needs at least one signing pub key", tell.User)
+	signPubKeyData, _, err := multicodeDecode(tell.SignPubKey)
+	if err != nil {
+		return fmt.Errorf("bad signing key %v", tell.SignPubKey)
 	}
 
-	if len(tell.SignPubKeys) > 10 {
-		return fmt.Errorf("user %s may not have more than 10 signing keys", tell.User)
-	}
-
-	for _, signPubKey := range tell.SignPubKeys {
-		signPubKeyData, _, err := multicodeDecode(signPubKey)
-		if err != nil {
-			return fmt.Errorf("bad signing key %v", signPubKey)
-		}
-
-		if err := kr.AddSignPubKey(tell.User, signPubKeyData); err != nil {
-			// will trigger on duplicate keys.
-			return err
-		}
+	if err := kr.SetSignPubKey(tell.User, signPubKeyData); err != nil {
+		// will trigger on duplicate keys.
+		return err
 	}
 
 	if len(tell.PubKeys) == 0 {
@@ -279,25 +330,21 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s may not have more than 10 public keys", tell.User)
 	}
 
-	var recps Recipients
-	for _, pubKey := range tell.PubKeys {
-		recp, err := ParseRecipient(pubKey.Key, state.pluginUI)
-		if err != nil {
-			return fmt.Errorf("bad public key %v", pubKey)
-		}
+	recps, err := resolveRecipients(tell.PubKeys, state.pluginUI)
+	if err != nil {
+		return err
+	}
 
-		recp.Source = pubKey.Source
+	for _, recp := range recps {
 		if err := kr.AddRecipient(tell.User, recp); err != nil {
 			// will trigger on duplicate keys.
 			return err
 		}
-
-		recps = append(recps, recp)
 	}
 
 	state.Users = append(state.Users, VerifiedUser{
 		Name:       tell.User,
-		SignPubKey: tell.SignPubKeys,
+		SignPubKey: tell.SignPubKey,
 		Recps:      recps,
 		Groups:     deduplicate(tell.Groups),
 	})
@@ -323,17 +370,41 @@ func verifyUserRename(log *AuditLog, state *VerifiedState, entry *AuditEntrySign
 		return fmt.Errorf("new user already exists: %s", renameDetails.NewName)
 	}
 
-	user, exists := state.UserExists(renameDetails.OldName)
-	if !exists {
-		return fmt.Errorf(
-			"user %s to rename does not exist; seq_id=%d",
-			renameDetails.OldName,
-			entry.SeqID,
-		)
+	user, err := state.requireUser(renameDetails.OldName, "rename", entry)
+	if err != nil {
+		return err
 	}
 
 	kr.RenameUser(renameDetails.OldName, renameDetails.NewName)
 	user.Name = renameDetails.NewName
+	return nil
+}
+
+func verifyUserRegenerateSignKey(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
+	if _, err := state.RequireAdmin(entry); err != nil {
+		return err
+	}
+
+	dursk, err := parseDetail[DetailUserRegenerateSignKey](entry)
+	if err != nil {
+		return fmt.Errorf("parse detail: %w", err)
+	}
+
+	user, err := state.requireUser(dursk.User, "regen sign key", entry)
+	if err != nil {
+		return err
+	}
+
+	signPubKeyData, _, err := multicodeDecode(dursk.NewSignPubKey)
+	if err != nil {
+		return fmt.Errorf("bad signing key %v", dursk.NewSignPubKey)
+	}
+
+	if err := kr.SetSignPubKey(dursk.User, signPubKeyData); err != nil {
+		return err
+	}
+
+	user.SignPubKey = dursk.NewSignPubKey
 	return nil
 }
 
@@ -347,13 +418,9 @@ func verifyUserChangeGroups(log *AuditLog, state *VerifiedState, entry *AuditEnt
 		return fmt.Errorf("parse user change groups detail: %w", err)
 	}
 
-	user, exists := state.UserExists(ucg.User)
-	if !exists {
-		return fmt.Errorf(
-			"user %s to change groups does not exist; seq_id=%d",
-			ucg.User,
-			entry.SeqID,
-		)
+	user, err := state.requireUser(ucg.User, "change groups", entry)
+	if err != nil {
+		return err
 	}
 
 	adminUsersFound, adminName := state.AdminUserCount()
@@ -383,13 +450,9 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 		return fmt.Errorf("parse user.kill detail: %w", err)
 	}
 
-	user, exists := state.UserExists(killDetails.User)
-	if !exists {
-		return fmt.Errorf(
-			"user %s to remove does not exist; seq_id=%d",
-			killDetails.User,
-			entry.SeqID,
-		)
+	user, err := state.requireUser(killDetails.User, "remove", entry)
+	if err != nil {
+		return err
 	}
 
 	// only one admin there:
@@ -410,6 +473,71 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 	return nil
 }
 
+func verifyUserAddRecipients(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
+	if _, err := state.RequireAdmin(entry); err != nil {
+		return err
+	}
+
+	duar, err := parseDetail[DetailUserAddRecipients](entry)
+	if err != nil {
+		return fmt.Errorf("parse user.add_recipients detail: %w", err)
+	}
+
+	user, err := state.requireUser(duar.User, "add recipients to", entry)
+	if err != nil {
+		return err
+	}
+
+	recps, err := resolveRecipients(duar.PubKeys, state.pluginUI)
+	if err != nil {
+		return err
+	}
+
+	for _, recp := range recps {
+		if err := kr.AddRecipient(duar.User, recp); err != nil {
+			// will trigger on duplicate keys.
+			return err
+		}
+	}
+
+	user.Recps = append(user.Recps, recps...)
+	return nil
+}
+
+func verifyUserRmRecipients(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr Keyring) error {
+	if _, err := state.RequireAdmin(entry); err != nil {
+		return err
+	}
+
+	durr, err := parseDetail[DetailUserRmRecipients](entry)
+	if err != nil {
+		return fmt.Errorf("parse user.rm_recipients detail: %w", err)
+	}
+
+	user, err := state.requireUser(durr.User, "remove recipients from", entry)
+	if err != nil {
+		return err
+	}
+
+	toDelete, err := resolveRecipients(durr.PubKeys, state.pluginUI)
+	if err != nil {
+		return err
+	}
+
+	for _, recp := range toDelete {
+		if err := kr.RemoveRecipient(user.Name, recp); err != nil {
+			// kr.RemoveRecipient already checks that at least one recipient is left
+			return err
+		}
+
+		user.Recps = slices.DeleteFunc(user.Recps, func(r *Recipient) bool {
+			return recp.Equal(r)
+		})
+	}
+
+	return nil
+}
+
 func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
 	scd, err := parseDetail[DetailSecretAdd](entry)
 	if err != nil {
@@ -421,10 +549,7 @@ func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigne
 		return err
 	}
 
-	scd.AccessGroups = deduplicate(scd.AccessGroups)
-	if !slices.Contains(scd.AccessGroups, "admin") {
-		scd.AccessGroups = append(scd.AccessGroups, "admin")
-	}
+	scd.AccessGroups = normalizeAccessGroups(scd.AccessGroups)
 
 	_, exists := state.SecretExists(scd.RevealedPath)
 	if exists {
@@ -456,26 +581,12 @@ func verifySecretChangeAccess(log *AuditLog, state *VerifiedState, entry *AuditE
 		return fmt.Errorf("parse detail: %w", err)
 	}
 
-	existingSecret, exists := state.SecretExists(sca.RevealedPath)
-	if !exists {
-		return fmt.Errorf("trying to change access of not existing secret: %s", sca.RevealedPath)
+	existingSecret, err := state.requireSecretAccess(sca.RevealedPath, "change access of", entry)
+	if err != nil {
+		return err
 	}
 
-	hasAccess := state.UserHasAccess(entry.ChangedBy, existingSecret.AccessGroups)
-	if !hasAccess {
-		return fmt.Errorf(
-			"would change access to secret that %s has no access to: %s",
-			entry.ChangedBy,
-			sca.RevealedPath,
-		)
-	}
-
-	sca.AccessGroups = deduplicate(sca.AccessGroups)
-	if !slices.Contains(sca.AccessGroups, "admin") {
-		sca.AccessGroups = append(sca.AccessGroups, "admin")
-	}
-
-	existingSecret.AccessGroups = sca.AccessGroups
+	existingSecret.AccessGroups = normalizeAccessGroups(sca.AccessGroups)
 	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
@@ -494,18 +605,9 @@ func verifySecretMove(log *AuditLog, state *VerifiedState, entry *AuditEntrySign
 		return fmt.Errorf("cannot move secret over existing secret: %q", scr.NewRevealedPath)
 	}
 
-	existingSecret, exists := state.SecretExists(scr.OldRevealedPath)
-	if !exists {
-		return fmt.Errorf("trying to rename not existing secret: %s", scr.OldRevealedPath)
-	}
-
-	hasAccess := state.UserHasAccess(entry.ChangedBy, existingSecret.AccessGroups)
-	if !hasAccess {
-		return fmt.Errorf(
-			"would rename secret that %s has no access to: %s",
-			entry.ChangedBy,
-			scr.OldRevealedPath,
-		)
+	existingSecret, err := state.requireSecretAccess(scr.OldRevealedPath, "move", entry)
+	if err != nil {
+		return err
 	}
 
 	// change in state to new name:
@@ -525,21 +627,8 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 		return err
 	}
 
-	s, exists := state.SecretExists(srd.RevealedPath)
-	if !exists {
-		return fmt.Errorf(
-			"secret %s does not exist, cannot remove (seq_id=%d)",
-			srd.RevealedPath,
-			entry.SeqID,
-		)
-	}
-
-	if !state.UserHasAccess(entry.ChangedBy, s.AccessGroups) {
-		return fmt.Errorf(
-			"user %s has no access, cannot remove (seq_id=%d)",
-			entry.ChangedBy,
-			entry.SeqID,
-		)
+	if _, err := state.requireSecretAccess(srd.RevealedPath, "remove", entry); err != nil {
+		return err
 	}
 
 	state.Secrets = slices.DeleteFunc(state.Secrets, func(s VerifiedSecret) bool {
@@ -695,10 +784,41 @@ func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, erro
 	return &state, nil
 }
 
+func cloneVerifiedUsers(users []VerifiedUser) []VerifiedUser {
+	out := make([]VerifiedUser, len(users))
+	for i, u := range users {
+		u.Groups = slices.Clone(u.Groups)
+		u.Recps = slices.Clone(u.Recps)
+		out[i] = u
+	}
+
+	return out
+}
+
+func cloneVerifiedSecrets(secrets []VerifiedSecret) []VerifiedSecret {
+	out := make([]VerifiedSecret, len(secrets))
+	for i, s := range secrets {
+		s.AccessGroups = slices.Clone(s.AccessGroups)
+		out[i] = s
+	}
+
+	return out
+}
+
 func verify(state *VerifiedState) error {
 	log := state.auditLog
 	kr := state.keyring
+
+	// Replay must be all-or-nothing: a verification error part-way through has
+	// to leave the caller's keyring and state exactly as they were. The state is
+	// a value reached only through *VerifiedState, so we replay into a deep copy
+	// and commit it at the end. The keyring is shared by pointer with the repo
+	// and managers, so we cannot swap it - snapshot its contents and restore them
+	// in place on error instead.
+	snap := kr.Clone()
 	newState := *state
+	newState.Users = cloneVerifiedUsers(state.Users)
+	newState.Secrets = cloneVerifiedSecrets(state.Secrets)
 
 	var previousEntry *AuditEntrySigned
 	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
@@ -716,8 +836,11 @@ func verify(state *VerifiedState) error {
 		case OpUserTell:
 			err = verifyUserTell(log, &newState, entry, kr)
 		case OpUserChangeGroups:
-			// NOTE:
 			err = verifyUserChangeGroups(log, &newState, entry, kr)
+		case OpUserAddRecipients:
+			err = verifyUserAddRecipients(log, &newState, entry, kr)
+		case OpUserRmRecipients:
+			err = verifyUserRmRecipients(log, &newState, entry, kr)
 		case OpSeal:
 			err = verifySeal(log, &newState, entry)
 		case OpSecretAdd:
@@ -728,8 +851,10 @@ func verify(state *VerifiedState) error {
 			err = verifySecretChangeAccess(log, &newState, entry)
 		case OpSecretMove:
 			err = verifySecretMove(log, &newState, entry)
-		case OpUserKill, OpUserRename:
-			// done later
+		case OpUserKill, OpUserRename, OpUserRegenerateSignKey:
+			// done later (after the signature check) - these mutate signing
+			// keys or the signer's own name, which the signature check needs
+			// to see in its pre-change form.
 		default:
 			err = fmt.Errorf("unexpected core.Operation: %#v", entry.Operation)
 		}
@@ -756,6 +881,8 @@ func verify(state *VerifiedState) error {
 			err = verifyUserKill(log, &newState, entry, kr)
 		case OpUserRename:
 			err = verifyUserRename(log, &newState, entry, kr)
+		case OpUserRegenerateSignKey:
+			err = verifyUserRegenerateSignKey(log, &newState, entry, kr)
 		}
 
 		if err != nil {
@@ -784,6 +911,10 @@ func verify(state *VerifiedState) error {
 		return nil
 	})
 	if err != nil {
+		// Roll the keyring back to its pre-replay contents (in place, so the
+		// repo's and managers' pointers stay valid). newState is simply
+		// discarded, leaving the caller's state untouched.
+		kr.Restore(snap)
 		return err
 	}
 

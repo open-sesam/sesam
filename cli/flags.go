@@ -188,6 +188,10 @@ var flagsUserRemoveRecipient = []cli.Flag{
 	flagNoSeal,
 }
 
+var flagsUserRegenerateSignKey = []cli.Flag{
+	userFlag(true, "Regenerate the signing key for a user"),
+}
+
 var flagsShow = []cli.Flag{}
 
 var flagsLog = []cli.Flag{

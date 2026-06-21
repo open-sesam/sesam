@@ -72,6 +72,11 @@ func TestWorkflows(t *testing.T) {
 			if _, _, err := writeIdentity("BOB"); err != nil {
 				return err
 			}
+			// A second non-admin identity, used as an extra recipient/device
+			// key in the add/remove-recipient and regen workflows.
+			if _, err := writeIdentity("CAROL"); err != nil {
+				return err
+			}
 
 			adminKey, err := os.ReadFile(adminKeyPath)
 			if err != nil {

@@ -1,0 +1,40 @@
+# Verify `sesam user regen-sign-key` rotates a user's signing key: the new key
+# is written to disk, recorded in the audit log, and is usable end-to-end (the
+# user can still sign operations with it).
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Add bob as an admin so he can sign admin operations himself.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group admin
+exists .sesam/signkeys/bob.age
+
+# Regenerate bob's signing key.
+exec sesam user regen-sign-key --user bob
+
+# The audit log records the operation...
+exec sesam show .sesam/audit/log.jsonl
+stdout '"user.regenerate_sign_key"'
+stdout '"bob"'
+
+# ...and `sesam log` renders it.
+exec sesam log
+stdout 'regenerated signing key of bob'
+
+exec sesam verify
+
+# End-to-end: bob signs a new operation with his regenerated key. This only
+# succeeds if the on-disk signing key matches the pubkey recorded by the regen
+# entry - it would fail on any encode/decode or key mismatch.
+exec sesam --identity $BOB_KEY tell --user carol --recipient $CAROL_PUBKEY --group dev
+exec sesam show .sesam/audit/log.jsonl
+stdout '"carol"'
+exec sesam verify
+
+# Regenerating the key of a non-existent user fails.
+! exec sesam user regen-sign-key --user ghost
