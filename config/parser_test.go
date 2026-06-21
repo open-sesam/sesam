@@ -8,31 +8,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSecretAdd_RelativeConfigPathSameDir reproduces the reported failure: a
-// config loaded via a relative path, with a secret given relatively in the same
-// directory, used to mishandle the path. Load resolves the config path to
-// absolute, so SecretAdd (which also resolves to absolute) records the secret
-// with a clean relative Path regardless of how the config was loaded.
+// loadConfig opens a root on the config's directory and loads it relative to
+// that root, mirroring how the repo wires config in production.
+func loadConfig(t *testing.T, mainPath string) (*Config, error) {
+	t.Helper()
+	root, err := os.OpenRoot(filepath.Dir(mainPath))
+	if err != nil {
+		return nil, err
+	}
+	t.Cleanup(func() { _ = root.Close() })
+	return Load(root, filepath.Base(mainPath))
+}
+
+// TestSecretAdd_RelativeConfigPathSameDir adds a secret given relative to the
+// config's root and checks the recorded Path stays clean and relative.
 func TestSecretAdd_RelativeConfigPathSameDir(t *testing.T) {
 	dir := t.TempDir()
-	t.Chdir(dir)
 
-	require.NoError(t, os.WriteFile("sesam.yml",
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sesam.yml"),
 		[]byte("secrets:\n  - path: existing.txt\n    access:\n      - group1\n"), 0o644))
-	require.NoError(t, os.WriteFile("somefile.txt", []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "somefile.txt"), []byte("x"), 0o644))
 
-	// Loaded with a relative path, and the secret given relatively in the same
-	// directory as the config — the exact failure case.
-	cr, err := Load("sesam.yml")
+	cr, err := loadConfig(t, filepath.Join(dir, "sesam.yml"))
 	require.NoError(t, err)
 
 	require.NoError(t, cr.SecretAdd("somefile.txt", false, []string{"group1"}))
 	require.NoError(t, cr.Save())
-	require.Equal(t, []string{"existing.txt", "somefile.txt"}, resolvedPaths(t, "sesam.yml"))
+	require.Equal(t, []string{"existing.txt", "somefile.txt"}, resolvedPaths(t, filepath.Join(dir, "sesam.yml")))
 }
 
 func Test_readYamlFile(t *testing.T) {
-	cr, err := Load("../test/files/test_read_yaml_file.yaml")
+	cr, err := loadConfig(t, "../test/files/test_read_yaml_file.yaml")
 	require.NoError(t, err)
 
 	users, err := cr.Users()
@@ -50,7 +56,7 @@ func Test_readYamlFile(t *testing.T) {
 // top-level secrets: key (which goccy parses as a single *ast.MappingValueNode
 // rather than an *ast.MappingNode) resolves and merges into the main file.
 func Test_resolveIncludeSecretsOnly(t *testing.T) {
-	cr, err := Load("../test/files/main_with_include.yaml")
+	cr, err := loadConfig(t, "../test/files/main_with_include.yaml")
 	require.NoError(t, err)
 
 	secrets, err := cr.Secrets()
@@ -73,7 +79,7 @@ func TestLoad_RejectsSelfInclude(t *testing.T) {
 	main := filepath.Join(dir, "sesam.yml")
 	require.NoError(t, os.WriteFile(main, []byte("secrets:\n  - include: sesam.yml\n"), 0o644))
 
-	_, err := Load(main)
+	_, err := loadConfig(t, main)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "include loop")
 }
@@ -86,7 +92,7 @@ func TestLoad_RejectsIncludeCycle(t *testing.T) {
 	require.NoError(t, os.WriteFile(main, []byte("secrets:\n  - include: a.yml\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.yml"), []byte("secrets:\n  - include: sesam.yml\n"), 0o644))
 
-	_, err := Load(main)
+	_, err := loadConfig(t, main)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "include loop")
 }

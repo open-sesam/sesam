@@ -10,16 +10,21 @@ import (
 	"strings"
 
 	"filippo.io/age"
-	"github.com/google/renameio"
+	"github.com/google/renameio/v2"
 	"golang.org/x/crypto/sha3"
 )
 
 // SecretManager is the high level API to manage secrets,
 // i.e. seal & reveal them and also add/remove/change secrets.
 type SecretManager struct {
-	// SesamDir is the path to sesam repository.
-	// It is the dir the .sesam directory is in.
+	// SesamDir is the absolute path to the sesam repository (the dir the
+	// .sesam directory is in). It is kept only for operations that cannot go
+	// through root: the renameat2 directory swap and handing paths to git.
 	SesamDir string
+
+	// root confines all of sesam's own file I/O to the repository. Every
+	// path passed to it is relative to SesamDir.
+	root *os.Root
 
 	// Identities are the private keys the current user of sesam supplies.
 	Identities Identities
@@ -37,9 +42,12 @@ type SecretManager struct {
 	State *VerifiedState
 }
 
-// BuildSecretManager uses the passed facilities to build a new SecretManager
+// BuildSecretManager uses the passed facilities to build a new SecretManager.
+// root confines all file I/O to the repository; sesamDir is its absolute path,
+// kept for the directory swap and git interop.
 func BuildSecretManager(
 	sesamDir string,
+	root *os.Root,
 	identities Identities,
 	signer Signer,
 	keyring Keyring,
@@ -48,6 +56,7 @@ func BuildSecretManager(
 ) (*SecretManager, error) {
 	mgr := &SecretManager{
 		SesamDir:   sesamDir,
+		root:       root,
 		Identities: identities,
 		Signer:     signer,
 		Keyring:    keyring,
@@ -57,8 +66,8 @@ func BuildSecretManager(
 
 	// Clear tmp dir before continuing:
 	tmpDir := mgr.tmpDir()
-	_ = os.RemoveAll(tmpDir)
-	_ = os.MkdirAll(tmpDir, 0o700)
+	_ = root.RemoveAll(tmpDir)
+	_ = root.MkdirAll(tmpDir, 0o700)
 
 	return mgr, nil
 }
@@ -71,26 +80,32 @@ func (sm *SecretManager) recipientsFor(revealedPath string) Recipients {
 	return sm.Keyring.Recipients(sm.State.UsersForSecret(revealedPath))
 }
 
+// The path helpers return repo-relative paths (relative to SesamDir). Callers
+// needing an absolute path (the directory swap, the external git-diff tree)
+// join them with SesamDir explicitly.
+
 func (sm *SecretManager) cryptPath(path string) string {
 	return filepath.Join(sm.objectsDir(), path+".sesam")
 }
 
 func (sm *SecretManager) tmpDir() string {
-	return filepath.Join(sm.SesamDir, ".sesam", "tmp")
+	return filepath.Join(".sesam", "tmp")
 }
 
 func (sm *SecretManager) objectsDir() string {
-	return filepath.Join(sm.SesamDir, ".sesam", "objects")
+	return filepath.Join(".sesam", "objects")
 }
 
 func (sm *SecretManager) stageDir() string {
-	return filepath.Join(sm.SesamDir, ".sesam", "seal-stage")
+	return filepath.Join(".sesam", "seal-stage")
 }
 
+// SealedPath returns the repo-relative path of the encrypted object for path.
 func (sm *SecretManager) SealedPath(path string) string {
 	return sm.cryptPath(path)
 }
 
+// TmpDir returns the repo-relative scratch directory.
 func (sm *SecretManager) TmpDir() string {
 	return sm.tmpDir()
 }
@@ -109,7 +124,7 @@ func (sm *SecretManager) SecretChangeGroups(revealedPath string, groups []string
 // secret.change_access entry for an existing one, deciding which based on
 // whether the secret is already known.
 func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string) error {
-	if err := validSecretPath(sm.SesamDir, revealedPath); err != nil {
+	if err := validSecretPath(sm.root, revealedPath); err != nil {
 		return fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
 	}
 
@@ -155,15 +170,15 @@ func (sm *SecretManager) SealAll() error {
 
 	// Any leftover stage from a prior crash is normally cleaned by Verify
 	// on load, but rebuild a fresh one here defensively.
-	if err := os.RemoveAll(stage); err != nil {
+	if err := sm.root.RemoveAll(stage); err != nil {
 		return fmt.Errorf("clear stage dir: %w", err)
 	}
-	if err := os.MkdirAll(stage, 0o700); err != nil {
+	if err := sm.root.MkdirAll(stage, 0o700); err != nil {
 		return fmt.Errorf("create stage dir: %w", err)
 	}
 	// renameat2(EXCHANGE) requires both endpoints to exist.
 	// Double-bolt this is the case.
-	if err := os.MkdirAll(objects, 0o700); err != nil {
+	if err := sm.root.MkdirAll(objects, 0o700); err != nil {
 		return fmt.Errorf("create objects dir: %w", err)
 	}
 
@@ -171,7 +186,7 @@ func (sm *SecretManager) SealAll() error {
 	for _, vsecret := range sm.State.Secrets {
 		sig, _, err := sm.stageSecret(vsecret.RevealedPath, stage)
 		if err != nil {
-			_ = os.RemoveAll(stage)
+			_ = sm.root.RemoveAll(stage)
 			return fmt.Errorf("stage %s: %w", vsecret.RevealedPath, err)
 		}
 		sigs = append(sigs, sig)
@@ -188,11 +203,12 @@ func (sm *SecretManager) SealAll() error {
 			FilesSealed: len(sigs),
 		}),
 	); err != nil {
-		_ = os.RemoveAll(stage)
+		_ = sm.root.RemoveAll(stage)
 		return fmt.Errorf("append audit seal entry: %w", err)
 	}
 
-	if err := atomicSwapDirs(stage, objects); err != nil {
+	// The swap is a renameat2(EXCHANGE) syscall and needs absolute paths.
+	if err := atomicSwapDirs(filepath.Join(sm.SesamDir, stage), filepath.Join(sm.SesamDir, objects)); err != nil {
 		// Audit entry already committed: leave stage in place so the
 		// next Verify can match its root hash and finish the swap.
 		return fmt.Errorf("swap stage dir into place: %w", err)
@@ -201,7 +217,7 @@ func (sm *SecretManager) SealAll() error {
 	// stage now holds the OLD objects tree. Reap it last so the
 	// commit-on-disk and commit-in-log windows are not separated by an
 	// expensive recursive delete.
-	if err := os.RemoveAll(stage); err != nil {
+	if err := sm.root.RemoveAll(stage); err != nil {
 		// Not fatal: the next Verify will retry the cleanup.
 		slog.Warn(
 			"failed to remove old objects after seal swap",
@@ -218,12 +234,11 @@ func (sm *SecretManager) SealAll() error {
 // is available.
 func (sm *SecretManager) stageSecret(revealedPath, stageRoot string) (*secretFooter, bool, error) {
 	stageDest := filepath.Join(stageRoot, revealedPath+".sesam")
-	if err := os.MkdirAll(filepath.Dir(stageDest), 0o700); err != nil {
+	if err := sm.root.MkdirAll(filepath.Dir(stageDest), 0o700); err != nil {
 		return nil, false, fmt.Errorf("create stage subdir: %w", err)
 	}
 
-	plainPath := filepath.Join(sm.SesamDir, revealedPath)
-	switch _, err := os.Stat(plainPath); {
+	switch _, err := sm.root.Stat(revealedPath); {
 	case err == nil:
 		// Good-citizen guard: an honest client refuses to produce a
 		// footer it knows the verifier will reject. The "preserve
@@ -252,24 +267,23 @@ func (sm *SecretManager) stageSecret(revealedPath, stageRoot string) (*secretFoo
 
 	// No plaintext: preserve the existing ciphertext if we have one.
 	existing := sm.cryptPath(revealedPath)
-	if !PathExists(existing) {
+	if _, err := sm.root.Stat(existing); err != nil {
 		return nil, false, fmt.Errorf(
 			"no plaintext at %q and no existing ciphertext at %q to preserve",
-			plainPath, existing,
+			revealedPath, existing,
 		)
 	}
 
-	if err := copyFile(existing, stageDest); err != nil {
+	if err := copyFile(sm.root, existing, stageDest); err != nil {
 		return nil, false, err
 	}
 
-	sig, err := readSecretFooter(stageDest)
+	sig, err := sm.readSecretFooter(stageDest)
 	return sig, false, err
 }
 
-func readSecretFooter(path string) (*secretFooter, error) {
-	//nolint:gosec
-	fd, err := os.Open(path)
+func (sm *SecretManager) readSecretFooter(path string) (*secretFooter, error) {
+	fd, err := sm.root.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
@@ -308,7 +322,7 @@ func (sm *SecretManager) SecretRemove(revealedPath string) error {
 		return fmt.Errorf("failed to add secret remove entry: %w", err)
 	}
 
-	return os.RemoveAll(sm.cryptPath(revealedPath))
+	return sm.root.RemoveAll(sm.cryptPath(revealedPath))
 }
 
 func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) error {
@@ -316,7 +330,8 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 		return fmt.Errorf("failed to move non-existing secret: %s", oldRevealedPath)
 	}
 
-	needsReveal := !PathExists(filepath.Join(sm.SesamDir, oldRevealedPath))
+	_, statErr := sm.root.Stat(oldRevealedPath)
+	needsReveal := statErr != nil
 	if needsReveal {
 		// not yet revealed, do it before the rename entry, otherwise reveal would fail
 		if err := revealSecret(sm, oldRevealedPath); err != nil {
@@ -338,14 +353,15 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 		return fmt.Errorf("failed to add secret remove entry: %w", err)
 	}
 
-	if err := os.Rename(
-		filepath.Join(sm.SesamDir, oldRevealedPath),
-		filepath.Join(sm.SesamDir, newRevealedPath),
-	); err != nil {
+	if err := sm.root.MkdirAll(filepath.Dir(newRevealedPath), 0o700); err != nil {
 		return err
 	}
 
-	if err := os.RemoveAll(sm.cryptPath(oldRevealedPath)); err != nil {
+	if err := sm.root.Rename(oldRevealedPath, newRevealedPath); err != nil {
+		return err
+	}
+
+	if err := sm.root.RemoveAll(sm.cryptPath(oldRevealedPath)); err != nil {
 		return err
 	}
 
@@ -361,7 +377,7 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 	}
 
 	// If we'd cache signatures, we could skip reading all of them. But for now good enough.
-	sigs, err := readAllSignatures(sm.SesamDir)
+	sigs, err := readAllSignatures(sm.root)
 	if err != nil {
 		return err
 	}
@@ -378,7 +394,7 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 
 	if needsReveal {
 		// file was not revealed before, to be consistent we should remove it again.
-		return os.Remove(filepath.Join(sm.SesamDir, newRevealedPath))
+		return sm.root.Remove(newRevealedPath)
 	}
 
 	return nil
@@ -393,25 +409,16 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 // it does not verify signatures - this requires parsing all of the audit log.
 // As a consequence it also does not check whether the sealer was authorized
 // to seal this path. Use `sesam reveal` or `sesam verify --all` for that.
-func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bool, error) {
+func ShowSecret(root *os.Root, ids Identities, path string, dst io.Writer) (bool, error) {
 	if !strings.HasSuffix(path, ".sesam") {
-		if err := validSecretPath(sesamDir, path); err == nil {
+		if err := validSecretPath(root, path); err == nil {
 			// user apparently gave the direct revealed path. Let's map it to the
 			// actual object file as a convenience feature.
 			path = filepath.Join(".sesam", "objects", path+".sesam")
 		}
 	}
 
-	// Resolve relative inputs against sesamDir so the lookup works regardless
-	// of the caller's cwd. Absolute paths (e.g. mgr.cryptPath() output) are
-	// used as-is — joining two absolute paths with filepath.Join would
-	// produce a double-prefixed nonsense path.
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(sesamDir, path)
-	}
-
-	//nolint:gosec
-	srcFd, err := os.Open(path)
+	srcFd, err := openForShow(root, path)
 	if err != nil {
 		// assume it's not something we can "show"
 		return false, nil
@@ -421,6 +428,18 @@ func ShowSecret(sesamDir string, ids Identities, path string, dst io.Writer) (bo
 
 	_, _, _, err = revealStream(srcFd, dst, ids.AgeIdentities())
 	return true, err
+}
+
+// openForShow reads in-repo paths through the root. An absolute path comes
+// from git's diff textconv, which extracts the blob to a temp file outside the
+// repo and passes that path; those are opened directly. Showing is a read-only
+// decryption for display, so reading outside the root sandbox is acceptable.
+func openForShow(root *os.Root, path string) (*os.File, error) {
+	if filepath.IsAbs(path) {
+		//nolint:gosec // textconv hands us an external blob temp path to read.
+		return os.Open(path)
+	}
+	return root.Open(path)
 }
 
 // RevealBlob decrypts src and writes the plaintext to sesamDir/revealedPath.
@@ -500,14 +519,13 @@ func RevealBlob(
 // text. It does not need to decrypt the sealed file for that and only needs to
 // read the revealedPath once.
 func (sm *SecretManager) EqualPlaintext(revealedPath string, ids Identities) (bool, error) {
-	sealFd, err := os.Open(sm.cryptPath(revealedPath))
+	sealFd, err := sm.root.Open(sm.cryptPath(revealedPath))
 	if err != nil {
 		return false, err
 	}
 	defer closeLogged(sealFd)
 
-	//nolint:gosec
-	plainFd, err := os.Open(filepath.Join(sm.SesamDir, revealedPath))
+	plainFd, err := sm.root.Open(revealedPath)
 	if err != nil {
 		return false, err
 	}

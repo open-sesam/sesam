@@ -36,8 +36,8 @@ func ValidUserName(name string) error {
 	return nil
 }
 
-func IsForbiddenPath(sesamDir, revealedPath string) error {
-	if strings.HasPrefix(revealedPath, filepath.Join(sesamDir, ".sesam")) {
+func IsForbiddenPath(revealedPath string) error {
+	if revealedPath == ".sesam" || strings.HasPrefix(revealedPath, ".sesam"+string(filepath.Separator)) {
 		return fmt.Errorf("secret path may not live in .sesam: %s", revealedPath)
 	}
 
@@ -62,7 +62,7 @@ func IsForbiddenPath(sesamDir, revealedPath string) error {
 	return nil
 }
 
-func validSecretPathFormat(sesamDir, revealedPath string) error {
+func validSecretPathFormat(revealedPath string) error {
 	if len(revealedPath) == 0 {
 		return fmt.Errorf("empty file path not allowed: %s", revealedPath)
 	}
@@ -78,20 +78,20 @@ func validSecretPathFormat(sesamDir, revealedPath string) error {
 	return nil
 }
 
-func validSecretPath(sesamDir, revealedPath string) error {
-	if err := validSecretPathFormat(sesamDir, revealedPath); err != nil {
+// validSecretPath checks the path format and that it points at a regular file
+// inside the repository. The stat goes through root so it cannot escape it.
+func validSecretPath(root *os.Root, revealedPath string) error {
+	if err := validSecretPathFormat(revealedPath); err != nil {
 		return err
 	}
 
-	absRevealedPath := filepath.Join(sesamDir, revealedPath)
-	absRevealedPath = filepath.Clean(absRevealedPath)
-	info, err := os.Stat(absRevealedPath)
+	info, err := root.Stat(revealedPath)
 	if err != nil {
-		return fmt.Errorf("failed to stat %s: %w", absRevealedPath, err)
+		return fmt.Errorf("failed to stat %s: %w", revealedPath, err)
 	}
 
 	if m := info.Mode(); !m.IsRegular() {
-		return fmt.Errorf("%s is not a regular file: %v", absRevealedPath, m)
+		return fmt.Errorf("%s is not a regular file: %v", revealedPath, m)
 	}
 
 	return nil
@@ -133,30 +133,51 @@ func PathExists(p string) bool {
 // The byte copy creates a fresh inode at mode 0o600. Both call sites
 // today operate exclusively under .sesam/ (0o700 dirs, 0o600 files) so
 // no permission widening can result either way.
-func copyFile(src, dst string) error {
-	if err := os.Link(src, dst); err == nil {
+func copyFile(root *os.Root, src, dst string) error {
+	if err := root.Link(src, dst); err == nil {
 		return nil
 	}
 
-	//nolint:gosec
-	srcFd, err := os.Open(src)
+	srcFd, err := root.Open(src)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", src, err)
 	}
 	defer closeLogged(srcFd)
 
-	//nolint:gosec
-	dstFd, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	dstFd, err := root.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", dst, err)
 	}
 
 	if _, err := io.Copy(dstFd, srcFd); err != nil {
 		_ = dstFd.Close()
-		_ = os.Remove(dst)
+		_ = root.Remove(dst)
 		return fmt.Errorf("copy %s -> %s: %w", src, dst, err)
 	}
 	return dstFd.Close()
+}
+
+// readFileLimitedRoot is ReadFileLimited confined to root.
+func readFileLimitedRoot(root *os.Root, path string, size int64) ([]byte, error) {
+	fd, err := root.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := fd.Stat()
+	if err != nil {
+		_ = fd.Close()
+		return nil, err
+	}
+
+	if is := info.Size(); is > size {
+		_ = fd.Close()
+		return nil, fmt.Errorf("file would be limited: %s: %d > %d", path, is, size)
+	}
+
+	//nolint:errcheck
+	defer fd.Close()
+	return io.ReadAll(io.LimitReader(fd, size))
 }
 
 func ReadFileLimited(path string, size int64) ([]byte, error) {

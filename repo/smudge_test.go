@@ -42,24 +42,21 @@ func runHandler(t *testing.T, clientScript []byte) []byte {
 	return stdout.Bytes()
 }
 
-// objectPathname is the per-blob `pathname=` header used by smudge tests
-// that exercise framing only (no real reveal). The corresponding sesamDir
-// becomes "." when the handler runs in chdirSesamRoot's tempdir.
+// objectPathname is the per-blob `pathname=` suffix used by smudge tests that
+// exercise framing only (no real reveal). Tests join it onto sesamRoot's dir
+// so the handler derives that dir as the sesamDir from the pathname header.
 const objectPathname = ".sesam/objects/test.sesam"
 
-// chdirSesamRoot creates a temp dir with a `.sesam/` skeleton and chdirs into
-// it for the lifetime of the test. The handler's per-blob spill file lands
-// in `.sesam/tmp/`, so a writable .sesam tree is required even when reveal
-// is expected to fail. Cleanup before reveal will warn (no git repo here),
-// which is the same path real installations take when cleanup fails.
-func chdirSesamRoot(t *testing.T) {
+// sesamRoot creates a temp dir with a `.sesam/` skeleton and returns it. The
+// handler's per-blob spill file lands in `.sesam/tmp/`, so a writable .sesam
+// tree is required even when reveal is expected to fail. Cleanup before reveal
+// will warn (no git repo here), which is the same path real installations take
+// when cleanup fails.
+func sesamRoot(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".sesam"), 0o700))
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	return dir
 }
 
 // pktScript builds a pkt-line stream for use as test input. An empty payload
@@ -160,7 +157,7 @@ func TestFilterProcessEOFAfterHandshake(t *testing.T) {
 func TestFilterProcessSmudgePassthrough(t *testing.T) {
 	// A smudge with no identities: handler echoes the encrypted blob
 	// unchanged and skips reveal. Asserts response framing.
-	chdirSesamRoot(t)
+	dir := sesamRoot(t)
 	content := "encrypted-blob-bytes\n"
 
 	script := bytes.Join([][]byte{
@@ -168,7 +165,7 @@ func TestFilterProcessSmudgePassthrough(t *testing.T) {
 		pktScript(
 			t,
 			"command=smudge\n",
-			"pathname="+objectPathname+"\n",
+			"pathname="+filepath.Join(dir, objectPathname)+"\n",
 			"",
 			content,
 			"",
@@ -193,13 +190,13 @@ func TestFilterProcessEmptyContent(t *testing.T) {
 	// Zero-byte blob: no content packets between header-flush and content-flush.
 	// Response framing per protocol: status=success + flush, then a flush for
 	// end-of-content (no content packets), then a final flush for end-of-response.
-	chdirSesamRoot(t)
+	dir := sesamRoot(t)
 	script := bytes.Join([][]byte{
 		validHandshake(t, "smudge"),
 		pktScript(
 			t,
 			"command=smudge\n",
-			"pathname="+objectPathname+"\n",
+			"pathname="+filepath.Join(dir, objectPathname)+"\n",
 			"",
 			"",
 		),
@@ -216,7 +213,7 @@ func TestFilterProcessLargeBlobIsRechunked(t *testing.T) {
 	// Build content larger than MaxPayloadSize so the response must be split
 	// across multiple pkt-lines. The client also sends it in one big logical
 	// chunk by chaining several pkt-lines in the request.
-	chdirSesamRoot(t)
+	dir := sesamRoot(t)
 	totalSize := pktline.MaxPayloadSize*2 + 1234
 	full := strings.Repeat("y", totalSize)
 
@@ -239,7 +236,7 @@ func TestFilterProcessLargeBlobIsRechunked(t *testing.T) {
 		pktScript(
 			t,
 			"command=smudge\n",
-			"pathname="+objectPathname+"\n",
+			"pathname="+filepath.Join(dir, objectPathname)+"\n",
 			"",
 		),
 		content.Bytes(),
@@ -279,7 +276,7 @@ func TestFilterProcessLargeBlobIsRechunked(t *testing.T) {
 // exactly git's order - and guards it with a timeout so a deadlock fails
 // loudly instead of hanging the suite.
 func TestFilterProcessLargeBlobDoesNotDeadlock(t *testing.T) {
-	chdirSesamRoot(t)
+	dir := sesamRoot(t)
 
 	// ~1 MiB of content, far past the 64 KiB pipe buffer.
 	full := strings.Repeat("z", pktline.MaxPayloadSize*16)
@@ -295,7 +292,7 @@ func TestFilterProcessLargeBlobDoesNotDeadlock(t *testing.T) {
 
 	request := bytes.Join([][]byte{
 		validHandshake(t, "smudge"),
-		pktScript(t, "command=smudge\n", "pathname="+objectPathname+"\n", ""),
+		pktScript(t, "command=smudge\n", "pathname="+filepath.Join(dir, objectPathname)+"\n", ""),
 		content.Bytes(),
 	}, nil)
 

@@ -6,12 +6,13 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"filippo.io/age"
-	"github.com/google/renameio"
+	"github.com/google/renameio/v2"
 )
 
 type SignDomain []byte
@@ -53,15 +54,14 @@ func (es *ed25519Signer) UserName() string {
 }
 
 // LoadSignKey will load a signer specific to a user and decrypt it via `userIdentity`
-func LoadSignKey(sesamDir, user string, userIdentity age.Identity) (Signer, error) {
+func LoadSignKey(root *os.Root, user string, userIdentity age.Identity) (Signer, error) {
 	if err := ValidUserName(user); err != nil {
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
 
-	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkeys", user+".age")
+	signKeyPath := signKeyPath(user)
 
-	//nolint:gosec
-	cryptedSignPrivKeyFd, err := os.Open(signKeyPath)
+	cryptedSignPrivKeyFd, err := root.Open(signKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sign key %s: %w", signKeyPath, err)
 	}
@@ -99,8 +99,13 @@ func LoadSignKey(sesamDir, user string, userIdentity age.Identity) (Signer, erro
 	}, nil
 }
 
+// signKeyPath returns the repo-relative path of a user's signing key.
+func signKeyPath(user string) string {
+	return filepath.Join(".sesam", "signkeys", user+".age")
+}
+
 // GenerateSignKey will generate a new ed25519 signing key only accessible to `userRecipient`
-func GenerateSignKey(sesamDir, user string, userRecipient []age.Recipient) (Signer, error) {
+func GenerateSignKey(root *os.Root, user string, userRecipient []age.Recipient) (Signer, error) {
 	if err := ValidUserName(user); err != nil {
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
@@ -110,7 +115,7 @@ func GenerateSignKey(sesamDir, user string, userRecipient []age.Recipient) (Sign
 		return nil, fmt.Errorf("failed to generate signing key %s: %w", user, err)
 	}
 
-	if err := WriteSignKey(sesamDir, user, userRecipient, priv); err != nil {
+	if err := WriteSignKey(root, user, userRecipient, priv); err != nil {
 		return nil, fmt.Errorf("failed to write signkey for %s: %w", user, err)
 	}
 
@@ -121,9 +126,9 @@ func GenerateSignKey(sesamDir, user string, userRecipient []age.Recipient) (Sign
 	}, nil
 }
 
-func WriteSignKey(sesamDir, user string, userRecipient []age.Recipient, priv ed25519.PrivateKey) error {
-	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkeys", user+".age")
-	if err := os.MkdirAll(filepath.Dir(signKeyPath), 0o700); err != nil {
+func WriteSignKey(root *os.Root, user string, userRecipient []age.Recipient, priv ed25519.PrivateKey) error {
+	signKeyPath := signKeyPath(user)
+	if err := root.MkdirAll(filepath.Dir(signKeyPath), 0o700); err != nil {
 		return fmt.Errorf("failed to mkdir signing key dir: %w", err)
 	}
 
@@ -142,7 +147,7 @@ func WriteSignKey(sesamDir, user string, userRecipient []age.Recipient, priv ed2
 		return fmt.Errorf("failed to close encrypted writer: %w", err)
 	}
 
-	if err := renameio.WriteFile(signKeyPath, ageBuf.Bytes(), 0o600); err != nil {
+	if err := renameio.WriteFile(signKeyPath, ageBuf.Bytes(), 0o600, renameio.WithRoot(root)); err != nil {
 		return fmt.Errorf("failed to write signing key %s: %w", signKeyPath, err)
 	}
 
@@ -150,19 +155,18 @@ func WriteSignKey(sesamDir, user string, userRecipient []age.Recipient, priv ed2
 }
 
 // readAllSignatures finds all .sesam files under .sesam/objects/ and parses their signature footers.
-func readAllSignatures(sesamDir string) ([]*secretFooter, error) {
-	objectsDir := filepath.Join(sesamDir, ".sesam", "objects")
-	return readAllSignaturesForDir(objectsDir)
+func readAllSignatures(root *os.Root) ([]*secretFooter, error) {
+	return readAllSignaturesForDir(root, filepath.Join(".sesam", "objects"))
 }
 
-func readAllSignaturesForDir(objectsDir string) ([]*secretFooter, error) {
+func readAllSignaturesForDir(root *os.Root, objectsDir string) ([]*secretFooter, error) {
 	var sigs []*secretFooter
-	if _, err := os.Stat(objectsDir); os.IsNotExist(err) {
+	if _, err := root.Stat(objectsDir); os.IsNotExist(err) {
 		// might happen if we're in the init phase
 		return sigs, nil
 	}
 
-	err := filepath.WalkDir(objectsDir, func(path string, d os.DirEntry, err error) error {
+	err := fs.WalkDir(root.FS(), filepath.ToSlash(objectsDir), func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -171,8 +175,7 @@ func readAllSignaturesForDir(objectsDir string) ([]*secretFooter, error) {
 			return nil
 		}
 
-		//nolint:gosec
-		fd, err := os.Open(path)
+		fd, err := root.Open(path)
 		if err != nil {
 			return fmt.Errorf("failed to open signature json %s: %w", path, err)
 		}

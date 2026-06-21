@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	gogitconfig "github.com/go-git/go-git/v5/config"
-	"github.com/google/renameio"
+	"github.com/google/renameio/v2"
 )
 
 //go:embed assets/gitignore.default

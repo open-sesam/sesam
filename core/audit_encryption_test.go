@@ -34,7 +34,7 @@ func TestLoadWithWrongIdentityFails(t *testing.T) {
 	require.NoError(t, al.Close())
 
 	stranger := newTestUser(t, "stranger")
-	_, err := LoadAuditLog(sesamDir, Identities{stranger.Identity})
+	_, err := LoadAuditLog(testRoot(t, sesamDir), Identities{stranger.Identity})
 	require.Error(t, err, "stranger is not a recipient and must not be able to load")
 }
 
@@ -141,12 +141,12 @@ func TestRotateKeyChangesRecipientSet(t *testing.T) {
 	require.NoError(t, al.Close())
 
 	// Bob (new recipient) can load.
-	loaded, err := LoadAuditLog(sesamDir, Identities{bob.Identity})
+	loaded, err := LoadAuditLog(testRoot(t, sesamDir), Identities{bob.Identity})
 	require.NoError(t, err)
 	require.NoError(t, loaded.Close())
 
 	// Admin (removed from recipients) can no longer unwrap the new K.
-	_, err = LoadAuditLog(sesamDir, Identities{admin.Identity})
+	_, err = LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.Error(t, err)
 }
 
@@ -161,14 +161,16 @@ func TestWriteAuditKeyExtendsRecipients(t *testing.T) {
 	require.NoError(t, al.WriteAuditKey(Recipients{admin.Recipient, bob.Recipient}))
 	require.NoError(t, al.Close())
 
-	loaded, err := LoadAuditLog(sesamDir, Identities{bob.Identity})
+	loaded, err := LoadAuditLog(testRoot(t, sesamDir), Identities{bob.Identity})
 	require.NoError(t, err)
 	require.Len(t, loaded.Entries, 1)
 	require.NoError(t, loaded.Close())
 }
 
 // TestRecoveryDeletesOrphanedTmpFiles: if a crash left renameio tmp files
-// (named ".log.jsonlXXXXXX") in the audit dir, LoadAuditLog removes them.
+// (named ".log.jsonlXXXXXX") at the repo root, LoadAuditLog removes them.
+// renameio with WithRoot creates its temp next to the root, not in the
+// audit dir, so recovery scans the root.
 func TestRecoveryDeletesOrphanedTmpFiles(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
@@ -176,11 +178,10 @@ func TestRecoveryDeletesOrphanedTmpFiles(t *testing.T) {
 	require.NoError(t, al.Close())
 
 	// Simulate a leftover renameio tmp file.
-	auditDir := filepath.Join(sesamDir, ".sesam", "audit")
-	orphan := filepath.Join(auditDir, ".log.jsonlXXXXXX")
+	orphan := filepath.Join(sesamDir, ".log.jsonlXXXXXX")
 	require.NoError(t, os.WriteFile(orphan, []byte("orphan"), 0o600))
 
-	loaded, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
+	loaded, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.NoError(t, err)
 	require.Len(t, loaded.Entries, 1)
 	require.NoError(t, loaded.Close())

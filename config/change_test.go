@@ -11,11 +11,11 @@ import (
 // TestSecretChangeGroups_ReplacesAccess rewrites the access list of an existing
 // secret in place, leaving the entry's other content alone.
 func TestSecretChangeGroups_ReplacesAccess(t *testing.T) {
-	dir, main := buildConfig(t, false, "token.txt")
+	_, main := buildConfig(t, false, "token.txt")
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
-	require.NoError(t, cr.SecretChangeGroups(filepath.Join(dir, "token.txt"), []string{"dev", "ops"}))
+	require.NoError(t, cr.SecretChangeGroups("token.txt", []string{"dev", "ops"}))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"dev", "ops"}, accessFor(t, main, "token.txt"))
@@ -29,9 +29,9 @@ func TestSecretChangeGroups_AddsAccessKeyWhenAbsent(t *testing.T) {
 	require.NoError(t, os.WriteFile(main, []byte("secrets:\n  - path: token.txt\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "token.txt"), []byte("x"), 0o644))
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
-	require.NoError(t, cr.SecretChangeGroups(filepath.Join(dir, "token.txt"), []string{"dev"}))
+	require.NoError(t, cr.SecretChangeGroups("token.txt", []string{"dev"}))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"dev"}, accessFor(t, main, "token.txt"))
@@ -51,9 +51,9 @@ func TestSecretChangeGroups_PreservesComment(t *testing.T) {
 	require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "token.txt"), []byte("x"), 0o644))
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
-	require.NoError(t, cr.SecretChangeGroups(filepath.Join(dir, "token.txt"), []string{"group2"}))
+	require.NoError(t, cr.SecretChangeGroups("token.txt", []string{"group2"}))
 	require.NoError(t, cr.Save())
 
 	out, err := os.ReadFile(main)
@@ -64,9 +64,9 @@ func TestSecretChangeGroups_PreservesComment(t *testing.T) {
 
 // TestSecretChangeGroups_NotFound errors when no secret matches the path.
 func TestSecretChangeGroups_NotFound(t *testing.T) {
-	dir, main := buildConfig(t, false)
+	_, main := buildConfig(t, false)
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
-	require.Error(t, cr.SecretChangeGroups(filepath.Join(dir, "nope.txt"), []string{"dev"}))
+	require.Error(t, cr.SecretChangeGroups("nope.txt", []string{"dev"}))
 }

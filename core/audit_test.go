@@ -139,7 +139,7 @@ func TestStoreAndLoad(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, al.Close())
-	loaded, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
+	loaded, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.NoError(t, err)
 	require.Len(t, loaded.Entries, len(al.Entries))
 	require.Equal(t, al.InitHash, loaded.InitHash)
@@ -156,7 +156,7 @@ func TestLoadMissingInitFile(t *testing.T) {
 	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
 	require.NoError(t, os.WriteFile(logPath, nil, 0o600))
 
-	_, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
+	_, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.Error(t, err)
 }
 
@@ -166,7 +166,7 @@ func TestLoadMissingLogFile(t *testing.T) {
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0o600))
 
-	_, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
+	_, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.Error(t, err)
 }
 
@@ -187,7 +187,7 @@ func TestLoadCorruptTrailingEntryRejected(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	_, err = LoadAuditLog(sesamDir, Identities{admin.Identity})
+	_, err = LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.Error(t, err, "garbage trailing entry should be rejected, not truncated")
 }
 

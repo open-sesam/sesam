@@ -20,6 +20,7 @@ func testSecretManager(t *testing.T) *SecretManager {
 
 	return &SecretManager{
 		SesamDir:   sesamDir,
+		root:       testRoot(t, sesamDir),
 		Identities: Identities{user.Identity},
 		Signer:     user.Signer,
 		Keyring:    kr,
@@ -61,7 +62,7 @@ func TestSealAndReveal(t *testing.T) {
 	require.NotEmpty(t, sig.Signature)
 
 	// Check file was created.
-	require.FileExists(t, mgr.cryptPath("secrets/db_password"))
+	require.FileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/db_password")))
 
 	// Remove plaintext, then reveal and compare.
 	plainPath := filepath.Join(mgr.SesamDir, "secrets/db_password")
@@ -112,7 +113,7 @@ func TestSealCreatesSignatureFile(t *testing.T) {
 	_, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
-	sigs, err := readAllSignatures(mgr.SesamDir)
+	sigs, err := readAllSignatures(mgr.root)
 	require.NoError(t, err)
 	require.Len(t, sigs, 1)
 
@@ -130,7 +131,7 @@ func TestRevealDetectsCorruptedCiphertext(t *testing.T) {
 	require.NoError(t, err)
 
 	// Corrupt the .sesam file contents.
-	os.WriteFile(mgr.cryptPath("secrets/token"), []byte("corrupted-ciphertext"), 0o600)
+	os.WriteFile(filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/token")), []byte("corrupted-ciphertext"), 0o600)
 
 	err = revealSecret(mgr, secret)
 	require.Error(t, err, "reveal should detect corrupted ciphertext")
@@ -144,7 +145,7 @@ func TestRevealDetectsTruncatedCiphertext(t *testing.T) {
 	require.NoError(t, err)
 
 	// Truncate the .age file to half its size.
-	agePath := mgr.cryptPath("secrets/trunc")
+	agePath := filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/trunc"))
 	data, _ := os.ReadFile(agePath)
 	os.WriteFile(agePath, data[:len(data)/2], 0o600)
 
@@ -209,7 +210,7 @@ func TestRevealMissingFooter(t *testing.T) {
 	require.NoError(t, err)
 
 	// Overwrite the .sesam file with content that has no newline footer.
-	os.WriteFile(mgr.cryptPath("secrets/nofooter"), []byte("no-footer-here"), 0o600)
+	os.WriteFile(filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/nofooter")), []byte("no-footer-here"), 0o600)
 
 	err = revealSecret(mgr, secret)
 	require.Error(t, err, "reveal should fail when footer is missing")
@@ -289,7 +290,7 @@ func TestReadStoredSignatureRoundtrip(t *testing.T) {
 	expected, err := sealSecret(mgr, secret, mgr.recipientsFor(secret), mgr.cryptPath(secret), "testuser")
 	require.NoError(t, err)
 
-	sigs, err := readAllSignatures(mgr.SesamDir)
+	sigs, err := readAllSignatures(mgr.root)
 	require.NoError(t, err)
 	require.Len(t, sigs, 1)
 
@@ -343,6 +344,7 @@ func TestRevealRejectsUnauthorizedSealer(t *testing.T) {
 
 	adminMgr := &SecretManager{
 		SesamDir:   sesamDir,
+		root:       testRoot(t, sesamDir),
 		Identities: Identities{admin.Identity},
 		Signer:     admin.Signer,
 		Keyring:    kr,
@@ -363,6 +365,7 @@ func TestRevealRejectsUnauthorizedSealer(t *testing.T) {
 	// not an authorized *sealer* of admin-only per the access policy.
 	bobMgr := &SecretManager{
 		SesamDir:   sesamDir,
+		root:       testRoot(t, sesamDir),
 		Identities: Identities{bob.Identity},
 		Signer:     bob.Signer,
 	}
@@ -393,7 +396,7 @@ func TestReadAgeEncryptionKey(t *testing.T) {
 	openSealed := func(t *testing.T) *os.File {
 		t.Helper()
 		//nolint:gosec
-		fd, err := os.Open(mgr.cryptPath(path))
+		fd, err := os.Open(filepath.Join(mgr.SesamDir, mgr.cryptPath(path)))
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = fd.Close() })
 		return fd
@@ -432,7 +435,7 @@ func TestReadAgeEncryptionKey(t *testing.T) {
 func recomputeContentHash(t *testing.T, mgr *SecretManager, path, plaintext string) string {
 	t.Helper()
 	//nolint:gosec
-	fd, err := os.Open(mgr.cryptPath(path))
+	fd, err := os.Open(filepath.Join(mgr.SesamDir, mgr.cryptPath(path)))
 	require.NoError(t, err)
 	defer func() { _ = fd.Close() }()
 

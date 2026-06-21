@@ -14,7 +14,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
-	"github.com/google/renameio"
+	"github.com/google/renameio/v2"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -34,6 +34,10 @@ type Config struct {
 	MainFile    *FileSource
 	SourceFiles map[string]*FileSource
 	JSONSchema  *jsonschema.Schema
+
+	// root confines all config file I/O to the repository. Every FileSource
+	// path is relative to it.
+	root *os.Root
 }
 
 // secretEntry is a transient view of one real (non-include) secret, pairing its
@@ -46,24 +50,21 @@ type secretEntry struct {
 }
 
 // Load is the entry function for ConfigRepository. The main sesam.yml file
-// should be passed to Load. It parses the file and every transitively-included
-// file into the AST, validating each against the JSON schema as it goes.
+// should be passed to Load as a repo-relative path. It parses the file and
+// every transitively-included file into the AST, validating each against the
+// JSON schema as it goes.
 //
-// The path is resolved to absolute first so MainFile.Path — and every
-// SourceFiles path derived from it — is absolute. That keeps the revealed paths
-// the single-secret mutators (SecretAdd/SecretRemove/SecretMove) match against
-// absolute regardless of whether the caller passed a relative config path.
-func Load(path string) (*Config, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve config path %q: %w", path, err)
-	}
-	path = abs
+// All FileSource paths — MainFile.Path and every path derived from it — are
+// kept relative to root, which is also the coordinate the revealed paths the
+// single-secret mutators (SecretAdd/SecretRemove/SecretMove) match against.
+func Load(root *os.Root, path string) (*Config, error) {
+	path = filepath.Clean(path)
 
 	// Load the JSON schema from the embedded FS so every file can be validated
 	// later (on load and before save).
 	configRepo := &Config{
 		SourceFiles: map[string]*FileSource{},
+		root:        root,
 	}
 
 	sch, err := compileSchema()
@@ -131,8 +132,7 @@ func (c *Config) validate(v any, path string) error {
 // loadFile parses one file into the AST (comments attached to nodes) and
 // validates it against the schema. It does not follow includes.
 func (c *Config) loadFile(path string) (*FileSource, error) {
-	//nolint:gosec // config paths are supplied by the user/repo layout, not untrusted input
-	bs, err := os.ReadFile(path)
+	bs, err := c.root.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +356,7 @@ func (c *Config) writeFile(src *FileSource) error {
 	}
 
 	// fmt.Printf("SAVING FILE:\n%s\n", string(out))
-	return renameio.WriteFile(src.Path, []byte(out), 0o644)
+	return renameio.WriteFile(src.Path, []byte(out), 0o644, renameio.WithRoot(c.root))
 }
 
 ////////////////////

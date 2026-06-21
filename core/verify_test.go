@@ -55,7 +55,7 @@ func TestVerifyInitNegative(t *testing.T) {
 		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")
 		tell := admin.DetailUserTell([]string{"dev"})
-		al, err := InitAuditLog(sesamDir, admin.Signer, Recipients{admin.Recipient}, tell)
+		al, err := InitAuditLog(testRoot(t, sesamDir), admin.Signer, Recipients{admin.Recipient}, tell)
 		require.NoError(t, err)
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
@@ -736,7 +736,7 @@ func TestVerifyExportedRootHashMatch(t *testing.T) {
 	writeSecret(t, sesamDir, "secrets/test", "content")
 	kr2 := testKeyring(t, admin)
 	sm := &SecretManager{
-		SesamDir: sesamDir, Identities: Identities{admin.Identity},
+		SesamDir: sesamDir, root: testRoot(t, sesamDir), Identities: Identities{admin.Identity},
 		Signer: admin.Signer, Keyring: kr2,
 	}
 	recps := kr2.Recipients([]string{"admin"})
@@ -792,7 +792,7 @@ func TestEndToEndStoreLoadVerify(t *testing.T) {
 		RootHash: "test-root-hash", FilesSealed: 1,
 	}), nil)
 
-	loaded, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
+	loaded, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.NoError(t, err)
 
 	state := verifyState(t, loaded, EmptyKeyring())

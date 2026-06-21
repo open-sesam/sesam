@@ -11,11 +11,11 @@ func TestGenerateAndLoadSignKey(t *testing.T) {
 	sesamDir := testRepo(t)
 	user := newTestUser(t, "alice")
 
-	signer, err := GenerateSignKey(sesamDir, "alice", []age.Recipient{user.Recipient.Recipient})
+	signer, err := GenerateSignKey(testRoot(t, sesamDir), "alice", []age.Recipient{user.Recipient.Recipient})
 	require.NoError(t, err)
 	require.Equal(t, "alice", signer.UserName())
 
-	loaded, err := LoadSignKey(sesamDir, "alice", user.Identity)
+	loaded, err := LoadSignKey(testRoot(t, sesamDir), "alice", user.Identity)
 	require.NoError(t, err)
 	require.Equal(t, "alice", loaded.UserName())
 
@@ -34,7 +34,7 @@ func TestGenerateAndLoadSignKey(t *testing.T) {
 func TestLoadSignKeyMissing(t *testing.T) {
 	sesamDir := testRepo(t)
 	user := newTestUser(t, "alice")
-	_, err := LoadSignKey(sesamDir, "alice", user.Identity)
+	_, err := LoadSignKey(testRoot(t, sesamDir), "alice", user.Identity)
 	require.Error(t, err, "should fail when sign key file does not exist")
 }
 
@@ -44,11 +44,11 @@ func TestLoadSignKeyWrongIdentity(t *testing.T) {
 	bob := newTestUser(t, "bob")
 
 	// Generate key encrypted to alice.
-	_, err := GenerateSignKey(sesamDir, "alice", []age.Recipient{alice.Recipient.Recipient})
+	_, err := GenerateSignKey(testRoot(t, sesamDir), "alice", []age.Recipient{alice.Recipient.Recipient})
 	require.NoError(t, err)
 
 	// Try loading with bob's identity - should fail to decrypt.
-	_, err = LoadSignKey(sesamDir, "alice", bob.Identity)
+	_, err = LoadSignKey(testRoot(t, sesamDir), "alice", bob.Identity)
 	require.Error(t, err, "should fail when decrypting with wrong identity")
 }
 
@@ -61,14 +61,14 @@ func TestReadAllSignatures(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	sigs, err := readAllSignatures(mgr.SesamDir)
+	sigs, err := readAllSignatures(mgr.root)
 	require.NoError(t, err)
 	require.Len(t, sigs, 3)
 }
 
 func TestReadAllSignaturesEmpty(t *testing.T) {
 	sesamDir := testRepo(t)
-	sigs, err := readAllSignatures(sesamDir)
+	sigs, err := readAllSignatures(testRoot(t, sesamDir))
 	require.NoError(t, err)
 	require.Empty(t, sigs)
 }
@@ -76,7 +76,7 @@ func TestReadAllSignaturesEmpty(t *testing.T) {
 func TestReadAllSignaturesNoObjectsDir(t *testing.T) {
 	// When the objects dir doesn't exist at all (e.g. fresh init before any seal).
 	sesamDir := t.TempDir()
-	sigs, err := readAllSignatures(sesamDir)
+	sigs, err := readAllSignatures(testRoot(t, sesamDir))
 	require.NoError(t, err, "should not fail when objects dir does not exist")
 	require.Empty(t, sigs)
 }
@@ -85,11 +85,11 @@ func TestSignCrossDomain(t *testing.T) {
 	sesamDir := testRepo(t)
 	user := newTestUser(t, "alice")
 
-	signer, err := GenerateSignKey(sesamDir, "alice", []age.Recipient{user.Recipient.Recipient})
+	signer, err := GenerateSignKey(testRoot(t, sesamDir), "alice", []age.Recipient{user.Recipient.Recipient})
 	require.NoError(t, err)
 	require.Equal(t, "alice", signer.UserName())
 
-	loaded, err := LoadSignKey(sesamDir, "alice", user.Identity)
+	loaded, err := LoadSignKey(testRoot(t, sesamDir), "alice", user.Identity)
 	require.NoError(t, err)
 	require.Equal(t, "alice", loaded.UserName())
 

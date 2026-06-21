@@ -7,11 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 )
 
 type UserManager struct {
-	sesamDir string
+	root     *os.Root
 	signer   Signer
 	log      *AuditLog
 	state    *VerifiedState
@@ -19,9 +18,10 @@ type UserManager struct {
 	secMgr   *SecretManager
 }
 
-// BuildUserManager wires a UserManager.
+// BuildUserManager wires a UserManager. root confines all file I/O to the
+// repository.
 func BuildUserManager(
-	sesamDir string,
+	root *os.Root,
 	signer Signer,
 	log *AuditLog,
 	state *VerifiedState,
@@ -34,7 +34,7 @@ func BuildUserManager(
 	}
 
 	return &UserManager{
-		sesamDir: sesamDir,
+		root:     root,
 		signer:   signer,
 		log:      log,
 		state:    state,
@@ -73,7 +73,7 @@ func (um *UserManager) UserTell(
 	}
 
 	newUserSigner, err := GenerateSignKey(
-		um.sesamDir,
+		um.root,
 		user,
 		recps.AgeRecipients(),
 	)
@@ -126,8 +126,7 @@ func (um *UserManager) UserKill(user string) error {
 		return err
 	}
 
-	signKeyPath := filepath.Join(um.sesamDir, ".sesam", "signkeys", user+".age")
-	if err := os.RemoveAll(signKeyPath); err != nil {
+	if err := um.root.RemoveAll(signKeyPath(user)); err != nil {
 		return err
 	}
 
@@ -156,14 +155,10 @@ func (um *UserManager) UserRename(oldName, newName string) error {
 	}
 
 	// TODO: Also not exactly atomic as an operation...
-	return os.Rename(
-		um.signKeyPath(oldName),
-		um.signKeyPath(newName),
+	return um.root.Rename(
+		signKeyPath(oldName),
+		signKeyPath(newName),
 	)
-}
-
-func (um *UserManager) signKeyPath(user string) string {
-	return filepath.Join(um.sesamDir, ".sesam", "signkeys", user+".age")
 }
 
 func (um *UserManager) UserChangeGroups(user string, groups []string) error {
@@ -259,7 +254,7 @@ func (um *UserManager) UserRegenerateSignKey(user string) error {
 
 	newRecps := um.state.keyring.Recipients([]string{user})
 	signer, err := GenerateSignKey(
-		um.sesamDir,
+		um.root,
 		user,
 		newRecps.AgeRecipients(),
 	)
@@ -287,7 +282,7 @@ func (um *UserManager) UserRegenerateSignKey(user string) error {
 // to default to a non-interactive UI.
 func InitAdminUser(
 	ctx context.Context,
-	sesamDir, user string, pubKeySpecs []string,
+	root *os.Root, user string, pubKeySpecs []string,
 	pluginUI *PluginUI,
 ) (Signer, *AuditLog, error) {
 	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, pluginUI)
@@ -296,7 +291,7 @@ func InitAdminUser(
 	}
 
 	signer, err := GenerateSignKey(
-		sesamDir,
+		root,
 		user,
 		recps.AgeRecipients(),
 	)
@@ -305,7 +300,7 @@ func InitAdminUser(
 	}
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	auditLog, err := InitAuditLog(sesamDir, signer, recps, DetailUserTell{
+	auditLog, err := InitAuditLog(root, signer, recps, DetailUserTell{
 		User:       signer.UserName(),
 		Groups:     []string{"admin"},
 		PubKeys:    recps.UserPubKeys(),
