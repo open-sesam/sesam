@@ -247,6 +247,13 @@ func Main(args []string) error {
 						Usage:   "Remove a recipient from an existing user (may not be the last one)",
 					},
 					{
+						Name:    "regen-sign-key",
+						Aliases: []string{"rsk"},
+						Flags:   flagsUserRegenerateSignKey,
+						Action:  commands.WithRepo(commands.HandleUserRegenerateSignKey),
+						Usage:   "Regenerate the signing key of a specific user",
+					},
+					{
 						Name:   "rename",
 						Flags:  flagsRenameUser,
 						Action: commands.WithRepo(commands.HandleRenameUser),

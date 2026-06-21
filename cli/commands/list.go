@@ -77,7 +77,7 @@ func HandleListUsers(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 			adminMark(user.IsAdmin()),
 			commaJoined(user.Groups),
 			multiline(elideKeys(recipientKeys(user.Recps))),
-			multiline(elideKeys(user.SignPubKey)),
+			multiline(elideKeys([]string{user.SignPubKey})),
 		})
 	}
 	t.AppendFooter([]any{"", "", "", "", fmt.Sprintf("%d users", len(users))})

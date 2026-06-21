@@ -28,10 +28,10 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
 
 	auditLog, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
-		User:        whoami,
-		Groups:      []string{"admin"},
-		PubKeys:     []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{signKeyStr},
+		User:       whoami,
+		Groups:     []string{"admin"},
+		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: signKeyStr,
 	})
 	require.NoError(t, err)
 
@@ -109,10 +109,10 @@ func TestIntegrationMultiUser(t *testing.T) {
 	keyring := EmptyKeyring()
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
 	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
-		User:        "admin",
-		Groups:      []string{"admin"},
-		PubKeys:     []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{signKeyStr},
+		User:       "admin",
+		Groups:     []string{"admin"},
+		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: signKeyStr,
 	})
 	require.NoError(t, err)
 	gitCommitAll(t, repo, "init")
@@ -127,10 +127,10 @@ func TestIntegrationMultiUser(t *testing.T) {
 
 	bobSignKeyStr := MulticodeEncode(bobSignKey.PublicKey(), MhEd25519Pub)
 	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailUserTell{
-		User:        "bob",
-		Groups:      []string{"dev"},
-		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{bobSignKeyStr},
+		User:       "bob",
+		Groups:     []string{"dev"},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: bobSignKeyStr,
 	}), nil)
 	require.NoError(t, err)
 
@@ -191,10 +191,10 @@ func TestIntegrationTamperDetection(t *testing.T) {
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
 	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
-		User:        "admin",
-		Groups:      []string{"admin"},
-		PubKeys:     []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{signKeyStr},
+		User:       "admin",
+		Groups:     []string{"admin"},
+		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: signKeyStr,
 	})
 	require.NoError(t, err)
 	gitCommitAll(t, repo, "init")
@@ -219,10 +219,10 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
 	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
-		User:        "admin",
-		Groups:      []string{"admin"},
-		PubKeys:     []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{signKeyStr},
+		User:       "admin",
+		Groups:     []string{"admin"},
+		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: signKeyStr,
 	})
 	require.NoError(t, err)
 	gitCommitAll(t, repo, "init")
@@ -318,10 +318,10 @@ func TestKeySourcePreservedThroughReplay(t *testing.T) {
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
 	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
-		User:        "admin",
-		Groups:      []string{"admin"},
-		PubKeys:     []UserPubKey{{Key: admin.Recipient.String(), Source: KeySource("github:admin")}},
-		SignPubKeys: []string{signKeyStr},
+		User:       "admin",
+		Groups:     []string{"admin"},
+		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySource("github:admin")}},
+		SignPubKey: signKeyStr,
 	})
 	require.NoError(t, err)
 
@@ -331,10 +331,10 @@ func TestKeySourcePreservedThroughReplay(t *testing.T) {
 	bobSignKeyStr := MulticodeEncode(bobSignKey.PublicKey(), MhEd25519Pub)
 
 	_, err = al.AddEntry(signer, newAuditEntry("admin", &DetailUserTell{
-		User:        "bob",
-		Groups:      []string{"dev"},
-		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySource("github:bob")}},
-		SignPubKeys: []string{bobSignKeyStr},
+		User:       "bob",
+		Groups:     []string{"dev"},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySource("github:bob")}},
+		SignPubKey: bobSignKeyStr,
 	}), nil)
 	require.NoError(t, err)
 
