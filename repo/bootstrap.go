@@ -291,11 +291,8 @@ func relSesamDir(r *git.Repository, sesamDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("worktree: %w", err)
 	}
-	absSesam, err := filepath.Abs(sesamDir)
-	if err != nil {
-		return "", fmt.Errorf("absolute sesam dir: %w", err)
-	}
-	rel, err := filepath.Rel(wt.Filesystem.Root(), absSesam)
+	// sesamDir is absolute (the resolved repo root).
+	rel, err := filepath.Rel(wt.Filesystem.Root(), sesamDir)
 	if err != nil {
 		return "", fmt.Errorf("relative sesam dir: %w", err)
 	}

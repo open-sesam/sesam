@@ -414,9 +414,10 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 }
 
 func newRepo(sesamDir string, root *os.Root, configRepo *sesamConf.Config, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
-	sesamDirAbs, _ := filepath.Abs(sesamDir)
+	// sesamDir is already absolute - resolveSesamDirAndGit normalizes it, the
+	// single place that resolves it against the cwd.
 	return &Repo{
-		sesamDir:      sesamDirAbs,
+		sesamDir:      sesamDir,
 		root:          root,
 		opts:          opts,
 		gitRepo:       gitRepo,

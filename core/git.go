@@ -37,12 +37,9 @@ func verifyInitFileUnchangedWithRepo(sesamDir string, repo *git.Repository) (str
 		return "", fmt.Errorf("failed to open worktree: %w", err)
 	}
 
-	absSesamDir, err := filepath.Abs(sesamDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve sesamDir: %w", err)
-	}
-
-	initAbs := filepath.Join(absSesamDir, ".sesam", "audit", "init")
+	// sesamDir is absolute (the resolved repo root), so this join stays
+	// absolute and can be made relative to the worktree root below.
+	initAbs := filepath.Join(sesamDir, ".sesam", "audit", "init")
 	initRel, err := filepath.Rel(wt.Filesystem.Root(), initAbs)
 	if err != nil {
 		return "", fmt.Errorf("failed to compute relative path: %w", err)
