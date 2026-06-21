@@ -56,8 +56,8 @@ type Repo struct {
 	secret   *core.SecretManager
 	user     *core.UserManager
 
-	configRepo *sesamConf.Config
-	mu         sync.Mutex
+	config *sesamConf.Config
+	mu     sync.Mutex
 }
 
 type VerifyMode string
@@ -249,7 +249,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	if err != nil {
 		return nil, err
 	}
-	r.configRepo = configRepo
+	r.config = configRepo
 
 	opts.PrintStep("Creating initial user »%s«…", opts.InitialUserName)
 	signer, auditLog, err := core.InitAdminUser(
@@ -402,7 +402,6 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 }
 
 func newRepo(sesamDir string, configRepo *sesamConf.Config, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
-	// TODO:
 	sesamDirAbs, _ := filepath.Abs(sesamDir)
 	return &Repo{
 		sesamDir:      sesamDirAbs,
@@ -410,7 +409,7 @@ func newRepo(sesamDir string, configRepo *sesamConf.Config, gitRepo *git.Reposit
 		gitRepo:       gitRepo,
 		pluginUI:      opts.pluginUI(),
 		identityPaths: ids,
-		configRepo:    configRepo,
+		config:        configRepo,
 	}
 }
 
@@ -466,8 +465,13 @@ func (r *Repo) ListUsers() ([]core.VerifiedUser, error) {
 	return append([]core.VerifiedUser(nil), r.vstate.Users...), nil
 }
 
+type SecretInfo struct {
+	core.VerifiedSecret
+	sesamConf.Config
+}
+
 // ListSecrets returns a list of secrets currently managed by sesam.
-func (r *Repo) ListSecrets(paths []string) ([]core.VerifiedSecret, error) {
+func (r *Repo) ListSecrets(paths []string) ([]SecretInfo, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -475,15 +479,28 @@ func (r *Repo) ListSecrets(paths []string) ([]core.VerifiedSecret, error) {
 		return nil, ErrClosed
 	}
 
+	var out []SecretInfo
 	if len(paths) == 0 {
-		// easy path, just clone all secrets:
-		return append([]core.VerifiedSecret(nil), r.vstate.Secrets...), nil
+		for _, secret := range r.vstate.Secrets {
+			out = append(out, SecretInfo{
+				VerifiedSecret: secret,
+			})
+		}
+
+		return out, nil
 	}
 
 	// filter a bit:
-	var out []core.VerifiedSecret
 	for _, path := range paths {
-		out = append(out, r.secretsUnder(r.toAbs(path))...)
+		for _, secret := range r.secretsUnder(r.toAbs(path)) {
+			out = append(out, SecretInfo{
+				VerifiedSecret: secret,
+				// TODO: Associate it with config here. We could add a layer in front
+				// of the config that would turn the config state into go structs once
+				// at load and then only modifies the loaded state. The actual AST
+				// modifications are passed through the underying implementation.
+			})
+		}
 	}
 
 	return out, nil
@@ -608,10 +625,10 @@ func (r *Repo) UserTell(ctx context.Context, user string, recipients, groups []s
 		return fmt.Errorf("failed to add user: %w", err)
 	}
 
-	if err := r.configRepo.UserTell(user, recipients, groups); err != nil {
+	if err := r.config.UserTell(user, recipients, groups); err != nil {
 		return fmt.Errorf("failed to add user %q to config: %w", user, err)
 	}
-	return r.configRepo.Save()
+	return r.config.Save()
 }
 
 // UserKill removes `user` from the list of authenticated users.
@@ -628,10 +645,10 @@ func (r *Repo) UserKill(user string) error {
 		return fmt.Errorf("failed to remove user: %w", err)
 	}
 
-	if err := r.configRepo.UserKill(user); err != nil {
+	if err := r.config.UserKill(user); err != nil {
 		return fmt.Errorf("failed to remove user %q from config: %w", user, err)
 	}
-	return r.configRepo.Save()
+	return r.config.Save()
 }
 
 // toAbs resolves a caller-supplied secret path to an absolute on-disk path.
@@ -695,7 +712,7 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string, nested bool) error {
 		}
 
 		// Config and the secret manager each self-decide add vs. change.
-		if err := r.configRepo.SecretAdd(abs, nested, groups); err != nil {
+		if err := r.config.SecretAdd(abs, nested, groups); err != nil {
 			return fmt.Errorf("failed to add secret %q to config: %w", rel, err)
 		}
 
@@ -704,7 +721,7 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string, nested bool) error {
 		}
 	}
 
-	return r.configRepo.Save()
+	return r.config.Save()
 }
 
 // expandSecretFiles resolves abs into the concrete regular files it represents.
@@ -809,7 +826,7 @@ func (r *Repo) SecretRemove(revealedPaths []string) error {
 		for _, secret := range targets {
 			rel := secret.RevealedPath
 			abs := filepath.Join(r.sesamDir, rel)
-			if err := r.configRepo.SecretRemove(abs); err != nil {
+			if err := r.config.SecretRemove(abs); err != nil {
 				return fmt.Errorf("failed to remove secret %q from config: %w", rel, err)
 			}
 
@@ -819,7 +836,7 @@ func (r *Repo) SecretRemove(revealedPaths []string) error {
 		}
 	}
 
-	return r.configRepo.Save()
+	return r.config.Save()
 }
 
 // VerifyOptions selects which verification checks Verify should run.
@@ -982,12 +999,12 @@ func (r *Repo) SecretMove(oldRevealedPath, newRevealedPath string) error {
 
 		// TODO: preserve nested layout on move (derive from the source's owning
 		// file); for now the moved secret lands in the main file.
-		if err := r.configRepo.SecretMove(oldSecretAbs, newSecretAbs, false); err != nil {
+		if err := r.config.SecretMove(oldSecretAbs, newSecretAbs, false); err != nil {
 			return fmt.Errorf("failed to move secret %q in config: %w", oldRel, err)
 		}
 	}
 
-	return r.configRepo.Save()
+	return r.config.Save()
 }
 
 func (r *Repo) UserRename(oldName, newName string) error {
@@ -998,6 +1015,7 @@ func (r *Repo) UserRename(oldName, newName string) error {
 		return ErrClosed
 	}
 
+	// TODO: Needs config integration.
 	return r.user.UserRename(oldName, newName)
 }
 
@@ -1009,6 +1027,7 @@ func (r *Repo) UserChangeGroups(user string, groups []string) error {
 		return ErrClosed
 	}
 
+	// TODO: Needs config integration.
 	return r.user.UserChangeGroups(user, groups)
 }
 
@@ -1020,6 +1039,7 @@ func (r *Repo) UserAddRecipient(ctx context.Context, user string, pubKeySpecs []
 		return ErrClosed
 	}
 
+	// TODO: Needs config integration.
 	return r.user.UserAddRecipient(ctx, user, pubKeySpecs)
 }
 
@@ -1031,6 +1051,7 @@ func (r *Repo) UserRmRecipient(ctx context.Context, user string, pubKeySpecs []s
 		return ErrClosed
 	}
 
+	// TODO: Needs config integration.
 	return r.user.UserRmRecipient(ctx, user, pubKeySpecs)
 }
 
