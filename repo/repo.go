@@ -1253,7 +1253,7 @@ func (r *Repo) Status(opts StatusOpts) (*Status, error) {
 func (r *Repo) statusToDiffDir(status *Status) (diffDir string, err error) {
 	// The diff tree is consumed by an external `git diff` process, so it is
 	// built with absolute paths outside the root.
-	rootTmpDir := filepath.Join(r.sesamDir, r.secret.TmpDir())
+	rootTmpDir := filepath.Join(r.sesamDir, core.SesamTmpDir())
 	tmpDir, err := os.MkdirTemp(rootTmpDir, "status-diff-")
 	if err != nil {
 		return "", fmt.Errorf("failed to make temp dir for diff: %w", err)

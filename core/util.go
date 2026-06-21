@@ -11,6 +11,14 @@ import (
 	"strings"
 )
 
+// SesamTmpDir is the repo-relative scratch directory. It is passed to renameio
+// as the temp dir so atomic writes stage inside .sesam/ rather than at the repo
+// root (and never in the worktree). Callers must ensure it exists; ensureSesamDirs
+// and BuildSecretManager do.
+func SesamTmpDir() string {
+	return filepath.Join(".sesam", "tmp")
+}
+
 // ValidUserName checks that a user name is safe for use in file paths and log entries.
 // Only alphanumeric characters (mixed case), hyphens, underscores, '@' and '.'
 // are allowed. The name must not be empty and must not exceed 64 characters.

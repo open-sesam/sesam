@@ -67,3 +67,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.1.6 // indirect
 )
+
+// Used for this patch: https://github.com/google/renameio/issues/46
+replace github.com/google/renameio/v2 => github.com/sahib/renameio/v2 v2.0.0-20260621194143-d21c25781e22

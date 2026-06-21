@@ -65,7 +65,7 @@ func BuildSecretManager(
 	}
 
 	// Clear tmp dir before continuing:
-	tmpDir := mgr.tmpDir()
+	tmpDir := SesamTmpDir()
 	_ = root.RemoveAll(tmpDir)
 	_ = root.MkdirAll(tmpDir, 0o700)
 
@@ -88,10 +88,6 @@ func (sm *SecretManager) cryptPath(path string) string {
 	return filepath.Join(sm.objectsDir(), path+".sesam")
 }
 
-func (sm *SecretManager) tmpDir() string {
-	return filepath.Join(".sesam", "tmp")
-}
-
 func (sm *SecretManager) objectsDir() string {
 	return filepath.Join(".sesam", "objects")
 }
@@ -103,11 +99,6 @@ func (sm *SecretManager) stageDir() string {
 // SealedPath returns the repo-relative path of the encrypted object for path.
 func (sm *SecretManager) SealedPath(path string) string {
 	return sm.cryptPath(path)
-}
-
-// TmpDir returns the repo-relative scratch directory.
-func (sm *SecretManager) TmpDir() string {
-	return sm.tmpDir()
 }
 
 // SecretAdd adds a new secret to be managed by sesam

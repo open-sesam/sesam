@@ -484,7 +484,7 @@ func (al *AuditLog) WriteAuditKey(recps Recipients) error {
 		return err
 	}
 
-	tmp, err := renameio.NewPendingFile(logPath, renameio.WithRoot(al.root), renameio.WithPermissions(0o600))
+	tmp, err := renameio.NewPendingFile(logPath, renameio.WithRoot(al.root), renameio.WithTempDir(SesamTmpDir()), renameio.WithPermissions(0o600))
 	if err != nil {
 		return fmt.Errorf("create tmp audit log: %w", err)
 	}
@@ -528,7 +528,7 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 
 	logPath := auditLogPath()
 
-	tmp, err := renameio.NewPendingFile(logPath, renameio.WithRoot(al.root), renameio.WithPermissions(0o600))
+	tmp, err := renameio.NewPendingFile(logPath, renameio.WithRoot(al.root), renameio.WithTempDir(SesamTmpDir()), renameio.WithPermissions(0o600))
 	if err != nil {
 		return fmt.Errorf("create tmp audit log: %w", err)
 	}
@@ -578,7 +578,8 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 // ".log.jsonlXXXXXX" (dot prefix + random suffix). We don't know how much was
 // written, so we just delete and let the caller retry.
 func cleanupAuditTmp(root *os.Root) {
-	entries, err := fs.ReadDir(root.FS(), ".")
+	tmpDir := SesamTmpDir()
+	entries, err := fs.ReadDir(root.FS(), tmpDir)
 	if err != nil {
 		return
 	}
@@ -588,8 +589,9 @@ func cleanupAuditTmp(root *os.Root) {
 			continue
 		}
 
-		slog.Warn("removing leftover tmp audit log", slog.String("path", e.Name()))
-		_ = root.Remove(e.Name())
+		p := filepath.Join(tmpDir, e.Name())
+		slog.Warn("removing leftover tmp audit log", slog.String("path", p))
+		_ = root.Remove(p)
 	}
 }
 
@@ -652,6 +654,7 @@ func InitAuditLog(root *os.Root, signer Signer, recps Recipients, admin DetailUs
 		[]byte(initHash),
 		0o600,
 		renameio.WithRoot(root),
+		renameio.WithTempDir(SesamTmpDir()),
 	); err != nil {
 		closeLogged(al.fd)
 		return nil, fmt.Errorf("failed to write init file: %w", err)

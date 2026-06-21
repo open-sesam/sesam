@@ -168,9 +168,7 @@ func TestWriteAuditKeyExtendsRecipients(t *testing.T) {
 }
 
 // TestRecoveryDeletesOrphanedTmpFiles: if a crash left renameio tmp files
-// (named ".log.jsonlXXXXXX") at the repo root, LoadAuditLog removes them.
-// renameio with WithRoot creates its temp next to the root, not in the
-// audit dir, so recovery scans the root.
+// (named ".log.jsonlXXXXXX") in .sesam/tmp, LoadAuditLog removes them.
 func TestRecoveryDeletesOrphanedTmpFiles(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
@@ -178,7 +176,7 @@ func TestRecoveryDeletesOrphanedTmpFiles(t *testing.T) {
 	require.NoError(t, al.Close())
 
 	// Simulate a leftover renameio tmp file.
-	orphan := filepath.Join(sesamDir, ".log.jsonlXXXXXX")
+	orphan := filepath.Join(sesamDir, ".sesam", "tmp", ".log.jsonlXXXXXX")
 	require.NoError(t, os.WriteFile(orphan, []byte("orphan"), 0o600))
 
 	loaded, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})

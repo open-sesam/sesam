@@ -15,6 +15,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/google/renameio/v2"
+	"github.com/open-sesam/sesam/core"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -321,6 +322,12 @@ func (c *Config) Groups() (map[string][]string, error) {
 // re-renders the AST (comments and original formatting included) and validates
 // it before writing.
 func (c *Config) Save() error {
+	// writeFile stages temps in .sesam/tmp; ensure it exists. In a real repo
+	// ensureSesamDirs already created it, so this is a no-op there.
+	if err := c.root.MkdirAll(core.SesamTmpDir(), 0o700); err != nil {
+		return fmt.Errorf("create scratch dir: %w", err)
+	}
+
 	for _, src := range c.SourceFiles {
 		if err := c.writeFile(src); err != nil {
 			return err
@@ -356,7 +363,10 @@ func (c *Config) writeFile(src *FileSource) error {
 	}
 
 	// fmt.Printf("SAVING FILE:\n%s\n", string(out))
-	return renameio.WriteFile(src.Path, []byte(out), 0o644, renameio.WithRoot(c.root))
+	// Stage the temp in .sesam/tmp (same as the rest of sesam) so it never
+	// lands in the worktree; Save ensures the directory exists.
+	return renameio.WriteFile(src.Path, []byte(out), 0o644,
+		renameio.WithRoot(c.root), renameio.WithTempDir(core.SesamTmpDir()))
 }
 
 ////////////////////
