@@ -11,7 +11,7 @@ import (
 // file's users sequence (existing users untouched) and the user is added as a
 // member of each named group, creating groups that do not exist yet. Returns an
 // error if a user with the same name already exists.
-func (c *ConfigRepository) Tell(name string, keys []string, groupsToAdd []string) error {
+func (c *Config) Tell(name string, keys, groupsToAdd []string) error {
 	users, err := c.Users()
 	if err != nil {
 		return err
@@ -38,7 +38,7 @@ func (c *ConfigRepository) Tell(name string, keys []string, groupsToAdd []string
 
 // appendUser inserts u into the main file's users sequence, creating the
 // users: key if it is missing.
-func (c *ConfigRepository) appendUser(u User) error {
+func (c *Config) appendUser(u User) error {
 	src := c.MainFile
 
 	seq, err := usersNode(src.RootNode)
@@ -60,7 +60,7 @@ func (c *ConfigRepository) appendUser(u User) error {
 // mapping, creating the groups: key and/or the group itself when missing.
 // Members already present are left untouched, so re-saving does not duplicate
 // them.
-func (c *ConfigRepository) addGroupMember(group, member string) error {
+func (c *Config) addGroupMember(group, member string) error {
 	src := c.MainFile
 
 	groups, err := groupsNode(src.RootNode)

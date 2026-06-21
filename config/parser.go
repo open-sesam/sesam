@@ -23,14 +23,14 @@ var schemaFS embed.FS
 
 const schemaFile = "sesam_schema.json"
 
-// ConfigRepository holds every loaded file. MainFile is the top level file
+// Config holds every loaded file. MainFile is the top level file
 // passed to Load; it is also present in SourceFiles (keyed by path) so Save can
 // iterate one map and treat every file uniformly.
 //
 // There is no merged secrets list stored anywhere: the AST under each file's
 // RootNode is the source of truth, and the flattened view is derived on demand
 // (Secrets) by walking it.
-type ConfigRepository struct {
+type Config struct {
 	MainFile    *FileSource
 	SourceFiles map[string]*FileSource
 	JSONSchema  *jsonschema.Schema
@@ -50,10 +50,10 @@ type secretEntry struct {
 // file into the AST, validating each against the JSON schema as it goes.
 //
 // The path is resolved to absolute first so MainFile.Path — and every
-// SourceFiles path derived from it — is absolute. That keeps the on-disk
-// (revealed) paths reported by AddSecrets/RemoveSecrets absolute regardless of
-// whether the caller passed a relative config path.
-func Load(path string) (*ConfigRepository, error) {
+// SourceFiles path derived from it — is absolute. That keeps the revealed paths
+// the single-secret mutators (AddSecret/RemoveSecret/MoveSecret) match against
+// absolute regardless of whether the caller passed a relative config path.
+func Load(path string) (*Config, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve config path %q: %w", path, err)
@@ -62,7 +62,7 @@ func Load(path string) (*ConfigRepository, error) {
 
 	// Load the JSON schema from the embedded FS so every file can be validated
 	// later (on load and before save).
-	configRepo := &ConfigRepository{
+	configRepo := &Config{
 		SourceFiles: map[string]*FileSource{},
 	}
 
@@ -110,7 +110,7 @@ func compileSchema() (*jsonschema.Schema, error) {
 
 // validate marshals v to JSON and checks it against the loaded schema. path is
 // only used to give a useful error message.
-func (c *ConfigRepository) validate(v any, path string) error {
+func (c *Config) validate(v any, path string) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -130,7 +130,7 @@ func (c *ConfigRepository) validate(v any, path string) error {
 
 // loadFile parses one file into the AST (comments attached to nodes) and
 // validates it against the schema. It does not follow includes.
-func (c *ConfigRepository) loadFile(path string) (*FileSource, error) {
+func (c *Config) loadFile(path string) (*FileSource, error) {
 	//nolint:gosec // config paths are supplied by the user/repo layout, not untrusted input
 	bs, err := os.ReadFile(path)
 	if err != nil {
@@ -162,7 +162,7 @@ func (c *ConfigRepository) loadFile(path string) (*FileSource, error) {
 
 // loadTree loads path (unless already loaded) and recurses into every include
 // it declares, registering each file in SourceFiles.
-func (c *ConfigRepository) loadTree(path string) (*FileSource, error) {
+func (c *Config) loadTree(path string) (*FileSource, error) {
 	if existing, ok := c.SourceFiles[path]; ok {
 		return existing, nil
 	}
@@ -186,7 +186,7 @@ func (c *ConfigRepository) loadTree(path string) (*FileSource, error) {
 // secretEntries walks the main file and every included file, returning one
 // entry per real secret in include order. The list is derived fresh from the
 // AST every call.
-func (c *ConfigRepository) secretEntries() ([]secretEntry, error) {
+func (c *Config) secretEntries() ([]secretEntry, error) {
 	return c.collectSecrets(c.MainFile, map[string]bool{})
 }
 
@@ -194,7 +194,7 @@ func (c *ConfigRepository) secretEntries() ([]secretEntry, error) {
 // any included file at the point the include appears. visiting holds the files
 // on the current include chain so a cycle (a file that transitively includes
 // itself) is detected and rejected instead of recursing forever.
-func (c *ConfigRepository) collectSecrets(src *FileSource, visiting map[string]bool) ([]secretEntry, error) {
+func (c *Config) collectSecrets(src *FileSource, visiting map[string]bool) ([]secretEntry, error) {
 	if visiting[src.Path] {
 		return nil, fmt.Errorf("include loop detected at %s", src.Path)
 	}
@@ -239,7 +239,7 @@ func (c *ConfigRepository) collectSecrets(src *FileSource, visiting map[string]b
 	return out, nil
 }
 
-// TODO: could use some optimization, as it's executed for every addSecret call. If adding
+// TODO: could use some optimization, as it's executed for every AddSecret call. If adding
 // multiple secrets at once (or large directories), it's probably easier to compute once and
 // update when addSecret is called.
 //
@@ -250,7 +250,7 @@ func (c *ConfigRepository) collectSecrets(src *FileSource, visiting map[string]b
 // it the basis for both global dedup and reporting which secrets a mutation
 // added. The same physical file tracked by two files collapses to one entry,
 // which is exactly the duplicate we refuse to create.
-func (c *ConfigRepository) trackedRevealedPaths() map[string]bool {
+func (c *Config) trackedRevealedPaths() map[string]bool {
 	set := map[string]bool{}
 	for _, src := range c.SourceFiles {
 		for _, s := range ownSecrets(src) {
@@ -262,7 +262,7 @@ func (c *ConfigRepository) trackedRevealedPaths() map[string]bool {
 
 // Secrets returns the merged, flattened secrets across the main file and all
 // included files, in include order, decoded fresh from the AST.
-func (c *ConfigRepository) Secrets() ([]Secret, error) {
+func (c *Config) Secrets() ([]Secret, error) {
 	entries, err := c.secretEntries()
 	if err != nil {
 		return nil, err
@@ -277,7 +277,7 @@ func (c *ConfigRepository) Secrets() ([]Secret, error) {
 
 // Users returns the users declared in the main file, decoded from its AST. A
 // main file without a users: key yields an empty slice.
-func (c *ConfigRepository) Users() ([]User, error) {
+func (c *Config) Users() ([]User, error) {
 	seq, err := usersNode(c.MainFile.RootNode)
 	if err != nil {
 		return nil, nil //nolint:nilerr // absent users: key means no users
@@ -302,7 +302,7 @@ func (c *ConfigRepository) Users() ([]User, error) {
 
 // Groups returns the group→members mapping from the main file. A main file
 // without a groups: key yields an empty map.
-func (c *ConfigRepository) Groups() (map[string][]string, error) {
+func (c *Config) Groups() (map[string][]string, error) {
 	m, err := groupsNode(c.MainFile.RootNode)
 	if err != nil {
 		// Absent groups: key means no groups.
@@ -320,7 +320,7 @@ func (c *ConfigRepository) Groups() (map[string][]string, error) {
 // reflects every edit — nodes were inserted or cut in place — so Save just
 // re-renders the AST (comments and original formatting included) and validates
 // it before writing.
-func (c *ConfigRepository) Save() error {
+func (c *Config) Save() error {
 	for _, src := range c.SourceFiles {
 		if err := c.writeFile(src); err != nil {
 			return err
@@ -335,7 +335,7 @@ func (c *ConfigRepository) Save() error {
 // comments and original formatting that yaml.Encoder would otherwise drop. A
 // source whose RootNode is still nil (created in memory but never given an
 // item) has nothing to persist and is skipped.
-func (c *ConfigRepository) writeFile(src *FileSource) error {
+func (c *Config) writeFile(src *FileSource) error {
 	if src.RootNode == nil {
 		return nil
 	}

@@ -8,12 +8,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestAddSecrets_RelativeConfigPathSameDir reproduces the reported failure: a
-// config loaded via a relative path used to return relative revealed paths for
-// a secret sitting next to it, which then could not be made relative to the
-// sesam dir. Load now resolves the config path to absolute, so the returned
-// paths are absolute regardless of how the config was loaded.
-func TestAddSecrets_RelativeConfigPathSameDir(t *testing.T) {
+// TestAddSecret_RelativeConfigPathSameDir reproduces the reported failure: a
+// config loaded via a relative path, with a secret given relatively in the same
+// directory, used to mishandle the path. Load resolves the config path to
+// absolute, so AddSecret (which also resolves to absolute) records the secret
+// with a clean relative Path regardless of how the config was loaded.
+func TestAddSecret_RelativeConfigPathSameDir(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
@@ -26,12 +26,7 @@ func TestAddSecrets_RelativeConfigPathSameDir(t *testing.T) {
 	cr, err := Load("sesam.yml")
 	require.NoError(t, err)
 
-	added, err := cr.AddSecrets("somefile.txt", false, []string{"group1"})
-	require.NoError(t, err)
-	require.Len(t, added, 1)
-	require.True(t, filepath.IsAbs(added[0]), "returned revealed path must be absolute, got %q", added[0])
-	require.Equal(t, "somefile.txt", filepath.Base(added[0]))
-
+	require.NoError(t, cr.AddSecret("somefile.txt", false, []string{"group1"}))
 	require.NoError(t, cr.Save())
 	require.Equal(t, []string{"existing.txt", "somefile.txt"}, resolvedPaths(t, "sesam.yml"))
 }
@@ -69,4 +64,29 @@ func Test_resolveIncludeSecretsOnly(t *testing.T) {
 	// The included secrets-only sub-file is flattened ahead of the main file's
 	// own secret, in include order.
 	require.Equal(t, []string{"nested.txt", "top.txt"}, paths)
+}
+
+// TestLoad_RejectsSelfInclude: a file that includes itself must be rejected
+// rather than recursing forever.
+func TestLoad_RejectsSelfInclude(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	require.NoError(t, os.WriteFile(main, []byte("secrets:\n  - include: sesam.yml\n"), 0o644))
+
+	_, err := Load(main)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "include loop")
+}
+
+// TestLoad_RejectsIncludeCycle: a cycle across several files (main → a → main)
+// must be detected, so parsing terminates instead of looping endlessly.
+func TestLoad_RejectsIncludeCycle(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	require.NoError(t, os.WriteFile(main, []byte("secrets:\n  - include: a.yml\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.yml"), []byte("secrets:\n  - include: sesam.yml\n"), 0o644))
+
+	_, err := Load(main)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "include loop")
 }

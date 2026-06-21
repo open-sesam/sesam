@@ -11,7 +11,7 @@ import (
 // no valid block representation). Missing users are a no-op — the audit log
 // (via the user manager) is the authority on whether the user exists; Kill only
 // keeps the YAML declaration in sync.
-func (c *ConfigRepository) Kill(name string) error {
+func (c *Config) Kill(name string) error {
 	src := c.MainFile
 
 	if seq, err := usersNode(src.RootNode); err == nil {

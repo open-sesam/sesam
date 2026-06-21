@@ -13,7 +13,7 @@ import (
 
 // HandleListSecrets prints tracked secret metadata.
 func HandleListSecrets(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	secrets, err := r.ListSecrets()
+	secrets, err := r.ListSecrets(cmd.StringArgs("dir"))
 	if err != nil {
 		return err
 	}

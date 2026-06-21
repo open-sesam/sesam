@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -8,8 +9,9 @@ import (
 )
 
 // buildConfig writes a main sesam.yml, touches every given file and adds them
-// via AddSecrets, then saves. It returns the main file path.
-func buildConfig(t *testing.T, ownSesamFile bool, files ...string) (string, string) {
+// one at a time via AddSecret, then saves. It returns the temp dir and the main
+// file path.
+func buildConfig(t *testing.T, nested bool, files ...string) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	main := writeMainFile(t, dir)
@@ -19,40 +21,37 @@ func buildConfig(t *testing.T, ownSesamFile bool, files ...string) (string, stri
 	for _, f := range files {
 		p := filepath.Join(dir, f)
 		touch(t, p)
-		_, err = cr.AddSecrets(p, ownSesamFile, []string{"group1"})
-		require.NoError(t, err)
+		require.NoError(t, cr.AddSecret(p, nested, []string{"group1"}))
 	}
 	require.NoError(t, cr.Save())
 
 	return dir, main
 }
 
-// TestRemoveSecrets_FileFromMain removes a single secret stored in the main
+// TestRemoveSecret_FileFromMain removes a single secret stored in the main
 // file; the rest stay and the plaintext file remains (no purge).
-func TestRemoveSecrets_FileFromMain(t *testing.T) {
+func TestRemoveSecret_FileFromMain(t *testing.T) {
 	dir, main := buildConfig(t, false, "token.txt")
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	_, err = cr.RemoveSecrets(filepath.Join(dir, "token.txt"))
-	require.NoError(t, err)
+	require.NoError(t, cr.RemoveSecret(filepath.Join(dir, "token.txt")))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"existing.txt"}, resolvedPaths(t, main))
 	require.True(t, exists(filepath.Join(dir, "token.txt")), "plaintext is left for the user to delete")
 }
 
-// TestRemoveSecrets_FileFromSubfile removes the only secret in a subdirectory
+// TestRemoveSecret_FileFromSubfile removes the only secret in a subdirectory
 // file: the sub sesam.yml is deleted and its include dropped from main.
-func TestRemoveSecrets_FileFromSubfile(t *testing.T) {
+func TestRemoveSecret_FileFromSubfile(t *testing.T) {
 	dir, main := buildConfig(t, true, "sub/api.key")
 
 	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	_, err = cr.RemoveSecrets(filepath.Join(dir, "sub", "api.key"))
-	require.NoError(t, err)
+	require.NoError(t, cr.RemoveSecret(filepath.Join(dir, "sub", "api.key")))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"existing.txt"}, resolvedPaths(t, main))
@@ -60,57 +59,108 @@ func TestRemoveSecrets_FileFromSubfile(t *testing.T) {
 	require.True(t, exists(filepath.Join(dir, "sub", "api.key")), "plaintext is left for the user to delete")
 }
 
-// TestRemoveSecrets_SubfileKeepsSecret removes one of several secrets in a
+// TestRemoveSecret_SubfileKeepsSecret removes one of several secrets in a
 // subdirectory file; the file (and its include) survive.
-func TestRemoveSecrets_SubfileKeepsSecret(t *testing.T) {
+func TestRemoveSecret_SubfileKeepsSecret(t *testing.T) {
 	dir, main := buildConfig(t, true, "sub/b.txt", "sub/c.txt")
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	_, err = cr.RemoveSecrets(filepath.Join(dir, "sub", "b.txt"))
-	require.NoError(t, err)
+	require.NoError(t, cr.RemoveSecret(filepath.Join(dir, "sub", "b.txt")))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"c.txt", "existing.txt"}, resolvedPaths(t, main))
 	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")), "non-empty sub file kept")
 }
 
-// TestRemoveSecrets_Directory removes a whole subtree, cascading the deletion
-// of nested sesam.yml files up to (but not including) the main file.
-func TestRemoveSecrets_Directory(t *testing.T) {
-	dir, main := buildConfig(t, true, "a.txt", "sub/b.txt", "sub/deep/c.txt")
-
-	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
-	require.True(t, exists(filepath.Join(dir, "sub", "deep", "sesam.yml")))
+// TestRemoveSecret_NotFound errors when nothing matches the path.
+func TestRemoveSecret_NotFound(t *testing.T) {
+	dir, main := buildConfig(t, false)
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	_, err = cr.RemoveSecrets(filepath.Join(dir, "sub"))
+	require.Error(t, cr.RemoveSecret(filepath.Join(dir, "stray.txt")))
+}
+
+// TestRemoveSecret_DoesNotMisattributeComments guards against the comment
+// misattribution that the positional CommentMap used to cause: removing the
+// first secret shifted the surviving one into slot 0, where it inherited the
+// removed secret's head comment.
+//
+// Comments now live on the AST nodes themselves (parser.ParseComments) and are
+// cut out with their node, so the removed secret's comment must not survive on
+// the one that remains.
+func TestRemoveSecret_DoesNotMisattributeComments(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	body := `secrets:
+  # comment-for-alpha
+  - path: alpha.txt
+    access:
+      - group1
+  # comment-for-beta
+  - path: beta.txt
+    access:
+      - group1
+`
+	require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "alpha.txt"), []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "beta.txt"), []byte("x"), 0o644))
+
+	cr, err := Load(main)
 	require.NoError(t, err)
+	require.NoError(t, cr.RemoveSecret(filepath.Join(dir, "alpha.txt")))
 	require.NoError(t, cr.Save())
 
-	require.Equal(t, []string{"a.txt", "existing.txt"}, resolvedPaths(t, main))
-	require.False(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
-	require.False(t, exists(filepath.Join(dir, "sub", "deep", "sesam.yml")))
+	out, err := os.ReadFile(main)
+	require.NoError(t, err)
+
+	// alpha is gone, so its comment must be gone too — it must not have moved
+	// onto beta.
+	require.NotContains(t, string(out), "comment-for-alpha",
+		"removed secret's comment was misattributed to the surviving secret:\n%s", out)
+	// beta and its own comment must survive.
+	require.Contains(t, string(out), "comment-for-beta", "surviving secret's comment was dropped:\n%s", out)
+	require.Contains(t, string(out), "beta.txt")
 }
 
-// TestRemoveSecrets_NotFound errors when nothing matches the path.
-func TestRemoveSecrets_NotFound(t *testing.T) {
-	dir, main := buildConfig(t, false)
-	touch(t, filepath.Join(dir, "stray.txt"))
+// TestRemoveSecret_RemovesCommentWithNode verifies that removing a node in the
+// middle of the sequence takes its head comment with it, while the comments on
+// the surrounding entries stay put.
+func TestRemoveSecret_RemovesCommentWithNode(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	body := `secrets:
+  # comment-alpha
+  - path: alpha.txt
+    access:
+      - group1
+  # comment-beta
+  - path: beta.txt
+    access:
+      - group1
+  # comment-gamma
+  - path: gamma.txt
+    access:
+      - group1
+`
+	require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
+	for _, f := range []string{"alpha.txt", "beta.txt", "gamma.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644))
+	}
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	_, err = cr.RemoveSecrets(filepath.Join(dir, "stray.txt"))
-	require.Error(t, err)
-}
+	require.NoError(t, cr.RemoveSecret(filepath.Join(dir, "beta.txt")))
+	require.NoError(t, cr.Save())
 
-// TestRemoveSecrets_MissingPath surfaces a stat error for a non-existent path.
-func TestRemoveSecrets_MissingPath(t *testing.T) {
-	dir, main := buildConfig(t, false)
-
-	cr, err := Load(main)
+	out, err := os.ReadFile(main)
 	require.NoError(t, err)
-	_, err = cr.RemoveSecrets(filepath.Join(dir, "nope.txt"))
-	require.Error(t, err)
+	got := string(out)
+
+	require.NotContains(t, got, "comment-beta", "removed node's comment must be gone:\n%s", got)
+	require.NotContains(t, got, "beta.txt")
+	// Neighbours and their comments survive.
+	require.Contains(t, got, "comment-alpha")
+	require.Contains(t, got, "comment-gamma")
 }

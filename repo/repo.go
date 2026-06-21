@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -55,7 +56,7 @@ type Repo struct {
 	secret   *core.SecretManager
 	user     *core.UserManager
 
-	configRepo *sesamConf.ConfigRepository
+	configRepo *sesamConf.Config
 	mu         sync.Mutex
 }
 
@@ -311,10 +312,6 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 
 	opts.PrintStep("Making sure the rains come down in Africa…")
-	if err := ensureTmpKeepFile(resolvedDir); err != nil {
-		return nil, err
-	}
-
 	if err := r.secret.SealAll(); err != nil {
 		return nil, err
 	}
@@ -404,7 +401,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	return r, nil
 }
 
-func newRepo(sesamDir string, configRepo *sesamConf.ConfigRepository, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
+func newRepo(sesamDir string, configRepo *sesamConf.Config, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
 	// TODO:
 	sesamDirAbs, _ := filepath.Abs(sesamDir)
 	return &Repo{
@@ -470,7 +467,7 @@ func (r *Repo) ListUsers() ([]core.VerifiedUser, error) {
 }
 
 // ListSecrets returns a list of secrets currently managed by sesam.
-func (r *Repo) ListSecrets() ([]core.VerifiedSecret, error) {
+func (r *Repo) ListSecrets(paths []string) ([]core.VerifiedSecret, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -478,7 +475,18 @@ func (r *Repo) ListSecrets() ([]core.VerifiedSecret, error) {
 		return nil, ErrClosed
 	}
 
-	return append([]core.VerifiedSecret(nil), r.vstate.Secrets...), nil
+	if len(paths) == 0 {
+		// easy path, just clone all secrets:
+		return append([]core.VerifiedSecret(nil), r.vstate.Secrets...), nil
+	}
+
+	// filter a bit:
+	var out []core.VerifiedSecret
+	for _, path := range paths {
+		out = append(out, r.secretsUnder(r.toAbs(path))...)
+	}
+
+	return out, nil
 }
 
 // RevealAll will reveal all secrets.
@@ -648,21 +656,13 @@ func (r *Repo) toRevealed(abs string) (string, error) {
 
 // SecretAdd adds the secret(s) at each path to the secrets known by sesam. A
 // path can be a single file, several files, or a directory (added recursively).
-// When nested is set, subdirectories get their own sesam.yml chained via
-// includes; otherwise everything is flattened into the main file.
+// When nested is set, subdirectories get their own sesam.yml included from the
+// main file; otherwise everything is flattened into the main file.
 //
-// The config layer owns the directory expansion and layout decisions and
-// reports back the concrete secret files that were newly added; each of those
-// is mirrored into the secret manager.
+// Re-adding files will change their groups accordingly.
 func (r *Repo) SecretAdd(revealedPaths, groups []string, nested bool) error {
 	if len(revealedPaths) == 0 {
 		return fmt.Errorf("missing secret path: pass at least one path")
-	}
-
-	for _, revealedPath := range revealedPaths {
-		if err := core.IsForbiddenPath(r.sesamDir, revealedPath); err != nil {
-			return err
-		}
 	}
 
 	r.mu.Lock()
@@ -675,33 +675,113 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string, nested bool) error {
 	// TODO: When being outside the repo something like repo/secret.txt should also work as path.
 	//       Same when being in a sub-dir and doing "add ../secret.txt" We should resolve that here.
 	//       We should only care it is inside of the sesam dir.
-	// TODO: When walking "." then we should skip .sesam and .git
-	// TODO: Since secrets get skipped if they are already added (to avoid duplication), changing the
-	// groups of a secret and therefore creating a 'change_access' event does not work currently
-	var added []string
+	var files []string
 	for _, p := range revealedPaths {
-		abs := r.toAbs(p)
-		// TODO: refactor the directory traversal to happen in the repo. AST surgery should be for every single
-		// secret then. (includes also)
-		paths, err := r.configRepo.AddSecrets(abs, nested, groups)
+		expanded, err := r.expandSecretFiles(r.toAbs(p))
 		if err != nil {
-			return fmt.Errorf("failed to add secret %q to config: %w", p, err)
+			return fmt.Errorf("failed to expand %q: %w", p, err)
 		}
-		added = append(added, paths...)
+		files = append(files, expanded...)
 	}
 
-	// 2. Mirror every newly added file into the secret manager.
-	for _, abs := range added {
+	for _, abs := range files {
 		rel, err := r.toRevealed(abs)
 		if err != nil {
 			return err
 		}
+
+		if err := core.IsForbiddenPath(r.sesamDir, rel); err != nil {
+			return err
+		}
+
+		// Config and the secret manager each self-decide add vs. change.
+		if err := r.configRepo.AddSecret(abs, nested, groups); err != nil {
+			return fmt.Errorf("failed to add secret %q to config: %w", rel, err)
+		}
+
 		if err := r.secret.AddSecret(rel, groups); err != nil {
 			return fmt.Errorf("failed to add secret %q: %w", rel, err)
 		}
 	}
 
 	return r.configRepo.Save()
+}
+
+// expandSecretFiles resolves abs into the concrete regular files it represents.
+// A regular file yields itself; a directory is walked recursively. Only the
+// .git and .sesam metadata directories are skipped — other dotfiles (e.g.
+// .env) are valid secrets, matching core.IsForbiddenPath. Non-regular entries
+// (symlinks, sockets, devices, …) and sesam.yml are ignored. Returned paths are
+// absolute and cleaned.
+func (r *Repo) expandSecretFiles(abs string) ([]string, error) {
+	info, err := os.Stat(abs)
+	if err != nil {
+		return nil, err
+	}
+
+	if !info.IsDir() {
+		return []string{filepath.Clean(abs)}, nil
+	}
+
+	var files []string
+	err = filepath.WalkDir(abs, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			if name := d.Name(); name == gitSuffix || name == sesamSuffix {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
+		// Only regular files can become secrets; skip symlinks, sockets,
+		// devices, fifos and the config files themselves.
+		if !d.Type().IsRegular() || d.Name() == "sesam.yml" {
+			return nil
+		}
+
+		files = append(files, filepath.Clean(p))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
+// secretsUnder returns every managed secret located at abs or beneath it,
+// enumerated from the verified state rather than the filesystem. This makes
+// remove/move work even when the plaintext is not currently revealed on disk.
+// The result is sorted by revealed path.
+func (r *Repo) secretsUnder(abs string) []core.VerifiedSecret {
+	target := filepath.Clean(abs)
+
+	var out []core.VerifiedSecret
+	for _, s := range r.vstate.Secrets {
+		secretAbs := filepath.Join(r.sesamDir, s.RevealedPath)
+		if secretAbs == target || isUnder(target, secretAbs) {
+			out = append(out, s)
+		}
+	}
+
+	slices.SortFunc(out, func(a, b core.VerifiedSecret) int {
+		return strings.Compare(a.RevealedPath, b.RevealedPath)
+	})
+
+	return out
+}
+
+// isUnder reports whether path lives at or beneath dir.
+func isUnder(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // SecretRemove stops tracking the secret(s) at each path. A path can be a
@@ -720,23 +800,22 @@ func (r *Repo) SecretRemove(revealedPaths []string) error {
 		return ErrClosed
 	}
 
-	var removed []string
 	for _, p := range revealedPaths {
-		abs := r.toAbs(p)
-		paths, err := r.configRepo.RemoveSecrets(abs)
-		if err != nil {
-			return fmt.Errorf("failed to remove secret %q from config: %w", p, err)
+		targets := r.secretsUnder(r.toAbs(p))
+		if len(targets) == 0 {
+			return fmt.Errorf("no secrets found for %q", p)
 		}
-		removed = append(removed, paths...)
-	}
 
-	for _, abs := range removed {
-		rel, err := r.toRevealed(abs)
-		if err != nil {
-			return err
-		}
-		if err := r.secret.RemoveSecret(rel); err != nil {
-			return fmt.Errorf("failed to remove secret %q: %w", rel, err)
+		for _, secret := range targets {
+			rel := secret.RevealedPath
+			abs := filepath.Join(r.sesamDir, rel)
+			if err := r.configRepo.RemoveSecret(abs); err != nil {
+				return fmt.Errorf("failed to remove secret %q from config: %w", rel, err)
+			}
+
+			if err := r.secret.RemoveSecret(rel); err != nil {
+				return fmt.Errorf("failed to remove secret %q: %w", rel, err)
+			}
 		}
 	}
 
@@ -857,6 +936,10 @@ func (r *Repo) Log(fn func(e *core.AuditEntrySigned) error) error {
 	return nil
 }
 
+// MoveSecret relocates the secret(s) at oldRevealedPath to newRevealedPath. A
+// single secret is renamed directly; a directory moves every secret beneath it,
+// preserving each one's path relative to the source root. Both the audit log
+// (secret manager) and the config files are kept in sync.
 func (r *Repo) MoveSecret(oldRevealedPath, newRevealedPath string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -865,7 +948,46 @@ func (r *Repo) MoveSecret(oldRevealedPath, newRevealedPath string) error {
 		return ErrClosed
 	}
 
-	return r.secret.MoveSecret(oldRevealedPath, newRevealedPath)
+	oldAbs := r.toAbs(oldRevealedPath)
+	newAbs := r.toAbs(newRevealedPath)
+
+	targets := r.secretsUnder(oldAbs)
+	if len(targets) == 0 {
+		return fmt.Errorf("no secrets found for %q", oldRevealedPath)
+	}
+
+	for _, secret := range targets {
+		oldRel := secret.RevealedPath
+		// Map each secret under the source onto the destination, preserving its
+		// path relative to the source root (the source itself maps directly).
+		oldSecretAbs := filepath.Join(r.sesamDir, oldRel)
+		sub, err := filepath.Rel(oldAbs, oldSecretAbs)
+		if err != nil {
+			return err
+		}
+
+		newSecretAbs := newAbs
+		if sub != "." {
+			newSecretAbs = filepath.Join(newAbs, sub)
+		}
+
+		newRel, err := r.toRevealed(newSecretAbs)
+		if err != nil {
+			return err
+		}
+
+		if err := r.secret.MoveSecret(oldRel, newRel); err != nil {
+			return fmt.Errorf("failed to move secret %q: %w", oldRel, err)
+		}
+
+		// TODO: preserve nested layout on move (derive from the source's owning
+		// file); for now the moved secret lands in the main file.
+		if err := r.configRepo.MoveSecret(oldSecretAbs, newSecretAbs, false); err != nil {
+			return fmt.Errorf("failed to move secret %q in config: %w", oldRel, err)
+		}
+	}
+
+	return r.configRepo.Save()
 }
 
 func (r *Repo) RenameUser(oldName, newName string) error {

@@ -132,7 +132,7 @@ func TestRepo_ListUsersAndSecrets_AfterInit(t *testing.T) {
 	require.Equal(t, "admin", users[0].Name)
 	require.Contains(t, users[0].Groups, "admin")
 
-	secrets, err := r.ListSecrets()
+	secrets, err := r.ListSecrets(nil)
 	require.NoError(t, err)
 	require.Len(t, secrets, 1, "init seeds the README.md secret")
 	require.Equal(t, "README.md", secrets[0].RevealedPath)
@@ -201,7 +201,7 @@ func TestRepo_SecretAddRemove_RoundTrip(t *testing.T) {
 
 	require.NoError(t, r.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}, false))
 
-	secrets, err := r.ListSecrets()
+	secrets, err := r.ListSecrets(nil)
 	require.NoError(t, err)
 	require.Len(t, secrets, 2, "README.md (from init) + the newly added secret")
 
@@ -212,7 +212,7 @@ func TestRepo_SecretAddRemove_RoundTrip(t *testing.T) {
 	require.Contains(t, paths, "secrets/api.token")
 
 	require.NoError(t, r.SecretRemove([]string{"secrets/api.token"}))
-	secrets, err = r.ListSecrets()
+	secrets, err = r.ListSecrets(nil)
 	require.NoError(t, err)
 	require.Len(t, secrets, 1, "only README.md remains")
 	require.Equal(t, "README.md", secrets[0].RevealedPath)

@@ -1,7 +1,5 @@
-# $schema: https://raw.githubusercontent.com/open-sesam/sesam/refs/heads/feat/yaml-parsing/config/sesam_schema.json
-#
-# TODO: Change to main branch once merged.
-# https://github.com/redhat-developer/yaml-language-server#using-modeline
+# $schema: https://raw.githubusercontent.com/open-sesam/sesam/refs/heads/main/config/sesam_schema.json
+# See: https://github.com/redhat-developer/yaml-language-server#using-modeline
 users:
   - name: [[ yaml .InitialUser ]]
     desc: default admin user

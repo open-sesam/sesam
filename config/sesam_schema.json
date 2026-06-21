@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/open-sesam/sesam/recipients_schema.json",
+  "$id": "https://github.com/open-sesam/sesam/",
   "title": "Sesam Schema",
   "description": "Sesam's config file (containing user/groups and secret definitions)",
   "$defs": {
