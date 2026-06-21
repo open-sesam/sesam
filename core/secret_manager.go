@@ -95,13 +95,13 @@ func (sm *SecretManager) TmpDir() string {
 	return sm.tmpDir()
 }
 
-// AddSecret adds a new secret to be managed by sesam
-func (sm *SecretManager) AddSecret(revealedPath string, groups []string) error {
+// SecretAdd adds a new secret to be managed by sesam
+func (sm *SecretManager) SecretAdd(revealedPath string, groups []string) error {
 	return sm.addOrChangeSecret(revealedPath, groups)
 }
 
-// ChangeSecretGroups changes the access groups for the secret at `revealedPath`.
-func (sm *SecretManager) ChangeSecretGroups(revealedPath string, groups []string) error {
+// SecretChangeGroups changes the access groups for the secret at `revealedPath`.
+func (sm *SecretManager) SecretChangeGroups(revealedPath string, groups []string) error {
 	return sm.addOrChangeSecret(revealedPath, groups)
 }
 
@@ -292,9 +292,9 @@ func (sm *SecretManager) RevealAll() error {
 	return nil
 }
 
-// RemoveSecret removes a secret from sesam's management.
+// SecretRemove removes a secret from sesam's management.
 // The encrypted files (+associated) are deleted, but the original file is not touched.
-func (sm *SecretManager) RemoveSecret(revealedPath string) error {
+func (sm *SecretManager) SecretRemove(revealedPath string) error {
 	if _, exists := sm.State.SecretExists(revealedPath); !exists {
 		return fmt.Errorf("no such secret")
 	}
@@ -311,7 +311,7 @@ func (sm *SecretManager) RemoveSecret(revealedPath string) error {
 	return os.RemoveAll(sm.cryptPath(revealedPath))
 }
 
-func (sm *SecretManager) MoveSecret(oldRevealedPath, newRevealedPath string) error {
+func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) error {
 	if _, exists := sm.State.SecretExists(oldRevealedPath); !exists {
 		return fmt.Errorf("failed to move non-existing secret: %s", oldRevealedPath)
 	}

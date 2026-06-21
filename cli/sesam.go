@@ -171,6 +171,13 @@ func Main(args []string) error {
 				Flags:    flagsListSecrets,
 				Action:   commands.WithRepo(commands.HandleListSecrets),
 				Usage:    "List known secrets and metadata",
+				Arguments: []cli.Argument{
+					&cli.StringArgs{
+						Name:      "dir",
+						UsageText: "Only show secrets in specific dirs",
+						Max:       255, // apparently we have to set max to something here...
+					},
+				},
 			},
 			{
 				Name:     "rotate",

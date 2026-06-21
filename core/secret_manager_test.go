@@ -16,7 +16,7 @@ func TestBuildSecretManager(t *testing.T) {
 	require.Len(t, mgr.State.Secrets, 1)
 }
 
-func TestAddSecret(t *testing.T) {
+func TestSecretAdd(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	writeSecret(t, mgr.SesamDir, "secrets/new", "new-content")
 
@@ -29,25 +29,25 @@ func TestAddSecret(t *testing.T) {
 	require.NoError(t, os.Chdir(dir))
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	require.NoError(t, mgr.AddSecret("secrets/new", []string{"admin"}))
+	require.NoError(t, mgr.SecretAdd("secrets/new", []string{"admin"}))
 	require.Len(t, mgr.State.Secrets, 2)
 
 	_, exists := mgr.State.SecretExists("secrets/new")
 	require.True(t, exists)
 }
 
-func TestAddSecretDuplicate(t *testing.T) {
+func TestSecretAddDuplicate(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
 	// Adding the same path again should update recipients, not add a second entry.
-	require.NoError(t, mgr.AddSecret("secrets/test", []string{"admin"}))
+	require.NoError(t, mgr.SecretAdd("secrets/test", []string{"admin"}))
 	require.Len(t, mgr.State.Secrets, 1, "should not duplicate the secret in the verified state")
 }
 
-func TestChangeSecretGroups(t *testing.T) {
+func TestSecretChangeGroups(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
-	require.NoError(t, mgr.ChangeSecretGroups("secrets/test", []string{"admin", "dev"}))
+	require.NoError(t, mgr.SecretChangeGroups("secrets/test", []string{"admin", "dev"}))
 	require.Len(t, mgr.State.Secrets, 1, "should still be one secret")
 
 	vs, exists := mgr.State.SecretExists("secrets/test")
@@ -57,22 +57,22 @@ func TestChangeSecretGroups(t *testing.T) {
 
 // The admin group is implicit: even when it is not passed it must remain on
 // the access list, otherwise admins could lock themselves out of a secret.
-func TestChangeSecretGroupsKeepsAdminImplicit(t *testing.T) {
+func TestSecretChangeGroupsKeepsAdminImplicit(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
-	require.NoError(t, mgr.ChangeSecretGroups("secrets/test", []string{"dev"}))
+	require.NoError(t, mgr.SecretChangeGroups("secrets/test", []string{"dev"}))
 
 	vs, exists := mgr.State.SecretExists("secrets/test")
 	require.True(t, exists)
 	require.ElementsMatch(t, []string{"dev", "admin"}, vs.AccessGroups)
 }
 
-func TestChangeSecretGroupsNonExistent(t *testing.T) {
+func TestSecretChangeGroupsNonExistent(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
 	// No plaintext on disk and not tracked in state: path validation rejects
 	// it before any audit entry is written.
-	err := mgr.ChangeSecretGroups("secrets/nope", []string{"dev"})
+	err := mgr.SecretChangeGroups("secrets/nope", []string{"dev"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid secret path")
 }
@@ -80,7 +80,7 @@ func TestChangeSecretGroupsNonExistent(t *testing.T) {
 // A user without access to a secret must not be able to change its access
 // list - otherwise anyone in the audit log could grant themselves access to
 // a secret they were never allowed to read.
-func TestChangeSecretGroupsUnauthorized(t *testing.T) {
+func TestSecretChangeGroupsUnauthorized(t *testing.T) {
 	mgr := sealedSecretManager(t) // admin manager, secrets/test is admin-only
 
 	bob := newTestUser(t, "bob")
@@ -98,7 +98,7 @@ func TestChangeSecretGroupsUnauthorized(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	err = bobMgr.ChangeSecretGroups("secrets/test", []string{"dev"})
+	err = bobMgr.SecretChangeGroups("secrets/test", []string{"dev"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no access")
 
@@ -108,12 +108,12 @@ func TestChangeSecretGroupsUnauthorized(t *testing.T) {
 	require.Equal(t, []string{"admin"}, vs.AccessGroups)
 }
 
-func TestAddSecretEmptyGroups(t *testing.T) {
+func TestSecretAddEmptyGroups(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	writeSecret(t, mgr.SesamDir, "secrets/onlyadmin", "data")
 
 	// Empty groups is valid and means "admin only" - it must not be rejected.
-	require.NoError(t, mgr.AddSecret("secrets/onlyadmin", []string{}))
+	require.NoError(t, mgr.SecretAdd("secrets/onlyadmin", []string{}))
 
 	vs, exists := mgr.State.SecretExists("secrets/onlyadmin")
 	require.True(t, exists)
@@ -166,13 +166,13 @@ func sealedSecretManager(t *testing.T) *SecretManager {
 	return mgr
 }
 
-func TestRemoveSecret(t *testing.T) {
+func TestSecretRemove(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
 	sesamPath := mgr.cryptPath("secrets/test")
 	require.FileExists(t, sesamPath)
 
-	require.NoError(t, mgr.RemoveSecret("secrets/test"))
+	require.NoError(t, mgr.SecretRemove("secrets/test"))
 
 	// Encrypted file should be gone.
 	require.NoFileExists(t, sesamPath)
@@ -187,30 +187,30 @@ func TestRemoveSecret(t *testing.T) {
 	require.Equal(t, "secret-content", string(plaintext))
 }
 
-func TestRemoveSecretNotFound(t *testing.T) {
+func TestSecretRemoveNotFound(t *testing.T) {
 	mgr := testSecretManagerFull(t)
-	err := mgr.RemoveSecret("secrets/nonexistent")
+	err := mgr.SecretRemove("secrets/nonexistent")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no such secret")
 }
 
-func TestRemoveSecretNotSealed(t *testing.T) {
+func TestSecretRemoveNotSealed(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 
 	// Secret is in the manager's list but was never sealed - no .sesam file on disk.
 	// RemoveAll is used internally, so missing files are not an error.
 	// The audit entry should still be recorded.
-	require.NoError(t, mgr.RemoveSecret("secrets/test"))
+	require.NoError(t, mgr.SecretRemove("secrets/test"))
 	_, exists := mgr.State.SecretExists("secrets/test")
 	require.False(t, exists, "secret should be removed from verified state")
 }
 
-// Regression: RemoveSecret must call FeedEntry before touching the .sesam file.
+// Regression: SecretRemove must call FeedEntry before touching the .sesam file.
 // If the audit entry is rejected (caller lacks access), the encrypted file
 // must survive - otherwise any authenticated user could corrupt the repo
 // (audit log still lists the secret while its ciphertext is gone, breaking
 // Verify / VerifyIntegrity for everyone).
-func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
+func TestSecretRemoveKeepsFilesOnAuthFailure(t *testing.T) {
 	mgr := sealedSecretManager(t) // admin manager with secrets/test sealed for "admin"
 
 	sesamPath := mgr.cryptPath("secrets/test")
@@ -233,17 +233,17 @@ func TestRemoveSecretKeepsFilesOnAuthFailure(t *testing.T) {
 
 	// Bob has no access to the admin-only secret. FeedEntry must reject,
 	// and the on-disk files must NOT be deleted.
-	require.Error(t, bobMgr.RemoveSecret("secrets/test"))
+	require.Error(t, bobMgr.SecretRemove("secrets/test"))
 
 	require.FileExists(t, sesamPath, "ciphertext must survive rejected remove")
 	_, exists := mgr.State.SecretExists("secrets/test")
 	require.True(t, exists, "secret must remain in verified state")
 }
 
-func TestMoveSecret(t *testing.T) {
+func TestSecretMove(t *testing.T) {
 	mgr := sealedSecretManager(t) // secrets/test sealed for admin, plaintext on disk
 
-	require.NoError(t, mgr.MoveSecret("secrets/test", "secrets/moved"))
+	require.NoError(t, mgr.SecretMove("secrets/test", "secrets/moved"))
 
 	// The encrypted object moved.
 	require.NoFileExists(t, mgr.cryptPath("secrets/test"))
@@ -276,25 +276,25 @@ func TestMoveSecret(t *testing.T) {
 	require.Equal(t, "secret-content", string(revealed))
 }
 
-func TestMoveSecretNotFound(t *testing.T) {
+func TestSecretMoveNotFound(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
-	err := mgr.MoveSecret("secrets/nonexistent", "secrets/moved")
+	err := mgr.SecretMove("secrets/nonexistent", "secrets/moved")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "non-existing secret")
 }
 
-// The secret is sealed on disk but its plaintext is not revealed. MoveSecret
+// The secret is sealed on disk but its plaintext is not revealed. SecretMove
 // must reveal it (from the old ciphertext, while the old path is still
 // authorized) before rewriting the footer for the new path. Regression guard
 // for the reveal-after-rename ordering.
-func TestMoveSecretNotYetRevealed(t *testing.T) {
+func TestSecretMoveNotYetRevealed(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
 	// Drop the plaintext so the move has to reveal it first.
 	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/test")))
 
-	require.NoError(t, mgr.MoveSecret("secrets/test", "secrets/moved"))
+	require.NoError(t, mgr.SecretMove("secrets/test", "secrets/moved"))
 
 	require.NoFileExists(t, mgr.cryptPath("secrets/test"))
 	require.FileExists(t, mgr.cryptPath("secrets/moved"))
@@ -339,7 +339,7 @@ func TestRevealSurvivesSealerRename(t *testing.T) {
 	// leaves the on-disk footer untouched (still sealed_by=admin).
 	um, err := BuildUserManager(mgr.SesamDir, mgr.Signer, mgr.AuditLog, mgr.State, mgr)
 	require.NoError(t, err)
-	require.NoError(t, um.RenameUser("admin", "root"))
+	require.NoError(t, um.UserRename("admin", "root"))
 
 	require.Len(t, mgr.Keyring.Recipients([]string{"root"}), 1)
 	require.Empty(t, mgr.Keyring.Recipients([]string{"admin"}),
@@ -492,15 +492,15 @@ func TestRevealBlobAuthMismatchLandsPlaintext(t *testing.T) {
 	require.Equal(t, "bob's substituted payload", string(got))
 }
 
-func TestRemoveSecretThenSealAll(t *testing.T) {
+func TestSecretRemoveThenSealAll(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
 	// Add a second secret so SealAll still has work to do.
 	writeSecret(t, mgr.SesamDir, "secrets/other", "other-content")
-	require.NoError(t, mgr.AddSecret("secrets/other", []string{"admin"}))
+	require.NoError(t, mgr.SecretAdd("secrets/other", []string{"admin"}))
 	require.NoError(t, mgr.SealAll())
 
-	require.NoError(t, mgr.RemoveSecret("secrets/test"))
+	require.NoError(t, mgr.SecretRemove("secrets/test"))
 
 	// SealAll after removal should only seal the remaining secret.
 	writeSecret(t, mgr.SesamDir, "secrets/other", "other-content")
@@ -603,7 +603,7 @@ func TestSealAllFailureLeavesObjectsUntouched(t *testing.T) {
 	// abort the whole transaction. The live secrets/test ciphertext
 	// must remain byte-identical.
 	writeSecret(t, mgr.SesamDir, "secrets/missing", "x")
-	require.NoError(t, mgr.AddSecret("secrets/missing", []string{"admin"}))
+	require.NoError(t, mgr.SecretAdd("secrets/missing", []string{"admin"}))
 	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/missing")))
 
 	err = mgr.SealAll()

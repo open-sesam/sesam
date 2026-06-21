@@ -115,7 +115,7 @@ func initAuditLog(t testing.TB, sesamDir string, admin *testUser) *AuditLog {
 
 	// Real init (InitAdminUser) writes the admin's signing key to disk via
 	// GenerateSignKey; mirror that so on-disk fixtures match production and
-	// operations like RenameUser (which moves the key file) can find it.
+	// operations like UserRename (which moves the key file) can find it.
 	persistSignKey(t, sesamDir, admin)
 
 	return al
