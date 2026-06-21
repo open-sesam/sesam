@@ -43,7 +43,7 @@ func setSecretAccess(node *ast.MappingNode, access []string) error {
 	if mv := findMappingValue(node, "access"); mv != nil {
 		newSeq, err := marshalSeq(access)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to build access list: %w", err)
 		}
 
 		return mv.Replace(newSeq)
@@ -52,7 +52,7 @@ func setSecretAccess(node *ast.MappingNode, access []string) error {
 	// Secret had no access: key yet — add the whole key/value pair.
 	m, err := marshalMapping(map[string][]string{"access": access})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to build access list: %w", err)
 	}
 
 	node.Merge(m)

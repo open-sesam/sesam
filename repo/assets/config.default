@@ -7,7 +7,7 @@ users:
     # Decryption is only possible when you possess the fitting private key.
     #
     # You can specify the key either...
-    # - ...literally (as ssh key)
+    # - ...literally (as public age or ssh key)
     # - ...as forge id
     # - ...as link
     # - ...as local path (can be used for larger keys)

@@ -55,7 +55,7 @@ func (c *Config) placeSecret(abs string, nested bool, sec Secret) error {
 		sesamPath := filepath.Join(fileDir, "sesam.yml")
 		s, err := c.loadOrCreate(sesamPath)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to load sub-config %q: %w", sesamPath, err)
 		}
 
 		if err := c.includeFromMain(sesamPath); err != nil {
@@ -67,7 +67,7 @@ func (c *Config) placeSecret(abs string, nested bool, sec Secret) error {
 
 	rel, err := filepath.Rel(filepath.Dir(src.Path), abs)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to locate %q under %q: %w", abs, filepath.Dir(src.Path), err)
 	}
 
 	sec.Path = rel
@@ -79,14 +79,17 @@ func (c *Config) placeSecret(abs string, nested bool, sec Secret) error {
 func (c *Config) includeFromMain(sesamPath string) error {
 	incPath, err := filepath.Rel(filepath.Dir(c.MainFile.Path), sesamPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to relativize include %q: %w", sesamPath, err)
 	}
 
 	if slices.Contains(fileIncludes(c.MainFile.RootNode), incPath) {
 		return nil
 	}
 
-	return c.appendInclude(c.MainFile, incPath)
+	if err := c.appendInclude(c.MainFile, incPath); err != nil {
+		return fmt.Errorf("failed to add include %q: %w", incPath, err)
+	}
+	return nil
 }
 
 // loadOrCreate returns the FileSource for `path`, loading it (and every file it
