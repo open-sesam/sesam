@@ -307,7 +307,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, err
 	}
 
-	if err := r.secret.AddSecret("README.md", []string{"admin"}); err != nil {
+	if err := r.secret.SecretAdd("README.md", []string{"admin"}); err != nil {
 		return nil, fmt.Errorf("failed to bootstrap readme secret: %w", err)
 	}
 
@@ -604,11 +604,11 @@ func (r *Repo) UserTell(ctx context.Context, user string, recipients, groups []s
 		return ErrClosed
 	}
 
-	if err := r.user.TellUser(ctx, user, recipients, groups); err != nil {
+	if err := r.user.UserTell(ctx, user, recipients, groups); err != nil {
 		return fmt.Errorf("failed to add user: %w", err)
 	}
 
-	if err := r.configRepo.Tell(user, recipients, groups); err != nil {
+	if err := r.configRepo.UserTell(user, recipients, groups); err != nil {
 		return fmt.Errorf("failed to add user %q to config: %w", user, err)
 	}
 	return r.configRepo.Save()
@@ -624,11 +624,11 @@ func (r *Repo) UserKill(user string) error {
 		return ErrClosed
 	}
 
-	if err := r.user.KillUsers(user); err != nil {
+	if err := r.user.UserKill(user); err != nil {
 		return fmt.Errorf("failed to remove user: %w", err)
 	}
 
-	if err := r.configRepo.Kill(user); err != nil {
+	if err := r.configRepo.UserKill(user); err != nil {
 		return fmt.Errorf("failed to remove user %q from config: %w", user, err)
 	}
 	return r.configRepo.Save()
@@ -695,11 +695,11 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string, nested bool) error {
 		}
 
 		// Config and the secret manager each self-decide add vs. change.
-		if err := r.configRepo.AddSecret(abs, nested, groups); err != nil {
+		if err := r.configRepo.SecretAdd(abs, nested, groups); err != nil {
 			return fmt.Errorf("failed to add secret %q to config: %w", rel, err)
 		}
 
-		if err := r.secret.AddSecret(rel, groups); err != nil {
+		if err := r.secret.SecretAdd(rel, groups); err != nil {
 			return fmt.Errorf("failed to add secret %q: %w", rel, err)
 		}
 	}
@@ -809,11 +809,11 @@ func (r *Repo) SecretRemove(revealedPaths []string) error {
 		for _, secret := range targets {
 			rel := secret.RevealedPath
 			abs := filepath.Join(r.sesamDir, rel)
-			if err := r.configRepo.RemoveSecret(abs); err != nil {
+			if err := r.configRepo.SecretRemove(abs); err != nil {
 				return fmt.Errorf("failed to remove secret %q from config: %w", rel, err)
 			}
 
-			if err := r.secret.RemoveSecret(rel); err != nil {
+			if err := r.secret.SecretRemove(rel); err != nil {
 				return fmt.Errorf("failed to remove secret %q: %w", rel, err)
 			}
 		}
@@ -936,11 +936,11 @@ func (r *Repo) Log(fn func(e *core.AuditEntrySigned) error) error {
 	return nil
 }
 
-// MoveSecret relocates the secret(s) at oldRevealedPath to newRevealedPath. A
+// SecretMove relocates the secret(s) at oldRevealedPath to newRevealedPath. A
 // single secret is renamed directly; a directory moves every secret beneath it,
 // preserving each one's path relative to the source root. Both the audit log
 // (secret manager) and the config files are kept in sync.
-func (r *Repo) MoveSecret(oldRevealedPath, newRevealedPath string) error {
+func (r *Repo) SecretMove(oldRevealedPath, newRevealedPath string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -976,13 +976,13 @@ func (r *Repo) MoveSecret(oldRevealedPath, newRevealedPath string) error {
 			return err
 		}
 
-		if err := r.secret.MoveSecret(oldRel, newRel); err != nil {
+		if err := r.secret.SecretMove(oldRel, newRel); err != nil {
 			return fmt.Errorf("failed to move secret %q: %w", oldRel, err)
 		}
 
 		// TODO: preserve nested layout on move (derive from the source's owning
 		// file); for now the moved secret lands in the main file.
-		if err := r.configRepo.MoveSecret(oldSecretAbs, newSecretAbs, false); err != nil {
+		if err := r.configRepo.SecretMove(oldSecretAbs, newSecretAbs, false); err != nil {
 			return fmt.Errorf("failed to move secret %q in config: %w", oldRel, err)
 		}
 	}
@@ -990,7 +990,7 @@ func (r *Repo) MoveSecret(oldRevealedPath, newRevealedPath string) error {
 	return r.configRepo.Save()
 }
 
-func (r *Repo) RenameUser(oldName, newName string) error {
+func (r *Repo) UserRename(oldName, newName string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -998,7 +998,7 @@ func (r *Repo) RenameUser(oldName, newName string) error {
 		return ErrClosed
 	}
 
-	return r.user.RenameUser(oldName, newName)
+	return r.user.UserRename(oldName, newName)
 }
 
 func (r *Repo) UserChangeGroups(user string, groups []string) error {

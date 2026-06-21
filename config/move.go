@@ -5,14 +5,14 @@ import (
 	"path/filepath"
 )
 
-// MoveSecret relocates a single tracked secret from oldPath to newPath,
+// SecretMove relocates a single tracked secret from oldPath to newPath,
 // preserving its access groups and any other metadata. nested controls the
-// layout of the secret at its destination, exactly as in AddSecret.
+// layout of the secret at its destination, exactly as in SecretAdd.
 //
 // The old entry is cut from its owning file (emptied subdirectory files are
 // pruned) and a fresh entry is placed for the new location. Directory
-// expansion is the caller's job — MoveSecret only ever touches one secret.
-func (c *Config) MoveSecret(oldPath, newPath string, nested bool) error {
+// expansion is the caller's job — SecretMove only ever touches one secret.
+func (c *Config) SecretMove(oldPath, newPath string, nested bool) error {
 	oldAbs, err := filepath.Abs(oldPath)
 	if err != nil {
 		return fmt.Errorf("failed to resolve secret path %q: %w", oldPath, err)

@@ -53,13 +53,13 @@ func loadUsersGroups(t *testing.T, main string) ([]string, map[string][]string) 
 
 // TestTell_AddsUserAndGroups adds a user, joining an existing group and a new
 // one. Existing entries are preserved, not duplicated.
-func TestTell_AddsUserAndGroups(t *testing.T) {
+func TestUserTell_AddsUserAndGroups(t *testing.T) {
 	dir := t.TempDir()
 	main := writeUserMain(t, dir)
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.Tell("bob", []string{"keyB"}, []string{"admin", "dev"}))
+	require.NoError(t, cr.UserTell("bob", []string{"keyB"}, []string{"admin", "dev"}))
 	require.NoError(t, cr.Save())
 
 	names, groups := loadUsersGroups(t, main)
@@ -71,13 +71,13 @@ func TestTell_AddsUserAndGroups(t *testing.T) {
 // TestTell_NoDuplicateOnResave verifies that loading and saving again (without
 // any change) does not duplicate the existing users or group members — the
 // origin-node tracking is what prevents re-appending.
-func TestTell_NoDuplicateOnResave(t *testing.T) {
+func TestUserTell_NoDuplicateOnResave(t *testing.T) {
 	dir := t.TempDir()
 	main := writeUserMain(t, dir)
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.Tell("bob", []string{"keyB"}, []string{"admin"}))
+	require.NoError(t, cr.UserTell("bob", []string{"keyB"}, []string{"admin"}))
 	require.NoError(t, cr.Save())
 
 	// Reload and save again with no changes.
@@ -91,18 +91,18 @@ func TestTell_NoDuplicateOnResave(t *testing.T) {
 }
 
 // TestTell_DuplicateUserErrors rejects adding a user that already exists.
-func TestTell_DuplicateUserErrors(t *testing.T) {
+func TestUserTell_DuplicateUserErrors(t *testing.T) {
 	dir := t.TempDir()
 	main := writeUserMain(t, dir)
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.Error(t, cr.Tell("axolotl", []string{"keyX"}, []string{"admin"}))
+	require.Error(t, cr.UserTell("axolotl", []string{"keyX"}, []string{"admin"}))
 }
 
 // TestTell_CreatesUsersAndGroups handles a main file that has no users: or
 // groups: section yet — both are created.
-func TestTell_CreatesUsersAndGroups(t *testing.T) {
+func TestUserTell_CreatesUsersAndGroups(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sesam.yml")
 	const body = "version: 1\nsecrets:\n  - path: existing.txt\n    access:\n      - admin\n"
@@ -110,7 +110,7 @@ func TestTell_CreatesUsersAndGroups(t *testing.T) {
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.Tell("bob", []string{"keyB"}, []string{"admin"}))
+	require.NoError(t, cr.UserTell("bob", []string{"keyB"}, []string{"admin"}))
 	require.NoError(t, cr.Save())
 
 	names, groups := loadUsersGroups(t, main)
@@ -119,13 +119,13 @@ func TestTell_CreatesUsersAndGroups(t *testing.T) {
 }
 
 // TestTell_PreservesUserKeys keeps each user's keys intact through a round trip.
-func TestTell_PreservesUserKeys(t *testing.T) {
+func TestUserTell_PreservesUserKeys(t *testing.T) {
 	dir := t.TempDir()
 	main := writeUserMain(t, dir)
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.Tell("bob", []string{"keyB1", "keyB2"}, []string{"admin"}))
+	require.NoError(t, cr.UserTell("bob", []string{"keyB1", "keyB2"}, []string{"admin"}))
 	require.NoError(t, cr.Save())
 
 	cr2, err := Load(main)

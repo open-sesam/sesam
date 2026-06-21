@@ -8,22 +8,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestChangeSecretGroups_ReplacesAccess rewrites the access list of an existing
+// TestSecretChangeGroups_ReplacesAccess rewrites the access list of an existing
 // secret in place, leaving the entry's other content alone.
-func TestChangeSecretGroups_ReplacesAccess(t *testing.T) {
+func TestSecretChangeGroups_ReplacesAccess(t *testing.T) {
 	dir, main := buildConfig(t, false, "token.txt")
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.ChangeSecretGroups(filepath.Join(dir, "token.txt"), []string{"dev", "ops"}))
+	require.NoError(t, cr.SecretChangeGroups(filepath.Join(dir, "token.txt"), []string{"dev", "ops"}))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"dev", "ops"}, accessFor(t, main, "token.txt"))
 }
 
-// TestChangeSecretGroups_AddsAccessKeyWhenAbsent covers the branch where the
+// TestSecretChangeGroups_AddsAccessKeyWhenAbsent covers the branch where the
 // secret has no access: key yet — it is created rather than replaced.
-func TestChangeSecretGroups_AddsAccessKeyWhenAbsent(t *testing.T) {
+func TestSecretChangeGroups_AddsAccessKeyWhenAbsent(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sesam.yml")
 	require.NoError(t, os.WriteFile(main, []byte("secrets:\n  - path: token.txt\n"), 0o644))
@@ -31,15 +31,15 @@ func TestChangeSecretGroups_AddsAccessKeyWhenAbsent(t *testing.T) {
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.ChangeSecretGroups(filepath.Join(dir, "token.txt"), []string{"dev"}))
+	require.NoError(t, cr.SecretChangeGroups(filepath.Join(dir, "token.txt"), []string{"dev"}))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"dev"}, accessFor(t, main, "token.txt"))
 }
 
-// TestChangeSecretGroups_PreservesComment keeps the entry's head comment when
+// TestSecretChangeGroups_PreservesComment keeps the entry's head comment when
 // only its access list is rewritten.
-func TestChangeSecretGroups_PreservesComment(t *testing.T) {
+func TestSecretChangeGroups_PreservesComment(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sesam.yml")
 	body := `secrets:
@@ -53,7 +53,7 @@ func TestChangeSecretGroups_PreservesComment(t *testing.T) {
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.ChangeSecretGroups(filepath.Join(dir, "token.txt"), []string{"group2"}))
+	require.NoError(t, cr.SecretChangeGroups(filepath.Join(dir, "token.txt"), []string{"group2"}))
 	require.NoError(t, cr.Save())
 
 	out, err := os.ReadFile(main)
@@ -62,11 +62,11 @@ func TestChangeSecretGroups_PreservesComment(t *testing.T) {
 	require.Equal(t, []string{"group2"}, accessFor(t, main, "token.txt"))
 }
 
-// TestChangeSecretGroups_NotFound errors when no secret matches the path.
-func TestChangeSecretGroups_NotFound(t *testing.T) {
+// TestSecretChangeGroups_NotFound errors when no secret matches the path.
+func TestSecretChangeGroups_NotFound(t *testing.T) {
 	dir, main := buildConfig(t, false)
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.Error(t, cr.ChangeSecretGroups(filepath.Join(dir, "nope.txt"), []string{"dev"}))
+	require.Error(t, cr.SecretChangeGroups(filepath.Join(dir, "nope.txt"), []string{"dev"}))
 }

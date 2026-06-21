@@ -52,7 +52,7 @@ func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return fmt.Errorf("need <old> and <new>")
 	}
 
-	if err := r.MoveSecret(oldRevealedPath, newRevealedPath); err != nil {
+	if err := r.SecretMove(oldRevealedPath, newRevealedPath); err != nil {
 		return err
 	}
 

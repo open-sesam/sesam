@@ -9,7 +9,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 )
 
-// RemoveSecret removes a single secret from the configuration.
+// SecretRemove removes a single secret from the configuration.
 //
 // The matching secret entry is cut from whichever sesam.yml holds it (the main
 // file or a subdirectory file). Any subdirectory sesam.yml left empty by the
@@ -18,8 +18,8 @@ import (
 //
 // Only the config entry is removed; the referenced plaintext file is left on
 // disk for the user to delete themselves. Directory expansion is the caller's
-// job — RemoveSecret only ever touches a single secret.
-func (c *Config) RemoveSecret(path string) error {
+// job — SecretRemove only ever touches a single secret.
+func (c *Config) SecretRemove(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("failed to resolve secret path %q: %w", path, err)

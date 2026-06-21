@@ -5,13 +5,13 @@ import (
 	"github.com/goccy/go-yaml/ast"
 )
 
-// Kill removes a user from the main sesam.yml: the user's entry is cut from the
+// UserKill removes a user from the main sesam.yml: the user's entry is cut from the
 // users sequence and the user is dropped from every group's member list. A
 // group left with no members is removed entirely (an empty member sequence has
 // no valid block representation). Missing users are a no-op — the audit log
-// (via the user manager) is the authority on whether the user exists; Kill only
+// (via the user manager) is the authority on whether the user exists; UserKill only
 // keeps the YAML declaration in sync.
-func (c *Config) Kill(name string) error {
+func (c *Config) UserKill(name string) error {
 	src := c.MainFile
 
 	if seq, err := usersNode(src.RootNode); err == nil {

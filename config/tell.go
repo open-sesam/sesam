@@ -6,12 +6,12 @@ import (
 	"github.com/goccy/go-yaml/ast"
 )
 
-// Tell adds a new user to the main sesam.yml: a name, one or more keys and the
+// UserTell adds a new user to the main sesam.yml: a name, one or more keys and the
 // groups the user should belong to. The user node is inserted into the main
 // file's users sequence (existing users untouched) and the user is added as a
 // member of each named group, creating groups that do not exist yet. Returns an
 // error if a user with the same name already exists.
-func (c *Config) Tell(name string, keys, groupsToAdd []string) error {
+func (c *Config) UserTell(name string, keys, groupsToAdd []string) error {
 	users, err := c.Users()
 	if err != nil {
 		return err

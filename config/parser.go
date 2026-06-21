@@ -51,7 +51,7 @@ type secretEntry struct {
 //
 // The path is resolved to absolute first so MainFile.Path — and every
 // SourceFiles path derived from it — is absolute. That keeps the revealed paths
-// the single-secret mutators (AddSecret/RemoveSecret/MoveSecret) match against
+// the single-secret mutators (SecretAdd/SecretRemove/SecretMove) match against
 // absolute regardless of whether the caller passed a relative config path.
 func Load(path string) (*Config, error) {
 	abs, err := filepath.Abs(path)
@@ -239,7 +239,7 @@ func (c *Config) collectSecrets(src *FileSource, visiting map[string]bool) ([]se
 	return out, nil
 }
 
-// TODO: could use some optimization, as it's executed for every AddSecret call. If adding
+// TODO: could use some optimization, as it's executed for every SecretAdd call. If adding
 // multiple secrets at once (or large directories), it's probably easier to compute once and
 // update when addSecret is called.
 //

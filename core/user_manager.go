@@ -43,7 +43,7 @@ func BuildUserManager(
 	}, nil
 }
 
-func (um *UserManager) TellUser(
+func (um *UserManager) UserTell(
 	ctx context.Context,
 	user string, pubKeySpecs []string,
 	groups []string,
@@ -112,7 +112,7 @@ func (um *UserManager) ShowUser(user string, dst io.Writer) (bool, error) {
 	return false, nil
 }
 
-func (um *UserManager) KillUsers(user string) error {
+func (um *UserManager) UserKill(user string) error {
 	if !um.signUser.IsAdmin() {
 		return fmt.Errorf("need to be admin for killing users")
 	}
@@ -140,7 +140,7 @@ func (um *UserManager) KillUsers(user string) error {
 	return nil
 }
 
-func (um *UserManager) RenameUser(oldName, newName string) error {
+func (um *UserManager) UserRename(oldName, newName string) error {
 	if !um.signUser.IsAdmin() {
 		return fmt.Errorf("need to be admin for renaming users")
 	}

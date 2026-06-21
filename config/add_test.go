@@ -67,9 +67,9 @@ func accessFor(t *testing.T, mainPath, secretPath string) []string {
 	return nil
 }
 
-// TestAddSecret_FileAtMainLevel: a file next to the main sesam.yml is added to
+// TestSecretAdd_FileAtMainLevel: a file next to the main sesam.yml is added to
 // the main file with its bare name, and no extra sesam.yml is created.
-func TestAddSecret_FileAtMainLevel(t *testing.T) {
+func TestSecretAdd_FileAtMainLevel(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "token.txt"))
@@ -77,17 +77,17 @@ func TestAddSecret_FileAtMainLevel(t *testing.T) {
 	cr, err := Load(mainPath)
 	require.NoError(t, err)
 
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "token.txt"), true, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "token.txt"), true, []string{"group1"}))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"existing.txt", "token.txt"}, resolvedPaths(t, mainPath))
 	require.False(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
 }
 
-// TestAddSecret_FileInSubdirNested: a file in a subdirectory with nested=true
+// TestSecretAdd_FileInSubdirNested: a file in a subdirectory with nested=true
 // gets its own sub/sesam.yml (included from main) and the secret path is
 // relative to that sub file.
-func TestAddSecret_FileInSubdirNested(t *testing.T) {
+func TestSecretAdd_FileInSubdirNested(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "sub", "api.key"))
@@ -95,7 +95,7 @@ func TestAddSecret_FileInSubdirNested(t *testing.T) {
 	cr, err := Load(mainPath)
 	require.NoError(t, err)
 
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "sub", "api.key"), true, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "sub", "api.key"), true, []string{"group1"}))
 	require.NoError(t, cr.Save())
 
 	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
@@ -103,10 +103,10 @@ func TestAddSecret_FileInSubdirNested(t *testing.T) {
 	require.Equal(t, []string{"api.key", "existing.txt"}, resolvedPaths(t, mainPath))
 }
 
-// TestAddSecret_FileInSubdirFlat: a file in a subdirectory with nested=false is
+// TestSecretAdd_FileInSubdirFlat: a file in a subdirectory with nested=false is
 // added straight to the main file, keeping its subdirectory prefix, and no
 // sub/sesam.yml is created.
-func TestAddSecret_FileInSubdirFlat(t *testing.T) {
+func TestSecretAdd_FileInSubdirFlat(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "sub", "api.key"))
@@ -114,29 +114,29 @@ func TestAddSecret_FileInSubdirFlat(t *testing.T) {
 	cr, err := Load(mainPath)
 	require.NoError(t, err)
 
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "sub", "api.key"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "sub", "api.key"), false, []string{"group1"}))
 	require.NoError(t, cr.Save())
 
 	require.False(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
 	require.Equal(t, []string{"existing.txt", "sub/api.key"}, resolvedPaths(t, mainPath))
 }
 
-// TestAddSecret_ReaddChangesAccess: re-adding an already-tracked file is a
+// TestSecretAdd_ReaddChangesAccess: re-adding an already-tracked file is a
 // self-deciding upsert — it rewrites the access groups in place rather than
 // duplicating the entry.
-func TestAddSecret_ReaddChangesAccess(t *testing.T) {
+func TestSecretAdd_ReaddChangesAccess(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "token.txt"))
 
 	cr, err := Load(mainPath)
 	require.NoError(t, err)
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "token.txt"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "token.txt"), false, []string{"group1"}))
 	require.NoError(t, cr.Save())
 
 	cr2, err := Load(mainPath)
 	require.NoError(t, err)
-	require.NoError(t, cr2.AddSecret(filepath.Join(dir, "token.txt"), false, []string{"group2"}))
+	require.NoError(t, cr2.SecretAdd(filepath.Join(dir, "token.txt"), false, []string{"group2"}))
 	require.NoError(t, cr2.Save())
 
 	// No duplicate entry, and the access list reflects the latest add.
@@ -144,24 +144,24 @@ func TestAddSecret_ReaddChangesAccess(t *testing.T) {
 	require.Equal(t, []string{"group2"}, accessFor(t, mainPath, "token.txt"))
 }
 
-// TestAddSecret_MissingPath surfaces a stat error for a non-existent path only
-// when the caller resolves it; AddSecret itself does not stat, so adding a path
+// TestSecretAdd_MissingPath surfaces a stat error for a non-existent path only
+// when the caller resolves it; SecretAdd itself does not stat, so adding a path
 // that is not yet on disk is allowed (the repo validates existence).
-func TestAddSecret_NonExistentPathStillAdded(t *testing.T) {
+func TestSecretAdd_NonExistentPathStillAdded(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := writeMainFile(t, dir)
 
 	cr, err := Load(mainPath)
 	require.NoError(t, err)
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "later.txt"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "later.txt"), false, []string{"group1"}))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"existing.txt", "later.txt"}, resolvedPaths(t, mainPath))
 }
 
-// TestAddSecret_NoDuplicateSameFileTwice: adding the same file into the same
+// TestSecretAdd_NoDuplicateSameFileTwice: adding the same file into the same
 // file twice keeps a single entry (the second add upserts its access groups).
-func TestAddSecret_NoDuplicateSameFileTwice(t *testing.T) {
+func TestSecretAdd_NoDuplicateSameFileTwice(t *testing.T) {
 	dir := t.TempDir()
 	main := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "token.txt"))
@@ -169,18 +169,18 @@ func TestAddSecret_NoDuplicateSameFileTwice(t *testing.T) {
 	cr, err := Load(main)
 	require.NoError(t, err)
 
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "token.txt"), false, []string{"group1"}))
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "token.txt"), false, []string{"group2"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "token.txt"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "token.txt"), false, []string{"group2"}))
 
 	require.NoError(t, cr.Save())
 	require.Equal(t, []string{"existing.txt", "token.txt"}, resolvedPaths(t, main))
 	require.Equal(t, []string{"group2"}, accessFor(t, main, "token.txt"))
 }
 
-// TestAddSecret_NoDuplicateSubThenMain: a file already declared in a sub
+// TestSecretAdd_NoDuplicateSubThenMain: a file already declared in a sub
 // sesam.yml is not re-added to the main file when the same physical file is
 // added again with a flat layout — it stays in the sub-file (upsert there).
-func TestAddSecret_NoDuplicateSubThenMain(t *testing.T) {
+func TestSecretAdd_NoDuplicateSubThenMain(t *testing.T) {
 	dir := t.TempDir()
 	main := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "sub", "api.key"))
@@ -189,19 +189,19 @@ func TestAddSecret_NoDuplicateSubThenMain(t *testing.T) {
 	require.NoError(t, err)
 
 	// Lands in sub/sesam.yml, included from main.
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "sub", "api.key"), true, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "sub", "api.key"), true, []string{"group1"}))
 	// Re-add the same physical file flat into main: must not duplicate.
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "sub", "api.key"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "sub", "api.key"), false, []string{"group1"}))
 
 	require.NoError(t, cr.Save())
 	// Present exactly once across the merged view.
 	require.Equal(t, []string{"api.key", "existing.txt"}, resolvedPaths(t, main))
 }
 
-// TestAddSecret_NoDuplicateMainThenSub: the reverse direction — a file already
+// TestSecretAdd_NoDuplicateMainThenSub: the reverse direction — a file already
 // declared in the main file is not re-added into its own sub sesam.yml, and no
 // empty sub-file or dangling include is produced.
-func TestAddSecret_NoDuplicateMainThenSub(t *testing.T) {
+func TestSecretAdd_NoDuplicateMainThenSub(t *testing.T) {
 	dir := t.TempDir()
 	main := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "sub", "api.key"))
@@ -209,18 +209,18 @@ func TestAddSecret_NoDuplicateMainThenSub(t *testing.T) {
 	cr, err := Load(main)
 	require.NoError(t, err)
 
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "sub", "api.key"), false, []string{"group1"}))
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "sub", "api.key"), true, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "sub", "api.key"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "sub", "api.key"), true, []string{"group1"}))
 
 	require.NoError(t, cr.Save())
 	require.False(t, exists(filepath.Join(dir, "sub", "sesam.yml")), "no empty sub-file created")
 	require.Equal(t, []string{"existing.txt", "sub/api.key"}, resolvedPaths(t, main))
 }
 
-// TestAddSecret_PreservesExistingComments verifies that inserting a new secret
+// TestSecretAdd_PreservesExistingComments verifies that inserting a new secret
 // node leaves the comments on the pre-existing entries untouched — the new node
 // is appended, nothing above it shifts.
-func TestAddSecret_PreservesExistingComments(t *testing.T) {
+func TestSecretAdd_PreservesExistingComments(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sesam.yml")
 	body := `secrets:
@@ -235,7 +235,7 @@ func TestAddSecret_PreservesExistingComments(t *testing.T) {
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "beta.txt"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "beta.txt"), false, []string{"group1"}))
 	require.NoError(t, cr.Save())
 
 	out, err := os.ReadFile(main)
@@ -245,10 +245,10 @@ func TestAddSecret_PreservesExistingComments(t *testing.T) {
 	require.Contains(t, string(out), "beta.txt", "added secret missing:\n%s", out)
 }
 
-// TestAddSecret_PreservesCommentsAndIndentation checks that altering the config
+// TestSecretAdd_PreservesCommentsAndIndentation checks that altering the config
 // leaves the existing entry byte-for-byte intact (comment + exact indentation)
 // and appends the new entry with the same block-sequence indentation.
-func TestAddSecret_PreservesCommentsAndIndentation(t *testing.T) {
+func TestSecretAdd_PreservesCommentsAndIndentation(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sesam.yml")
 	body := `secrets:
@@ -263,7 +263,7 @@ func TestAddSecret_PreservesCommentsAndIndentation(t *testing.T) {
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.AddSecret(filepath.Join(dir, "beta.txt"), false, []string{"group2"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "beta.txt"), false, []string{"group2"}))
 	require.NoError(t, cr.Save())
 
 	out, err := os.ReadFile(main)

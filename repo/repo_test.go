@@ -179,7 +179,7 @@ func TestRepo_SecretAdd_RejectsBadInputs(t *testing.T) {
 			wantErr: "missing secret path",
 		},
 		// Note: empty groups is intentionally NOT a bad input - it means
-		// "admin only" (see TestAddSecretEmptyGroups).
+		// "admin only" (see TestSecretAddEmptyGroups).
 	}
 
 	for _, tc := range cases {

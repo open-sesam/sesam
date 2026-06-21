@@ -9,7 +9,7 @@ import (
 )
 
 // buildConfig writes a main sesam.yml, touches every given file and adds them
-// one at a time via AddSecret, then saves. It returns the temp dir and the main
+// one at a time via SecretAdd, then saves. It returns the temp dir and the main
 // file path.
 func buildConfig(t *testing.T, nested bool, files ...string) (string, string) {
 	t.Helper()
@@ -21,37 +21,37 @@ func buildConfig(t *testing.T, nested bool, files ...string) (string, string) {
 	for _, f := range files {
 		p := filepath.Join(dir, f)
 		touch(t, p)
-		require.NoError(t, cr.AddSecret(p, nested, []string{"group1"}))
+		require.NoError(t, cr.SecretAdd(p, nested, []string{"group1"}))
 	}
 	require.NoError(t, cr.Save())
 
 	return dir, main
 }
 
-// TestRemoveSecret_FileFromMain removes a single secret stored in the main
+// TestSecretRemove_FileFromMain removes a single secret stored in the main
 // file; the rest stay and the plaintext file remains (no purge).
-func TestRemoveSecret_FileFromMain(t *testing.T) {
+func TestSecretRemove_FileFromMain(t *testing.T) {
 	dir, main := buildConfig(t, false, "token.txt")
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.RemoveSecret(filepath.Join(dir, "token.txt")))
+	require.NoError(t, cr.SecretRemove(filepath.Join(dir, "token.txt")))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"existing.txt"}, resolvedPaths(t, main))
 	require.True(t, exists(filepath.Join(dir, "token.txt")), "plaintext is left for the user to delete")
 }
 
-// TestRemoveSecret_FileFromSubfile removes the only secret in a subdirectory
+// TestSecretRemove_FileFromSubfile removes the only secret in a subdirectory
 // file: the sub sesam.yml is deleted and its include dropped from main.
-func TestRemoveSecret_FileFromSubfile(t *testing.T) {
+func TestSecretRemove_FileFromSubfile(t *testing.T) {
 	dir, main := buildConfig(t, true, "sub/api.key")
 
 	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.RemoveSecret(filepath.Join(dir, "sub", "api.key")))
+	require.NoError(t, cr.SecretRemove(filepath.Join(dir, "sub", "api.key")))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"existing.txt"}, resolvedPaths(t, main))
@@ -59,30 +59,30 @@ func TestRemoveSecret_FileFromSubfile(t *testing.T) {
 	require.True(t, exists(filepath.Join(dir, "sub", "api.key")), "plaintext is left for the user to delete")
 }
 
-// TestRemoveSecret_SubfileKeepsSecret removes one of several secrets in a
+// TestSecretRemove_SubfileKeepsSecret removes one of several secrets in a
 // subdirectory file; the file (and its include) survive.
-func TestRemoveSecret_SubfileKeepsSecret(t *testing.T) {
+func TestSecretRemove_SubfileKeepsSecret(t *testing.T) {
 	dir, main := buildConfig(t, true, "sub/b.txt", "sub/c.txt")
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.RemoveSecret(filepath.Join(dir, "sub", "b.txt")))
+	require.NoError(t, cr.SecretRemove(filepath.Join(dir, "sub", "b.txt")))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"c.txt", "existing.txt"}, resolvedPaths(t, main))
 	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")), "non-empty sub file kept")
 }
 
-// TestRemoveSecret_NotFound errors when nothing matches the path.
-func TestRemoveSecret_NotFound(t *testing.T) {
+// TestSecretRemove_NotFound errors when nothing matches the path.
+func TestSecretRemove_NotFound(t *testing.T) {
 	dir, main := buildConfig(t, false)
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.Error(t, cr.RemoveSecret(filepath.Join(dir, "stray.txt")))
+	require.Error(t, cr.SecretRemove(filepath.Join(dir, "stray.txt")))
 }
 
-// TestRemoveSecret_DoesNotMisattributeComments guards against the comment
+// TestSecretRemove_DoesNotMisattributeComments guards against the comment
 // misattribution that the positional CommentMap used to cause: removing the
 // first secret shifted the surviving one into slot 0, where it inherited the
 // removed secret's head comment.
@@ -90,7 +90,7 @@ func TestRemoveSecret_NotFound(t *testing.T) {
 // Comments now live on the AST nodes themselves (parser.ParseComments) and are
 // cut out with their node, so the removed secret's comment must not survive on
 // the one that remains.
-func TestRemoveSecret_DoesNotMisattributeComments(t *testing.T) {
+func TestSecretRemove_DoesNotMisattributeComments(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sesam.yml")
 	body := `secrets:
@@ -109,7 +109,7 @@ func TestRemoveSecret_DoesNotMisattributeComments(t *testing.T) {
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.RemoveSecret(filepath.Join(dir, "alpha.txt")))
+	require.NoError(t, cr.SecretRemove(filepath.Join(dir, "alpha.txt")))
 	require.NoError(t, cr.Save())
 
 	out, err := os.ReadFile(main)
@@ -124,10 +124,10 @@ func TestRemoveSecret_DoesNotMisattributeComments(t *testing.T) {
 	require.Contains(t, string(out), "beta.txt")
 }
 
-// TestRemoveSecret_RemovesCommentWithNode verifies that removing a node in the
+// TestSecretRemove_RemovesCommentWithNode verifies that removing a node in the
 // middle of the sequence takes its head comment with it, while the comments on
 // the surrounding entries stay put.
-func TestRemoveSecret_RemovesCommentWithNode(t *testing.T) {
+func TestSecretRemove_RemovesCommentWithNode(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sesam.yml")
 	body := `secrets:
@@ -151,7 +151,7 @@ func TestRemoveSecret_RemovesCommentWithNode(t *testing.T) {
 
 	cr, err := Load(main)
 	require.NoError(t, err)
-	require.NoError(t, cr.RemoveSecret(filepath.Join(dir, "beta.txt")))
+	require.NoError(t, cr.SecretRemove(filepath.Join(dir, "beta.txt")))
 	require.NoError(t, cr.Save())
 
 	out, err := os.ReadFile(main)

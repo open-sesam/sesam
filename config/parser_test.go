@@ -8,12 +8,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestAddSecret_RelativeConfigPathSameDir reproduces the reported failure: a
+// TestSecretAdd_RelativeConfigPathSameDir reproduces the reported failure: a
 // config loaded via a relative path, with a secret given relatively in the same
 // directory, used to mishandle the path. Load resolves the config path to
-// absolute, so AddSecret (which also resolves to absolute) records the secret
+// absolute, so SecretAdd (which also resolves to absolute) records the secret
 // with a clean relative Path regardless of how the config was loaded.
-func TestAddSecret_RelativeConfigPathSameDir(t *testing.T) {
+func TestSecretAdd_RelativeConfigPathSameDir(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
@@ -26,7 +26,7 @@ func TestAddSecret_RelativeConfigPathSameDir(t *testing.T) {
 	cr, err := Load("sesam.yml")
 	require.NoError(t, err)
 
-	require.NoError(t, cr.AddSecret("somefile.txt", false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd("somefile.txt", false, []string{"group1"}))
 	require.NoError(t, cr.Save())
 	require.Equal(t, []string{"existing.txt", "somefile.txt"}, resolvedPaths(t, "sesam.yml"))
 }

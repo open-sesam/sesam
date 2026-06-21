@@ -7,9 +7,9 @@ import (
 	"github.com/goccy/go-yaml/ast"
 )
 
-// ChangeSecretGroups replaces the access groups of an already-tracked secret.
+// SecretChangeGroups replaces the access groups of an already-tracked secret.
 // It errors if no secret for path is declared in any loaded file.
-func (c *Config) ChangeSecretGroups(path string, access []string) error {
+func (c *Config) SecretChangeGroups(path string, access []string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("failed to resolve secret path %q: %w", path, err)

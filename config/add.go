@@ -7,11 +7,11 @@ import (
 	"slices"
 )
 
-// AddSecret adds (or updates) a single secret file in the configuration.
+// SecretAdd adds (or updates) a single secret file in the configuration.
 //
 // It is a self-deciding upsert: if the file is already tracked by some
 // sesam.yml the call is treated as an access-group change (delegating to
-// ChangeSecretGroups); otherwise the secret is inserted.
+// SecretChangeGroups); otherwise the secret is inserted.
 //
 // Where a newly inserted secret lands depends on nested:
 //   - false: the secret is added straight to the main sesam.yml, its Path kept
@@ -21,10 +21,10 @@ import (
 //     relative to that sub-file. A file next to the main sesam.yml always lands
 //     in the main file regardless of nested.
 //
-// Directory expansion is the caller's job (repo): AddSecret only ever touches a
+// Directory expansion is the caller's job (repo): SecretAdd only ever touches a
 // single file. Per-file metadata other than access is left empty for the user
 // to fill in.
-func (c *Config) AddSecret(path string, nested bool, access []string) error {
+func (c *Config) SecretAdd(path string, nested bool, access []string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("failed to resolve secret path %q: %w", path, err)
@@ -43,7 +43,7 @@ func (c *Config) AddSecret(path string, nested bool, access []string) error {
 }
 
 // placeSecret inserts a brand-new secret for the on-disk file at abs into the
-// appropriate sesam.yml, honoring nested (see AddSecret). The caller supplies
+// appropriate sesam.yml, honoring nested (see SecretAdd). The caller supplies
 // the secret's metadata (access, description, …); placeSecret fills in Path
 // relative to the owning file's directory. abs must not already be tracked.
 func (c *Config) placeSecret(abs string, nested bool, sec Secret) error {
