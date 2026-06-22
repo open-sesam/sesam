@@ -44,8 +44,10 @@ func TestRepo_acquireLock_FailsWithoutSesamDir(t *testing.T) {
 	dir := t.TempDir() // no .sesam/ inside
 
 	r := &Repo{
-		sesamDir: dir,
-		opts:     RepoOpts{LockTimeout: time.Second},
+		View: &View{
+			sesamDir: dir,
+			opts:     RepoOpts{LockTimeout: time.Second},
+		},
 	}
 
 	err := r.acquireLock()
@@ -58,8 +60,10 @@ func TestRepo_acquireLock_HappyPath(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, sesamSuffix), 0o700))
 
 	r := &Repo{
-		sesamDir: dir,
-		opts:     RepoOpts{LockTimeout: time.Second},
+		View: &View{
+			sesamDir: dir,
+			opts:     RepoOpts{LockTimeout: time.Second},
+		},
 	}
 
 	require.NoError(t, r.acquireLock())

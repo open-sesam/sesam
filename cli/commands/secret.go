@@ -24,15 +24,17 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
-	if err := r.SecretAdd(paths, groups, cmd.Bool("nested")); err != nil {
-		return err
-	}
-
-	if cmd.Bool("no-seal") {
-		return nil
-	}
-
-	return r.SealAll()
+	noSeal := cmd.Bool("no-seal")
+	nested := cmd.Bool("nested")
+	return r.Update(func(s *repo.Stage) error {
+		if err := s.AddSecret(paths, groups, nested); err != nil {
+			return err
+		}
+		if noSeal {
+			return nil
+		}
+		return s.SealAll()
+	})
 }
 
 // HandleRemove removes a secret path from sesam metadata.
@@ -47,11 +49,12 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
-	if err := r.SecretRemove(paths); err != nil {
-		return err
-	}
-
-	return r.SealAll()
+	return r.Update(func(s *repo.Stage) error {
+		if err := s.RemoveSecret(paths); err != nil {
+			return err
+		}
+		return s.SealAll()
+	})
 }
 
 func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
@@ -67,10 +70,11 @@ func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
-	if err := r.SecretMove(paths[0], paths[1]); err != nil {
-		return err
-	}
-
-	// move always needs an seal, otherwise state is pretty broken
-	return r.SealAll()
+	// move always needs a seal, otherwise state is pretty broken
+	return r.Update(func(s *repo.Stage) error {
+		if err := s.MoveSecret(paths[0], paths[1]); err != nil {
+			return err
+		}
+		return s.SealAll()
+	})
 }

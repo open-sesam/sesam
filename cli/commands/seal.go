@@ -7,9 +7,9 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// HandleSeal encrypts and signs tracked secrets via Repo.SealAll.
+// HandleSeal encrypts and signs tracked secrets via a staged seal commit.
 func HandleSeal(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-	if err := r.SealAll(); err != nil {
+	if err := r.Update(func(s *repo.Stage) error { return s.SealAll() }); err != nil {
 		return err
 	}
 

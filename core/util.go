@@ -11,12 +11,28 @@ import (
 	"strings"
 )
 
+// defaultSesamBase is the sesam-internal directory name. A stage uses a
+// sibling fork directory instead; see sesamBase.
+const defaultSesamBase = ".sesam"
+
+// sesamBase resolves the sesam-internal base directory. The empty string means
+// the live ".sesam" tree; a stage passes its fork dir (".sesam-tmp") so the
+// same path helpers write into the fork. All paths under this base are swapped
+// atomically on commit, so the temp dir (SesamTmpDir) stays in the live tree:
+// renameio renames cross-tree within the same os.Root.
+func sesamBase(base string) string {
+	if base == "" {
+		return defaultSesamBase
+	}
+	return base
+}
+
 // SesamTmpDir is the repo-relative scratch directory. It is passed to renameio
 // as the temp dir so atomic writes stage inside .sesam/ rather than at the repo
 // root (and never in the worktree). Callers must ensure it exists; ensureSesamDirs
 // and BuildSecretManager do.
 func SesamTmpDir() string {
-	return filepath.Join(".sesam", "tmp")
+	return filepath.Join(defaultSesamBase, "tmp")
 }
 
 // ValidUserName checks that a user name is safe for use in file paths and log entries.
@@ -130,7 +146,7 @@ func PathExists(p string) bool {
 	return err == nil
 }
 
-// copyFile materializes `dst` with the same contents as `src`. It tries
+// CopyFile materializes `dst` with the same contents as `src`. It tries
 // a hardlink first (zero-copy when src and dst sit on the same
 // filesystem and the FS supports it - Linux/macOS/BSD via link(2),
 // Windows on NTFS via CreateHardLinkW) and falls back to a byte-for-byte
@@ -138,10 +154,11 @@ func PathExists(p string) bool {
 // EEXIST, ...).
 //
 // Hardlinks share the source inode, so dst inherits its mode/owner/mtime.
-// The byte copy creates a fresh inode at mode 0o600. Both call sites
-// today operate exclusively under .sesam/ (0o700 dirs, 0o600 files) so
-// no permission widening can result either way.
-func copyFile(root *os.Root, src, dst string) error {
+// The byte copy creates a fresh inode at mode 0o600. The caller (the repo
+// stage fork) operates exclusively under .sesam/ (0o700 dirs, 0o600 files),
+// so no permission widening can result either way. It does not fsync; the
+// caller is responsible for durability.
+func CopyFile(root *os.Root, src, dst string) error {
 	if err := root.Link(src, dst); err == nil {
 		return nil
 	}
