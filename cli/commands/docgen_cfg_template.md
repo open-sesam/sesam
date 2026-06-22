@@ -17,7 +17,7 @@ bring both in sync.
 **Public key formats.** A user's `key` field accepts four forms:
 
 - A literal SSH or age public key (e.g. `ssh-ed25519 AAAA…`)
-- A forge identity shorthand (e.g. `github:alice`) — resolved once and pinned in the audit log
+- A forge identity shorthand (e.g. `github:alice`)
 - An HTTPS URL pointing to a public key (treated the same as a forge-id)
 - A local file path (useful for larger or machine-generated keys)
 
@@ -29,61 +29,51 @@ verify`.
 
 <!-- Generated from config/sesam_schema.json via `task docgen:cfg`. Do not edit below this line. -->
 
-## `version`
+{{ $root := . -}}
+{{ range propOrder $root -}}
+{{ $name := . -}}
+{{ $prop := index $root.Properties $name -}}
 
-The version of this config file format.
+## `{{ $name }}{{ if $prop.Items }}[]{{ end }}`
 
+{{ $prop.Description }}
+
+{{ if and $prop.Items $prop.Items.OneOf -}}
+{{ range $prop.Items.OneOf -}}
+{{ $variant := . }}
+### {{ $variant.Description }}
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+{{ range propOrder $variant -}}{{ $f := . -}}{{ $fp := index $variant.Properties $f -}}
+| `{{ $f }}` | `{{ typeStr $fp }}` | {{ if isRequired $variant $f }}yes{{ else }}no{{ end }} | {{ $fp.Description }} |
+{{ end }}
+{{ end -}}
+{{ else if and $prop.Items $prop.Items.Properties -}}
+| Field | Type | Required | Description |
+|---|---|---|---|
+{{ range propOrder $prop.Items -}}{{ $f := . -}}{{ $fp := index $prop.Items.Properties $f -}}
+| `{{ $f }}` | `{{ typeStr $fp }}` | {{ if isRequired $prop.Items $f }}yes{{ else }}no{{ end }} | {{ $fp.Description }} |
+{{ end }}
+{{ else if $prop.AdditionalProperties -}}
+Each value is `{{ typeStr $prop.AdditionalProperties }}`.
+
+{{ else -}}
 | | |
 |---|---|
-| **Type** | `integer` |
+| **Type** | `{{ typeStr $prop }}` |
 | **Required** | no |
-| **Default** | `1` |
-| **Constraint** | must be `1` |
+{{- if $prop.Default }}
+| **Default** | `{{ defaultStr $prop.Default }}` |
+{{- end }}
+{{- range constraints $prop }}
+| **Constraint** | {{ . }} |
+{{- end }}
 
+{{ end -}}
 ---
 
-## `users[]`
-
-List of users known to this repository.
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `name` | `string (non-empty)` | yes | Name of a user |
-| `key` | `string or array of string` | yes | Public key(s) of this user. May be given once or several times. |
-| `desc` | `string (non-empty)` | no | Description or full name of this user |
-
----
-
-## `groups`
-
-Named groups of users. Each key is a group name mapped to a list of user names from the users list.
-
-Each value is `array of string (non-empty)`.
-
----
-
-## `secrets[]`
-
-List of secret definitions and sub-file includes.
-
-
-### Include form — delegates to a subordinate sesam.yml in a sub-directory
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `include` | `string (non-empty)` | yes | Path to a subordinate sesam.yml file |
-
-
-### Secret form — registers a file as a managed secret
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `path` | `string (non-empty)` | yes | Path to the decrypted secret |
-| `access` | `array of string (non-empty)` | no | Groups or users allowed to reveal this secret. Defaults to admin only when omitted. |
-| `description` | `string (non-empty)` | no | Description of the secret |
-
----
-
+{{ end -}}
 ## Complete example
 
 ```yaml

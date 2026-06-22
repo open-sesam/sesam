@@ -57,7 +57,7 @@ tasks:
     desc: Generate CLI reference markdown from live command tree
     deps: [build]
     cmds:
-      - ./sesam docgen > docs/src/cli_ref.md
+      - ./sesam docgen cli > docs/src/cli_ref.md
     sources:
       - ./sesam
       - cli/**/*.go
@@ -66,11 +66,13 @@ tasks:
 
   docgen:cfg:
     desc: Generate config reference markdown from sesam_schema.json
+    deps: [build]
     cmds:
-      - go run ./tools/cfgdocgen > docs/src/config_ref.md
+      - ./sesam docgen config > docs/src/config_ref.md
     sources:
+      - ./sesam
       - config/sesam_schema.json
-      - tools/cfgdocgen/**
+      - cli/commands/docgen_cfg_template.md
     generates:
       - docs/src/config_ref.md
 

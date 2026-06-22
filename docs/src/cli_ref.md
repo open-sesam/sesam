@@ -103,6 +103,8 @@ Add a secret file or directory at `PATH`
 
 **--help, -h**: show help
 
+**--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file
+
 **--no-seal**: Do not run `sesam seal` afterwards - useful when batching
 
 ## rm
@@ -244,6 +246,14 @@ Remove a recipient from an existing user (may not be the last one)
 **--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
 
 **--user**="": Which user looses the specified recipient
+
+### regen-sign-key, rsk
+
+Regenerate the signing key of a specific user
+
+**--help, -h**: show help
+
+**--user**="": Regenerate the signing key for a user
 
 ### rename
 
