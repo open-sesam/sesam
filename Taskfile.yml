@@ -50,6 +50,10 @@ tasks:
       - gofumpt -w -extra .
 
   docgen:
+    desc: Generate all reference docs (CLI + config)
+    deps: [docgen:cli, docgen:cfg]
+
+  docgen:cli:
     desc: Generate CLI reference markdown from live command tree
     deps: [build]
     cmds:
@@ -59,6 +63,16 @@ tasks:
       - cli/**/*.go
     generates:
       - docs/src/cli_ref.md
+
+  docgen:cfg:
+    desc: Generate config reference markdown from sesam_schema.json
+    cmds:
+      - go run ./tools/cfgdocgen > docs/src/config_ref.md
+    sources:
+      - config/sesam_schema.json
+      - tools/cfgdocgen/**
+    generates:
+      - docs/src/config_ref.md
 
   vuln:
     desc: Scan dependencies and stdlib usage for known vulnerabilities (govulncheck)
