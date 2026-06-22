@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -115,6 +116,37 @@ func TestStageUpdateErrorLeavesLiveUntouched(t *testing.T) {
 	require.False(t, hasUser(t, r, "bob"))
 	require.False(t, fileExists(t, filepath.Join(dir, ".sesam", "signkeys", "bob.age")))
 	require.False(t, fileExists(t, filepath.Join(dir, ".sesam-tmp")))
+}
+
+// sesam.yml is staged too: a rolled-back config edit must leave it untouched,
+// and a committed one must land.
+func TestStageConfigRollbackAndCommit(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	dir, r := bootstrapRepo(t, admin)
+
+	cfgPath := filepath.Join(dir, "sesam.yml")
+	before, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	require.NotContains(t, string(before), "bob")
+
+	// Rolled-back tell: sesam.yml must be byte-identical afterwards.
+	s, err := r.Stage()
+	require.NoError(t, err)
+	require.NoError(t, s.Tell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"}))
+	require.NoError(t, s.Rollback())
+
+	after, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "rolled-back config edit must not touch sesam.yml")
+
+	// Committed tell: sesam.yml now records bob.
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.Tell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"})
+	}))
+	committed, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	require.Contains(t, string(committed), "bob")
 }
 
 func TestStageSingleInFlight(t *testing.T) {

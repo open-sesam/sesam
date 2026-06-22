@@ -76,7 +76,7 @@ func sealSecret(
 		return nil, err
 	}
 
-	wc, err := renameio.NewPendingFile(destPath, renameio.WithRoot(sm.root), renameio.WithTempDir(SesamTmpDir()), renameio.WithPermissions(0o600))
+	wc, err := renameio.NewPendingFile(destPath, renameio.WithRoot(sm.root), renameio.WithTempDir(sesamTmpDir(sm.base)), renameio.WithPermissions(0o600))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open encrypted file in repo: %w", err)
 	}
@@ -229,7 +229,7 @@ func revealSecret(sm *SecretManager, revealedPath string) error {
 	}
 
 	// Write revealed file to a temp file first, so we can get rid of it later easily:
-	dstFd, err := renameio.NewPendingFile(revealedPath, renameio.WithRoot(sm.root), renameio.WithTempDir(SesamTmpDir()), renameio.WithPermissions(0o600))
+	dstFd, err := renameio.NewPendingFile(revealedPath, renameio.WithRoot(sm.root), renameio.WithTempDir(sesamTmpDir(sm.base)), renameio.WithPermissions(0o600))
 	if err != nil {
 		return fmt.Errorf("failed to create revealed file: %w", err)
 	}

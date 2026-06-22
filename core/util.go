@@ -27,12 +27,20 @@ func sesamBase(base string) string {
 	return base
 }
 
-// SesamTmpDir is the repo-relative scratch directory. It is passed to renameio
-// as the temp dir so atomic writes stage inside .sesam/ rather than at the repo
-// root (and never in the worktree). Callers must ensure it exists; ensureSesamDirs
-// and BuildSecretManager do.
+// SesamTmpDir is the repo-relative scratch directory for the live tree. It is
+// passed to renameio as the temp dir so atomic writes stage inside .sesam/
+// rather than at the repo root (and never in the worktree). Callers must ensure
+// it exists; ensureSesamDirs and BuildSecretManager do.
 func SesamTmpDir() string {
-	return filepath.Join(defaultSesamBase, "tmp")
+	return sesamTmpDir("")
+}
+
+// sesamTmpDir is SesamTmpDir under a given base. A stage passes its fork dir so
+// renameio temps for fork operations land inside the fork and are reaped with
+// it on rollback/crash — there is then nothing stray to garbage-collect in the
+// live tree.
+func sesamTmpDir(base string) string {
+	return filepath.Join(sesamBase(base), "tmp")
 }
 
 // ValidUserName checks that a user name is safe for use in file paths and log entries.
