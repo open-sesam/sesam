@@ -109,7 +109,7 @@ This can be done either:
 
 For option 3 you need a compatible program installed and have set any of those variables to the name of the program, so `sesam` knows what to call:
 
-- `SESAM_ASKPASS` (or `--askpass` global option) - use this if you want to 
+- `SESAM_ASKPASS` (or `--askpass` global option)
 - `GIT_ASKPASS` - used in `git` context.
 - `SSH_ASKPASS` - used in `git` and `ssh` context.
 
@@ -121,6 +121,9 @@ We also honor the related `*_ASKPASS_REQUIRED` variable (i.e. `SESAM_ASKPASS_REQ
 - `force`: Use it even if have a terminal available that we could ask from.
 
 You don't need to set it though, we will use a sensible default.
+
+Your desktop environment might already set these environment variables.
+If it does not, install a program like `ksshaskpass` and set `SESAM_ASKPASS=ksshaskpass`.
 
 ## Recipients
 

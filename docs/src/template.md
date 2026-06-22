@@ -1,5 +1,9 @@
 # Template secrets
 
+```admonish warning
+This feature is not yet implemented.
+```
+
 So far we did not really talk about how *Secrets* actually look like. We just
 assumed it was a file with a password in it or some x509 certificate. It is
 rather common though that secrets are embedded in a larger structure.

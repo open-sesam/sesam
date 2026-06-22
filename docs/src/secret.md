@@ -103,6 +103,23 @@ simply encrypts ("seals") all known secrets by default, unless you pass `--no-pa
 
 If you want to change the access groups of a user, then just pass a different set of `--group` flags.
 
+### Getting an overview
+
+If you need to see which files were modified but not yet sealed you can use `sesam status`:
+
+```bash
+# without --all you will only see the modified files:
+$ sesam status --all
+.
+├─ M README.md (admin)
+├─ ✓ bg.png (admin)
+╰─ services/
+   ├─ ✓ gateway.env (admin)
+   ╰─ ✓ registry.env (admin)
+  1 out of sync · 3 in sync
+
+```
+
 ## Removing secrets
 
 If you have deleted files you can run this:
