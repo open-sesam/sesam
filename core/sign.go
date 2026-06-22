@@ -160,7 +160,7 @@ func writeSignKeyAt(root *os.Root, base, user string, userRecipient []age.Recipi
 		return fmt.Errorf("failed to close encrypted writer: %w", err)
 	}
 
-	if err := renameio.WriteFile(signKeyPath, ageBuf.Bytes(), 0o600, renameio.WithRoot(root), renameio.WithTempDir(SesamTmpDir())); err != nil {
+	if err := renameio.WriteFile(signKeyPath, ageBuf.Bytes(), 0o600, renameio.WithRoot(root), renameio.WithTempDir(sesamTmpDir(base))); err != nil {
 		return fmt.Errorf("failed to write signing key %s: %w", signKeyPath, err)
 	}
 

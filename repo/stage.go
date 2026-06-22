@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
+	sesamConf "github.com/open-sesam/sesam/config"
 	"github.com/open-sesam/sesam/core"
 )
 
@@ -35,11 +37,12 @@ var ErrStageFinalized = errors.New("stage already finalized")
 // writes"). Commit makes the fork live with a single atomic directory swap;
 // Rollback discards it.
 //
-// NOTE: sesam.yml lives in the worktree root, outside .sesam, so config edits
-// made through a stage are written in place and are NOT covered by the atomic
-// swap or undone by Rollback. The audit log, sealed objects and signing keys
-// are the parts that commit atomically. (Follow-up: a per-stage sesam.yml.tmp
-// brought into the swap set.)
+// Config: the staged View carries its own in-memory copy of sesam.yml (a fresh
+// load); mutators edit that copy and it is written to disk only on Commit, so
+// Rollback never touches the live config. sesam.yml lives in the worktree root,
+// outside .sesam, so it cannot ride the swap itself — it is saved right after
+// the swap (the audit log is authoritative; config is its desired-state
+// mirror), leaving only a narrow crash window where config trails the log.
 type Stage struct {
 	*View
 
@@ -102,6 +105,13 @@ func (r *Repo) Update(fn func(*Stage) error) error {
 // every sesam-internal path is pointed at the fork via SetBase. The signer is
 // immutable and reused from the live secret manager.
 func (r *Repo) buildStage() (*Stage, error) {
+	// Fork operations write renameio temps into the fork's own tmp dir so a
+	// crash leaves nothing stray in the live tree. materializeFork mirrors it,
+	// but ensure it exists defensively (renameio fails hard on a missing dir).
+	if err := r.root.MkdirAll(filepath.Join(forkSuffix, "tmp"), 0o700); err != nil {
+		return nil, fmt.Errorf("create fork tmp dir: %w", err)
+	}
+
 	audit, err := r.auditLog.Fork(r.root, forkSuffix)
 	if err != nil {
 		return nil, fmt.Errorf("fork audit log: %w", err)
@@ -125,6 +135,15 @@ func (r *Repo) buildStage() (*Stage, error) {
 	}
 	user.SetBase(forkSuffix)
 
+	// Independent in-memory config: a fresh load of the live sesam.yml. Staged
+	// edits mutate this copy only and are not written to disk until Commit, so
+	// a Rollback leaves the live config files untouched.
+	cfg, err := sesamConf.Load(r.root, "sesam.yml")
+	if err != nil {
+		_ = audit.Close()
+		return nil, fmt.Errorf("load fork config: %w", err)
+	}
+
 	fork := &View{
 		mu:            r.mu, // shared with the Repo
 		sesamDir:      r.sesamDir,
@@ -140,7 +159,7 @@ func (r *Repo) buildStage() (*Stage, error) {
 		vstate:        vstate,
 		secret:        secret,
 		user:          user,
-		config:        r.config, // shared live config; see Stage doc comment.
+		config:        cfg,
 	}
 
 	return &Stage{View: fork, repo: r}, nil
@@ -218,6 +237,18 @@ func (s *Stage) Commit() error {
 	s.repo.View = s.View
 	s.repo.stage = nil
 
+	// Persist the staged config to the live sesam.yml file(s). Done after the
+	// swap because the audit log is the authoritative state and sesam.yml is
+	// only the desired-state mirror: if this fails the operation is already
+	// committed, so a stale config is a warning, not a rollback. (sesam.yml
+	// lives in the worktree root, outside .sesam, so it cannot ride the swap.)
+	if err := s.config.Save(); err != nil {
+		slog.Warn(
+			"committed, but failed to persist sesam.yml (audit log is authoritative)",
+			slog.String("err", err.Error()),
+		)
+	}
+
 	// Reap the old tree (now sitting at .sesam-tmp). Non-fatal: a leftover fork
 	// is reaped on the next Stage()/Load.
 	if err := s.repo.root.RemoveAll(forkSuffix); err != nil {
@@ -254,10 +285,8 @@ func (s *Stage) Tell(ctx context.Context, user string, recipients, groups []stri
 	if err := s.user.UserTell(ctx, user, recipients, groups); err != nil {
 		return fmt.Errorf("failed to add user: %w", err)
 	}
-	if err := s.config.UserTell(user, recipients, groups); err != nil {
-		return fmt.Errorf("failed to add user %q to config: %w", user, err)
-	}
-	return s.config.Save()
+	// Config edits stay in memory until Commit (see buildStage).
+	return s.config.UserTell(user, recipients, groups)
 }
 
 // Kill removes a user from the set of authenticated users.
@@ -268,10 +297,7 @@ func (s *Stage) Kill(user string) error {
 	if err := s.user.UserKill(user); err != nil {
 		return fmt.Errorf("failed to remove user: %w", err)
 	}
-	if err := s.config.UserKill(user); err != nil {
-		return fmt.Errorf("failed to remove user %q from config: %w", user, err)
-	}
-	return s.config.Save()
+	return s.config.UserKill(user)
 }
 
 // SealAll re-encrypts all revealed content into the staged sealed storage.
@@ -315,7 +341,7 @@ func (s *Stage) AddSecret(revealedPaths, groups []string, nested bool) error {
 		}
 	}
 
-	return s.config.Save()
+	return nil
 }
 
 // RemoveSecret stops tracking the secret(s) at each path.
@@ -343,7 +369,7 @@ func (s *Stage) RemoveSecret(revealedPaths []string) error {
 		}
 	}
 
-	return s.config.Save()
+	return nil
 }
 
 // MoveSecret relocates the secret(s) at oldRevealedPath to newRevealedPath. A
@@ -384,7 +410,7 @@ func (s *Stage) MoveSecret(oldRevealedPath, newRevealedPath string) error {
 		}
 	}
 
-	return s.config.Save()
+	return nil
 }
 
 // RenameUser renames a user. TODO: config integration.

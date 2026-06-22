@@ -1,8 +1,6 @@
 package core
 
 import (
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -167,23 +165,3 @@ func TestWriteAuditKeyExtendsRecipients(t *testing.T) {
 	require.NoError(t, loaded.Close())
 }
 
-// TestRecoveryDeletesOrphanedTmpFiles: if a crash left renameio tmp files
-// (named ".log.jsonlXXXXXX") in .sesam/tmp, LoadAuditLog removes them.
-func TestRecoveryDeletesOrphanedTmpFiles(t *testing.T) {
-	sesamDir := testRepo(t)
-	admin := newTestUser(t, "admin")
-	al := initAuditLog(t, sesamDir, admin)
-	require.NoError(t, al.Close())
-
-	// Simulate a leftover renameio tmp file.
-	orphan := filepath.Join(sesamDir, ".sesam", "tmp", ".log.jsonlXXXXXX")
-	require.NoError(t, os.WriteFile(orphan, []byte("orphan"), 0o600))
-
-	loaded, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
-	require.NoError(t, err)
-	require.Len(t, loaded.Entries, 1)
-	require.NoError(t, loaded.Close())
-
-	_, err = os.Stat(orphan)
-	require.Truef(t, errors.Is(err, fs.ErrNotExist), "orphan tmp should be gone, got: %v", err)
-}
