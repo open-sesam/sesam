@@ -564,47 +564,17 @@ func TestSealRejectsUnauthorizedUser(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Bob has plaintext on disk (left over from sealedSecretManager)
-	// but no access to secrets/test. SealAll must refuse.
-	err = bobMgr.SealAll()
-	require.NoError(t, err)
-
-	_, wasSealed, err := bobMgr.stageSecret("secrets/test", ".sesam/test-stage")
-
-	require.NoError(t, err)
-	require.False(t, wasSealed)
-}
-
-func TestSealAllCleansStage(t *testing.T) {
-	mgr := sealedSecretManager(t)
-
-	require.NoDirExists(t, filepath.Join(mgr.SesamDir, mgr.stageDir()), "stage dir must be gone after a successful seal")
-}
-
-// A failed seal must not touch the live objects/ tree.
-func TestSealAllFailureLeavesObjectsUntouched(t *testing.T) {
-	mgr := sealedSecretManager(t) // writes secrets/test sealed
-
 	original, err := os.ReadFile(filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
 	require.NoError(t, err)
 
-	// Add a second secret with plaintext but never seal it; then remove
-	// the plaintext. SealAll will iterate both: the first re-encrypts
-	// fine, the second has neither plaintext nor ciphertext and must
-	// abort the whole transaction. The live secrets/test ciphertext
-	// must remain byte-identical.
-	writeSecret(t, mgr.SesamDir, "secrets/missing", "x")
-	require.NoError(t, mgr.SecretAdd("secrets/missing", []string{"admin"}))
-	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/missing")))
-
-	err = mgr.SealAll()
-	require.Error(t, err, "seal must fail when a secret has neither plaintext nor ciphertext")
+	// Bob has plaintext on disk (left over from sealedSecretManager) but no
+	// access to secrets/test, so SealAll must preserve the existing ciphertext
+	// rather than re-seal it.
+	require.NoError(t, bobMgr.SealAll())
 
 	current, err := os.ReadFile(filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
 	require.NoError(t, err)
-	require.Equal(t, original, current, "live ciphertext must be unchanged on seal failure")
-
-	require.NoDirExists(t, filepath.Join(mgr.SesamDir, mgr.stageDir()), "stage dir must be cleaned on failure")
+	require.Equal(t, original, current, "unauthorized user must preserve, not re-seal")
 }
 
 // A non-admin who does not have access to a secret must still be able to seal:
@@ -682,65 +652,6 @@ func TestSealAllNonAdminPreservesCiphertextItCannotDecrypt(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, devSharedBefore, devSharedAfter,
 		"dev-shared must be re-encrypted by bob (age uses fresh randomness)")
-
-	require.NoDirExists(t, filepath.Join(bobMgr.SesamDir, bobMgr.stageDir()))
-}
-
-// Recovery branch: no seal entry yet. A leftover stage from a crash
-// before the first seal-entry write is just uncommitted work and must
-// be discarded.
-func TestRecoverIncompleteSealNoSealYet(t *testing.T) {
-	mgr := testSecretManagerFull(t)
-	mgr.State.LastSealRootHash = "" // simulate no seal entry yet
-
-	stage := filepath.Join(mgr.SesamDir, mgr.stageDir())
-	require.NoError(t, os.MkdirAll(filepath.Join(stage, "junk"), 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(stage, "junk", "leftover"), []byte("x"), 0o600))
-
-	require.NoError(t, recoverIncompleteSeal(mgr.root, mgr.State))
-	require.NoDirExists(t, stage)
-}
-
-// Recovery branch: stage matches the latest seal's RootHash. SealAll
-// crashed between FeedEntry and atomicSwapDirs. Recovery must finish
-// the swap so disk matches the log.
-func TestRecoverIncompleteSealFinishesPendingSwap(t *testing.T) {
-	mgr := sealedSecretManager(t)
-
-	stage := filepath.Join(mgr.SesamDir, mgr.stageDir())
-	objects := filepath.Join(mgr.SesamDir, mgr.objectsDir())
-
-	// Move the committed objects tree into stage and replace objects with
-	// an empty dir. State on disk now mimics "audit committed, swap
-	// pending": stage hashes to LastSealRootHash, objects does not.
-	require.NoError(t, os.Rename(objects, stage))
-	require.NoError(t, os.MkdirAll(objects, 0o700))
-
-	require.NoError(t, recoverIncompleteSeal(mgr.root, mgr.State))
-
-	require.NoDirExists(t, stage, "stage must be gone after the swap")
-	require.FileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")),
-		"sealed file must end up in objects after recovery completes the swap")
-}
-
-// Recovery branch: stage exists, neither stage nor objects matches the
-// audit log's RootHash. Recovery cannot reconcile and must surface the
-// inconsistency rather than silently promoting unknown content.
-func TestRecoverIncompleteSealErrorsOnUnknownStage(t *testing.T) {
-	mgr := sealedSecretManager(t)
-
-	// Wipe the live objects tree so it no longer matches the log; this
-	// forces recovery past the "live matches log" short-circuit.
-	require.NoError(t, os.RemoveAll(filepath.Join(mgr.SesamDir, mgr.objectsDir())))
-	require.NoError(t, os.MkdirAll(filepath.Join(mgr.SesamDir, mgr.objectsDir()), 0o700))
-
-	stage := filepath.Join(mgr.SesamDir, mgr.stageDir())
-	require.NoError(t, os.MkdirAll(filepath.Join(stage, "junk"), 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(stage, "junk", "leftover"), []byte("x"), 0o600))
-
-	err := recoverIncompleteSeal(mgr.root, mgr.State)
-	require.Error(t, err, "stage with unknown content must not be silently promoted")
-	require.DirExists(t, stage, "stage must be left in place for investigation")
 }
 
 func TestShowSecretSuccessSesamPath(t *testing.T) {

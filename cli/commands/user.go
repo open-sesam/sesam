@@ -37,76 +37,99 @@ func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		}
 	}
 
-	if err := r.UserTell(ctx, user, recipients, groups); err != nil {
-		return err
-	}
+	noSeal := cmd.Bool("no-seal")
 
-	if cmd.Bool("no-seal") {
-		return nil
-	}
-
-	return r.SealAll()
+	// tell + reseal commit atomically as a single .sesam swap.
+	return r.Update(func(s *repo.Stage) error {
+		if err := s.Tell(ctx, user, recipients, groups); err != nil {
+			return err
+		}
+		if noSeal {
+			return nil
+		}
+		return s.SealAll()
+	})
 }
 
 func HandleKill(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	if err := r.UserKill(cmd.String("user")); err != nil {
-		return err
-	}
+	user := cmd.String("user")
+	noSeal := cmd.Bool("no-seal")
 
-	if cmd.Bool("no-seal") {
-		return nil
-	}
-
-	return r.SealAll()
+	// kill + reseal commit atomically as a single .sesam swap.
+	return r.Update(func(s *repo.Stage) error {
+		if err := s.Kill(user); err != nil {
+			return err
+		}
+		if noSeal {
+			return nil
+		}
+		return s.SealAll()
+	})
 }
 
 func HandleUserChangeGroups(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	err := r.UserChangeGroups(cmd.String("user"), cmd.StringSlice("group"))
-	if err != nil {
-		return err
-	}
+	user := cmd.String("user")
+	groups := cmd.StringSlice("group")
+	noSeal := cmd.Bool("no-seal")
 
-	if cmd.Bool("no-seal") {
-		return nil
-	}
-
-	return r.SealAll()
+	return r.Update(func(s *repo.Stage) error {
+		if err := s.ChangeGroups(user, groups); err != nil {
+			return err
+		}
+		if noSeal {
+			return nil
+		}
+		return s.SealAll()
+	})
 }
 
-func HandleRenameUser(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+func HandleRenameUser(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	oldName := cmd.StringArg("olduser")
 	newName := cmd.StringArg("newuser")
 	if oldName == "" || newName == "" {
 		return fmt.Errorf("need <olduser> and <newuser>")
 	}
 
-	return r.UserRename(oldName, newName)
+	return r.Update(func(s *repo.Stage) error {
+		return s.RenameUser(oldName, newName)
+	})
 }
 
 func HandleUserAddRecipient(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-	if err := r.UserAddRecipient(ctx, cmd.String("user"), cmd.StringSlice("recipient")); err != nil {
-		return err
-	}
+	user := cmd.String("user")
+	recipients := cmd.StringSlice("recipient")
+	noSeal := cmd.Bool("no-seal")
 
-	if cmd.Bool("no-seal") {
-		return nil
-	}
-
-	return r.SealAll()
+	return r.Update(func(s *repo.Stage) error {
+		if err := s.AddRecipient(ctx, user, recipients); err != nil {
+			return err
+		}
+		if noSeal {
+			return nil
+		}
+		return s.SealAll()
+	})
 }
 
 func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-	if err := r.UserRmRecipient(ctx, cmd.String("user"), cmd.StringSlice("recipient")); err != nil {
-		return err
-	}
+	user := cmd.String("user")
+	recipients := cmd.StringSlice("recipient")
+	noSeal := cmd.Bool("no-seal")
 
-	if cmd.Bool("no-seal") {
-		return nil
-	}
-
-	return r.SealAll()
+	return r.Update(func(s *repo.Stage) error {
+		if err := s.RmRecipient(ctx, user, recipients); err != nil {
+			return err
+		}
+		if noSeal {
+			return nil
+		}
+		return s.SealAll()
+	})
 }
 
-func HandleUserRegenerateSignKey(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-	return r.UserRegenerateSignKey(cmd.String("user"))
+func HandleUserRegenerateSignKey(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+	user := cmd.String("user")
+	return r.Update(func(s *repo.Stage) error {
+		return s.RegenerateSignKey(user)
+	})
 }

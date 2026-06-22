@@ -130,6 +130,29 @@ func gitCommitAll(t *testing.T, dir, msg string) {
 	require.NoError(t, err)
 }
 
+// Test-only convenience wrappers. Production code drives every mutation
+// through Repo.Update(func(*Stage)); these keep the existing read-then-mutate
+// tests concise by committing a single staged mutation each.
+func (r *Repo) SecretAdd(paths, groups []string, nested bool) error {
+	return r.Update(func(s *Stage) error { return s.AddSecret(paths, groups, nested) })
+}
+
+func (r *Repo) SecretRemove(paths []string) error {
+	return r.Update(func(s *Stage) error { return s.RemoveSecret(paths) })
+}
+
+func (r *Repo) UserTell(ctx context.Context, user string, recipients, groups []string) error {
+	return r.Update(func(s *Stage) error { return s.Tell(ctx, user, recipients, groups) })
+}
+
+func (r *Repo) UserKill(user string) error {
+	return r.Update(func(s *Stage) error { return s.Kill(user) })
+}
+
+func (r *Repo) SealAll() error {
+	return r.Update(func(s *Stage) error { return s.SealAll() })
+}
+
 // fileExists is a small helper that asserts whether `path` is a regular
 // file, fatally failing on any other stat error.
 func fileExists(t *testing.T, path string) bool {

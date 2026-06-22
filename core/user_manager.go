@@ -16,7 +16,15 @@ type UserManager struct {
 	state    *VerifiedState
 	signUser *VerifiedUser
 	secMgr   *SecretManager
+
+	// base is the sesam-internal directory the signkeys live under. Empty
+	// means the live ".sesam"; a stage sets it to its fork dir so signing-key
+	// writes/removes land in the fork.
+	base string
 }
+
+// SetBase points the manager's signkey paths at base (a stage's fork dir).
+func (um *UserManager) SetBase(base string) { um.base = base }
 
 // BuildUserManager wires a UserManager. root confines all file I/O to the
 // repository.
@@ -72,8 +80,9 @@ func (um *UserManager) UserTell(
 		return err
 	}
 
-	newUserSigner, err := GenerateSignKey(
+	newUserSigner, err := GenerateSignKeyAt(
 		um.root,
+		um.base,
 		user,
 		recps.AgeRecipients(),
 	)
@@ -126,7 +135,7 @@ func (um *UserManager) UserKill(user string) error {
 		return err
 	}
 
-	if err := um.root.RemoveAll(signKeyPath(user)); err != nil {
+	if err := um.root.RemoveAll(signKeyPath(um.base, user)); err != nil {
 		return err
 	}
 
@@ -156,8 +165,8 @@ func (um *UserManager) UserRename(oldName, newName string) error {
 
 	// TODO: Also not exactly atomic as an operation...
 	return um.root.Rename(
-		signKeyPath(oldName),
-		signKeyPath(newName),
+		signKeyPath(um.base, oldName),
+		signKeyPath(um.base, newName),
 	)
 }
 
@@ -253,8 +262,9 @@ func (um *UserManager) UserRegenerateSignKey(user string) error {
 	}
 
 	newRecps := um.state.keyring.Recipients([]string{user})
-	signer, err := GenerateSignKey(
+	signer, err := GenerateSignKeyAt(
 		um.root,
+		um.base,
 		user,
 		newRecps.AgeRecipients(),
 	)
