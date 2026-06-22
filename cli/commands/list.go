@@ -13,7 +13,7 @@ import (
 
 // HandleListSecrets prints tracked secret metadata.
 func HandleListSecrets(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	secrets, err := r.ListSecrets()
+	secrets, err := r.ListSecrets(cmd.StringArgs("dir"))
 	if err != nil {
 		return err
 	}
@@ -34,6 +34,7 @@ func HandleListSecrets(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 		return nil
 	}
 
+	// TODO: Pull in config description in here.
 	t := newTable("Secrets", "Path", "Access Groups")
 	for _, secret := range secrets {
 		t.AppendRow([]any{
@@ -77,7 +78,7 @@ func HandleListUsers(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 			adminMark(user.IsAdmin()),
 			commaJoined(user.Groups),
 			multiline(elideKeys(recipientKeys(user.Recps))),
-			multiline(elideKeys(user.SignPubKey)),
+			multiline(elideKeys([]string{user.SignPubKey})),
 		})
 	}
 	t.AppendFooter([]any{"", "", "", "", fmt.Sprintf("%d users", len(users))})

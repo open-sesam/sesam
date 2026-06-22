@@ -16,6 +16,7 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
+	"filippo.io/age/armor"
 	"filippo.io/age/plugin"
 	"github.com/chzyer/readline"
 	"github.com/zalando/go-keyring"
@@ -238,6 +239,12 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *
 		}, nil
 	case strings.HasPrefix(ageLine, "AGE-PLUGIN-"):
 		return parsePluginIdentity(ageLine, recipientHint, pluginUI)
+
+	// Encrypted age identities may be stored either as raw age files
+	// ("age-encryption.org/v1") or in ASCII-armored form
+	// ("-----BEGIN AGE ENCRYPTED FILE-----").
+	case strings.HasPrefix(ageLine, "-----BEGIN AGE"), strings.HasPrefix(ageLine, "age-encryption.org/v1"):
+		return parseEncryptedAgeIdentity(key, passphraseProvider, pluginUI, prompt)
 	}
 
 	// Try parsing it as an unencrypted SSH key first, since it's apparently not age.
@@ -285,7 +292,7 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *
 // both the key and the prefix so either format is accepted. Empty strings
 // if no match.
 func scanAgeIdentity(data string) (identityLine, publicKey string) {
-	for _, raw := range strings.Split(data, "\n") {
+	for raw := range strings.SplitSeq(data, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
@@ -420,6 +427,46 @@ func (kpp *KeyringPassphraseProvider) PassphraseVerified(passphrase []byte, succ
 			slog.Warn("failed to cache passphrase in keyring", slog.Any("err", err))
 		}
 	}
+}
+
+func parseEncryptedAgeIdentity(
+	key string,
+	passphraseProvider PassphraseProvider,
+	pluginUI *PluginUI,
+	prompt string,
+) (*Identity, error) {
+	if passphraseProvider == nil {
+		return nil, fmt.Errorf("no passphrase supplied")
+	}
+	passphrase, err := passphraseProvider.ReadPassphrase(prompt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read passphrase: %w", err)
+	}
+
+	var r io.Reader = strings.NewReader(key)
+	if strings.HasPrefix(key, "-----BEGIN AGE") {
+		r = armor.NewReader(r)
+	}
+
+	id, err := age.NewScryptIdentity(string(passphrase))
+	if err != nil {
+		return nil, err
+	}
+
+	plaintext, err := age.Decrypt(r, id)
+	if err != nil {
+		passphraseProvider.PassphraseVerified(passphrase, false)
+		return nil, fmt.Errorf("failed to decrypt age identity: %w", err)
+	}
+
+	data, err := io.ReadAll(plaintext)
+	if err != nil {
+		passphraseProvider.PassphraseVerified(passphrase, false)
+		return nil, fmt.Errorf("failed to read decrypted age identity: %w", err)
+	}
+	passphraseProvider.PassphraseVerified(passphrase, true)
+
+	return ParseIdentity(string(data), nil, pluginUI, prompt)
 }
 
 // IdentityToUser checks which public key corresponds to which recipient public key.

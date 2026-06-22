@@ -58,28 +58,28 @@ func TestBuildUserManagerUnknownSigner(t *testing.T) {
 	require.Contains(t, err.Error(), "does not exist")
 }
 
-func TestTellUserSuccess(t *testing.T) {
+func TestUserTellSuccess(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
 
-	err := um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"})
+	err := um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"})
 	require.NoError(t, err)
 
 	_, exists := um.state.UserExists("bob")
 	require.True(t, exists)
 }
 
-func TestTellUserNonAdmin(t *testing.T) {
+func TestUserTellNonAdmin(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
 	bob := newTestUser(t, "bob")
 	al := initAuditLog(t, sesamDir, admin)
 
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
-		User:        "bob",
-		Groups:      []string{"dev"},
-		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{bob.SignPubKey},
+		User:       "bob",
+		Groups:     []string{"dev"},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: bob.SignPubKey,
 	}), nil)
 	require.NoError(t, err)
 
@@ -96,52 +96,52 @@ func TestTellUserNonAdmin(t *testing.T) {
 	require.NoError(t, err)
 
 	charlie := newTestUser(t, "charlie")
-	err = um.TellUser(context.Background(), "charlie", []string{charlie.Recipient.String()}, []string{"dev"})
+	err = um.UserTell(context.Background(), "charlie", []string{charlie.Recipient.String()}, []string{"dev"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "admin")
 }
 
-func TestTellUserDuplicate(t *testing.T) {
+func TestUserTellDuplicate(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
 
-	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
 
-	err := um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"})
+	err := um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"})
 	require.Error(t, err, "re-adding an existing user should fail")
 }
 
-func TestTellUserInvalidName(t *testing.T) {
+func TestUserTellInvalidName(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 
-	err := um.TellUser(context.Background(), "Invalid User!", []string{}, []string{"dev"})
+	err := um.UserTell(context.Background(), "Invalid User!", []string{}, []string{"dev"})
 	require.Error(t, err)
 }
 
-func TestKillUsersSuccess(t *testing.T) {
+func TestUserKillSuccess(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
 
-	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
 	_, exists := um.state.UserExists("bob")
 	require.True(t, exists)
 
-	require.NoError(t, um.KillUsers("bob"))
+	require.NoError(t, um.UserKill("bob"))
 	_, exists = um.state.UserExists("bob")
 	require.False(t, exists)
 }
 
-func TestKillUsersNonAdmin(t *testing.T) {
+func TestUserKillNonAdmin(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
 	bob := newTestUser(t, "bob")
 	al := initAuditLog(t, sesamDir, admin)
 
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
-		User:        "bob",
-		Groups:      []string{"dev"},
-		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{bob.SignPubKey},
+		User:       "bob",
+		Groups:     []string{"dev"},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: bob.SignPubKey,
 	}), nil)
 	require.NoError(t, err)
 
@@ -157,15 +157,16 @@ func TestKillUsersNonAdmin(t *testing.T) {
 	um, err := BuildUserManager(sesamDir, bob.Signer, al, state, secMgr)
 	require.NoError(t, err)
 
-	err = um.KillUsers("admin")
+	err = um.UserKill("admin")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "admin")
 }
 
-// Auto-reseal-on-tell: bringing a new user into a group that already
-// owns secrets must re-encrypt those secrets to include them, so a
-// `sesam tell` is enough - no separate `sesam seal` round-trip.
-func TestTellUserResealsForNewRecipient(t *testing.T) {
+// Tell no longer auto-seals (reseal moved to the CLI). A freshly told user
+// therefore cannot read existing ciphertext until an explicit seal re-encrypts
+// it to include them. This asserts both halves: invisible before the seal,
+// readable after.
+func TestTellThenSealGivesNewRecipientAccess(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
@@ -185,43 +186,52 @@ func TestTellUserResealsForNewRecipient(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	writeSecret(t, sesamDir, "secrets/api", "shared")
-	require.NoError(t, secMgr.AddSecret("secrets/api", []string{"dev", "admin"}))
+	require.NoError(t, secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}))
 	require.NoError(t, secMgr.SealAll()) // sealed for admin only; "dev" is empty
 
 	um, err := BuildUserManager(sesamDir, admin.Signer, al, state, secMgr)
 	require.NoError(t, err)
 
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(
+	require.NoError(t, um.UserTell(
 		context.Background(),
 		"bob",
 		[]string{bob.Recipient.String()},
 		[]string{"dev"},
 	))
 
-	// Bob should now be able to decrypt the on-disk ciphertext using
-	// nothing more than his identity. Before the auto-reseal he
-	// would not be a recipient of the existing footer.
-	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
-	cryptFd, err := os.Open(filepath.Join(sesamDir, ".sesam", "objects", "secrets/api.sesam"))
-	require.NoError(t, err)
-	defer cryptFd.Close()
+	cryptPath := filepath.Join(sesamDir, ".sesam", "objects", "secrets/api.sesam")
 
-	ok, err := RevealBlob(sesamDir, Identities{bob.Identity}, cryptFd, "secrets/api", nil, nil)
+	// Before an explicit seal, the ciphertext is still admin-only: bob cannot read it.
+	fd, err := os.Open(cryptPath)
 	require.NoError(t, err)
-	require.True(t, ok, "bob must be a recipient after tell")
+	ok, err := RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api", nil, nil)
+	_ = fd.Close()
+	require.NoError(t, err)
+	require.False(t, ok, "bob must not be a recipient before an explicit seal")
+
+	// An explicit seal re-encrypts to include the new "dev" member.
+	require.NoError(t, secMgr.SealAll())
+
+	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
+	fd, err = os.Open(cryptPath)
+	require.NoError(t, err)
+	defer fd.Close()
+	ok, err = RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api", nil, nil)
+	require.NoError(t, err)
+	require.True(t, ok, "bob must be a recipient after the explicit seal")
 
 	got, err := os.ReadFile(filepath.Join(sesamDir, "secrets/api"))
 	require.NoError(t, err)
 	require.Equal(t, "shared", string(got))
 }
 
-// Auto-reseal-on-kill: removing a user from the access list must
-// re-encrypt every secret they had access to, so they cannot decrypt
-// the *current* ciphertext even if their identity material is intact.
+// Kill no longer auto-seals; the caller must seal to evict the killed user
+// from the ciphertext. After kill + an explicit seal they can no longer
+// decrypt the *current* file, even with intact identity material.
 // (Old git-history ciphertext is unavoidably still readable; that
 // limitation is documented in design.md.)
-func TestKillUserResealsWithoutKilledRecipient(t *testing.T) {
+func TestKillThenSealEvictsRecipient(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
@@ -244,7 +254,7 @@ func TestKillUserResealsWithoutKilledRecipient(t *testing.T) {
 	require.NoError(t, err)
 
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(
+	require.NoError(t, um.UserTell(
 		context.Background(),
 		"bob",
 		[]string{bob.Recipient.String()},
@@ -252,7 +262,7 @@ func TestKillUserResealsWithoutKilledRecipient(t *testing.T) {
 	))
 
 	writeSecret(t, sesamDir, "secrets/api", "shared")
-	require.NoError(t, secMgr.AddSecret("secrets/api", []string{"dev", "admin"}))
+	require.NoError(t, secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}))
 	require.NoError(t, secMgr.SealAll())
 
 	// Sanity: bob can decrypt before kill.
@@ -265,8 +275,9 @@ func TestKillUserResealsWithoutKilledRecipient(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok, "bob should be a recipient before kill")
 
-	// Kill bob. Auto-reseal must drop him from the recipient list.
-	require.NoError(t, um.KillUsers("bob"))
+	// Kill does not auto-seal; an explicit seal must drop bob from the recipients.
+	require.NoError(t, um.UserKill("bob"))
+	require.NoError(t, secMgr.SealAll())
 
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
 	fd, err = os.Open(cryptPath)
@@ -288,10 +299,10 @@ func nonAdminUserManager(t *testing.T) *UserManager {
 	al := initAuditLog(t, sesamDir, admin)
 
 	_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
-		User:        "bob",
-		Groups:      []string{"dev"},
-		PubKeys:     []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
-		SignPubKeys: []string{bob.SignPubKey},
+		User:       "bob",
+		Groups:     []string{"dev"},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: bob.SignPubKey,
 	}), nil)
 	require.NoError(t, err)
 
@@ -309,12 +320,12 @@ func nonAdminUserManager(t *testing.T) *UserManager {
 	return um
 }
 
-func TestRenameUserSuccess(t *testing.T) {
+func TestUserRenameSuccess(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
 
-	require.NoError(t, um.RenameUser("bob", "robert"))
+	require.NoError(t, um.UserRename("bob", "robert"))
 
 	_, exists := um.state.UserExists("bob")
 	require.False(t, exists, "old name must be gone from state")
@@ -328,36 +339,36 @@ func TestRenameUserSuccess(t *testing.T) {
 	require.Empty(t, um.secMgr.Keyring.Recipients([]string{"bob"}))
 }
 
-func TestRenameUserNonAdmin(t *testing.T) {
+func TestUserRenameNonAdmin(t *testing.T) {
 	um := nonAdminUserManager(t)
 
-	err := um.RenameUser("admin", "root")
+	err := um.UserRename("admin", "root")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "admin")
 }
 
-func TestRenameUserNotFound(t *testing.T) {
+func TestUserRenameNotFound(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 
-	err := um.RenameUser("ghost", "phantom")
+	err := um.UserRename("ghost", "phantom")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not exist")
 }
 
-func TestRenameUserToExistingName(t *testing.T) {
+func TestUserRenameToExistingName(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
 
-	err := um.RenameUser("bob", "admin")
+	err := um.UserRename("bob", "admin")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "already exists")
 }
 
-func TestRenameUserInvalidNewName(t *testing.T) {
+func TestUserRenameInvalidNewName(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 
-	err := um.RenameUser("admin", "Invalid Name!")
+	err := um.UserRename("admin", "Invalid Name!")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid new user name")
 }
@@ -365,7 +376,7 @@ func TestRenameUserInvalidNewName(t *testing.T) {
 func TestUserChangeGroupsSuccess(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
-	require.NoError(t, um.TellUser(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
 
 	require.NoError(t, um.UserChangeGroups("bob", []string{"dev", "ops"}))
 
@@ -419,4 +430,179 @@ func TestShowUserNotFound(t *testing.T) {
 	ok, err := um.ShowUser("nobody", &bytes.Buffer{})
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+// --- add / remove recipients ----------------------------------------------
+
+func TestUserAddRecipientSuccess(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.UserTell(
+		context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"},
+	))
+
+	// A second key for bob, e.g. a new device.
+	bobDevice := newTestUser(t, "bob")
+	require.NoError(t, um.UserAddRecipient(
+		context.Background(), "bob", []string{bobDevice.Recipient.String()},
+	))
+
+	vu, exists := um.state.UserExists("bob")
+	require.True(t, exists)
+	require.Len(t, vu.Recps, 2, "state must hold both of bob's recipients")
+	require.Len(t, um.state.keyring.Recipients([]string{"bob"}), 2)
+
+	// The audit key was re-encrypted, so the new key alone can load and replay
+	// the log.
+	al := loadAuditLog(t, um.sesamDir, bobDevice)
+	_, err := VerifyChain(al, EmptyKeyring(), nil)
+	require.NoError(t, err, "newly added recipient must be able to decrypt and replay the log")
+}
+
+func TestUserAddRecipientNonAdmin(t *testing.T) {
+	um := nonAdminUserManager(t)
+	intruder := newTestUser(t, "intruder")
+
+	err := um.UserAddRecipient(context.Background(), "admin", []string{intruder.Recipient.String()})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "admin")
+}
+
+func TestUserAddRecipientUnknownUser(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	ghost := newTestUser(t, "ghost")
+
+	err := um.UserAddRecipient(context.Background(), "ghost", []string{ghost.Recipient.String()})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not exist")
+}
+
+func TestUserRmRecipientSuccess(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	bob := newTestUser(t, "bob")
+	bobDevice := newTestUser(t, "bob")
+	require.NoError(t, um.UserTell(
+		context.Background(), "bob",
+		[]string{bob.Recipient.String(), bobDevice.Recipient.String()},
+		[]string{"dev"},
+	))
+	require.Len(t, um.state.keyring.Recipients([]string{"bob"}), 2)
+
+	require.NoError(t, um.UserRmRecipient(
+		context.Background(), "bob", []string{bobDevice.Recipient.String()},
+	))
+
+	vu, _ := um.state.UserExists("bob")
+	require.Len(t, vu.Recps, 1)
+	require.True(t, vu.Recps[0].Equal(bob.Recipient), "the surviving recipient must be the one we kept")
+
+	// The audit key was rotated: the removed device is locked out of the log...
+	_, err := LoadAuditLog(um.sesamDir, Identities{bobDevice.Identity})
+	require.Error(t, err, "removed recipient must no longer decrypt the rotated audit log")
+
+	// ...while a surviving recipient can still load and replay it.
+	al := loadAuditLog(t, um.sesamDir, bob)
+	_, err = VerifyChain(al, EmptyKeyring(), nil)
+	require.NoError(t, err)
+}
+
+func TestUserRmRecipientLastRecipient(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.UserTell(
+		context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"},
+	))
+
+	err := um.UserRmRecipient(context.Background(), "bob", []string{bob.Recipient.String()})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "only one")
+
+	// The rejected removal must leave the last recipient intact.
+	require.Len(t, um.state.keyring.Recipients([]string{"bob"}), 1)
+}
+
+func TestUserRmRecipientNonAdmin(t *testing.T) {
+	um := nonAdminUserManager(t)
+	intruder := newTestUser(t, "intruder")
+
+	err := um.UserRmRecipient(context.Background(), "admin", []string{intruder.Recipient.String()})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "admin")
+}
+
+// --- regenerate signing key ------------------------------------------------
+
+func TestUserRegenerateSignKeySuccess(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.UserTell(
+		context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"},
+	))
+
+	before, _ := um.state.UserExists("bob")
+	oldPub := before.SignPubKey
+	// The signing key generated at tell time, loaded from disk before regen.
+	oldSigner, err := LoadSignKey(um.sesamDir, "bob", bob.Identity)
+	require.NoError(t, err)
+
+	require.NoError(t, um.UserRegenerateSignKey("bob"))
+
+	after, _ := um.state.UserExists("bob")
+	require.NotEqual(t, oldPub, after.SignPubKey, "regen must change the recorded signing pubkey")
+
+	// The on-disk signing key matches the newly recorded pubkey and verifies as
+	// bob - this catches both the encode/decode bug and a log/disk mismatch.
+	newSigner, err := LoadSignKey(um.sesamDir, "bob", bob.Identity)
+	require.NoError(t, err)
+	require.Equal(t, after.SignPubKey, MulticodeEncode(newSigner.PublicKey(), MhEd25519Pub),
+		"on-disk signing key must match the pubkey recorded in the audit log")
+
+	data := []byte("regen check")
+	sig, err := newSigner.Sign(SesamDomainSignSecretTag, data)
+	require.NoError(t, err)
+	who, err := um.state.keyring.Verify(SesamDomainSignSecretTag, data, sig, "bob")
+	require.NoError(t, err)
+	require.Equal(t, "bob", who)
+
+	// The pre-regen signing key was replaced and must no longer verify.
+	oldSig, err := oldSigner.Sign(SesamDomainSignSecretTag, data)
+	require.NoError(t, err)
+	_, err = um.state.keyring.Verify(SesamDomainSignSecretTag, data, oldSig, "bob")
+	require.Error(t, err, "the replaced signing key must no longer verify")
+}
+
+func TestUserRegenerateSignKeyReloads(t *testing.T) {
+	um, admin := buildTestUserManager(t)
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.UserTell(
+		context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"},
+	))
+	require.NoError(t, um.UserRegenerateSignKey("bob"))
+
+	// Replaying the log from disk (including the regenerate entry) must verify
+	// cleanly and yield the new pubkey.
+	al := loadAuditLog(t, um.sesamDir, admin)
+	state, err := VerifyChain(al, EmptyKeyring(), nil)
+	require.NoError(t, err)
+
+	reloaded, ok := state.UserExists("bob")
+	require.True(t, ok)
+	after, _ := um.state.UserExists("bob")
+	require.Equal(t, after.SignPubKey, reloaded.SignPubKey)
+}
+
+func TestUserRegenerateSignKeyNonAdmin(t *testing.T) {
+	um := nonAdminUserManager(t)
+
+	err := um.UserRegenerateSignKey("admin")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "admin")
+}
+
+func TestUserRegenerateSignKeyUnknownUser(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+
+	err := um.UserRegenerateSignKey("ghost")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not exist")
 }

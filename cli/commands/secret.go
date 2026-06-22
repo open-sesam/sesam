@@ -19,7 +19,7 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		printInfo("no groups specified, assuming `--group admin` only - only admins can decrypt")
 	}
 
-	if err := r.SecretAdd(cmd.Args().Slice(), groups); err != nil {
+	if err := r.SecretAdd(cmd.Args().Slice(), groups, cmd.Bool("nested")); err != nil {
 		return err
 	}
 
@@ -52,7 +52,7 @@ func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return fmt.Errorf("need <old> and <new>")
 	}
 
-	if err := r.MoveSecret(oldRevealedPath, newRevealedPath); err != nil {
+	if err := r.SecretMove(oldRevealedPath, newRevealedPath); err != nil {
 		return err
 	}
 

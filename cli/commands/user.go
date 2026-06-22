@@ -80,13 +80,33 @@ func HandleRenameUser(ctx context.Context, cmd *cli.Command, r *repo.Repo) error
 		return fmt.Errorf("need <olduser> and <newuser>")
 	}
 
-	return r.RenameUser(oldName, newName)
+	return r.UserRename(oldName, newName)
 }
 
 func HandleUserAddRecipient(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-	return HandleStub(ctx, cmd)
+	if err := r.UserAddRecipient(ctx, cmd.String("user"), cmd.StringSlice("recipient")); err != nil {
+		return err
+	}
+
+	if cmd.Bool("no-seal") {
+		return nil
+	}
+
+	return r.SealAll()
 }
 
 func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-	return HandleStub(ctx, cmd)
+	if err := r.UserRmRecipient(ctx, cmd.String("user"), cmd.StringSlice("recipient")); err != nil {
+		return err
+	}
+
+	if cmd.Bool("no-seal") {
+		return nil
+	}
+
+	return r.SealAll()
+}
+
+func HandleUserRegenerateSignKey(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+	return r.UserRegenerateSignKey(cmd.String("user"))
 }

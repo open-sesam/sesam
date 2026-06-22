@@ -64,6 +64,11 @@ func TestWorkflows(t *testing.T) {
 			if _, err := writeIdentity("BOB"); err != nil {
 				return err
 			}
+			// A second non-admin identity, used as an extra recipient/device
+			// key in the add/remove-recipient and regen workflows.
+			if _, err := writeIdentity("CAROL"); err != nil {
+				return err
+			}
 
 			// Plugin identity for the mock age-plugin-sesamtest binary
 			// registered via TestMain. Used by plugin_workflow.txt to

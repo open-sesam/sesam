@@ -79,7 +79,7 @@ func TestVerifyUserTellBasic(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 	}), nil)
 
 	state := verifyState(t, al, EmptyKeyring())
@@ -98,13 +98,13 @@ func TestVerifyUserTellNegative(t *testing.T) {
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "bob", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 		}), nil)
 
 		carol := newTestUser(t, "carol")
 		al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailUserTell{
 			User: "carol", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: carol.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{carol.SignPubKey},
+			PubKeys: []UserPubKey{{Key: carol.Recipient.String(), Source: KeySourceManual}}, SignPubKey: carol.SignPubKey,
 		}), nil)
 
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
@@ -117,7 +117,7 @@ func TestVerifyUserTellNegative(t *testing.T) {
 
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "admin", Groups: []string{"admin"},
-			PubKeys: []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{admin.SignPubKey},
+			PubKeys: []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}}, SignPubKey: admin.SignPubKey,
 		}), nil)
 
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
@@ -131,7 +131,7 @@ func TestVerifyUserTellNegative(t *testing.T) {
 		bob := newTestUser(t, "bob")
 		tell := &DetailUserTell{
 			User: "bob", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 		}
 		al.AddEntry(admin.Signer, newAuditEntry("admin", tell), nil)
 		al.AddEntry(admin.Signer, newAuditEntry("admin", tell), nil)
@@ -142,6 +142,77 @@ func TestVerifyUserTellNegative(t *testing.T) {
 
 // --- verifyUserKill tests ---
 
+// TestVerifyFeedEntryRollback asserts that a FeedEntry whose verification fails
+// part-way through leaves the keyring and state exactly as they were. The
+// keyring is shared by pointer with the repo and managers, so a failed replay
+// must roll its contents back in place rather than leak partial mutations; the
+// state is replayed into a deep copy that is discarded on error.
+func TestVerifyFeedEntryRollback(t *testing.T) {
+	t.Run("keyring not polluted by partial registerUser", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+		state := verifyState(t, al, EmptyKeyring())
+		kr := state.keyring.(*MemoryKeyring)
+
+		usersBefore := len(state.Users)
+		recpsBefore := len(AllRecipients(kr))
+		signPubsBefore := len(kr.signPubs)
+
+		// eve has her own signing key but reuses admin's recipient. registerUser
+		// sets the signing key first (succeeds) and then fails adding the
+		// duplicate recipient - the signing key must not survive.
+		eve := newTestUser(t, "eve")
+		err := state.FeedEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+			User:       "eve",
+			Groups:     []string{"dev"},
+			PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
+			SignPubKey: eve.SignPubKey,
+		}))
+		require.Error(t, err)
+
+		require.Len(t, state.Users, usersBefore)
+		require.Len(t, AllRecipients(kr), recpsBefore)
+		require.Len(t, kr.signPubs, signPubsBefore)
+		_, hasEve := kr.signPubs["eve"]
+		require.False(t, hasEve, "phantom signing key for eve must not survive a failed verify")
+	})
+
+	t.Run("in-place state mutation rolled back on later failure", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+		state := verifyState(t, al, EmptyKeyring())
+
+		bob := newTestUser(t, "bob")
+		require.NoError(t, state.FeedEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+			User:       "bob",
+			Groups:     []string{"dev"},
+			PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+			SignPubKey: bob.SignPubKey,
+		})))
+
+		bobUser, ok := state.UserExists("bob")
+		require.True(t, ok)
+		require.Equal(t, []string{"dev"}, bobUser.Groups)
+
+		// change_groups mutates bob.Groups in place before the signature check.
+		// An impostor signer reusing the "admin" name passes the logical checks
+		// but fails the signature check *after* the mutation; bob's groups must
+		// be left untouched because verify replays into a deep copy.
+		impostor := newTestUser(t, "admin")
+		err := state.FeedEntry(impostor.Signer, newAuditEntry("admin", &DetailUserChangeGroups{
+			User:      "bob",
+			NewGroups: []string{"ops"},
+		}))
+		require.Error(t, err)
+
+		bobUser, ok = state.UserExists("bob")
+		require.True(t, ok)
+		require.Equal(t, []string{"dev"}, bobUser.Groups, "bob's groups must survive a failed verify unchanged")
+	})
+}
+
 func TestVerifyUserKillBasic(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
@@ -150,7 +221,7 @@ func TestVerifyUserKillBasic(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 	}), nil)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserKill{User: "bob"}), nil)
@@ -186,7 +257,7 @@ func TestVerifyUserKillNegative(t *testing.T) {
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "bob", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 		}), nil)
 
 		al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailUserKill{User: "admin"}), nil)
@@ -202,7 +273,7 @@ func TestVerifyUserKillSecondAdmin(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"admin"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 	}), nil)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserKill{User: "bob"}), nil)
@@ -255,7 +326,7 @@ func TestVerifySecretChangeNegative(t *testing.T) {
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "bob", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 		}), nil)
 
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
@@ -320,7 +391,7 @@ func TestVerifySecretChangeNewSecretRequiresAccess(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 	}), nil)
 
 	// Bob (dev) tries to register a brand-new secret restricted to "ops".
@@ -367,7 +438,7 @@ func TestVerifySecretRemoveNegative(t *testing.T) {
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "bob", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 		}), nil)
 
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
@@ -389,7 +460,7 @@ func TestVerifySealResetsRequirement(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 	}), nil)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{
@@ -413,7 +484,7 @@ func TestVerifySignatureNegative(t *testing.T) {
 		// Entry says admin but bob signs it.
 		al.AddEntry(bob.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "bob", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 		}), nil)
 
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
@@ -439,7 +510,7 @@ func TestVerifyChainIntegrity(t *testing.T) {
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "bob", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 		}), nil)
 
 		al.Entries[1].PreviousHash = "broken"
@@ -454,13 +525,13 @@ func TestVerifyChainIntegrity(t *testing.T) {
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "bob", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 		}), nil)
 
 		carol := newTestUser(t, "carol")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "carol", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: carol.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{carol.SignPubKey},
+			PubKeys: []UserPubKey{{Key: carol.Recipient.String(), Source: KeySourceManual}}, SignPubKey: carol.SignPubKey,
 		}), nil)
 
 		// Swap entries 1 and 2 - should break chain.
@@ -476,13 +547,13 @@ func TestVerifyChainIntegrity(t *testing.T) {
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "bob", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 		}), nil)
 
 		carol := newTestUser(t, "carol")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "carol", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: carol.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{carol.SignPubKey},
+			PubKeys: []UserPubKey{{Key: carol.Recipient.String(), Source: KeySourceManual}}, SignPubKey: carol.SignPubKey,
 		}), nil)
 
 		// Remove middle entry - chain breaks.
@@ -498,7 +569,7 @@ func TestVerifyChainIntegrity(t *testing.T) {
 		bob := newTestUser(t, "bob")
 		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 			User: "bob", Groups: []string{"dev"},
-			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 		}), nil)
 
 		// Tamper the init entry's detail (changes its hash, breaking chain for entry 2).
@@ -633,7 +704,7 @@ func TestUpdate(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	require.NoError(t, state.FeedEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 	})))
 	require.Equal(t, uint64(2), state.VerifiedUntil)
 	_, exists := state.UserExists("bob")
@@ -710,7 +781,7 @@ func TestEndToEndStoreLoadVerify(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 	}), nil)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
@@ -738,13 +809,13 @@ func TestFullLifecycle(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "bob", Groups: []string{"dev"},
-		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{bob.SignPubKey},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
 	}), nil)
 
 	carol := newTestUser(t, "carol")
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
 		User: "carol", Groups: []string{"ops"},
-		PubKeys: []UserPubKey{{Key: carol.Recipient.String(), Source: KeySourceManual}}, SignPubKeys: []string{carol.SignPubKey},
+		PubKeys: []UserPubKey{{Key: carol.Recipient.String(), Source: KeySourceManual}}, SignPubKey: carol.SignPubKey,
 	}), nil)
 
 	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{

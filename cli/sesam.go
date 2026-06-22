@@ -171,6 +171,13 @@ func Main(args []string) error {
 				Flags:    flagsListSecrets,
 				Action:   commands.WithRepo(commands.HandleListSecrets),
 				Usage:    "List known secrets and metadata",
+				Arguments: []cli.Argument{
+					&cli.StringArgs{
+						Name:      "dir",
+						UsageText: "Only show secrets in specific dirs",
+						Max:       255, // apparently we have to set max to something here...
+					},
+				},
 			},
 			{
 				Name:     "rotate",
@@ -245,6 +252,13 @@ func Main(args []string) error {
 						Flags:   flagsUserRemoveRecipient,
 						Action:  commands.WithRepo(commands.HandleUserRemoveRecipient),
 						Usage:   "Remove a recipient from an existing user (may not be the last one)",
+					},
+					{
+						Name:    "regen-sign-key",
+						Aliases: []string{"rsk"},
+						Flags:   flagsUserRegenerateSignKey,
+						Action:  commands.WithRepo(commands.HandleUserRegenerateSignKey),
+						Usage:   "Regenerate the signing key of a specific user",
 					},
 					{
 						Name:   "rename",
