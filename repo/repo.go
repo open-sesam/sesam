@@ -2,7 +2,7 @@
 //
 // A Repo is a handle to a sesam repository on disk. Load (or Init) acquires
 // the on-disk `.sesam.lock`, opens the audit log, and builds the secret / user
-// managers — all of which stay open for the lifetime of the Repo and are
+// managers - all of which stay open for the lifetime of the Repo and are
 // released by Close. Read operations live on the embedded View; state-changing
 // operations live on a Stage opened via Stage()/Update(), which commits with a
 // single atomic swap of the whole `.sesam` directory (see stage.go).
@@ -37,11 +37,7 @@ var ErrClosed = errors.New("sesam repo is closed")
 // Status, Verify, …) are callable directly on the Repo.
 type Repo struct {
 	*View
-
-	lock *flock.Flock
-
-	// stage is the single in-flight read-write transaction, if any. Guards
-	// against two concurrent forks of .sesam (see stage.go).
+	lock  *flock.Flock
 	stage *Stage
 }
 
@@ -457,21 +453,21 @@ func (r *Repo) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	firstErr := r.closeState()
+	errs := []error{r.closeState()}
 
 	if r.lock != nil {
-		if err := r.lock.Unlock(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("unlock repository: %w", err)
+		if err := r.lock.Unlock(); err != nil {
+			errs = append(errs, fmt.Errorf("unlock repository: %w", err))
 		}
 		r.lock = nil
 	}
 	if r.root != nil {
-		if err := r.root.Close(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("close repo root: %w", err)
+		if err := r.root.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close repo root: %w", err))
 		}
 		r.root = nil
 	}
-	return firstErr
+	return errors.Join(errs...)
 }
 
 // TODO: We might need to enrich the user type with config-derived info like

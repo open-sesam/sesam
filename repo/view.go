@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -63,20 +64,20 @@ func (v *View) isClosed() bool {
 // closeState closes the audit log and verified state. The root and lock are
 // shared/owned by the Repo and are not touched here.
 func (v *View) closeState() error {
-	var firstErr error
+	var errs []error
 	if v.auditLog != nil {
 		if err := v.auditLog.Close(); err != nil {
-			firstErr = fmt.Errorf("close audit log: %w", err)
+			errs = append(errs, fmt.Errorf("close audit log: %w", err))
 		}
 		v.auditLog = nil
 	}
 	if v.vstate != nil {
-		if err := v.vstate.Close(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("close vstate: %w", err)
+		if err := v.vstate.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close vstate: %w", err))
 		}
 		v.vstate = nil
 	}
-	return firstErr
+	return errors.Join(errs...)
 }
 
 // ListUsers returns the users currently in the audit log.
@@ -88,7 +89,7 @@ func (v *View) ListUsers() ([]core.VerifiedUser, error) {
 		return nil, ErrClosed
 	}
 
-	return append([]core.VerifiedUser(nil), v.vstate.Users...), nil
+	return slices.Clone(v.vstate.Users), nil
 }
 
 // ListSecrets returns the secrets currently managed by sesam.
@@ -100,7 +101,7 @@ func (v *View) ListSecrets(paths []string) ([]SecretInfo, error) {
 		return nil, ErrClosed
 	}
 
-	var out []SecretInfo
+	out := make([]SecretInfo, 0, len(v.vstate.Secrets))
 	if len(paths) == 0 {
 		for _, secret := range v.vstate.Secrets {
 			out = append(out, SecretInfo{VerifiedSecret: secret})
@@ -378,7 +379,7 @@ func (v *View) expandSecretFiles(rel string) ([]string, error) {
 }
 
 // secretsUnder returns every managed secret at or beneath the sesam-relative
-// path rel, enumerated from verified state. Unlocked helper: callers hold v.mu.
+// path rel, enumerated from verified state.
 func (v *View) secretsUnder(rel string) []core.VerifiedSecret {
 	target := filepath.Clean(rel)
 

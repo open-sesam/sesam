@@ -204,7 +204,7 @@ func TestCopyFileHardlinksWhenPossible(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = root.Close() })
 
-	require.NoError(t, CopyFile(root, "src", "dst"))
+	require.NoError(t, CopyFile(root, "src", "dst", true))
 
 	srcInfo, err := os.Stat(filepath.Join(dir, "src"))
 	require.NoError(t, err)
@@ -230,7 +230,7 @@ func TestCopyFileFallsBackOnLinkFailure(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = root.Close() })
 
-	require.NoError(t, CopyFile(root, "src", "dst"))
+	require.NoError(t, CopyFile(root, "src", "dst", true))
 
 	got, err := os.ReadFile(filepath.Join(dir, "dst"))
 	require.NoError(t, err)

@@ -300,8 +300,9 @@ func InitAdminUser(
 		return nil, nil, err
 	}
 
-	signer, err := GenerateSignKey(
+	signer, err := GenerateSignKeyAt(
 		root,
+		"",
 		user,
 		recps.AgeRecipients(),
 	)

@@ -852,19 +852,18 @@ func verify(state *VerifiedState) error {
 
 // Clone returns an independent copy of the verified state bound to log and kr
 // (a stage's forked audit log and cloned keyring). The user/secret slices are
-// deep-copied so staged FeedEntry calls cannot mutate the live view. This is
-// the memory-based fork construction: no audit-log replay is performed.
+// deep-copied so staged FeedEntry calls cannot mutate the live view.
 func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 	users := make([]VerifiedUser, len(s.Users))
 	for i, u := range s.Users {
-		u.Groups = append([]string(nil), u.Groups...)
-		u.Recps = append(Recipients(nil), u.Recps...)
+		u.Groups = slices.Clone(u.Groups)
+		u.Recps = slices.Clone(u.Recps)
 		users[i] = u
 	}
 
 	secrets := make([]VerifiedSecret, len(s.Secrets))
 	for i, sec := range s.Secrets {
-		sec.AccessGroups = append([]string(nil), sec.AccessGroups...)
+		sec.AccessGroups = slices.Clone(sec.AccessGroups)
 		secrets[i] = sec
 	}
 

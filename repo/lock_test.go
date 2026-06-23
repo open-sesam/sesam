@@ -1,7 +1,6 @@
 package repo
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -40,24 +39,8 @@ func TestAcquireRepoLock_SucceedsAfterRelease(t *testing.T) {
 	require.NoError(t, second.Unlock())
 }
 
-func TestRepo_acquireLock_FailsWithoutSesamDir(t *testing.T) {
-	dir := t.TempDir() // no .sesam/ inside
-
-	r := &Repo{
-		View: &View{
-			sesamDir: dir,
-			opts:     RepoOpts{LockTimeout: time.Second},
-		},
-	}
-
-	err := r.acquireLock()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "sesam directory missing")
-}
-
 func TestRepo_acquireLock_HappyPath(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, sesamSuffix), 0o700))
+	dir := t.TempDir() // .sesam/ need not exist; the lock is a sibling.
 
 	r := &Repo{
 		View: &View{

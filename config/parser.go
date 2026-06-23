@@ -143,8 +143,6 @@ func (c *Config) loadFile(path string) (*FileSource, error) {
 		return nil, err
 	}
 
-	// fmt.Printf("FILE:\n%s\n", string(bs))
-
 	file, err := parser.ParseBytes(bs, parser.ParseComments)
 	if err != nil {
 		return nil, err

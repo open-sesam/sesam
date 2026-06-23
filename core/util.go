@@ -77,6 +77,10 @@ func IsForbiddenPath(revealedPath string) error {
 		return fmt.Errorf("you can't seal sesam.yml")
 	}
 
+	if filepath.Base(revealedPath) == defaultSesamBase+".lock" {
+		return fmt.Errorf("you can't seal the sesam lock file")
+	}
+
 	if filepath.Base(revealedPath) == ".gitattributes" {
 		return fmt.Errorf("you shouldn't seal .gitattributes")
 	}
@@ -154,21 +158,28 @@ func PathExists(p string) bool {
 	return err == nil
 }
 
-// CopyFile materializes `dst` with the same contents as `src`. It tries
-// a hardlink first (zero-copy when src and dst sit on the same
-// filesystem and the FS supports it - Linux/macOS/BSD via link(2),
-// Windows on NTFS via CreateHardLinkW) and falls back to a byte-for-byte
-// copy on any error (EXDEV across mounts, EPERM on FAT/some FUSE,
-// EEXIST, ...).
+// CopyFile materializes `dst` with the same contents as `src`. When tryLink is
+// set it attempts a hardlink first (zero-copy when src and dst sit on the same
+// filesystem and the FS supports it - Linux/macOS/BSD via link(2), Windows on
+// NTFS via CreateHardLinkW) and falls back to a byte-for-byte copy on any error
+// (EXDEV across mounts, EPERM on FAT/some FUSE, EEXIST, ...). Pass tryLink=false
+// to force a copy (e.g. for a file the caller intends to mutate independently of
+// src, like the staged audit log).
 //
-// Hardlinks share the source inode, so dst inherits its mode/owner/mtime.
-// The byte copy creates a fresh inode at mode 0o600. The caller (the repo
-// stage fork) operates exclusively under .sesam/ (0o700 dirs, 0o600 files),
-// so no permission widening can result either way. It does not fsync; the
-// caller is responsible for durability.
-func CopyFile(root *os.Root, src, dst string) error {
-	if err := root.Link(src, dst); err == nil {
-		return nil
+// Hardlinks share the source inode, so dst inherits its mode/owner/mtime. The
+// byte copy creates a fresh inode at mode 0o600. The caller (the repo stage
+// fork) operates exclusively under .sesam/ (0o700 dirs, 0o600 files), so no
+// permission widening can result either way. The byte-copy path fsyncs dst; a
+// hardlink does not (its inode data is already durable, and the new directory
+// entry's durability is the caller's concern, e.g. via a directory fsync).
+func CopyFile(root *os.Root, src, dst string, tryLink bool) error {
+	// A hardlink shares src's already-durable inode, so it needs no fsync (the
+	// new directory entry's durability is the caller's concern). A byte copy
+	// creates a fresh inode whose data we fsync before returning.
+	if tryLink {
+		if err := root.Link(src, dst); err == nil {
+			return nil
+		}
 	}
 
 	srcFd, err := root.Open(src)
@@ -186,6 +197,10 @@ func CopyFile(root *os.Root, src, dst string) error {
 		_ = dstFd.Close()
 		_ = root.Remove(dst)
 		return fmt.Errorf("copy %s -> %s: %w", src, dst, err)
+	}
+	if err := dstFd.Sync(); err != nil {
+		_ = dstFd.Close()
+		return fmt.Errorf("sync %s: %w", dst, err)
 	}
 	return dstFd.Close()
 }

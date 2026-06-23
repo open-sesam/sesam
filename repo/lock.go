@@ -3,28 +3,21 @@ package repo
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/gofrs/flock"
 )
 
-// acquireLock grabs `<sesamDir>/.sesam.lock` for the lifetime of the Repo.
-// Released by Close. Requires `.sesam/` to already exist; Init creates it
-// first.
+// acquireLock grabs `<sesamDir>/.sesam.lock` for the lifetime of the Repo,
+// released by Close.
 //
 // The lock deliberately lives *outside* `.sesam/`: every mutating operation
 // atomically swaps the whole `.sesam` directory (see stage.go), and a lock
 // file inside it would get a fresh inode on every swap, breaking flock's
 // per-inode mutual exclusion. Keeping it a sibling gives it a stable inode.
 func (r *Repo) acquireLock() error {
-	sesamDir := filepath.Join(r.sesamDir, sesamSuffix)
-	if _, err := os.Stat(sesamDir); err != nil {
-		return fmt.Errorf("sesam directory missing at %s: %w", sesamDir, err)
-	}
-
-	lockPath := filepath.Join(r.sesamDir, sesamSuffix+".lock")
+	lockPath := filepath.Join(r.sesamDir, sesamLockName)
 	fl, err := acquireRepoLock(lockPath, r.opts.lockTimeout())
 	if err != nil {
 		return err
