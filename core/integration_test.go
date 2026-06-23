@@ -21,7 +21,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	whoami := admin.Name
 
 	// ── Phase 1: init ────────────────────────────────────────────────
-	signer, err := GenerateSignKey(testRoot(t, sesamDir), whoami, []age.Recipient{admin.Recipient.Recipient})
+	signer, err := GenerateSignKeyAt(testRoot(t, sesamDir), "", whoami, []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	keyring := EmptyKeyring()
@@ -47,7 +47,6 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 		signer, keyring, auditLog, vstate,
 	)
 	require.NoError(t, err)
-
 
 	secretPath := "secrets/db_password"
 	writeSecret(t, sesamDir, secretPath, "hunter2")
@@ -101,7 +100,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(testRoot(t, sesamDir), "admin", []age.Recipient{admin.Recipient.Recipient})
+	signer, err := GenerateSignKeyAt(testRoot(t, sesamDir), "", "admin", []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	keyring := EmptyKeyring()
@@ -120,7 +119,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 
 	// ── Admin adds bob ──
 	bob := newTestUser(t, "bob")
-	bobSignKey, err := GenerateSignKey(testRoot(t, sesamDir), "bob", []age.Recipient{bob.Recipient.Recipient})
+	bobSignKey, err := GenerateSignKeyAt(testRoot(t, sesamDir), "", "bob", []age.Recipient{bob.Recipient.Recipient})
 	require.NoError(t, err)
 
 	bobSignKeyStr := MulticodeEncode(bobSignKey.PublicKey(), MhEd25519Pub)
@@ -185,7 +184,7 @@ func TestIntegrationTamperDetection(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(testRoot(t, sesamDir), "admin", []age.Recipient{admin.Recipient.Recipient})
+	signer, err := GenerateSignKeyAt(testRoot(t, sesamDir), "", "admin", []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
@@ -213,7 +212,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(testRoot(t, sesamDir), "admin", []age.Recipient{admin.Recipient.Recipient})
+	signer, err := GenerateSignKeyAt(testRoot(t, sesamDir), "", "admin", []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
@@ -240,7 +239,6 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 		vs,
 	)
 	require.NoError(t, err)
-
 
 	// 1. Add secret.
 	writeSecret(t, sesamDir, "secrets/token", "tok-abc")
@@ -310,7 +308,7 @@ func TestKeySourcePreservedThroughReplay(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(testRoot(t, sesamDir), "admin", []age.Recipient{admin.Recipient.Recipient})
+	signer, err := GenerateSignKeyAt(testRoot(t, sesamDir), "", "admin", []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
@@ -323,7 +321,7 @@ func TestKeySourcePreservedThroughReplay(t *testing.T) {
 	require.NoError(t, err)
 
 	bob := newTestUser(t, "bob")
-	bobSignKey, err := GenerateSignKey(testRoot(t, sesamDir), "bob", []age.Recipient{bob.Recipient.Recipient})
+	bobSignKey, err := GenerateSignKeyAt(testRoot(t, sesamDir), "", "bob", []age.Recipient{bob.Recipient.Recipient})
 	require.NoError(t, err)
 	bobSignKeyStr := MulticodeEncode(bobSignKey.PublicKey(), MhEd25519Pub)
 

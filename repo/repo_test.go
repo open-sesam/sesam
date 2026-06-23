@@ -184,7 +184,7 @@ func TestRepo_SecretAdd_RejectsBadInputs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := r.SecretAdd(tc.paths, tc.groups, false)
+			err := r.Update(func(s *Stage) error { return s.AddSecret(tc.paths, tc.groups, false) })
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantErr)
 		})
@@ -199,7 +199,7 @@ func TestRepo_SecretAddRemove_RoundTrip(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(plaintext), 0o700))
 	require.NoError(t, os.WriteFile(plaintext, []byte("hunter2\n"), 0o600))
 
-	require.NoError(t, r.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}, false))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.AddSecret([]string{"secrets/api.token"}, []string{"admin"}, false) }))
 
 	secrets, err := r.ListSecrets(nil)
 	require.NoError(t, err)
@@ -211,7 +211,7 @@ func TestRepo_SecretAddRemove_RoundTrip(t *testing.T) {
 	}
 	require.Contains(t, paths, "secrets/api.token")
 
-	require.NoError(t, r.SecretRemove([]string{"secrets/api.token"}))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.RemoveSecret([]string{"secrets/api.token"}) }))
 	secrets, err = r.ListSecrets(nil)
 	require.NoError(t, err)
 	require.Len(t, secrets, 1, "only README.md remains")
@@ -222,7 +222,7 @@ func TestRepo_SecretRemove_RejectsEmpty(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	_, r := bootstrapRepo(t, admin)
 
-	err := r.SecretRemove(nil)
+	err := r.Update(func(s *Stage) error { return s.RemoveSecret(nil) })
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing secret path")
 }
@@ -235,7 +235,7 @@ func TestRepo_UserTell_AddsUserAndReSeals(t *testing.T) {
 
 	_, r := bootstrapRepo(t, admin)
 
-	err := r.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"developers"})
+	err := r.Update(func(s *Stage) error { return s.Tell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"developers"}) })
 	require.NoError(t, err)
 
 	users, err := r.ListUsers()
@@ -252,10 +252,11 @@ func TestRepo_UserKill_RemovesUser(t *testing.T) {
 	bob := writeTestIdentity(t, "bob")
 
 	_, r := bootstrapRepo(t, admin)
-	require.NoError(t, r.UserTell(context.Background(),
-		bob.Name, []string{bob.Recipient}, []string{"developers"}))
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.Tell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"developers"})
+	}))
 
-	require.NoError(t, r.UserKill(bob.Name))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.Kill(bob.Name) }))
 
 	users, err := r.ListUsers()
 	require.NoError(t, err)
@@ -365,7 +366,7 @@ func TestRepo_SealReveal_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, original, got, "RevealAll restores the original plaintext")
 
-	require.NoError(t, r.SealAll(), "SealAll on an already-sealed tree is a no-op")
+	require.NoError(t, r.Update(func(s *Stage) error { return s.SealAll() }), "SealAll on an already-sealed tree is a no-op")
 }
 
 // --- Clean (method dispatch) ----------------------------------------------
@@ -489,7 +490,7 @@ func TestRepoStatusStates(t *testing.T) {
 	add := func(rel, content string) {
 		t.Helper()
 		writeRepoFile(t, dir, rel, content)
-		require.NoError(t, r.SecretAdd([]string{rel}, []string{"admin"}, false))
+		require.NoError(t, r.Update(func(s *Stage) error { return s.AddSecret([]string{rel}, []string{"admin"}, false) }))
 	}
 
 	add("secrets/same", "identical")
@@ -498,7 +499,7 @@ func TestRepoStatusStates(t *testing.T) {
 	add("secrets/unsealed", "seal-removed")
 
 	// Add only records the audit entry; seal writes the ciphertext objects.
-	require.NoError(t, r.SealAll())
+	require.NoError(t, r.Update(func(s *Stage) error { return s.SealAll() }))
 	require.NoError(t, r.Close())
 
 	// Reload so the runtime user (whoami) is resolved - Status needs it to
@@ -521,6 +522,11 @@ func TestRepoStatusStates(t *testing.T) {
 		require.Equal(t, SecretStateNoRevealedPath, m["secrets/unrevealed"])
 		require.Equal(t, SecretStateNoSealedPath, m["secrets/unsealed"])
 		require.Equal(t, SecretStateUnmanaged, m["loose.txt"])
+
+		// The repo lock is a sibling of .sesam at the worktree root but is
+		// sesam-internal infra, not an unmanaged worktree file.
+		_, hasLock := m[".sesam.lock"]
+		require.False(t, hasLock, "the repo lock must not be reported as unmanaged")
 	})
 
 	t.Run("ignore-unmanaged drops loose files but keeps secrets", func(t *testing.T) {
@@ -540,10 +546,10 @@ func TestRepoStatusUserHasNoAccess(t *testing.T) {
 
 	// A secret in a group bob will never belong to.
 	writeRepoFile(t, dir, "secrets/ops", "ops-only")
-	require.NoError(t, r.SecretAdd([]string{"secrets/ops"}, []string{"ops"}, false))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.AddSecret([]string{"secrets/ops"}, []string{"ops"}, false) }))
 
 	// Tell bob, but only into "dev" - he has no access to the "ops" secret.
-	require.NoError(t, r.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"dev"}))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.Tell(context.Background(), "bob", []string{bob.Recipient}, []string{"dev"}) }))
 	require.NoError(t, r.Close())
 
 	rb := reloadSesamRepo(t, dir, bob)
@@ -559,8 +565,8 @@ func TestRepoStatusDiffDir(t *testing.T) {
 	dir, r := bootstrapRepo(t, admin)
 
 	writeRepoFile(t, dir, "secrets/diff", "v1-sealed")
-	require.NoError(t, r.SecretAdd([]string{"secrets/diff"}, []string{"admin"}, false))
-	require.NoError(t, r.SealAll())
+	require.NoError(t, r.Update(func(s *Stage) error { return s.AddSecret([]string{"secrets/diff"}, []string{"admin"}, false) }))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.SealAll() }))
 	require.NoError(t, r.Close())
 
 	// Reload so whoami is resolved (Init does not set it).

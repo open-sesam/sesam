@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -19,10 +18,6 @@ import (
 // It lives next to .sesam (a child of sesamDir, not of .sesam) so it never
 // participates in flock identity and is ignored by the generated .gitignore.
 const forkSuffix = ".sesam-tmp"
-
-// ErrStageOpen is returned by Stage when a stage is already in flight. Only one
-// stage may exist at a time: it owns the single .sesam-tmp fork directory.
-var ErrStageOpen = errors.New("a stage is already open")
 
 // ErrStageFinalized is returned when Commit/Rollback is called on a stage that
 // was already committed or rolled back.
@@ -40,7 +35,7 @@ var ErrStageFinalized = errors.New("stage already finalized")
 // Config: the staged View carries its own in-memory copy of sesam.yml (a fresh
 // load); mutators edit that copy and it is written to disk only on Commit, so
 // Rollback never touches the live config. sesam.yml lives in the worktree root,
-// outside .sesam, so it cannot ride the swap itself — it is saved right after
+// outside .sesam, so it cannot ride the swap itself - it is saved right after
 // the swap (the audit log is authoritative; config is its desired-state
 // mirror), leaving only a narrow crash window where config trails the log.
 type Stage struct {
@@ -60,7 +55,8 @@ func (r *Repo) Stage() (*Stage, error) {
 		return nil, ErrClosed
 	}
 	if r.stage != nil {
-		return nil, ErrStageOpen
+		// stage exists already; return again.
+		return r.stage, nil
 	}
 
 	// Drop any fork left behind by a crashed previous run before re-forking.
@@ -121,14 +117,28 @@ func (r *Repo) buildStage() (*Stage, error) {
 	vstate := r.vstate.Clone(audit, keyring)
 	signer := r.secret.Signer
 
-	secret, err := core.BuildSecretManager(r.sesamDir, r.root, r.identities, signer, keyring, audit, vstate)
+	secret, err := core.BuildSecretManager(
+		r.sesamDir,
+		r.root,
+		r.identities,
+		signer,
+		keyring,
+		audit,
+		vstate,
+	)
 	if err != nil {
 		_ = audit.Close()
 		return nil, fmt.Errorf("build fork secret manager: %w", err)
 	}
 	secret.SetBase(forkSuffix)
 
-	user, err := core.BuildUserManager(r.root, signer, audit, vstate, secret)
+	user, err := core.BuildUserManager(
+		r.root,
+		signer,
+		audit,
+		vstate,
+		secret,
+	)
 	if err != nil {
 		_ = audit.Close()
 		return nil, fmt.Errorf("build fork user manager: %w", err)
@@ -185,14 +195,10 @@ func (r *Repo) materializeFork() error {
 			return r.root.MkdirAll(dst, 0o700)
 		}
 
-		if rel == auditLogRel {
-			// Forced byte copy: a hardlink would let staged appends touch the
-			// live log inode and survive a Rollback.
-			return copyInRoot(r.root, rel, dst)
-		}
-
-		// Everything else: hardlink (cheap), copy on filesystems that refuse.
-		return core.CopyFile(r.root, rel, dst)
+		// The audit log gets a forced byte copy (a hardlink would let staged
+		// appends touch the live inode and survive a Rollback); everything else
+		// hardlinks (cheap), copying only on filesystems that refuse.
+		return core.CopyFile(r.root, rel, dst, rel != auditLogRel)
 	})
 }
 
@@ -207,14 +213,12 @@ func (s *Stage) Commit() error {
 	}
 
 	// Durability before the swap: fsync the fork's directory tree so the
-	// hardlink entries and the copied audit log are on disk. Object/signkey
-	// writes already went through renameio (file+dir fsync) and audit appends
-	// through O_SYNC; this covers the rest.
+	// hardlink entries and the copied audit log are on disk for sure.
+	// See man(2) fsync - not 100% sure it's necessary anymore, but better safe than sorry.
 	if err := fsyncTree(s.repo.root, forkSuffix); err != nil {
 		return fmt.Errorf("fsync fork: %w", err)
 	}
 
-	// The single linearization point. Absolute paths: renameat2 needs them.
 	live := filepath.Join(s.repo.sesamDir, sesamSuffix)
 	fork := filepath.Join(s.repo.sesamDir, forkSuffix)
 	if err := atomicSwapDirs(live, fork); err != nil {
@@ -240,8 +244,7 @@ func (s *Stage) Commit() error {
 	// Persist the staged config to the live sesam.yml file(s). Done after the
 	// swap because the audit log is the authoritative state and sesam.yml is
 	// only the desired-state mirror: if this fails the operation is already
-	// committed, so a stale config is a warning, not a rollback. (sesam.yml
-	// lives in the worktree root, outside .sesam, so it cannot ride the swap.)
+	// committed, so a stale config is a warning, not a rollback.
 	if err := s.config.Save(); err != nil {
 		slog.Warn(
 			"committed, but failed to persist sesam.yml (audit log is authoritative)",
@@ -451,37 +454,6 @@ func (s *Stage) RegenerateSignKey(user string) error {
 	defer s.mu.Unlock()
 
 	return s.user.UserRegenerateSignKey(user)
-}
-
-// ── fork I/O helpers ─────────────────────────────────────────────────────────
-
-// copyInRoot copies the file at src to dst within root, creating dst's parent
-// and fsyncing the result.
-func copyInRoot(root *os.Root, src, dst string) error {
-	if err := root.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return err
-	}
-
-	in, err := root.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }()
-
-	out, err := root.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	if err := out.Sync(); err != nil {
-		_ = out.Close()
-		return err
-	}
-	return out.Close()
 }
 
 // fsyncTree fsyncs every directory under dir (inclusive) within root, so newly

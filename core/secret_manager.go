@@ -42,9 +42,6 @@ type SecretManager struct {
 	// State is the state won by replaying the audit log.
 	State *VerifiedState
 
-	// base is the sesam-internal directory the object/stage paths live under.
-	// Empty means the live ".sesam" tree; a stage sets it to its fork dir so
-	// all sealed objects are written into the fork. See SetBase / sesamBase.
 	base string
 }
 
@@ -145,15 +142,6 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 }
 
 // SealAll seals all known secrets.
-//
-// Strategy: with whole-.sesam staging (see repo.Stage) SealAll runs inside a
-// fork whose objects/ is a hardlink mirror of the live tree, so it seals in
-// place. Each managed secret is re-encrypted (renameio atomically replaces the
-// object, breaking the hardlink without touching the live inode) or, when the
-// current user lacks the plaintext, its existing ciphertext is left untouched.
-// Objects whose secret is no longer managed are pruned, and the seal entry is
-// appended last. Crash-safety comes from the enclosing stage's atomic commit,
-// not from SealAll itself.
 func (sm *SecretManager) SealAll() error {
 	objects := sm.objectsDir()
 	if err := sm.root.MkdirAll(objects, 0o700); err != nil {
@@ -171,6 +159,7 @@ func (sm *SecretManager) SealAll() error {
 		wanted[sm.cryptPath(vsecret.RevealedPath)] = true
 	}
 
+	// safety net: remove left over files or anything that was manually created.
 	if err := sm.pruneObjects(wanted); err != nil {
 		return fmt.Errorf("prune stale objects: %w", err)
 	}
@@ -196,16 +185,15 @@ func (sm *SecretManager) sealOrPreserve(revealedPath string) (*secretFooter, err
 
 	switch _, err := sm.root.Stat(revealedPath); {
 	case err == nil:
-		// Good-citizen guard: an honest client refuses to produce a footer it
-		// knows the verifier will reject. The preserve branch does not hit this
-		// because it does not change SealedBy.
 		sealer := sm.Signer.UserName()
 		if sm.State.SealerAuthorized(sealer, revealedPath) {
 			return sealSecret(sm, revealedPath, sm.recipientsFor(revealedPath), dest, sealer)
 		}
 
-		slog.Warn(
-			"ignoring path because user is not authorized",
+		// Expected for non-recipients: they cannot re-seal what they cannot
+		// read, so the existing ciphertext is preserved below. Debug, not Warn.
+		slog.Debug(
+			"not re-sealing path: user not authorized, preserving existing ciphertext",
 			slog.String("user", sealer),
 			slog.String("path", revealedPath),
 		)
@@ -225,8 +213,7 @@ func (sm *SecretManager) sealOrPreserve(revealedPath string) (*secretFooter, err
 }
 
 // pruneObjects removes object files under objects/ whose sesam-relative path is
-// not in `wanted` (the set just sealed/preserved). Empty directories are left
-// in place; they are harmless.
+// not in `wanted` (the set just sealed/preserved). Empty directories are left in place.
 func (sm *SecretManager) pruneObjects(wanted map[string]bool) error {
 	objects := sm.objectsDir()
 	if _, err := sm.root.Stat(objects); os.IsNotExist(err) {
@@ -314,9 +301,6 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 			return err
 		}
 	}
-
-	// Crash-safety comes from the enclosing stage: SecretMove runs in a fork
-	// of .sesam that is swapped in atomically (or discarded) on commit.
 
 	if err := sm.State.FeedEntry(
 		sm.Signer,

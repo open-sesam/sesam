@@ -153,11 +153,11 @@ func TestStageSingleInFlight(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	_, r := bootstrapRepo(t, admin)
 
-	s, err := r.Stage()
+	s1, err := r.Stage()
 	require.NoError(t, err)
 
-	_, err = r.Stage()
-	require.ErrorIs(t, err, ErrStageOpen)
+	s2, err := r.Stage()
+	require.NoError(t, err)
 
-	require.NoError(t, s.Rollback())
+	require.Equal(t, s1, s2)
 }

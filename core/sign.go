@@ -106,14 +106,12 @@ func signKeyPath(base, user string) string {
 	return filepath.Join(sesamBase(base), "signkeys", user+".age")
 }
 
-// GenerateSignKey will generate a new ed25519 signing key only accessible to
-// `userRecipient`, written into the live ".sesam" tree.
 func GenerateSignKey(root *os.Root, user string, userRecipient []age.Recipient) (Signer, error) {
 	return GenerateSignKeyAt(root, "", user, userRecipient)
 }
 
-// GenerateSignKeyAt is GenerateSignKey but writes the key under base (a stage
-// passes ".sesam-tmp"). "" defaults to ".sesam".
+// GenerateSignKeyAt will generate a new ed25519 signing key only accessible to
+// `userRecipient`, written to signKeyPath(base, user)
 func GenerateSignKeyAt(root *os.Root, base, user string, userRecipient []age.Recipient) (Signer, error) {
 	if err := ValidUserName(user); err != nil {
 		return nil, fmt.Errorf("invalid user name: %w", err)
@@ -133,10 +131,6 @@ func GenerateSignKeyAt(root *os.Root, base, user string, userRecipient []age.Rec
 		priv: priv,
 		user: user,
 	}, nil
-}
-
-func WriteSignKey(root *os.Root, user string, userRecipient []age.Recipient, priv ed25519.PrivateKey) error {
-	return writeSignKeyAt(root, "", user, userRecipient, priv)
 }
 
 func writeSignKeyAt(root *os.Root, base, user string, userRecipient []age.Recipient, priv ed25519.PrivateKey) error {

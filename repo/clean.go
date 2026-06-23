@@ -181,9 +181,17 @@ func cleanup(
 			if name == sesamSuffix {
 				return filepath.SkipDir
 			}
+			if name == forkSuffix {
+				// Transient stage fork (.sesam-tmp); never a worktree file.
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !d.Type().IsRegular() {
+			return nil
+		}
+		// The repo lock lives at the worktree root but is sesam-internal infra.
+		if d.Name() == sesamLockName {
 			return nil
 		}
 
