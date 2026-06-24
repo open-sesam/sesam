@@ -74,7 +74,9 @@ func TestLoad_Negative(t *testing.T) {
 			name:    "no .sesam dir",
 			dirFn:   freshGitRepo,
 			idPaths: []string{admin.Path},
-			wantErr: "failed to load config tree", // NOTE: config fails before aquire lock now
+			// Config is lazy-loaded now, so the missing repo first surfaces
+			// when the audit log can't be opened.
+			wantErr: "failed to load audit log",
 		},
 		{
 			name: "no identity supplied",

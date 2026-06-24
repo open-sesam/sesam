@@ -149,6 +149,26 @@ func TestStageConfigRollbackAndCommit(t *testing.T) {
 	require.Contains(t, string(committed), "bob")
 }
 
+// A config-free mutation (a plain seal) must not load or rewrite sesam.yml:
+// config is lazy-loaded only by config mutators, and Commit skips Save when it
+// was never touched. renameio's Save would replace the inode, so SameFile
+// staying true proves the file was left alone.
+func TestStageSealOnlyLeavesConfigUntouched(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+	cfgPath := filepath.Join(dir, "sesam.yml")
+
+	before, err := os.Stat(cfgPath)
+	require.NoError(t, err)
+
+	require.NoError(t, r.Update(func(s *Stage) error { return s.SealAll() }))
+
+	after, err := os.Stat(cfgPath)
+	require.NoError(t, err)
+	require.True(t, os.SameFile(before, after),
+		"a seal-only commit must not rewrite sesam.yml")
+}
+
 func TestStageSingleInFlight(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	_, r := bootstrapRepo(t, admin)

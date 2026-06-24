@@ -61,6 +61,21 @@ func (v *View) isClosed() bool {
 	return v.auditLog == nil
 }
 
+// cfg returns the repo config, loading sesam.yml on first use and caching it.
+// Caller must hold v.mu (matching expandSecretFiles/secretsUnder). This is the
+// canonical config access point for staged writes today and read paths (apply,
+// the config commands) later.
+func (v *View) cfg() (*sesamConf.Config, error) {
+	if v.config == nil {
+		c, err := sesamConf.Load(v.root, "sesam.yml")
+		if err != nil {
+			return nil, fmt.Errorf("load config: %w", err)
+		}
+		v.config = c
+	}
+	return v.config, nil
+}
+
 // closeState closes the audit log and verified state. The root and lock are
 // shared/owned by the Repo and are not touched here.
 func (v *View) closeState() error {

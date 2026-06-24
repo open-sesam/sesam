@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	sesamConf "github.com/open-sesam/sesam/config"
 	"github.com/open-sesam/sesam/core"
 )
 
@@ -31,13 +30,6 @@ var ErrStageFinalized = errors.New("stage already finalized")
 // the fork; the embedded View's reads reflect the staged state ("see your own
 // writes"). Commit makes the fork live with a single atomic directory swap;
 // Rollback discards it.
-//
-// Config: the staged View carries its own in-memory copy of sesam.yml (a fresh
-// load); mutators edit that copy and it is written to disk only on Commit, so
-// Rollback never touches the live config. sesam.yml lives in the worktree root,
-// outside .sesam, so it cannot ride the swap itself - it is saved right after
-// the swap (the audit log is authoritative; config is its desired-state
-// mirror), leaving only a narrow crash window where config trails the log.
 type Stage struct {
 	*View
 
@@ -145,15 +137,10 @@ func (r *Repo) buildStage() (*Stage, error) {
 	}
 	user.SetBase(forkSuffix)
 
-	// Independent in-memory config: a fresh load of the live sesam.yml. Staged
-	// edits mutate this copy only and are not written to disk until Commit, so
-	// a Rollback leaves the live config files untouched.
-	cfg, err := sesamConf.Load(r.root, "sesam.yml")
-	if err != nil {
-		_ = audit.Close()
-		return nil, fmt.Errorf("load fork config: %w", err)
-	}
-
+	// config stays nil: it is lazy-loaded (View.cfg) the first time a config
+	// mutator runs, giving the fork its own independent in-memory copy. Staged
+	// edits never touch the live config and are written only on Commit, so a
+	// Rollback (or a stage that never touches config) leaves sesam.yml untouched.
 	fork := &View{
 		mu:            r.mu, // shared with the Repo
 		sesamDir:      r.sesamDir,
@@ -169,7 +156,6 @@ func (r *Repo) buildStage() (*Stage, error) {
 		vstate:        vstate,
 		secret:        secret,
 		user:          user,
-		config:        cfg,
 	}
 
 	return &Stage{View: fork, repo: r}, nil
@@ -241,15 +227,19 @@ func (s *Stage) Commit() error {
 	s.repo.View = s.View
 	s.repo.stage = nil
 
-	// Persist the staged config to the live sesam.yml file(s). Done after the
+	// Persist the staged config to the live sesam.yml file(s), but only if a
+	// config mutator actually loaded it (s.config != nil) — a config-free stage
+	// (e.g. a plain seal) neither loads nor rewrites sesam.yml. Done after the
 	// swap because the audit log is the authoritative state and sesam.yml is
 	// only the desired-state mirror: if this fails the operation is already
 	// committed, so a stale config is a warning, not a rollback.
-	if err := s.config.Save(); err != nil {
-		slog.Warn(
-			"committed, but failed to persist sesam.yml (audit log is authoritative)",
-			slog.String("err", err.Error()),
-		)
+	if s.config != nil {
+		if err := s.config.Save(); err != nil {
+			slog.Warn(
+				"committed, but failed to persist sesam.yml",
+				slog.String("err", err.Error()),
+			)
+		}
 	}
 
 	// Reap the old tree (now sitting at .sesam-tmp). Non-fatal: a leftover fork
@@ -289,7 +279,11 @@ func (s *Stage) Tell(ctx context.Context, user string, recipients, groups []stri
 		return fmt.Errorf("failed to add user: %w", err)
 	}
 	// Config edits stay in memory until Commit (see buildStage).
-	return s.config.UserTell(user, recipients, groups)
+	cfg, err := s.cfg()
+	if err != nil {
+		return err
+	}
+	return cfg.UserTell(user, recipients, groups)
 }
 
 // Kill removes a user from the set of authenticated users.
@@ -300,7 +294,11 @@ func (s *Stage) Kill(user string) error {
 	if err := s.user.UserKill(user); err != nil {
 		return fmt.Errorf("failed to remove user: %w", err)
 	}
-	return s.config.UserKill(user)
+	cfg, err := s.cfg()
+	if err != nil {
+		return err
+	}
+	return cfg.UserKill(user)
 }
 
 // SealAll re-encrypts all revealed content into the staged sealed storage.
@@ -323,6 +321,11 @@ func (s *Stage) AddSecret(revealedPaths, groups []string, nested bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	cfg, err := s.cfg()
+	if err != nil {
+		return err
+	}
+
 	var files []string
 	for _, p := range revealedPaths {
 		expanded, err := s.expandSecretFiles(p)
@@ -336,7 +339,7 @@ func (s *Stage) AddSecret(revealedPaths, groups []string, nested bool) error {
 		if err := core.IsForbiddenPath(rel); err != nil {
 			return err
 		}
-		if err := s.config.SecretAdd(rel, nested, groups); err != nil {
+		if err := cfg.SecretAdd(rel, nested, groups); err != nil {
 			return fmt.Errorf("failed to add secret %q to config: %w", rel, err)
 		}
 		if err := s.secret.SecretAdd(rel, groups); err != nil {
@@ -356,6 +359,11 @@ func (s *Stage) RemoveSecret(revealedPaths []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	cfg, err := s.cfg()
+	if err != nil {
+		return err
+	}
+
 	for _, p := range revealedPaths {
 		targets := s.secretsUnder(p)
 		if len(targets) == 0 {
@@ -363,7 +371,7 @@ func (s *Stage) RemoveSecret(revealedPaths []string) error {
 		}
 		for _, secret := range targets {
 			rel := secret.RevealedPath
-			if err := s.config.SecretRemove(rel); err != nil {
+			if err := cfg.SecretRemove(rel); err != nil {
 				return fmt.Errorf("failed to remove secret %q from config: %w", rel, err)
 			}
 			if err := s.secret.SecretRemove(rel); err != nil {
@@ -381,6 +389,11 @@ func (s *Stage) RemoveSecret(revealedPaths []string) error {
 func (s *Stage) MoveSecret(oldRevealedPath, newRevealedPath string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	cfg, err := s.cfg()
+	if err != nil {
+		return err
+	}
 
 	oldBase := filepath.Clean(oldRevealedPath)
 	newBase := filepath.Clean(newRevealedPath)
@@ -408,7 +421,7 @@ func (s *Stage) MoveSecret(oldRevealedPath, newRevealedPath string) error {
 
 		// TODO: preserve nested layout on move (derive from the source's owning
 		// file); for now the moved secret lands in the main file.
-		if err := s.config.SecretMove(oldRel, newRel, false); err != nil {
+		if err := cfg.SecretMove(oldRel, newRel, false); err != nil {
 			return fmt.Errorf("failed to move secret %q in config: %w", oldRel, err)
 		}
 	}

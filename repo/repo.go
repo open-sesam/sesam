@@ -216,7 +216,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, fmt.Errorf("failed to open repo root %q: %w", resolvedDir, err)
 	}
 
-	r := newRepo(resolvedDir, root, nil, gitRepo, idPaths, opts.RepoOpts)
+	r := newRepo(resolvedDir, root, gitRepo, idPaths, opts.RepoOpts)
 	r.whoami = opts.InitialUserName
 	success := false
 	defer func() {
@@ -350,13 +350,9 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 		return nil, fmt.Errorf("failed to open repo root %q: %w", resolvedDir, err)
 	}
 
-	configRepo, err := sesamConf.Load(root, "sesam.yml")
-	if err != nil {
-		_ = root.Close()
-		return nil, err
-	}
-
-	r := newRepo(resolvedDir, root, configRepo, gitRepo, ids, opts)
+	// The config is lazy-loaded on first use (see View.cfg); most commands
+	// never read sesam.yml, and mutating ones load it once in their stage.
+	r := newRepo(resolvedDir, root, gitRepo, ids, opts)
 	success := false
 	defer func() {
 		if !success {
@@ -425,9 +421,10 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	return r, nil
 }
 
-func newRepo(sesamDir string, root *os.Root, configRepo *sesamConf.Config, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
+func newRepo(sesamDir string, root *os.Root, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
 	// sesamDir is already absolute - resolveSesamDirAndGit normalizes it, the
-	// single place that resolves it against the cwd.
+	// single place that resolves it against the cwd. config stays nil and is
+	// lazy-loaded on first use (View.cfg); Init sets it eagerly after writing it.
 	return &Repo{
 		View: &View{
 			mu:            &sync.Mutex{},
@@ -437,7 +434,6 @@ func newRepo(sesamDir string, root *os.Root, configRepo *sesamConf.Config, gitRe
 			gitRepo:       gitRepo,
 			pluginUI:      opts.pluginUI(),
 			identityPaths: ids,
-			config:        configRepo,
 		},
 	}
 }
