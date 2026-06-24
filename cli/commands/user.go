@@ -41,7 +41,7 @@ func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 	// tell + reseal commit atomically as a single .sesam swap.
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.Tell(ctx, user, recipients, groups); err != nil {
+		if err := s.UserTell(ctx, user, recipients, groups); err != nil {
 			return err
 		}
 		if noSeal {
@@ -57,7 +57,7 @@ func HandleKill(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 	// kill + reseal commit atomically as a single .sesam swap.
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.Kill(user); err != nil {
+		if err := s.UserKill(user); err != nil {
 			return err
 		}
 		if noSeal {
@@ -73,7 +73,7 @@ func HandleUserChangeGroups(_ context.Context, cmd *cli.Command, r *repo.Repo) e
 	noSeal := cmd.Bool("no-seal")
 
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.ChangeGroups(user, groups); err != nil {
+		if err := s.UserChangeGroups(user, groups); err != nil {
 			return err
 		}
 		if noSeal {
@@ -91,7 +91,7 @@ func HandleRenameUser(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	}
 
 	return r.Update(func(s *repo.Stage) error {
-		return s.RenameUser(oldName, newName)
+		return s.UserRename(oldName, newName)
 	})
 }
 
@@ -101,7 +101,7 @@ func HandleUserAddRecipient(ctx context.Context, cmd *cli.Command, r *repo.Repo)
 	noSeal := cmd.Bool("no-seal")
 
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.AddRecipient(ctx, user, recipients); err != nil {
+		if err := s.UserAddRecipient(ctx, user, recipients); err != nil {
 			return err
 		}
 		if noSeal {
@@ -117,7 +117,7 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 	noSeal := cmd.Bool("no-seal")
 
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.RmRecipient(ctx, user, recipients); err != nil {
+		if err := s.UserRmRecipient(ctx, user, recipients); err != nil {
 			return err
 		}
 		if noSeal {
@@ -130,6 +130,6 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 func HandleUserRegenerateSignKey(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	user := cmd.String("user")
 	return r.Update(func(s *repo.Stage) error {
-		return s.RegenerateSignKey(user)
+		return s.UserRegenerateSignKey(user)
 	})
 }

@@ -416,7 +416,7 @@ func TestLoadAuditView_PrefersIndexOverWorktree(t *testing.T) {
 	// .sesam/audit/log.jsonl on disk). The git index still carries only
 	// the admin-only version.
 	require.NoError(t, r.Update(func(s *Stage) error {
-		return s.Tell(t.Context(), "bob", []string{bob.Recipient}, []string{"dev"})
+		return s.UserTell(t.Context(), "bob", []string{bob.Recipient}, []string{"dev"})
 	}))
 	require.NoError(t, r.Close())
 
