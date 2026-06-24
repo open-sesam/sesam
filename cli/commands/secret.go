@@ -27,7 +27,7 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	noSeal := cmd.Bool("no-seal")
 	nested := cmd.Bool("nested")
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.AddSecret(paths, groups, nested); err != nil {
+		if err := s.SecretAdd(paths, groups, nested); err != nil {
 			return err
 		}
 		if noSeal {
@@ -50,7 +50,7 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	}
 
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.RemoveSecret(paths); err != nil {
+		if err := s.SecretRemove(paths); err != nil {
 			return err
 		}
 		return s.SealAll()
@@ -72,7 +72,7 @@ func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 	// move always needs a seal, otherwise state is pretty broken
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.MoveSecret(paths[0], paths[1]); err != nil {
+		if err := s.SecretMove(paths[0], paths[1]); err != nil {
 			return err
 		}
 		return s.SealAll()

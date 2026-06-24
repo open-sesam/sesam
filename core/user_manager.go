@@ -163,7 +163,6 @@ func (um *UserManager) UserRename(oldName, newName string) error {
 		return err
 	}
 
-	// TODO: Also not exactly atomic as an operation...
 	return um.root.Rename(
 		signKeyPath(um.base, oldName),
 		signKeyPath(um.base, newName),

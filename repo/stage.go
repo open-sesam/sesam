@@ -267,11 +267,9 @@ func (s *Stage) Rollback() error {
 	return s.repo.root.RemoveAll(forkSuffix)
 }
 
-// ── staged mutators ────────────────────────────────────────────────────────
-
-// Tell adds a new user with access to `groups`, encrypting their secrets to
+// UserTell adds a new user with access to `groups`, encrypting their secrets to
 // `recipients`.
-func (s *Stage) Tell(ctx context.Context, user string, recipients, groups []string) error {
+func (s *Stage) UserTell(ctx context.Context, user string, recipients, groups []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -286,8 +284,8 @@ func (s *Stage) Tell(ctx context.Context, user string, recipients, groups []stri
 	return cfg.UserTell(user, recipients, groups)
 }
 
-// Kill removes a user from the set of authenticated users.
-func (s *Stage) Kill(user string) error {
+// UserKill removes a user from the set of authenticated users.
+func (s *Stage) UserKill(user string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -312,8 +310,8 @@ func (s *Stage) SealAll() error {
 	return nil
 }
 
-// AddSecret starts tracking the secret(s) at each path. Paths are sesam-relative.
-func (s *Stage) AddSecret(revealedPaths, groups []string, nested bool) error {
+// SecretAdd starts tracking the secret(s) at each path. Paths are sesam-relative.
+func (s *Stage) SecretAdd(revealedPaths, groups []string, nested bool) error {
 	if len(revealedPaths) == 0 {
 		return fmt.Errorf("missing secret path: pass at least one path")
 	}
@@ -350,8 +348,8 @@ func (s *Stage) AddSecret(revealedPaths, groups []string, nested bool) error {
 	return nil
 }
 
-// RemoveSecret stops tracking the secret(s) at each path.
-func (s *Stage) RemoveSecret(revealedPaths []string) error {
+// SecretRemove stops tracking the secret(s) at each path.
+func (s *Stage) SecretRemove(revealedPaths []string) error {
 	if len(revealedPaths) == 0 {
 		return fmt.Errorf("missing secret path: pass at least one path")
 	}
@@ -383,10 +381,10 @@ func (s *Stage) RemoveSecret(revealedPaths []string) error {
 	return nil
 }
 
-// MoveSecret relocates the secret(s) at oldRevealedPath to newRevealedPath. A
+// SecretMove relocates the secret(s) at oldRevealedPath to newRevealedPath. A
 // single secret is renamed directly; a directory moves every secret beneath it,
 // preserving each one's path relative to the source root.
-func (s *Stage) MoveSecret(oldRevealedPath, newRevealedPath string) error {
+func (s *Stage) SecretMove(oldRevealedPath, newRevealedPath string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -429,40 +427,40 @@ func (s *Stage) MoveSecret(oldRevealedPath, newRevealedPath string) error {
 	return nil
 }
 
-// RenameUser renames a user. TODO: config integration.
-func (s *Stage) RenameUser(oldName, newName string) error {
+// UserRename renames a user. TODO: config integration.
+func (s *Stage) UserRename(oldName, newName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	return s.user.UserRename(oldName, newName)
 }
 
-// ChangeGroups sets the group membership of a user. TODO: config integration.
-func (s *Stage) ChangeGroups(user string, groups []string) error {
+// UserChangeGroups sets the group membership of a user. TODO: config integration.
+func (s *Stage) UserChangeGroups(user string, groups []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	return s.user.UserChangeGroups(user, groups)
 }
 
-// AddRecipient grants additional public keys to a user. TODO: config integration.
-func (s *Stage) AddRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
+// UserAddRecipient grants additional public keys to a user. TODO: config integration.
+func (s *Stage) UserAddRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	return s.user.UserAddRecipient(ctx, user, pubKeySpecs)
 }
 
-// RmRecipient removes public keys from a user. TODO: config integration.
-func (s *Stage) RmRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
+// UserRmRecipient removes public keys from a user. TODO: config integration.
+func (s *Stage) UserRmRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	return s.user.UserRmRecipient(ctx, user, pubKeySpecs)
 }
 
-// RegenerateSignKey issues a fresh signing key for a user.
-func (s *Stage) RegenerateSignKey(user string) error {
+// UserRegenerateSignKey issues a fresh signing key for a user.
+func (s *Stage) UserRegenerateSignKey(user string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
