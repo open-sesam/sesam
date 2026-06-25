@@ -493,6 +493,19 @@ func findMappingValue(m *ast.MappingNode, key string) *ast.MappingValueNode {
 	return nil
 }
 
+// removeMappingValue deletes the key/value pair for `key` from m, returning
+// true if it was present.
+func removeMappingValue(m *ast.MappingNode, key string) bool {
+	for i, mv := range m.Values {
+		if mv.Key.String() == key {
+			m.Values = append(m.Values[:i], m.Values[i+1:]...)
+			return true
+		}
+	}
+
+	return false
+}
+
 // findRootValue returns the top-level MappingValueNode whose key matches, or an
 // error if absent. A file whose only top-level key is e.g. `secrets:` (a
 // typical sub-file) can parse to a single *ast.MappingValueNode rather than an

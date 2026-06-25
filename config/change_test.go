@@ -62,6 +62,27 @@ func TestSecretChangeGroups_PreservesComment(t *testing.T) {
 	require.Equal(t, []string{"group2"}, accessFor(t, main, "token.txt"))
 }
 
+// TestSecretChangeGroups_EmptyDropsAccessNode changing access to empty removes
+// the access: node (the implicit "admin-only" default) rather than writing a
+// noisy `access: []`, leaving other secrets' access untouched.
+func TestSecretChangeGroups_EmptyDropsAccessNode(t *testing.T) {
+	_, main := buildConfig(t, false, "token.txt") // token.txt: access [group1]
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.SecretChangeGroups("token.txt", []string{}))
+	require.NoError(t, cr.Save())
+
+	require.Empty(t, accessFor(t, main, "token.txt"))
+
+	raw, err := os.ReadFile(main)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "access: []", "empty access must drop the node, not write access: []")
+
+	// Other secrets keep their access.
+	require.Equal(t, []string{"group1"}, accessFor(t, main, "existing.txt"))
+}
+
 // TestSecretChangeGroups_NotFound errors when no secret matches the path.
 func TestSecretChangeGroups_NotFound(t *testing.T) {
 	_, main := buildConfig(t, false)

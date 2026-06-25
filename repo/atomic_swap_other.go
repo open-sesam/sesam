@@ -4,6 +4,7 @@ package repo
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 )
 
@@ -27,8 +28,16 @@ func atomicSwapDirs(a, b string) error {
 		return fmt.Errorf("rename %s -> %s: %w", b, a, err)
 	}
 	if err := os.Rename(tmp, b); err != nil {
-		// `a` is already the new tree; don't strand the old one at tmp.
-		_ = os.RemoveAll(tmp)
+		slog.Warn(
+			"atomic swap: could not relocate old tree; discarding it",
+			slog.String("tmp", tmp), slog.String("dst", b), slog.String("err", err.Error()),
+		)
+		if rmErr := os.RemoveAll(tmp); rmErr != nil {
+			slog.Warn(
+				"atomic swap: could not remove orphaned old tree",
+				slog.String("tmp", tmp), slog.String("err", rmErr.Error()),
+			)
+		}
 	}
 	return nil
 }
