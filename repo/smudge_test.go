@@ -415,8 +415,9 @@ func TestLoadAuditView_PrefersIndexOverWorktree(t *testing.T) {
 	// Diverge: mutate the worktree audit log (UserTell appends to
 	// .sesam/audit/log.jsonl on disk). The git index still carries only
 	// the admin-only version.
-	require.NoError(t, r.UserTell(t.Context(),
-		"bob", []string{bob.Recipient}, []string{"dev"}))
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.UserTell(t.Context(), "bob", []string{bob.Recipient}, []string{"dev"})
+	}))
 	require.NoError(t, r.Close())
 
 	ids, err := LoadIdentities([]string{admin.Path}, RepoOpts{})

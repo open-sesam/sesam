@@ -11,7 +11,7 @@ func TestGenerateAndLoadSignKey(t *testing.T) {
 	sesamDir := testRepo(t)
 	user := newTestUser(t, "alice")
 
-	signer, err := GenerateSignKey(testRoot(t, sesamDir), "alice", []age.Recipient{user.Recipient.Recipient})
+	signer, err := GenerateSignKeyAt(testRoot(t, sesamDir), "", "alice", []age.Recipient{user.Recipient.Recipient})
 	require.NoError(t, err)
 	require.Equal(t, "alice", signer.UserName())
 
@@ -44,7 +44,7 @@ func TestLoadSignKeyWrongIdentity(t *testing.T) {
 	bob := newTestUser(t, "bob")
 
 	// Generate key encrypted to alice.
-	_, err := GenerateSignKey(testRoot(t, sesamDir), "alice", []age.Recipient{alice.Recipient.Recipient})
+	_, err := GenerateSignKeyAt(testRoot(t, sesamDir), "", "alice", []age.Recipient{alice.Recipient.Recipient})
 	require.NoError(t, err)
 
 	// Try loading with bob's identity - should fail to decrypt.
@@ -85,7 +85,7 @@ func TestSignCrossDomain(t *testing.T) {
 	sesamDir := testRepo(t)
 	user := newTestUser(t, "alice")
 
-	signer, err := GenerateSignKey(testRoot(t, sesamDir), "alice", []age.Recipient{user.Recipient.Recipient})
+	signer, err := GenerateSignKeyAt(testRoot(t, sesamDir), "", "alice", []age.Recipient{user.Recipient.Recipient})
 	require.NoError(t, err)
 	require.Equal(t, "alice", signer.UserName())
 
