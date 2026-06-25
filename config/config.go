@@ -46,7 +46,7 @@ type Secret struct {
 	Name        string   `yaml:"name,omitempty"`
 	Path        string   `yaml:"path,omitempty"`
 	Access      []string `yaml:"access,omitempty"`
-	Description string   `yaml:"description,omitempty"`
+	Description string   `yaml:"desc,omitempty"`
 	Rotate      []any    `yaml:"rotate,omitempty"`
 	Swap        []Swap   `yaml:"swap,omitempty"`
 }

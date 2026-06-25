@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/google/renameio/v2"
+	"github.com/open-sesam/sesam/config"
 	sesamConf "github.com/open-sesam/sesam/config"
 	"github.com/open-sesam/sesam/core"
 )
@@ -95,8 +96,13 @@ func (v *View) closeState() error {
 	return errors.Join(errs...)
 }
 
+type UserInfo struct {
+	core.VerifiedUser
+	Config config.User
+}
+
 // ListUsers returns the users currently in the audit log.
-func (v *View) ListUsers() ([]core.VerifiedUser, error) {
+func (v *View) ListUsers() ([]UserInfo, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -104,7 +110,38 @@ func (v *View) ListUsers() ([]core.VerifiedUser, error) {
 		return nil, ErrClosed
 	}
 
-	return slices.Clone(v.vstate.Users), nil
+	cfg, err := v.cfg()
+	if err != nil {
+		return nil, err
+	}
+
+	cfgUsers, err := cfg.Users()
+	if err != nil {
+		return nil, err
+	}
+
+	combinedInfo := func(vu core.VerifiedUser) UserInfo {
+		idx := slices.IndexFunc(cfgUsers, func(s sesamConf.User) bool {
+			return s.Name == vu.Name
+		})
+
+		info := UserInfo{
+			VerifiedUser: vu,
+		}
+
+		if idx >= 0 {
+			info.Config = cfgUsers[idx]
+		}
+
+		return info
+	}
+
+	out := make([]UserInfo, 0, len(v.vstate.Users))
+	for idx := range v.vstate.Users {
+		out = append(out, combinedInfo(v.vstate.Users[idx]))
+	}
+
+	return out, nil
 }
 
 // ListSecrets returns the secrets currently managed by sesam.
@@ -116,17 +153,44 @@ func (v *View) ListSecrets(paths []string) ([]SecretInfo, error) {
 		return nil, ErrClosed
 	}
 
+	cfg, err := v.cfg()
+	if err != nil {
+		return nil, err
+	}
+
+	cfgSecrets, err := cfg.Secrets()
+	if err != nil {
+		return nil, err
+	}
+
+	// NOTE: This is probably slow for large N, but ok for the start.
+	combinedInfo := func(vs core.VerifiedSecret) SecretInfo {
+		idx := slices.IndexFunc(cfgSecrets, func(s sesamConf.Secret) bool {
+			return s.Path == vs.RevealedPath
+		})
+
+		info := SecretInfo{
+			VerifiedSecret: vs,
+		}
+
+		if idx >= 0 {
+			info.Config = cfgSecrets[idx]
+		}
+
+		return info
+	}
+
 	out := make([]SecretInfo, 0, len(v.vstate.Secrets))
 	if len(paths) == 0 {
 		for _, secret := range v.vstate.Secrets {
-			out = append(out, SecretInfo{VerifiedSecret: secret})
+			out = append(out, combinedInfo(secret))
 		}
 		return out, nil
 	}
 
 	for _, path := range paths {
 		for _, secret := range v.secretsUnder(path) {
-			out = append(out, SecretInfo{VerifiedSecret: secret})
+			out = append(out, combinedInfo(secret))
 		}
 	}
 
