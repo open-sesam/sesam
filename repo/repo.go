@@ -471,7 +471,7 @@ func (r *Repo) Close() error {
 
 type SecretInfo struct {
 	core.VerifiedSecret
-	sesamConf.Config
+	Config sesamConf.Secret
 }
 
 // isUnder reports whether path lives at or beneath dir.
