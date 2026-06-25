@@ -15,7 +15,6 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/google/renameio/v2"
-	"github.com/open-sesam/sesam/config"
 	sesamConf "github.com/open-sesam/sesam/config"
 	"github.com/open-sesam/sesam/core"
 )
@@ -98,7 +97,7 @@ func (v *View) closeState() error {
 
 type UserInfo struct {
 	core.VerifiedUser
-	Config config.User
+	Config sesamConf.User
 }
 
 // ListUsers returns the users currently in the audit log.
