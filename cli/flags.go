@@ -145,7 +145,12 @@ var flagsAdd = []cli.Flag{
 	},
 }
 
-var flagsMove = []cli.Flag{}
+var flagsMove = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "nested",
+		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file",
+	},
+}
 
 // flagsTell contains controls for adding users.
 var flagsTell = []cli.Flag{

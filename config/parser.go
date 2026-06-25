@@ -700,10 +700,7 @@ func marshalMapping(v any) (*ast.MappingNode, error) {
 	return m, nil
 }
 
-// marshalBody marshals v to YAML and reparses it into an AST node. Sequences
-// are emitted indented (yaml.IndentSequence) so freshly-built nodes match the
-// block style sesam files use, and parsing keeps comments on nodes for
-// consistency with loaded files.
+// marshalBody marshals v to YAML and reparses it into an AST node.
 func marshalBody(v any) (ast.Node, error) {
 	bs, err := yaml.MarshalWithOptions(v, yaml.IndentSequence(true))
 	if err != nil {
