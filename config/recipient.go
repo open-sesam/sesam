@@ -10,12 +10,12 @@ import (
 
 func (c *Config) UserAddRecipient(user string, pubKeySpecs []string) error {
 	src := c.MainFile
-	seq, err := usersNode(src.RootNode)
+	userSeq, err := usersNode(src.RootNode)
 	if err != nil {
 		return err
 	}
 
-	for i, item := range seq.Values {
+	for i, item := range userSeq.Values {
 		userNode, ok := item.(*ast.MappingNode)
 		if !ok {
 			return fmt.Errorf("%s: users[%d] is not a mapping (got %T)", src.Path, i, item)
@@ -36,22 +36,27 @@ func (c *Config) UserAddRecipient(user string, pubKeySpecs []string) error {
 			return fmt.Errorf("%s: user %q key is not a sequence (got %T)", src.Path, user, keyNode.Value)
 		}
 
-		deduplicatedPubKey := []string{}
+		keyMap := make(map[string]bool)
+		newKeys := []string{}
+
 		for _, keyNode := range keySeq.Values {
-			if !slices.Contains(pubKeySpecs, keyNode.String()) {
-				deduplicatedPubKey = append(deduplicatedPubKey, keyNode.String())
+			oldKey := keyNode.String()
+			keyMap[oldKey] = true
+			newKeys = append(newKeys, oldKey)
+		}
+
+		for _, newKey := range pubKeySpecs {
+			if !keyMap[newKey] {
+				newKeys = append(newKeys, newKey)
 			}
 		}
 
-		if len(deduplicatedPubKey) > 0 {
-			newKeys, err := marshalSeq(pubKeySpecs)
-			if err != nil {
-				return err
-			}
-
-			keySeq.Merge(newKeys)
+		newKeySeq, err := marshalSeq(newKeys)
+		if err != nil {
+			return err
 		}
 
+		keySeq.Values = newKeySeq.Values
 		return nil
 	}
 
