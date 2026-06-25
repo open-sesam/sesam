@@ -140,28 +140,18 @@ func ValidUserName(name string) error {
 	return nil
 }
 
+// paths that are required for sesam to work,
+// so they shouldn't be encrypted...
+var forbiddenBasenames = map[string]bool{
+	".gitignore":               true,
+	".gitattributes":           true,
+	"sesam.yml":                true,
+	defaultSesamBase + ".lock": true,
+}
+
 func IsForbiddenPath(revealedPath string) error {
-	if revealedPath == ".sesam" || strings.HasPrefix(revealedPath, ".sesam"+string(filepath.Separator)) {
-		return fmt.Errorf("secret path may not live in .sesam: %s", revealedPath)
-	}
-
-	// .sesam-tmp is the transient stage fork (repo.forkSuffix). It shares the
-	// ".sesam" prefix but is not under ".sesam/", so guard it explicitly;
-	// otherwise a path there would be reaped with the fork.
-	if revealedPath == ".sesam-tmp" || strings.HasPrefix(revealedPath, ".sesam-tmp"+string(filepath.Separator)) {
-		return fmt.Errorf("secret path may not live in the stage fork .sesam-tmp: %s", revealedPath)
-	}
-
-	if filepath.Base(revealedPath) == "sesam.yml" {
-		return fmt.Errorf("you can't seal sesam.yml")
-	}
-
-	if filepath.Base(revealedPath) == defaultSesamBase+".lock" {
-		return fmt.Errorf("you can't seal the sesam lock file")
-	}
-
-	if filepath.Base(revealedPath) == ".gitattributes" {
-		return fmt.Errorf("you shouldn't seal .gitattributes")
+	if b := filepath.Base(revealedPath); forbiddenBasenames[b] {
+		return fmt.Errorf("you can't seal %s", b)
 	}
 
 	for _, elem := range strings.Split(revealedPath, string(filepath.Separator)) {

@@ -21,7 +21,7 @@ func (c *Config) renameUserInGroups(oldName, newName string) error {
 		}
 
 		for _, userNode := range groupSeq.Values {
-			if userNode.String() == oldName {
+			if userNode.GetToken().Value == oldName {
 				s, ok := userNode.(*ast.StringNode)
 				if !ok {
 					return fmt.Errorf("%s: group %q member is not a string (got %T)", src.Path, item.Key.String(), userNode)
@@ -48,8 +48,9 @@ func (c *Config) UserRename(oldName, newName string) error {
 			return fmt.Errorf("%s: users[%d] is not a mapping (got %T)", src.Path, i, item)
 		}
 
-		// Only operate on the requested user.
-		if nv := findMappingValue(userNode, "name"); nv == nil || nv.Value.String() != oldName {
+		// Only operate on the requested user. GetToken().Value (not String())
+		// so an inline comment on the name does not defeat the match.
+		if nv := findMappingValue(userNode, "name"); nv == nil || nv.Value.GetToken().Value != oldName {
 			continue
 		}
 
@@ -95,7 +96,7 @@ func (c *Config) UserChangeGroups(user string, groups []string) error {
 		var userFound bool
 
 		for idx, userNode := range groupSeq.Values {
-			if userNode.String() == user {
+			if userNode.GetToken().Value == user {
 				userFound = true
 				if !groupMap[item.Key.String()] {
 					// config says user is in this group, but should not be anymore.

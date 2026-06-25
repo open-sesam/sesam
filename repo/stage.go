@@ -327,6 +327,8 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, nested bool) error {
 		return err
 	}
 
+	fmt.Println("ADD", revealedPaths)
+
 	var files []string
 	for _, p := range revealedPaths {
 		expanded, err := s.expandSecretFiles(p)
@@ -338,8 +340,9 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, nested bool) error {
 
 	for _, rel := range files {
 		if err := core.IsForbiddenPath(rel); err != nil {
-			return err
+			continue
 		}
+
 		if err := cfg.SecretAdd(rel, nested, groups); err != nil {
 			return fmt.Errorf("failed to add secret %q to config: %w", rel, err)
 		}
