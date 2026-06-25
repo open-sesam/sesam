@@ -1,4 +1,4 @@
 FROM scratch
 ARG TARGETPLATFORM
-COPY ${TARGETPLATFORM}/app /app
-ENTRYPOINT ["/app"]
+COPY ${TARGETPLATFORM}/sesam /sesam
+ENTRYPOINT ["/sesam"]

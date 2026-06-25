@@ -3,19 +3,15 @@ version: "3"
 
 tasks:
   default:
-    deps: [build]
+    deps: [build-amd64]
 
-  build:
+  _build:
     desc: "Build the sesam binary"
-    aliases:
-      - build-cli
     vars:
-      # Last reachable tag (+commits-since), or a bare hash when untagged.
-      # Commit and date come from the toolchain's embedded VCS stamps.
       VERSION:
         sh: git describe --tags --always
     cmds:
-      - cmd: CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/open-sesam/sesam/cli.version={{.VERSION}}" -o sesam .
+      - cmd: CGO_ENABLED=0 GOARCH={{.GOARCH}} GOOS={{.GOOS}} go build -ldflags "-s -w -X github.com/open-sesam/sesam/cli.version={{.VERSION}}" -o sesam .
     sources:
       - ./*.go
       - ./**/*.go
@@ -24,19 +20,21 @@ tasks:
       - ./sesam
     method: checksum
 
-  build-arm:
-    desc: "Build the sesam binary (arm64)"
-    aliases:
-      - build-cli-arm
+  build-arm64:
     cmds:
-      - cmd: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o sesam-arm .
-    sources:
-      - ./*.go
-      - ./**/*.go
-      - Taskfile.yml
-    generates:
-      - ./sesam-arm
-    method: checksum
+      - task: _build
+        vars:
+          GOOS: linux
+          GOARCH: arm64
+
+  build-amd64:
+    aliases:
+      - build
+    cmds:
+      - task: _build
+        vars:
+          GOOS: linux
+          GOARCH: amd64
 
   test:
     desc: Run go tests
@@ -49,8 +47,6 @@ tasks:
       - go test -coverpkg=./... -coverprofile=coverage.out ./...
       - go tool cover -func=coverage.out
       - go tool cover -html=coverage.out
-
-  # TODO: Build an docker image for CI + also for end users.
 
   lint:
     desc: Run the linter

@@ -17,7 +17,9 @@ jobs:
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -29,7 +31,7 @@ jobs:
         uses: jdx/mise-action@v4
 
       - name: Cache Go modules and build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/go/pkg/mod
@@ -47,43 +49,20 @@ jobs:
       - name: Lint
         run: task lint
 
-      - name: Generate coverage report
-        run: task coverage
+      - name: Test
+        run: task test
 
-      - name: Upload coverage artifact
+      # Builds the linux/amd64 + linux/arm64 binaries and the multi-arch Docker
+      # image through the exact release config. --snapshot never publishes, so
+      # drift in .goreleaser.yml is caught on PRs rather than at tag time.
+      - name: GoReleaser (snapshot)
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean
+
+      - name: Upload binary artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-report
-          path: coverage.out
-
-      - name: Build (amd64)
-        run: task build
-
-      - name: Build (arm64)
-        run: task build-arm
-
-      - name: Upload binary artifact (amd64)
-        uses: actions/upload-artifact@v7
-        with:
-          name: sesam
-          path: sesam
-
-      - name: Upload binary artifact (arm64)
-        uses: actions/upload-artifact@v7
-        with:
-          name: sesam-arm
-          path: sesam-arm
-
-      - name: Stage binaries for Docker validation
-        run: |
-          mkdir -p linux/amd64 linux/arm64
-          cp sesam linux/amd64/app
-          cp sesam-arm linux/arm64/app
-
-      - name: Build Docker image (validation only)
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: false
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ github.repository }}:latest
+          name: sesam-dist
+          path: dist/*.tar.gz
