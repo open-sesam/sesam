@@ -118,6 +118,49 @@ func TestUserAddRecipient_TargetsNamedUser(t *testing.T) {
 	require.Equal(t, []string{"keyB", "keyZ"}, keys["bravo"])
 }
 
+// TestUserAddRecipient_NoDuplicate re-adding a key the user already has must
+// not append a duplicate entry.
+func TestUserAddRecipient_NoDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	main := writeUserMain(t, dir) // axolotl with [keyA]
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserAddRecipient("axolotl", []string{"keyA"})) // already present
+	require.NoError(t, cr.Save())
+
+	require.Equal(t, []string{"keyA"}, keysByUser(t, main)["axolotl"])
+}
+
+// TestUserAddRecipient_PartialOverlapAddsOnlyNew adds a set mixing a key the
+// user already has with a new one: the new key must be appended and the
+// existing one must not duplicate.
+func TestUserAddRecipient_PartialOverlapAddsOnlyNew(t *testing.T) {
+	dir := t.TempDir()
+	main := writeUserMain(t, dir) // axolotl with [keyA]
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserAddRecipient("axolotl", []string{"keyA", "keyB"}))
+	require.NoError(t, cr.Save())
+
+	require.Equal(t, []string{"keyA", "keyB"}, keysByUser(t, main)["axolotl"])
+}
+
+// TestUserAddRecipient_NoDuplicateWhenOthersPresent re-adds one key of a
+// multi-key user: it must not duplicate, and the other keys are untouched.
+func TestUserAddRecipient_NoDuplicateWhenOthersPresent(t *testing.T) {
+	dir := t.TempDir()
+	main := writeMultiKeyMain(t, dir) // axolotl with [keyA1, keyA2, keyA3]
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserAddRecipient("axolotl", []string{"keyA1"}))
+	require.NoError(t, cr.Save())
+
+	require.Equal(t, []string{"keyA1", "keyA2", "keyA3"}, keysByUser(t, main)["axolotl"])
+}
+
 // TestUserAddRecipient_UnknownUserErrors rejects a user that does not exist.
 func TestUserAddRecipient_UnknownUserErrors(t *testing.T) {
 	dir := t.TempDir()

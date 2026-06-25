@@ -236,6 +236,9 @@ func TestSecretMove(t *testing.T) {
 	mgr := sealedSecretManager(t) // secrets/test sealed for admin, plaintext on disk
 
 	require.NoError(t, mgr.SecretMove("secrets/test", "secrets/moved"))
+	// SecretMove no longer emits its own seal entry; the caller seals once
+	// after the whole move cascade (here, a single SealAll).
+	require.NoError(t, mgr.SealAll())
 
 	// The encrypted object moved.
 	require.NoFileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
@@ -287,6 +290,8 @@ func TestSecretMoveNotYetRevealed(t *testing.T) {
 	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/test")))
 
 	require.NoError(t, mgr.SecretMove("secrets/test", "secrets/moved"))
+	// The caller seals once after the move (SecretMove no longer self-seals).
+	require.NoError(t, mgr.SealAll())
 
 	require.NoFileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
 	require.FileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/moved")))
@@ -303,6 +308,28 @@ func TestSecretMoveNotYetRevealed(t *testing.T) {
 	revealed, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/moved"))
 	require.NoError(t, err)
 	require.Equal(t, "secret-content", string(revealed))
+}
+
+// A move that fails after revealing a not-yet-revealed secret must not strand
+// the decrypted plaintext in the worktree — Stage.Rollback reaps only the
+// .sesam fork, so a leftover worktree plaintext would survive a rolled-back
+// move. The deferred cleanup in SecretMove must remove it on the error path.
+func TestSecretMoveFailureCleansRevealedPlaintext(t *testing.T) {
+	mgr := sealedSecretManager(t)
+
+	// Make the secret unrevealed so the move has to reveal it first.
+	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/test")))
+
+	// A regular file where the move needs a directory makes MkdirAll fail
+	// *after* revealSecret has written the plaintext to the old path.
+	require.NoError(t, os.WriteFile(filepath.Join(mgr.SesamDir, "blocker"), []byte("x"), 0o600))
+
+	require.Error(t, mgr.SecretMove("secrets/test", "blocker/sub"))
+
+	// The reveal was cleaned up on the failure path: no stray plaintext at
+	// either the old or the new location.
+	require.NoFileExists(t, filepath.Join(mgr.SesamDir, "secrets/test"))
+	require.NoFileExists(t, filepath.Join(mgr.SesamDir, "blocker/sub"))
 }
 
 // A secret's footer records sealed_by (the name of the user who sealed it),

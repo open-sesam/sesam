@@ -74,9 +74,7 @@ func TestLoad_Negative(t *testing.T) {
 			name:    "no .sesam dir",
 			dirFn:   freshGitRepo,
 			idPaths: []string{admin.Path},
-			// Config is lazy-loaded now, so the missing repo first surfaces
-			// when the audit log can't be opened.
-			wantErr: "failed to load audit log",
+			wantErr: "sesam directory missing",
 		},
 		{
 			name: "no identity supplied",

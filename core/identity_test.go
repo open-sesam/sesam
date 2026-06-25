@@ -52,11 +52,20 @@ func (m *mockPassphraseProvider) PassphraseVerified(_ []byte, success bool) {
 	m.verifiedSuccess = success
 }
 
+// testScryptWorkFactor is a deliberately low scrypt log2(N) for test fixtures
+// only (age's default is 18, ~1s). N=2^10 keeps encrypt/decrypt in the low ms.
+const testScryptWorkFactor = 10
+
 func encryptIdentityForTest(t *testing.T, plaintext string, passphrase []byte, armored bool) string {
 	t.Helper()
 
 	recipient, err := age.NewScryptRecipient(string(passphrase))
 	require.NoError(t, err)
+	// Tests only: age's default scrypt work factor (logN=18) is tuned to take
+	// ~1s, and the header records it so decryption pays the same cost. Drop it
+	// so the fixture encrypts and decrypts near-instantly; real identities keep
+	// the secure default.
+	recipient.SetWorkFactor(testScryptWorkFactor)
 
 	var buf bytes.Buffer
 	w := io.Writer(&buf)

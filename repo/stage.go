@@ -242,11 +242,14 @@ func (s *Stage) Commit() error {
 		}
 	}
 
-	// Reap the old tree (now sitting at .sesam-tmp). Non-fatal: a leftover fork
-	// is reaped on the next Stage()/Load.
+	// Reap the old tree (now sitting at .sesam-tmp).
 	if err := s.repo.root.RemoveAll(forkSuffix); err != nil {
-		return fmt.Errorf("reap old tree: %w", err)
+		slog.Warn(
+			"committed, but failed to reap the old tree (.sesam-tmp); it is reaped on next load",
+			slog.String("err", err.Error()),
+		)
 	}
+
 	return nil
 }
 

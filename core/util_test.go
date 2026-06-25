@@ -243,3 +243,63 @@ func TestCopyFileFallsBackOnLinkFailure(t *testing.T) {
 	require.False(t, os.SameFile(srcInfo, dstInfo),
 		"fallback path should produce a fresh inode, not link to src")
 }
+
+func TestPruneEmptyDirs(t *testing.T) {
+	tcs := []struct {
+		Name             string
+		CreateDirs       []string
+		CreateFiles      []string
+		Except           map[string]bool
+		ExpectedToDelete []string
+	}{
+		{
+			Name:             "basic",
+			CreateDirs:       []string{"empty"},
+			ExpectedToDelete: []string{"empty"},
+		},
+		{
+			Name:             "except",
+			CreateDirs:       []string{".git"},
+			Except:           map[string]bool{".git": true},
+			ExpectedToDelete: []string{},
+		},
+		{
+			Name:       "nested",
+			CreateDirs: []string{"sub1/sub2/sub3"},
+			ExpectedToDelete: []string{
+				"sub1/sub2/sub3",
+				"sub1/sub2",
+				"sub1",
+			},
+		},
+		{
+			Name:        "nested_with_file",
+			CreateDirs:  []string{"sub1/sub2/sub3"},
+			CreateFiles: []string{"sub1/file"},
+			ExpectedToDelete: []string{
+				"sub1/sub2/sub3",
+				"sub1/sub2",
+			},
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, d := range tc.CreateDirs {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, d), 0o700))
+			}
+			for _, p := range tc.CreateFiles {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, p), nil, 0o600))
+			}
+
+			root, err := os.OpenRoot(dir)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = root.Close() })
+
+			deleted, err := PruneEmptyDirs(root, ".", tc.Except, nil)
+			require.NoError(t, err)
+			require.Equal(t, tc.ExpectedToDelete, deleted)
+		})
+	}
+}
