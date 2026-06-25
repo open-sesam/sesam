@@ -161,11 +161,11 @@ func (v *View) Clean(ctx context.Context, opts CleanOpts) error {
 		return CleanAggressive(ctx, v.sesamDir, v.identityPaths, opts)
 	}
 
-	if err := deleteRevealedSecrets(v.sesamDir, v.secret.State.Secrets, opts.CheckFunc); err != nil {
+	if err := deleteRevealedSecrets(v.root, v.secret.State.Secrets, opts.CheckFunc); err != nil {
 		return fmt.Errorf("failed to delete revealed secrets: %w", err)
 	}
 
-	_, err := recursiveRmEmptyDirs(v.sesamDir, map[string]bool{
+	_, err := core.PruneEmptyDirs(v.root, ".", map[string]bool{
 		sesamSuffix: true,
 		gitSuffix:   true,
 	}, opts.CheckFunc)
@@ -415,7 +415,7 @@ func (v *View) secretsUnder(rel string) []core.VerifiedSecret {
 
 func (v *View) cleanablePaths() ([]string, error) {
 	paths := []string{}
-	err := cleanup(v.gitRepo, v.sesamDir, func(path string) (bool, error) {
+	err := cleanup(v.root, v.gitRepo, func(path string) (bool, error) {
 		paths = append(paths, path)
 		return false, nil
 	})

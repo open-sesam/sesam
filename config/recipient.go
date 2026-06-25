@@ -36,12 +36,22 @@ func (c *Config) UserAddRecipient(user string, pubKeySpecs []string) error {
 			return fmt.Errorf("%s: user %q key is not a sequence (got %T)", src.Path, user, keyNode.Value)
 		}
 
-		newKeys, err := marshalSeq(pubKeySpecs)
-		if err != nil {
-			return err
+		deduplicatedPubKey := []string{}
+		for _, keyNode := range keySeq.Values {
+			if !slices.Contains(pubKeySpecs, keyNode.String()) {
+				deduplicatedPubKey = append(deduplicatedPubKey, keyNode.String())
+			}
 		}
 
-		keySeq.Merge(newKeys)
+		if len(deduplicatedPubKey) > 0 {
+			newKeys, err := marshalSeq(pubKeySpecs)
+			if err != nil {
+				return err
+			}
+
+			keySeq.Merge(newKeys)
+		}
+
 		return nil
 	}
 
