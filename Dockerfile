@@ -1,0 +1,4 @@
+FROM scratch
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/sesam /sesam
+ENTRYPOINT ["/sesam"]
