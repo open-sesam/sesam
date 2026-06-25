@@ -21,8 +21,9 @@ func (c *Config) UserAddRecipient(user string, pubKeySpecs []string) error {
 			return fmt.Errorf("%s: users[%d] is not a mapping (got %T)", src.Path, i, item)
 		}
 
-		// Only operate on the requested user.
-		if nv := findMappingValue(userNode, "name"); nv == nil || nv.Value.String() != user {
+		// Only operate on the requested user. GetToken().Value (not String())
+		// so an inline comment on the name does not defeat the match.
+		if nv := findMappingValue(userNode, "name"); nv == nil || nv.Value.GetToken().Value != user {
 			continue
 		}
 
@@ -36,17 +37,17 @@ func (c *Config) UserAddRecipient(user string, pubKeySpecs []string) error {
 			return fmt.Errorf("%s: user %q key is not a sequence (got %T)", src.Path, user, keyNode.Value)
 		}
 
-		keyMap := make(map[string]bool)
-		newKeys := []string{}
-
-		for _, keyNode := range keySeq.Values {
-			oldKey := keyNode.String()
-			keyMap[oldKey] = true
-			newKeys = append(newKeys, oldKey)
+		// Decode the existing keys instead of reading each node's String(): the
+		// latter folds an inline comment into the value and would bake it into
+		// the rewritten key.
+		var existingKeys []string
+		if err := yaml.NodeToValue(keySeq, &existingKeys); err != nil {
+			return fmt.Errorf("%s: decode keys of user %q: %w", src.Path, user, err)
 		}
 
+		newKeys := slices.Clone(existingKeys)
 		for _, newKey := range pubKeySpecs {
-			if !keyMap[newKey] {
+			if !slices.Contains(newKeys, newKey) {
 				newKeys = append(newKeys, newKey)
 			}
 		}
@@ -76,8 +77,9 @@ func (c *Config) UserRmRecipient(user string, pubKeySpecs []string) error {
 			return fmt.Errorf("%s: users[%d] is not a mapping (got %T)", src.Path, i, item)
 		}
 
-		// Only operate on the requested user.
-		if nv := findMappingValue(userNode, "name"); nv == nil || nv.Value.String() != user {
+		// Only operate on the requested user. GetToken().Value (not String())
+		// so an inline comment on the name does not defeat the match.
+		if nv := findMappingValue(userNode, "name"); nv == nil || nv.Value.GetToken().Value != user {
 			continue
 		}
 

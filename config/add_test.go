@@ -144,6 +144,40 @@ func TestSecretAdd_ReaddChangesAccess(t *testing.T) {
 	require.Equal(t, []string{"group2"}, accessFor(t, mainPath, "token.txt"))
 }
 
+// TestSecretAdd_ReaddEmptyGroupsPreservesAccess re-adding an already tracked
+// secret without any groups is a no-op: the existing access list is left
+// untouched rather than cleared. Only an explicit group list replaces it.
+func TestSecretAdd_ReaddEmptyGroupsPreservesAccess(t *testing.T) {
+	cases := []struct {
+		name   string
+		access []string
+	}{
+		{"nil groups", nil},
+		{"empty groups", []string{}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			mainPath := writeMainFile(t, dir)
+			touch(t, filepath.Join(dir, "token.txt"))
+
+			cr, err := loadConfig(t, mainPath)
+			require.NoError(t, err)
+			require.NoError(t, cr.SecretAdd("token.txt", false, []string{"group1"}))
+			require.NoError(t, cr.Save())
+
+			cr2, err := loadConfig(t, mainPath)
+			require.NoError(t, err)
+			require.NoError(t, cr2.SecretAdd("token.txt", false, tc.access))
+			require.NoError(t, cr2.Save())
+
+			require.Equal(t, []string{"existing.txt", "token.txt"}, resolvedPaths(t, mainPath))
+			require.Equal(t, []string{"group1"}, accessFor(t, mainPath, "token.txt"))
+		})
+	}
+}
+
 // TestSecretAdd_MissingPath surfaces a stat error for a non-existent path only
 // when the caller resolves it; SecretAdd itself does not stat, so adding a path
 // that is not yet on disk is allowed (the repo validates existence).

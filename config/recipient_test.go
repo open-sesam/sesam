@@ -254,3 +254,58 @@ func TestUserRmRecipient_UnknownUserErrors(t *testing.T) {
 	require.NoError(t, err)
 	require.Error(t, cr.UserRmRecipient("ghost", []string{"keyA1"}))
 }
+
+// TestUserAddRecipient_CommentedKeyNotCorrupted: an existing key carrying an
+// inline comment must keep its clean value (the comment must not be folded into
+// the key) and must not be duplicated when a new key is added.
+func TestUserAddRecipient_CommentedKeyNotCorrupted(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	body := `users:
+  - name: axolotl
+    key:
+      - keyA1 # laptop
+groups:
+  admin:
+    - axolotl
+secrets:
+  - path: existing.txt
+    access:
+      - admin
+`
+	require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserAddRecipient("axolotl", []string{"keyA2"}))
+	require.NoError(t, cr.Save())
+
+	require.Equal(t, []string{"keyA1", "keyA2"}, keysByUser(t, main)["axolotl"])
+}
+
+// TestUserAddRecipient_NameWithCommentStillMatches: an inline comment on a
+// user's name must not stop the user from being located.
+func TestUserAddRecipient_NameWithCommentStillMatches(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	body := `users:
+  - name: axolotl # primary admin
+    key:
+      - keyA1
+groups:
+  admin:
+    - axolotl
+secrets:
+  - path: existing.txt
+    access:
+      - admin
+`
+	require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserAddRecipient("axolotl", []string{"keyA2"}))
+	require.NoError(t, cr.Save())
+
+	require.Equal(t, []string{"keyA1", "keyA2"}, keysByUser(t, main)["axolotl"])
+}
