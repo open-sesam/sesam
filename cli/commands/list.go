@@ -76,7 +76,7 @@ func HandleListUsers(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return nil
 	}
 
-	t := newTable("Users", "User", "Admin", "Groups", "Recipients", "Signing Keys", "Descrption")
+	t := newTable("Users", "User", "Admin", "Groups", "Recipients", "Signing Keys", "Description")
 	for _, user := range users {
 		t.AppendRow([]any{
 			user.Name,

@@ -35,6 +35,13 @@ func (c *Config) changeSecretGroups(rel string, access []string) error {
 // the node's other keys and attached comments intact and re-aligns the new
 // sequence's indentation to the existing value's column.
 func setSecretAccess(node *ast.MappingNode, access []string) error {
+	// An empty access list is the implicit "admin only" default, so don't write
+	// a noisy `access: []`; drop the key entirely (if present) instead.
+	if len(access) == 0 {
+		removeMappingValue(node, "access")
+		return nil
+	}
+
 	if mv := findMappingValue(node, "access"); mv != nil {
 		newSeq, err := marshalSeq(access)
 		if err != nil {

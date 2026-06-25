@@ -466,9 +466,6 @@ func (r *Repo) Close() error {
 	return errors.Join(errs...)
 }
 
-// TODO: We might need to enrich the user type with config-derived info like
-// descriptions. Something for later.
-
 type SecretInfo struct {
 	core.VerifiedSecret
 	Config sesamConf.Secret
