@@ -10,29 +10,24 @@ import (
 // SecretChangeGroups replaces the access groups of an already-tracked secret.
 // It errors if no secret for path is declared in any loaded file.
 func (c *Config) SecretChangeGroups(path string, access []string) error {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("failed to resolve secret path %q: %w", path, err)
-	}
-
-	return c.changeSecretGroups(filepath.Clean(abs), access)
+	return c.changeSecretGroups(filepath.Clean(path), access)
 }
 
-// changeSecretGroups finds the secret whose revealed path equals abs (already
-// cleaned & absolute) and rewrites its access list in place.
-func (c *Config) changeSecretGroups(abs string, access []string) error {
+// changeSecretGroups finds the secret whose revealed path equals rel (already
+// cleaned, repo-relative) and rewrites its access list in place.
+func (c *Config) changeSecretGroups(rel string, access []string) error {
 	entries, err := c.secretEntries()
 	if err != nil {
 		return err
 	}
 
 	for _, e := range entries {
-		if filepath.Clean(revealedPath(e)) == abs {
+		if filepath.Clean(revealedPath(e)) == rel {
 			return setSecretAccess(e.node, access)
 		}
 	}
 
-	return fmt.Errorf("no secret found for %q", abs)
+	return fmt.Errorf("no secret found for %q", rel)
 }
 
 // setSecretAccess replaces (or adds, when absent) the access: list of a single

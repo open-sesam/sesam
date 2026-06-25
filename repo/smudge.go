@@ -14,7 +14,7 @@ import (
 
 	"github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
-	"github.com/google/renameio"
+	"github.com/google/renameio/v2"
 	"github.com/open-sesam/sesam/core"
 )
 
@@ -523,7 +523,13 @@ func repoRootRelative(worktreeRoot, sesamDir string) (string, error) {
 }
 
 func loadAuditViewFromWorktree(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
-	al, err := core.LoadAuditLog(sesamDir, ids)
+	root, err := os.OpenRoot(sesamDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open repo root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	al, err := core.LoadAuditLog(root, ids)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load audit log: %w", err)
 	}

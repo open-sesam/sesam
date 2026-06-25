@@ -33,7 +33,7 @@ secrets:
 // loadUsersGroups reloads main and returns user names plus the group map.
 func loadUsersGroups(t *testing.T, main string) ([]string, map[string][]string) {
 	t.Helper()
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 
 	users, err := cr.Users()
@@ -57,7 +57,7 @@ func TestUserTell_AddsUserAndGroups(t *testing.T) {
 	dir := t.TempDir()
 	main := writeUserMain(t, dir)
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 	require.NoError(t, cr.UserTell("bob", []string{"keyB"}, []string{"admin", "dev"}))
 	require.NoError(t, cr.Save())
@@ -75,13 +75,13 @@ func TestUserTell_NoDuplicateOnResave(t *testing.T) {
 	dir := t.TempDir()
 	main := writeUserMain(t, dir)
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 	require.NoError(t, cr.UserTell("bob", []string{"keyB"}, []string{"admin"}))
 	require.NoError(t, cr.Save())
 
 	// Reload and save again with no changes.
-	cr2, err := Load(main)
+	cr2, err := loadConfig(t, main)
 	require.NoError(t, err)
 	require.NoError(t, cr2.Save())
 
@@ -95,7 +95,7 @@ func TestUserTell_DuplicateUserErrors(t *testing.T) {
 	dir := t.TempDir()
 	main := writeUserMain(t, dir)
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 	require.Error(t, cr.UserTell("axolotl", []string{"keyX"}, []string{"admin"}))
 }
@@ -108,7 +108,7 @@ func TestUserTell_CreatesUsersAndGroups(t *testing.T) {
 	const body = "version: 1\nsecrets:\n  - path: existing.txt\n    access:\n      - admin\n"
 	require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 	require.NoError(t, cr.UserTell("bob", []string{"keyB"}, []string{"admin"}))
 	require.NoError(t, cr.Save())
@@ -123,12 +123,12 @@ func TestUserTell_PreservesUserKeys(t *testing.T) {
 	dir := t.TempDir()
 	main := writeUserMain(t, dir)
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 	require.NoError(t, cr.UserTell("bob", []string{"keyB1", "keyB2"}, []string{"admin"}))
 	require.NoError(t, cr.Save())
 
-	cr2, err := Load(main)
+	cr2, err := loadConfig(t, main)
 	require.NoError(t, err)
 
 	users, err := cr2.Users()
