@@ -28,6 +28,8 @@ func encryptRepoIdentityForTest(t *testing.T, plaintext string, passphrase []byt
 
 	recipient, err := age.NewScryptRecipient(string(passphrase))
 	require.NoError(t, err)
+	// Tests only: drop age's ~1s default scrypt work factor (logN=18) so the
+	// fixture encrypts and decrypts near-instantly. Real identities keep it.
 	recipient.SetWorkFactor(10)
 
 	var buf bytes.Buffer

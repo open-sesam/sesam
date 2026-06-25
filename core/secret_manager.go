@@ -242,6 +242,12 @@ func (sm *SecretManager) pruneObjects(wanted map[string]bool) error {
 			return fmt.Errorf("remove stale object %s: %w", p, err)
 		}
 	}
+
+	// Drop directories left empty by the removals. The old stage->objects swap
+	// rebuilt the tree and never carried empty dirs; this keeps that property.
+	if _, err := PruneEmptyDirs(sm.root, objects, nil, nil); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -296,10 +302,20 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 	_, statErr := sm.root.Stat(oldRevealedPath)
 	needsReveal := statErr != nil
 	if needsReveal {
-		// not yet revealed, do it before the rename entry, otherwise reveal would fail
+		// Not yet revealed; reveal so the rename has plaintext to move. The
+		// secret was not revealed before, so it must not be left revealed on
+		// ANY exit path. Defer the cleanup (rather than only on success) so a
+		// partial failure does not strand plaintext in the worktree — which a
+		// Stage.Rollback could not remove, since it lives outside the fork.
+		// The plaintext may sit at the old path (failure before rename) or the
+		// new path (after), so remove both best-effort.
 		if err := revealSecret(sm, oldRevealedPath); err != nil {
 			return err
 		}
+		defer func() {
+			_ = sm.root.Remove(newRevealedPath)
+			_ = sm.root.Remove(oldRevealedPath)
+		}()
 	}
 
 	if err := sm.State.FeedEntry(
@@ -309,7 +325,7 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 			NewRevealedPath: newRevealedPath,
 		}),
 	); err != nil {
-		return fmt.Errorf("failed to add secret remove entry: %w", err)
+		return fmt.Errorf("failed to add secret move entry: %w", err)
 	}
 
 	if err := sm.root.MkdirAll(filepath.Dir(newRevealedPath), 0o700); err != nil {
@@ -324,6 +340,10 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 		return err
 	}
 
+	// Materialize the moved object so it survives the cleanup above and the
+	// caller's SealAll can preserve it. No per-move seal entry is emitted: the
+	// caller runs a single SealAll after the whole move cascade, which writes
+	// the one authoritative seal entry (instead of one per moved secret).
 	_, err := sealSecret(
 		sm,
 		newRevealedPath,
@@ -331,32 +351,7 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 		sm.cryptPath(newRevealedPath),
 		sm.Signer.UserName(),
 	)
-	if err != nil {
-		return err
-	}
-
-	// If we'd cache signatures, we could skip reading all of them. But for now good enough.
-	sigs, err := readAllSignaturesForDir(sm.root, sm.objectsDir())
-	if err != nil {
-		return err
-	}
-
-	if err := sm.State.FeedEntry(
-		sm.Signer,
-		newAuditEntry(sm.Signer.UserName(), &DetailSeal{
-			RootHash:    buildRootHash(sigs),
-			FilesSealed: 1,
-		}),
-	); err != nil {
-		return fmt.Errorf("failed to add secret remove entry: %w", err)
-	}
-
-	if needsReveal {
-		// file was not revealed before, to be consistent we should remove it again.
-		return sm.root.Remove(newRevealedPath)
-	}
-
-	return nil
+	return err
 }
 
 // ShowSecret outputs the secret content of `path` to `dst`.
