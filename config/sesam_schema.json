@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/open-sesam/sesam/",
+  "title": "Sesam Schema",
+  "description": "Sesam's config file (containing user/groups and secret definitions)",
+  "$defs": {
+    "pubkey": {
+      "type": "string",
+      "description": "Public key of this user, either as literal, forge-id, file path or link"
+    },
+    "non-empty-string": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "type": "object",
+  "properties": {
+    "version": {
+      "description": "The version of this recipients file",
+      "type": "integer",
+      "default": 1,
+      "minimum": 1,
+      "maximum": 1
+    },
+    "users": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "key"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/non-empty-string",
+            "description": "Name of a user"
+          },
+          "desc": {
+            "$ref": "#/$defs/non-empty-string",
+            "description": "Description or full name of this user"
+          },
+          "key": {
+            "description": "Public key(s) of this user. May be given once or several times.",
+            "anyOf": [
+              {
+                "$ref": "#/$defs/pubkey"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/pubkey"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "groups": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/non-empty-string",
+          "description": "One of the names described in users above"
+        }
+      }
+    },
+    "secrets": {
+      "type": "array",
+      "items": {
+        "description": "Either an include of another sesam.yml or a secret definition with type and path.",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "include"
+            ],
+            "properties": {
+              "include": {
+                "$ref": "#/$defs/non-empty-string",
+                "description": "An include path to another sub sesam.yml file"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "$ref": "#/$defs/non-empty-string",
+                "description": "Path to the decrypted secret"
+              },
+              "access": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/non-empty-string"
+                }
+              },
+              "description": {
+                "$ref": "#/$defs/non-empty-string",
+                "description": "Description of the secret"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

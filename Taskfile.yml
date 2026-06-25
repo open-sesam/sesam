@@ -9,8 +9,13 @@ tasks:
     desc: "Build the sesam binary"
     aliases:
       - build-cli
+    vars:
+      # Last reachable tag (+commits-since), or a bare hash when untagged.
+      # Commit and date come from the toolchain's embedded VCS stamps.
+      VERSION:
+        sh: git describe --tags --always
     cmds:
-      - cmd: go build -o sesam .
+      - cmd: CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/open-sesam/sesam/cli.version={{.VERSION}}" -o sesam .
     sources:
       - ./*.go
       - ./**/*.go
@@ -36,7 +41,7 @@ tasks:
   test:
     desc: Run go tests
     cmds:
-      - go run gotest.tools/gotestsum@v1.10.1 --format testname -- -parallel 20 ./...
+      - gotestsum --format testname -- -parallel 20 ./...
 
   coverage:
     desc: Run go tests with coverage report
@@ -51,12 +56,12 @@ tasks:
     desc: Run the linter
     cmds:
       - pkill -9 -f golangci || true
-      - go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run -c linter.yml
+      - golangci-lint run -c linter.yml
 
   fmt:
     desc: Format all Go sources via gofumpt
     cmds:
-      - go run mvdan.cc/gofumpt@v0.9.2 -w -extra .
+      - gofumpt -w -extra .
 
   docgen:
     desc: Generate CLI reference markdown from live command tree
@@ -80,12 +85,6 @@ tasks:
     cmds:
       - cd docs && mdbook serve --open
 
-  setup-docs:
-    desc: Setup dependency for docs
-    cmds:
-      - command -v cargo-binstall || cargo install cargo-binstall
-      - cargo binstall --no-confirm mdbook@0.4.52 mdbook-admonish@1.18.0 mdbook-gitinfo@1.2.0 mdbook-pagetoc@0.2.2
-
   changelog:
     desc: Regenerate CHANGELOG.md from conventional-commit history
     cmds:
@@ -95,9 +94,3 @@ tasks:
     desc: Preview the unreleased changelog section without writing the file
     cmds:
       - git-cliff --unreleased
-
-  setup-changelog:
-    desc: Setup git-cliff for changelog generation
-    cmds:
-      - command -v cargo-binstall || cargo install cargo-binstall
-      - cargo binstall --no-confirm git-cliff@2.13.1

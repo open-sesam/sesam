@@ -1,0 +1,50 @@
+# `sesam status` renders a tree of secrets with a per-secret state glyph.
+# In-sync secrets are hidden by default and shown with --all; --json stays the
+# stable, unfiltered machine interface.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+# Init creates README.md, registers it as a secret, and seals it.
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# --json is unfiltered: the in-sync README still appears.
+exec sesam status --json
+stdout 'README.md'
+stdout '"in_sync"'
+
+# Default tree hides in-sync secrets; README is not listed, but the footer
+# still counts it.
+exec sesam status
+! stdout 'README\.md'
+stdout 'in sync'
+
+# --all reveals the in-sync secret in the tree.
+exec sesam status --all
+stdout 'README\.md'
+
+# Modify the revealed secret: it is now drift and shows by default.
+cp modified_readme.md README.md
+exec sesam status
+stdout 'README\.md'
+stdout 'out of sync'
+
+exec sesam status --json
+stdout '"out_of_sync"'
+
+# --diff shells out to git to show old (sealed) vs new (revealed) content.
+exec sesam status --diff
+stdout 'modified readme'
+
+# Removing the revealed plaintext reports it as unrevealed.
+rm README.md
+exec sesam status --json
+stdout '"unrevealed"'
+
+-- modified_readme.md --
+# modified readme
+
+This is the new content after the change.

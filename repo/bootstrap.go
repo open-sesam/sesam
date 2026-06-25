@@ -27,8 +27,8 @@ var sesamReadmeTemplate string
 //go:embed assets/config.default
 var configTemplate string
 
-// resolveSesamDirAndGit resolves the sesam repository root and opens the git repository
-// closes to it.
+// resolveSesamDirAndGit resolves the sesam repository root and opens the git
+// repository close to it.
 //
 // It starts at sesamPath and walks upward until the git worktree root,
 // returning the first directory that contains .sesam. If none is found, it
@@ -37,6 +37,7 @@ func resolveSesamDirAndGit(sesamPath string) (string, *git.Repository, error) {
 	if strings.TrimSpace(sesamPath) == "" {
 		sesamPath = "."
 	}
+
 	absPath, err := filepath.Abs(filepath.Clean(sesamPath))
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to resolve repo path %s: %w", sesamPath, err)
@@ -120,24 +121,7 @@ func ensureSesamDirs(sesamDir string) error {
 		}
 	}
 
-	if err := ensureTmpKeepFile(sesamDir); err != nil {
-		return err
-	}
-
-	slog.Info("initialized sesam directory", slog.String("path", filepath.Join(sesamDir, sesamSuffix)))
-	return nil
-}
-
-func ensureTmpKeepFile(sesamDir string) error {
-	keepPath := filepath.Join(sesamDir, sesamSuffix, "tmp", ".gitkeep")
-	if _, err := os.Stat(keepPath); os.IsNotExist(err) {
-		if err := renameio.WriteFile(keepPath, []byte("\n"), 0o600); err != nil {
-			return fmt.Errorf("failed to create %s: %w", keepPath, err)
-		}
-	} else if err != nil {
-		return fmt.Errorf("failed to access %s: %w", keepPath, err)
-	}
-
+	slog.Debug("initialized sesam directory", slog.String("path", filepath.Join(sesamDir, sesamSuffix)))
 	return nil
 }
 
@@ -177,7 +161,7 @@ func createInitialConfig(configPath, initialUser string, initialRecipients []str
 		return fmt.Errorf("failed to create sample config %s: %w", configPath, err)
 	}
 
-	slog.Info("created sample config", slog.String("path", configPath))
+	slog.Debug("created sample config", slog.String("path", configPath))
 	return nil
 }
 
@@ -196,7 +180,7 @@ func ensureDefaultGitAttributes(sesamDir string) error {
 	return appendMissingLines(gitAttributesPath, gitattributesTemplate, 0o600)
 }
 
-func ensureGitConfig(r *git.Repository, sesamDir string) error {
+func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) error {
 	cfg, err := r.ConfigScoped(gogitconfig.LocalScope)
 	if err != nil {
 		return fmt.Errorf("read local git config: %w", err)
@@ -221,28 +205,36 @@ func ensureGitConfig(r *git.Repository, sesamDir string) error {
 	if err != nil {
 		return err
 	}
+
 	textconvCmd, err := sesamCmd(r, sesamDir, "show")
 	if err != nil {
 		return err
 	}
+
 	smudgeCmd, err := sesamCmd(r, sesamDir, "smudge")
 	if err != nil {
 		return err
 	}
+
 	aliasCmd, err := sesamCmd(r, sesamDir)
 	if err != nil {
 		return err
 	}
 
 	if !mergeConfigured {
+		opts.PrintStep("  • Installing merge driver…")
+
 		mergeSection.SetOption("name", "merge the audit log of sesam")
 		mergeSection.SetOption("driver", mergeCmd)
 
+		opts.PrintStep("  • installing diff driver…")
 		diffSection := cfg.Raw.Section("diff").Subsection("sesam-diff")
 		diffSection.SetOption("textconv", textconvCmd)
 	}
 
 	if !processConfigured {
+		opts.PrintStep("  • Installing smudge filter…")
+
 		// required=false means a smudge failure doesn't abort
 		// `git checkout`; the encrypted bytes land instead. We rely
 		// on this to keep history bisects working when the audit log
@@ -261,6 +253,7 @@ func ensureGitConfig(r *git.Repository, sesamDir string) error {
 		// looking for `git-sesam` on PATH, so users get `git sesam ...`
 		// without any PATH plumbing. Git runs the command with cwd =
 		// worktree root, which is what sesam wants anyway.
+		opts.PrintStep("  • Making sure sesam can be called as `git sesam`…")
 		aliasSection.SetOption("sesam", "!"+aliasCmd)
 	}
 
@@ -391,7 +384,7 @@ func ensureSesamReadme(sesamDir string) error {
 		return fmt.Errorf("failed to create sesam readme %s: %w", readmePath, err)
 	}
 
-	slog.Info("created sesam readme", slog.String("path", readmePath))
+	slog.Debug("created sesam readme", slog.String("path", readmePath))
 	return nil
 }
 
@@ -428,21 +421,4 @@ func stageInitFiles(r *git.Repository, sesamDir, configPath string) error {
 	}
 
 	return nil
-}
-
-func withWorkingDir(dir string, fn func() error) error {
-	originalDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to read current directory: %w", err)
-	}
-
-	if err := os.Chdir(dir); err != nil {
-		return fmt.Errorf("failed to switch directory to %s: %w", dir, err)
-	}
-
-	defer func() {
-		_ = os.Chdir(originalDir)
-	}()
-
-	return fn()
 }

@@ -42,25 +42,29 @@ func VerifyKeyReuse(kr Keyring) []SharedPublicKey {
 }
 
 type ForgeReportEntry struct {
-	User   string
-	PubKey *Recipient
+	User   string `json:"user"`
+	PubKey string `json:"pubkey"`
 }
 
 type ForgeReportError struct {
-	User   string
-	Source KeySource
-	Error  error
+	User   string    `json:"user"`
+	Source KeySource `json:"source"`
+	Error  error     `json:"error"`
 }
 
 type ForgeReport struct {
 	// Added are public keys that are in the specified source
-	Added []ForgeReportEntry
+	Added []ForgeReportEntry `json:"added,omitempty"`
 
 	// Deleted are public keys that are not anymore in any of the specified sources.
-	Deleted []ForgeReportEntry
+	Deleted []ForgeReportEntry `json:"deleted,omitempty"`
 
 	// Errored are public keys that could not be retrieved at this time any more.
-	Errored []ForgeReportError
+	Errored []ForgeReportError `json:"errored,omitempty"`
+}
+
+func (fr *ForgeReport) IsZero() bool {
+	return len(fr.Added) == 0 && len(fr.Deleted) == 0 && len(fr.Errored) == 0
 }
 
 // VerifyForgeIds checks the public keys of all users and will re-fetch the source they were from.
@@ -170,7 +174,7 @@ func VerifyForgeIds(ctx context.Context, vstate *VerifiedState, kr Keyring, plug
 			// Key seems to be new:
 			report.Added = append(report.Added, ForgeReportEntry{
 				User:   user,
-				PubKey: newPubKey,
+				PubKey: newPubKey.String(),
 			})
 		}
 	}
@@ -184,7 +188,7 @@ func VerifyForgeIds(ctx context.Context, vstate *VerifiedState, kr Keyring, plug
 
 			report.Deleted = append(report.Deleted, ForgeReportEntry{
 				User:   user,
-				PubKey: leftOverPubKey,
+				PubKey: leftOverPubKey.String(),
 			})
 		}
 	}

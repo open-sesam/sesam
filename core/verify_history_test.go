@@ -76,7 +76,7 @@ func (f *historyFixture) tellUser(t *testing.T, newUser *testUser, groups []stri
 	um, err := BuildUserManager(f.SesamDir, f.Admin.Signer, f.AuditLog, state, secMgr)
 	require.NoError(t, err)
 
-	require.NoError(t, um.TellUser(
+	require.NoError(t, um.UserTell(
 		context.Background(),
 		newUser.Name,
 		[]string{newUser.Recipient.String()},
@@ -118,10 +118,10 @@ func (f *historyFixture) truncateLog(t *testing.T) {
 
 func TestAuditLogIsPrefix(t *testing.T) {
 	mk := func(sigs ...string) *AuditLog {
-		entries := make([]auditEntrySigned, len(sigs))
+		entries := make([]AuditEntrySigned, len(sigs))
 		for i, s := range sigs {
-			entries[i] = auditEntrySigned{
-				auditEntry: auditEntry{SeqID: uint64(i + 1)},
+			entries[i] = AuditEntrySigned{
+				AuditEntry: AuditEntry{SeqID: uint64(i + 1)},
 				Signature:  s,
 			}
 		}

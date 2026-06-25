@@ -25,7 +25,7 @@ func TestGenerateAndLoadSignKey(t *testing.T) {
 	require.NoError(t, err)
 
 	kr := EmptyKeyring()
-	kr.AddSignPubKey("alice", loaded.PublicKey())
+	kr.SetSignPubKey("alice", loaded.PublicKey())
 	who, err := kr.Verify(SesamDomainSignSecretTag, data, sig, "alice")
 	require.NoError(t, err)
 	require.Equal(t, "alice", who)
@@ -57,7 +57,7 @@ func TestReadAllSignatures(t *testing.T) {
 
 	for _, p := range []string{"secrets/a", "secrets/b", "nested/c"} {
 		s := testSecret(t, mgr, p, "content-"+p)
-		_, err := s.Seal(s.Mgr.cryptPath(s.RevealedPath), "testuser")
+		_, err := sealSecret(mgr, s, mgr.recipientsFor(s), mgr.cryptPath(s), "testuser")
 		require.NoError(t, err)
 	}
 
@@ -98,7 +98,7 @@ func TestSignCrossDomain(t *testing.T) {
 	require.NoError(t, err)
 
 	kr := EmptyKeyring()
-	kr.AddSignPubKey("alice", loaded.PublicKey())
+	kr.SetSignPubKey("alice", loaded.PublicKey())
 	who, err := kr.Verify(SesamDomainSignSecretTag, data, sig, "alice")
 	require.NoError(t, err)
 	require.Equal(t, "alice", who)

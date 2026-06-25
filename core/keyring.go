@@ -7,16 +7,34 @@ import (
 	"slices"
 )
 
+// DuplicatePubkeyError is returned when a key (recipient or signing key) is
+// added for one user while another user already holds the same key. Keys must
+// be unique across users so that `sesam id` can map a key back to a single user.
+type DuplicatePubkeyError struct {
+	user   string
+	pubkey string
+}
+
+func (e *DuplicatePubkeyError) Error() string {
+	return fmt.Sprintf("user %s already has recipient %s", e.user, e.pubkey)
+}
+
 // Keyring is a collection of public keys (both for sign-verify and encryption)
 type Keyring interface {
 	// AddRecipient adds a recipient to `user`. It is the public part of a keypair
-	// the user can use to encrypt files.
-	AddRecipient(user string, recp *Recipient)
+	// the user can use to encrypt files. If `recp` is already linked to this ` user`
+	// it is a no-op. If `recp` is already used by any other user, then DuplicatePubkeyError
+	// is returned.
+	AddRecipient(user string, recp *Recipient) error
 
-	// AddSignPubKey adds a signing key for a a specific user.
-	// Most of the time a user has only a single key, except for key rotation.
+	// RemoveRecipient removes the recipient `recp` from the recipients of `user`.
+	// An error will be returned when there's only one recipient left and there's a match.
+	// An error will be returned when there was no match.
+	RemoveRecipient(user string, recp *Recipient) error
+
+	// SetSignPubKey sets the signing key for a a specific user.
 	// For now, only ed25519 keys are supported in `pub`.
-	AddSignPubKey(user string, pub []byte)
+	SetSignPubKey(user string, pub ed25519.PublicKey) error
 
 	// DeleteUser removes a user from they Keyring.
 	// It will return true if the user existed.
@@ -32,51 +50,103 @@ type Keyring interface {
 
 	// ListUsers() returns all users and recipients.
 	ListUsers() map[string]Recipients
+
+	// RenameUser() renames existing oldUser to newUser.
+	// If oldUser does not exists it's a no-op.
+	RenameUser(oldUser, newUser string)
+
+	// Clone returns a deep copy of the keyring. It is used to snapshot the
+	// keyring before audit-log replay so the contents can be restored on a
+	// verification error (see Restore).
+	Clone() Keyring
+
+	// Restore replaces this keyring's contents with a deep copy of src's,
+	// WITHOUT changing the keyring's identity. The repo and managers hold the
+	// same *Keyring by pointer, so replay must roll back in place rather than
+	// swap the pointer. src is typically a value previously returned by Clone.
+	Restore(src Keyring)
 }
 
 // MemoryKeyring is a simple Keyring implementation that holds public keys in memory only.
 type MemoryKeyring struct {
 	recipients map[string]Recipients
-	signPubs   map[string][][]byte
+	signPubs   map[string]ed25519.PublicKey
 }
 
 func EmptyKeyring() *MemoryKeyring {
 	return &MemoryKeyring{
 		recipients: make(map[string]Recipients),
-		signPubs:   make(map[string][][]byte),
+		signPubs:   make(map[string]ed25519.PublicKey),
 	}
 }
 
-func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) {
+func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) error {
+	var isDuplicate bool
+	for existingUser, keys := range mk.recipients {
+		for _, other := range keys {
+			if other.Equal(recp) {
+				if user == existingUser {
+					// key exists, but is just a duplicate of user.
+					isDuplicate = true
+					break
+				}
+
+				// another user already is using this key.
+				return &DuplicatePubkeyError{
+					user:   user,
+					pubkey: fmt.Sprintf("%v", recp),
+				}
+			}
+		}
+	}
+
+	if !isDuplicate {
+		mk.recipients[user] = append(mk.recipients[user], recp)
+	}
+
+	return nil
+}
+
+func (mk *MemoryKeyring) RemoveRecipient(user string, toDelete *Recipient) error {
 	recps, ok := mk.recipients[user]
 	if !ok {
-		mk.recipients[user] = []*Recipient{recp}
-		return
+		return fmt.Errorf("no such user: %s", user)
 	}
 
-	if slices.ContainsFunc(recps, func(other *Recipient) bool {
-		return other.Equal(recp)
-	}) {
-		return
+	idx := slices.IndexFunc(recps, func(o *Recipient) bool {
+		return o.Equal(toDelete)
+	})
+
+	if idx < 0 {
+		// key to delete did not exist.
+		return fmt.Errorf("user %s has no key %s that we could remove", user, toDelete)
 	}
 
-	mk.recipients[user] = append(recps, recp)
+	if len(recps) == 1 {
+		// key was found, but it's the last one.
+		return fmt.Errorf("user %s has only one key left, need to add new keys before removing further", user)
+	}
+
+	mk.recipients[user] = slices.Delete(recps, idx, idx+1)
+	return nil
 }
 
-func (mk *MemoryKeyring) AddSignPubKey(user string, key []byte) {
-	signPubs, ok := mk.signPubs[user]
-	if !ok {
-		mk.signPubs[user] = [][]byte{key}
-		return
+func (mk *MemoryKeyring) SetSignPubKey(user string, newKey ed25519.PublicKey) error {
+	// Reject only if *another* user already holds this key, so keys stay
+	// unique across users (mirrors AddRecipient). Re-setting a user's own
+	// key is allowed - replay re-applies init/tell entries into a populated
+	// keyring, and a regen replaces the user's existing key in place.
+	for existingUser, pubKey := range mk.signPubs {
+		if existingUser != user && bytes.Equal(pubKey, newKey) {
+			return &DuplicatePubkeyError{
+				user:   user,
+				pubkey: fmt.Sprintf("%v", newKey),
+			}
+		}
 	}
 
-	if slices.ContainsFunc(signPubs, func(other []byte) bool {
-		return bytes.Equal(other, key)
-	}) {
-		return
-	}
-
-	mk.signPubs[user] = append(mk.signPubs[user], key)
+	mk.signPubs[user] = newKey
+	return nil
 }
 
 func (mk *MemoryKeyring) DeleteUser(user string) bool {
@@ -109,28 +179,20 @@ func (mk *MemoryKeyring) Verify(domain SignDomain, data []byte, signature, userH
 	// In most cases we know which user we expect to have made the signature.
 	// In this case we can just hit this one first.
 	if userHint != "" {
-		signPubKeys, ok := mk.signPubs[userHint]
+		signPubKey, ok := mk.signPubs[userHint]
 		if ok {
-			for _, signPubKey := range signPubKeys {
-				if err := mk.verifySingle(domain, signPubKey, data, signature); err != nil {
-					continue
-				}
-
+			if err := mk.verifySingle(domain, signPubKey, data, signature); err == nil {
 				return userHint, nil
 			}
 		}
 	}
 
-	for user, signPubKeys := range mk.signPubs {
+	for user, signPubKey := range mk.signPubs {
 		if user == userHint {
 			continue
 		}
 
-		for _, signPubKey := range signPubKeys {
-			if err := mk.verifySingle(domain, signPubKey, data, signature); err != nil {
-				continue
-			}
-
+		if err := mk.verifySingle(domain, signPubKey, data, signature); err == nil {
 			return user, nil
 		}
 	}
@@ -159,4 +221,58 @@ func AllRecipients(kr Keyring) Recipients {
 	}
 
 	return recps
+}
+
+func cloneRecipientsMap(in map[string]Recipients) map[string]Recipients {
+	out := make(map[string]Recipients, len(in))
+	for user, recps := range in {
+		// *Recipient values are immutable after construction, so sharing the
+		// pointers is safe; we only need an independent slice header.
+		out[user] = slices.Clone(recps)
+	}
+
+	return out
+}
+
+func cloneSignPubs(in map[string]ed25519.PublicKey) map[string]ed25519.PublicKey {
+	out := make(map[string]ed25519.PublicKey, len(in))
+	for user, key := range in {
+		// ed25519.PublicKey is a []byte; copy it so a later in-place change
+		// cannot bleed into the snapshot.
+		out[user] = slices.Clone(key)
+	}
+
+	return out
+}
+
+func (mk *MemoryKeyring) Clone() Keyring {
+	return &MemoryKeyring{
+		recipients: cloneRecipientsMap(mk.recipients),
+		signPubs:   cloneSignPubs(mk.signPubs),
+	}
+}
+
+func (mk *MemoryKeyring) Restore(src Keyring) {
+	other, ok := src.(*MemoryKeyring)
+	if !ok {
+		panic(fmt.Sprintf("keyring restore: incompatible snapshot type %T", src))
+	}
+
+	// Deep copy so src stays independent and reusable after the restore.
+	mk.recipients = cloneRecipientsMap(other.recipients)
+	mk.signPubs = cloneSignPubs(other.signPubs)
+}
+
+func (mk *MemoryKeyring) RenameUser(oldUser, newUser string) {
+	recps, ok1 := mk.recipients[oldUser]
+	signPubs, ok2 := mk.signPubs[oldUser]
+	if !ok1 || !ok2 {
+		return
+	}
+
+	delete(mk.recipients, oldUser)
+	mk.recipients[newUser] = recps
+
+	delete(mk.signPubs, oldUser)
+	mk.signPubs[newUser] = signPubs
 }
