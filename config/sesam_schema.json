@@ -99,7 +99,7 @@
                   "$ref": "#/$defs/non-empty-string"
                 }
               },
-              "description": {
+              "desc": {
                 "$ref": "#/$defs/non-empty-string",
                 "description": "Description of the secret"
               }
