@@ -70,9 +70,11 @@ func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
+	nested := cmd.Bool("nested")
+
 	// move always needs a seal, otherwise state is pretty broken
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.SecretMove(paths[0], paths[1]); err != nil {
+		if err := s.SecretMove(paths[0], paths[1], nested); err != nil {
 			return err
 		}
 		return s.SealAll()
