@@ -131,6 +131,11 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 			AccessGroups: groups,
 		})
 	} else {
+		if len(groups) == 0 {
+			// if no groups were given, there is nothing to change.
+			return nil
+		}
+
 		// Secret already exists: this is an access-list change.
 		auditEntry = newAuditEntry(sm.Signer.UserName(), &DetailSecretChangeAccess{
 			RevealedPath: revealedPath,

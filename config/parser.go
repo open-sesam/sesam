@@ -537,11 +537,15 @@ func rootMappingValues(root ast.Node) []*ast.MappingValueNode {
 
 func includePath(m *ast.MappingNode) (string, bool) {
 	for _, mv := range m.Values {
-		// Key.String() is fine — scalar key with no trailing comment in
-		// practice. Value goes through GetToken() so any inline comment
-		// (`include: foo.yml # note`) doesn't bleed into the path.
 		if mv.Key.String() == "include" {
-			return mv.Value.GetToken().Value, true
+			p := mv.Value.GetToken().Value
+
+			// allow just specifying the directory itself.
+			if !strings.HasSuffix(p, "sesam.yml") {
+				p = filepath.Join(p, "sesam.yml")
+			}
+
+			return p, true
 		}
 	}
 

@@ -201,3 +201,63 @@ func TestUserChangeGroups_CreatesMissingGroup(t *testing.T) {
 	_, groups := loadUsersGroups(t, main)
 	require.Equal(t, []string{"axolotl"}, groups["brandnew"])
 }
+
+// TestUserRename_RenamesCommentedGroupMember: a group member occurrence that
+// carries an inline comment is still renamed.
+func TestUserRename_RenamesCommentedGroupMember(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	body := `users:
+  - name: axolotl
+    key:
+      - keyA
+groups:
+  admin:
+    - axolotl # founder
+secrets:
+  - path: existing.txt
+    access:
+      - admin
+`
+	require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserRename("axolotl", "newt"))
+	require.NoError(t, cr.Save())
+
+	_, groups := loadUsersGroups(t, main)
+	require.Equal(t, []string{"newt"}, groups["admin"])
+}
+
+// TestUserChangeGroups_RemovesCommentedMember: dropping a user from a group
+// removes their membership even when the occurrence carries an inline comment.
+func TestUserChangeGroups_RemovesCommentedMember(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	body := `users:
+  - name: axolotl
+    key:
+      - keyA
+groups:
+  admin:
+    - axolotl
+  dev:
+    - axolotl # temp
+    - bravo
+secrets:
+  - path: existing.txt
+    access:
+      - admin
+`
+	require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserChangeGroups("axolotl", []string{"admin"}))
+	require.NoError(t, cr.Save())
+
+	_, groups := loadUsersGroups(t, main)
+	require.Equal(t, []string{"bravo"}, groups["dev"], "commented axolotl removed, bravo kept")
+	require.Equal(t, []string{"axolotl"}, groups["admin"])
+}

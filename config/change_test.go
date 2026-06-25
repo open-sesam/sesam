@@ -83,6 +83,33 @@ func TestSecretChangeGroups_EmptyDropsAccessNode(t *testing.T) {
 	require.Equal(t, []string{"group1"}, accessFor(t, main, "existing.txt"))
 }
 
+// TestSecretChangeGroups_EmptyPreservesComment removing the access node when
+// groups go empty must not disturb the entry's surrounding comments.
+func TestSecretChangeGroups_EmptyPreservesComment(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	body := `secrets:
+  # keep me
+  - path: token.txt # inline keep
+    access:
+      - group1
+`
+	require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "token.txt"), []byte("x"), 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.SecretChangeGroups("token.txt", []string{}))
+	require.NoError(t, cr.Save())
+
+	out, err := os.ReadFile(main)
+	require.NoError(t, err)
+	require.Contains(t, string(out), "# keep me", "head comment dropped on removal:\n%s", out)
+	require.Contains(t, string(out), "# inline keep", "inline comment dropped on removal:\n%s", out)
+	require.NotContains(t, string(out), "access", "access node should be gone:\n%s", out)
+	require.Empty(t, accessFor(t, main, "token.txt"))
+}
+
 // TestSecretChangeGroups_NotFound errors when no secret matches the path.
 func TestSecretChangeGroups_NotFound(t *testing.T) {
 	_, main := buildConfig(t, false)
