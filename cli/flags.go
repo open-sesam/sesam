@@ -26,7 +26,7 @@ var flagJSON = &cli.BoolFlag{
 // command - handy when batching several changes into one seal.
 var flagNoSeal = &cli.BoolFlag{
 	Name:  "no-seal",
-	Usage: "Do not run `sesam seal` afterwards - useful when batching",
+	Usage: "Do not run 'sesam seal' afterwards - useful when batching",
 }
 
 // userFlag builds the --user flag. Required-ness and help text differ per
