@@ -274,18 +274,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, fmt.Errorf("failed to build user manager: %w", err)
 	}
 
-	opts.PrintStep("Adjusting .gitgnore to ignore all revealed files…")
-	if err := ensureDefaultGitIgnore(resolvedDir); err != nil {
-		return nil, err
-	}
-
-	opts.PrintStep("Telling git when to call sesam…")
-	if err := ensureDefaultGitAttributes(resolvedDir); err != nil {
-		return nil, err
-	}
-
-	opts.PrintStep("Adjusting git config…")
-	if err := ensureGitConfig(gitRepo, resolvedDir, opts); err != nil {
+	if err := configureGitIntegration(gitRepo, resolvedDir, opts); err != nil {
 		return nil, err
 	}
 
@@ -320,6 +309,67 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	opts.PrintStep("Welcome to…")
 	success = true
 	return r, nil
+}
+
+// IsInitialized reports whether sesamDir already holds a sesam repository (sesam.yml present)
+func IsInitialized(sesamDir string) (bool, error) {
+	resolvedDir, _, err := resolveSesamDirAndGit(sesamDir)
+	if err != nil {
+		return false, err
+	}
+
+	switch _, err := os.Stat(filepath.Join(resolvedDir, "sesam.yml")); {
+	case err == nil:
+		return true, nil
+	case os.IsNotExist(err):
+		return false, nil
+	default:
+		return false, fmt.Errorf("stat sesam.yml: %w", err)
+	}
+}
+
+// Setup wires sesam's git integration into an already-initialized repository.
+// This is meant to be called to onboard users that cloned the repo but did not run init.
+func Setup(sesamDir string, idPaths []string, opts RepoInitOpts) error {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	if err != nil {
+		return err
+	}
+
+	if _, err := os.Stat(filepath.Join(resolvedDir, "sesam.yml")); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("no sesam repository at %s - run `sesam init` to create one", resolvedDir)
+		}
+		return fmt.Errorf("stat sesam.yml: %w", err)
+	}
+
+	if err := configureGitIntegration(gitRepo, resolvedDir, opts); err != nil {
+		return err
+	}
+
+	if len(idPaths) == 0 {
+		opts.PrintStep("No identity given - run `sesam reveal` once you have one to decrypt your secrets.")
+		return nil
+	}
+
+	// Load maps the identity to a known user and would hard-fail for a user
+	// who is not a recipient yet. That is expected on a fresh clone, so we
+	// downgrade it to a hint rather than failing the (already done) wiring.
+	r, err := Load(resolvedDir, idPaths, opts.RepoOpts)
+	if err != nil {
+		opts.PrintStep("Git is wired up, but your identity can't be used here yet (%v).", err)
+		opts.PrintStep("If you are new to this repo, ask an admin to run `sesam tell` for you, then `sesam reveal`.")
+		return nil
+	}
+	defer func() { _ = r.Close() }()
+
+	who, _ := r.Whoami()
+	opts.PrintStep("Revealing secrets available to »%s«…", who)
+	if err := r.RevealAll(); err != nil {
+		opts.PrintStep("Could not reveal yet (%v) - run `sesam reveal` once your access is set up.", err)
+	}
+
+	return nil
 }
 
 // Load loads an existing sesam repository at sesamDir. The on-disk repo
