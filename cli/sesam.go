@@ -13,14 +13,17 @@ import (
 )
 
 // Command categories group subcommands in `sesam --help`. urfave/cli sorts
-// categories alphabetically by name with no ordering hook, so the leading
-// ordinal pins the order (repo lifecycle first, then daily and admin groups).
+// categories lexicographically by name with no ordering hook, so each label
+// carries a numeric sort-prefix (gaps of ten leave room to insert later).
+// installHelpOrdering strips the prefix before display - see help.go.
+const catSep = "\x1f" // ASCII unit separator; never appears in a real label
+
 const (
-	catRepository = "REPOSITORY"
-	catSecrets    = "SECRETS"
-	catAccess     = "ACCESS"
-	catConfig     = "CONFIG"
-	catMeta       = "META"
+	catRepository = "10" + catSep + "REPOSITORY"
+	catSecrets    = "20" + catSep + "SECRETS"
+	catAccess     = "30" + catSep + "ACCESS"
+	catConfig     = "40" + catSep + "CONFIG"
+	catMeta       = "50" + catSep + "META"
 )
 
 // Main builds and runs the sesam CLI command tree.
@@ -29,6 +32,8 @@ const (
 // build managers, defer Close) and hand it to the handler; the wrapping
 // makes it obvious which commands need an initialized sesam repository.
 func Main(args []string) error {
+	installHelpOrdering()
+
 	cli.VersionFlag = &cli.BoolFlag{
 		Name:  "version",
 		Usage: "Print the version and exit",
