@@ -273,6 +273,11 @@ func (sm *SecretManager) readSecretFooter(path string) (*secretFooter, error) {
 // RevealAll reveals all known secrets.
 func (sm *SecretManager) RevealAll() error {
 	for _, vsecret := range sm.State.Secrets {
+		if !sm.State.UserHasAccess(sm.Signer.UserName(), vsecret.AccessGroups) {
+			// ignore files we can't decrypt:
+			continue
+		}
+
 		if err := revealSecret(sm, vsecret.RevealedPath); err != nil {
 			return fmt.Errorf("failed to reveal %s: %w", vsecret.RevealedPath, err)
 		}
