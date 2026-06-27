@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -297,7 +298,16 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, fmt.Errorf("failed to bootstrap readme secret: %w", err)
 	}
 
-	opts.PrintStep("Making sure the rains come down in Africa…")
+	eggs := []string{
+		"Blessing the rains down in Africa…",
+		"Greeting the darkness, my old friend…",
+		"Refusing to never gonna give you up…",
+		"Waiting for the final countdown…",
+		"Checking if the cake is a lie…",
+		"Making sure another one bites the dust…",
+	}
+
+	opts.PrintStep(eggs[rand.IntN(len(eggs))])
 	if err := r.secret.SealAll(); err != nil {
 		return nil, err
 	}
