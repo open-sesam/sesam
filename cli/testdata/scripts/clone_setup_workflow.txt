@@ -10,9 +10,10 @@ exec git config user.name 'Sesam Test'
 exec sesam init --user admin
 cp secret.env app.env
 exec sesam add app.env --group dev
-# Bob is an admin so he can read every secret (incl. the admin-only README
-# init creates); a non-admin would currently fail RevealAll on that README.
-exec sesam tell --user bob --recipient $BOB_PUBKEY --group admin
+# Bob is a non-admin dev: he can read app.env (dev) but not the admin-only
+# README init creates. Setup's reveal must skip the README and still reveal
+# app.env (RevealAll skips inaccessible secrets rather than aborting).
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
 exec git add -A
 exec git commit -m 'init sesam with a secret and bob'
 
