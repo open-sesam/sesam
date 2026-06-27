@@ -327,8 +327,6 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, nested bool) error {
 		return err
 	}
 
-	fmt.Println("ADD", revealedPaths)
-
 	var files []string
 	for _, p := range revealedPaths {
 		expanded, err := s.expandSecretFiles(p)

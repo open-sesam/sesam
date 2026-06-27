@@ -123,7 +123,7 @@ func Main(args []string) error {
 				Name:     "edit",
 				Category: catSecrets,
 				Action:   commands.HandleStub,
-				Usage:    "Edit an secret and immeediately seal it afterwards",
+				Usage:    "Edit an secret and immediately seal it afterwards",
 			},
 			{
 				Name:     "seal",
@@ -211,7 +211,7 @@ func Main(args []string) error {
 				Flags:         flagsTell,
 				Action:        commands.WithRepo(commands.HandleTell),
 				ShellComplete: completeFlags,
-				Usage:         "Add a person to a group and re-encrypt affected files",
+				Usage:         "Add a person to a group and re-encrypt files",
 			},
 			{
 				Name:          "kill",
@@ -219,7 +219,7 @@ func Main(args []string) error {
 				Flags:         flagsKill,
 				Action:        commands.WithRepo(commands.HandleKill),
 				ShellComplete: completeUsers,
-				Usage:         "Remove a person from a group",
+				Usage:         "Remove a person from the sesam repo entirely",
 			},
 			{
 				Name:     "user",
@@ -228,10 +228,11 @@ func Main(args []string) error {
 				Usage:    "User management commands",
 				Commands: []*cli.Command{
 					{
-						Name:   "list",
-						Flags:  flagsListUsers,
-						Action: commands.WithRepo(commands.HandleListUsers),
-						Usage:  "List persons, groups, and access",
+						Name:    "list",
+						Aliases: []string{"ls"},
+						Flags:   flagsListUsers,
+						Action:  commands.WithRepo(commands.HandleListUsers),
+						Usage:   "List persons, groups, and access",
 					},
 					{
 						Name:   "change-groups",
