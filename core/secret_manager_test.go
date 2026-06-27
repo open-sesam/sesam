@@ -146,6 +146,52 @@ func TestRevealAllFailsMissingAge(t *testing.T) {
 	require.Error(t, err, "reveal should fail when .sesam file is missing")
 }
 
+// TestRevealAllSkipsInaccessibleSecrets pins the contract of RevealAll for a
+// non-admin: it reveals every secret the user has access to and silently skips
+// the rest, rather than aborting on the first one it cannot decrypt. This used
+// to fail outright - `sesam init` always creates an admin-only README, so a
+// non-admin (the common "friend" case) revealed nothing at all.
+func TestRevealAllSkipsInaccessibleSecrets(t *testing.T) {
+	mgr := sealedSecretManager(t) // admin + admin-only "secrets/test" sealed
+
+	// Onboard non-admin bob (group "dev").
+	bob := newTestUser(t, "bob")
+	_, err := mgr.AuditLog.AddEntry(mgr.Signer, newAuditEntry("admin", &DetailUserTell{
+		User: "bob", Groups: []string{"dev"},
+		PubKeys:    []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}},
+		SignPubKey: bob.SignPubKey,
+	}), nil)
+	require.NoError(t, err)
+	require.NoError(t, verify(mgr.State))
+
+	// Admin adds a "dev" secret bob *can* read, and seals it (bob is now a
+	// recipient). It is appended after the admin-only "secrets/test", so a
+	// naive RevealAll would hit the inaccessible secret first.
+	writeSecret(t, mgr.SesamDir, "secrets/devstuff", "dev-content")
+	require.NoError(t, mgr.SecretAdd("secrets/devstuff", []string{"dev"}))
+	require.NoError(t, mgr.SealAll())
+
+	bobMgr, err := BuildSecretManager(
+		mgr.SesamDir, mgr.root, Identities{bob.Identity}, bob.Signer,
+		mgr.Keyring, mgr.AuditLog, mgr.State,
+	)
+	require.NoError(t, err)
+
+	// Remove plaintext so a successful reveal recreates it.
+	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/test")))
+	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/devstuff")))
+
+	// Skips the admin-only "secrets/test", reveals the accessible "devstuff".
+	require.NoError(t, bobMgr.RevealAll())
+
+	got, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/devstuff"))
+	require.NoError(t, err)
+	require.Equal(t, "dev-content", string(got), "accessible secret must be revealed")
+
+	require.NoFileExists(t, filepath.Join(mgr.SesamDir, "secrets/test"),
+		"inaccessible (admin-only) secret must be skipped, not revealed")
+}
+
 // sealedSecretManager returns a SecretManager with one sealed secret ("secrets/test")
 // and cwd set to the repo dir. The .sesam file exists on disk.
 func sealedSecretManager(t *testing.T) *SecretManager {
@@ -236,6 +282,9 @@ func TestSecretMove(t *testing.T) {
 	mgr := sealedSecretManager(t) // secrets/test sealed for admin, plaintext on disk
 
 	require.NoError(t, mgr.SecretMove("secrets/test", "secrets/moved"))
+	// SecretMove no longer emits its own seal entry; the caller seals once
+	// after the whole move cascade (here, a single SealAll).
+	require.NoError(t, mgr.SealAll())
 
 	// The encrypted object moved.
 	require.NoFileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
@@ -287,6 +336,8 @@ func TestSecretMoveNotYetRevealed(t *testing.T) {
 	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/test")))
 
 	require.NoError(t, mgr.SecretMove("secrets/test", "secrets/moved"))
+	// The caller seals once after the move (SecretMove no longer self-seals).
+	require.NoError(t, mgr.SealAll())
 
 	require.NoFileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
 	require.FileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/moved")))
@@ -303,6 +354,28 @@ func TestSecretMoveNotYetRevealed(t *testing.T) {
 	revealed, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/moved"))
 	require.NoError(t, err)
 	require.Equal(t, "secret-content", string(revealed))
+}
+
+// A move that fails after revealing a not-yet-revealed secret must not strand
+// the decrypted plaintext in the worktree — Stage.Rollback reaps only the
+// .sesam fork, so a leftover worktree plaintext would survive a rolled-back
+// move. The deferred cleanup in SecretMove must remove it on the error path.
+func TestSecretMoveFailureCleansRevealedPlaintext(t *testing.T) {
+	mgr := sealedSecretManager(t)
+
+	// Make the secret unrevealed so the move has to reveal it first.
+	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/test")))
+
+	// A regular file where the move needs a directory makes MkdirAll fail
+	// *after* revealSecret has written the plaintext to the old path.
+	require.NoError(t, os.WriteFile(filepath.Join(mgr.SesamDir, "blocker"), []byte("x"), 0o600))
+
+	require.Error(t, mgr.SecretMove("secrets/test", "blocker/sub"))
+
+	// The reveal was cleaned up on the failure path: no stray plaintext at
+	// either the old or the new location.
+	require.NoFileExists(t, filepath.Join(mgr.SesamDir, "secrets/test"))
+	require.NoFileExists(t, filepath.Join(mgr.SesamDir, "blocker/sub"))
 }
 
 // A secret's footer records sealed_by (the name of the user who sealed it),

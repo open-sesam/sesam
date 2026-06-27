@@ -171,6 +171,25 @@ func quoteYAMLString(value string) string {
 	return "'" + escaped + "'"
 }
 
+func configureGitIntegration(gitRepo *git.Repository, sesamDir string, opts RepoInitOpts) error {
+	opts.PrintStep("Adjusting .gitignore to ignore all revealed files…")
+	if err := ensureDefaultGitIgnore(sesamDir); err != nil {
+		return err
+	}
+
+	opts.PrintStep("Telling git when to call sesam…")
+	if err := ensureDefaultGitAttributes(sesamDir); err != nil {
+		return err
+	}
+
+	opts.PrintStep("Adjusting git config…")
+	if err := ensureGitConfig(gitRepo, sesamDir, opts); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func ensureDefaultGitIgnore(sesamDir string) error {
 	gitignorePath := filepath.Join(sesamDir, ".gitignore")
 	return appendMissingLines(gitignorePath, gitignoreTemplate, 0o600)

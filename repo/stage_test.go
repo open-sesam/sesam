@@ -7,12 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/open-sesam/sesam/core"
 	"github.com/stretchr/testify/require"
 )
 
-// containsUser reports whether name is among the verified users.
-func containsUser(users []core.VerifiedUser, name string) bool {
+// containsUser reports whether name is among the listed users.
+func containsUser(users []UserInfo, name string) bool {
 	for _, u := range users {
 		if u.Name == name {
 			return true
@@ -24,7 +23,7 @@ func containsUser(users []core.VerifiedUser, name string) bool {
 // hasUser is a small assertion helper: fetches the (staged or live) user list
 // and reports whether name is present.
 func hasUser(t *testing.T, lister interface {
-	ListUsers() ([]core.VerifiedUser, error)
+	ListUsers() ([]UserInfo, error)
 }, name string,
 ) bool {
 	t.Helper()

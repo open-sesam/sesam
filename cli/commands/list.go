@@ -39,15 +39,15 @@ func HandleListSecrets(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 		return nil
 	}
 
-	// TODO: Pull in config description in here.
-	t := newTable("Secrets", "Path", "Access Groups")
+	t := newTable("Secrets", "Path", "Access Groups", "Description")
 	for _, secret := range secrets {
 		t.AppendRow([]any{
 			displayPath(r.SesamDir(), secret.RevealedPath),
 			commaJoined(secret.AccessGroups),
+			dashify(secret.Config.Description),
 		})
 	}
-	t.AppendFooter([]any{"", fmt.Sprintf("%d secrets", len(secrets))})
+	t.AppendFooter([]any{"", "", fmt.Sprintf("%d secrets", len(secrets))})
 	t.Render()
 
 	return nil
@@ -76,7 +76,7 @@ func HandleListUsers(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return nil
 	}
 
-	t := newTable("Users", "User", "Admin", "Groups", "Recipients", "Signing Keys")
+	t := newTable("Users", "User", "Admin", "Groups", "Recipients", "Signing Keys", "Description")
 	for _, user := range users {
 		t.AppendRow([]any{
 			user.Name,
@@ -84,9 +84,10 @@ func HandleListUsers(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 			commaJoined(user.Groups),
 			multiline(elideKeys(recipientKeys(user.Recps))),
 			multiline(elideKeys([]string{user.SignPubKey})),
+			dashify(user.Config.Description),
 		})
 	}
-	t.AppendFooter([]any{"", "", "", "", fmt.Sprintf("%d users", len(users))})
+	t.AppendFooter([]any{"", "", "", "", "", fmt.Sprintf("%d users", len(users))})
 	t.Render()
 
 	return nil

@@ -4,12 +4,84 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 )
+
+// PruneEmptyDirs removes directories beneath dir (a root-relative path) whose
+// subtree contains no regular files, deepest first. dir itself is never
+// removed, nor is any directory whose root-relative path is in `except“ (those
+// are skipped without descending). If allow is non-nil it is called for each
+// removal candidate - return true to allow and return an error to stop
+// entirely.
+func PruneEmptyDirs(root *os.Root, dir string, except map[string]bool, allow func(rel string) (bool, error)) ([]string, error) {
+	dir = filepath.Clean(dir)
+	if _, err := root.Stat(dir); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	hasFile := map[string]bool{} // dirs with a file somewhere in their subtree
+	var candidates []string
+
+	walkErr := fs.WalkDir(root.FS(), filepath.ToSlash(dir), func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel := filepath.FromSlash(p)
+		if d.IsDir() {
+			if rel == dir {
+				return nil
+			}
+			if except[rel] {
+				return fs.SkipDir
+			}
+			candidates = append(candidates, rel)
+			return nil
+		}
+		// Mark every ancestor up to (and including) dir as non-empty.
+		for a := filepath.Dir(rel); ; a = filepath.Dir(a) {
+			hasFile[a] = true
+			if a == dir || a == "." {
+				break
+			}
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+
+	var empties []string
+	for _, c := range candidates {
+		if !hasFile[c] {
+			empties = append(empties, c)
+		}
+	}
+	// Deepest first, so a parent is only removed after its emptied children.
+	slices.SortFunc(empties, func(a, b string) int { return len(b) - len(a) })
+
+	removed := make([]string, 0, len(empties))
+	for _, e := range empties {
+		if allow != nil {
+			ok, err := allow(e)
+			if err != nil {
+				return removed, err
+			}
+			if !ok {
+				continue
+			}
+		}
+		if err := root.Remove(e); err != nil {
+			return removed, fmt.Errorf("remove empty dir %s: %w", e, err)
+		}
+		removed = append(removed, e)
+	}
+	return removed, nil
+}
 
 // defaultSesamBase is the sesam-internal directory name. A stage uses a
 // sibling fork directory instead; see sesamBase.
@@ -68,26 +140,27 @@ func ValidUserName(name string) error {
 	return nil
 }
 
+// paths that are required for sesam to work,
+// so they shouldn't be encrypted...
+var forbiddenBasenames = map[string]bool{
+	".gitignore":               true,
+	".gitattributes":           true,
+	"sesam.yml":                true,
+	defaultSesamBase + ".lock": true,
+}
+
 func IsForbiddenPath(revealedPath string) error {
-	if revealedPath == ".sesam" || strings.HasPrefix(revealedPath, ".sesam"+string(filepath.Separator)) {
-		return fmt.Errorf("secret path may not live in .sesam: %s", revealedPath)
-	}
-
-	if filepath.Base(revealedPath) == "sesam.yml" {
-		return fmt.Errorf("you can't seal sesam.yml")
-	}
-
-	if filepath.Base(revealedPath) == defaultSesamBase+".lock" {
-		return fmt.Errorf("you can't seal the sesam lock file")
-	}
-
-	if filepath.Base(revealedPath) == ".gitattributes" {
-		return fmt.Errorf("you shouldn't seal .gitattributes")
+	if b := filepath.Base(revealedPath); forbiddenBasenames[b] {
+		return fmt.Errorf("you can't seal %s", b)
 	}
 
 	for _, elem := range strings.Split(revealedPath, string(filepath.Separator)) {
 		if elem == ".sesam" {
 			return fmt.Errorf("encrypting files in .sesam/ is not allowed")
+		}
+
+		if elem == ".sesam-tmp" {
+			return fmt.Errorf("encrypting files in .sesam-tmp/ is not allowed")
 		}
 
 		if elem == ".git" {

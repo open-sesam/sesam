@@ -242,11 +242,14 @@ func (s *Stage) Commit() error {
 		}
 	}
 
-	// Reap the old tree (now sitting at .sesam-tmp). Non-fatal: a leftover fork
-	// is reaped on the next Stage()/Load.
+	// Reap the old tree (now sitting at .sesam-tmp).
 	if err := s.repo.root.RemoveAll(forkSuffix); err != nil {
-		return fmt.Errorf("reap old tree: %w", err)
+		slog.Warn(
+			"committed, but failed to reap the old tree (.sesam-tmp); it is reaped on next load",
+			slog.String("err", err.Error()),
+		)
 	}
+
 	return nil
 }
 
@@ -335,8 +338,9 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, nested bool) error {
 
 	for _, rel := range files {
 		if err := core.IsForbiddenPath(rel); err != nil {
-			return err
+			continue
 		}
+
 		if err := cfg.SecretAdd(rel, nested, groups); err != nil {
 			return fmt.Errorf("failed to add secret %q to config: %w", rel, err)
 		}
@@ -384,7 +388,7 @@ func (s *Stage) SecretRemove(revealedPaths []string) error {
 // SecretMove relocates the secret(s) at oldRevealedPath to newRevealedPath. A
 // single secret is renamed directly; a directory moves every secret beneath it,
 // preserving each one's path relative to the source root.
-func (s *Stage) SecretMove(oldRevealedPath, newRevealedPath string) error {
+func (s *Stage) SecretMove(oldRevealedPath, newRevealedPath string, nested bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -417,9 +421,7 @@ func (s *Stage) SecretMove(oldRevealedPath, newRevealedPath string) error {
 			return fmt.Errorf("failed to move secret %q: %w", oldRel, err)
 		}
 
-		// TODO: preserve nested layout on move (derive from the source's owning
-		// file); for now the moved secret lands in the main file.
-		if err := cfg.SecretMove(oldRel, newRel, false); err != nil {
+		if err := cfg.SecretMove(oldRel, newRel, nested); err != nil {
 			return fmt.Errorf("failed to move secret %q in config: %w", oldRel, err)
 		}
 	}
@@ -427,36 +429,72 @@ func (s *Stage) SecretMove(oldRevealedPath, newRevealedPath string) error {
 	return nil
 }
 
-// UserRename renames a user. TODO: config integration.
+// UserRename renames a user
 func (s *Stage) UserRename(oldName, newName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.user.UserRename(oldName, newName)
+	if err := s.user.UserRename(oldName, newName); err != nil {
+		return err
+	}
+
+	cfg, err := s.cfg()
+	if err != nil {
+		return err
+	}
+
+	return cfg.UserRename(oldName, newName)
 }
 
-// UserChangeGroups sets the group membership of a user. TODO: config integration.
+// UserChangeGroups sets the group membership of a user.
 func (s *Stage) UserChangeGroups(user string, groups []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.user.UserChangeGroups(user, groups)
+	if err := s.user.UserChangeGroups(user, groups); err != nil {
+		return err
+	}
+
+	cfg, err := s.cfg()
+	if err != nil {
+		return err
+	}
+
+	return cfg.UserChangeGroups(user, groups)
 }
 
-// UserAddRecipient grants additional public keys to a user. TODO: config integration.
+// UserAddRecipient grants additional public keys to a user.
 func (s *Stage) UserAddRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.user.UserAddRecipient(ctx, user, pubKeySpecs)
+	if err := s.user.UserAddRecipient(ctx, user, pubKeySpecs); err != nil {
+		return err
+	}
+
+	cfg, err := s.cfg()
+	if err != nil {
+		return err
+	}
+
+	return cfg.UserAddRecipient(user, pubKeySpecs)
 }
 
-// UserRmRecipient removes public keys from a user. TODO: config integration.
+// UserRmRecipient removes public keys from a user.
 func (s *Stage) UserRmRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.user.UserRmRecipient(ctx, user, pubKeySpecs)
+	if err := s.user.UserRmRecipient(ctx, user, pubKeySpecs); err != nil {
+		return err
+	}
+
+	cfg, err := s.cfg()
+	if err != nil {
+		return err
+	}
+
+	return cfg.UserRmRecipient(user, pubKeySpecs)
 }
 
 // UserRegenerateSignKey issues a fresh signing key for a user.

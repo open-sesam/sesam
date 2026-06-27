@@ -89,8 +89,9 @@ func TestLoad_RejectsSelfInclude(t *testing.T) {
 func TestLoad_RejectsIncludeCycle(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sesam.yml")
-	require.NoError(t, os.WriteFile(main, []byte("secrets:\n  - include: a.yml\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.yml"), []byte("secrets:\n  - include: sesam.yml\n"), 0o644))
+	require.NoError(t, os.WriteFile(main, []byte("secrets:\n  - include: sub\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "sesam.yml"), []byte("secrets:\n  - include: ..\n"), 0o644))
 
 	_, err := loadConfig(t, main)
 	require.Error(t, err)

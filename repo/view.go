@@ -95,8 +95,13 @@ func (v *View) closeState() error {
 	return errors.Join(errs...)
 }
 
+type UserInfo struct {
+	core.VerifiedUser
+	Config sesamConf.User
+}
+
 // ListUsers returns the users currently in the audit log.
-func (v *View) ListUsers() ([]core.VerifiedUser, error) {
+func (v *View) ListUsers() ([]UserInfo, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -104,7 +109,38 @@ func (v *View) ListUsers() ([]core.VerifiedUser, error) {
 		return nil, ErrClosed
 	}
 
-	return slices.Clone(v.vstate.Users), nil
+	cfg, err := v.cfg()
+	if err != nil {
+		return nil, err
+	}
+
+	cfgUsers, err := cfg.Users()
+	if err != nil {
+		return nil, err
+	}
+
+	combinedInfo := func(vu core.VerifiedUser) UserInfo {
+		idx := slices.IndexFunc(cfgUsers, func(s sesamConf.User) bool {
+			return s.Name == vu.Name
+		})
+
+		info := UserInfo{
+			VerifiedUser: vu,
+		}
+
+		if idx >= 0 {
+			info.Config = cfgUsers[idx]
+		}
+
+		return info
+	}
+
+	out := make([]UserInfo, 0, len(v.vstate.Users))
+	for idx := range v.vstate.Users {
+		out = append(out, combinedInfo(v.vstate.Users[idx]))
+	}
+
+	return out, nil
 }
 
 // ListSecrets returns the secrets currently managed by sesam.
@@ -116,17 +152,44 @@ func (v *View) ListSecrets(paths []string) ([]SecretInfo, error) {
 		return nil, ErrClosed
 	}
 
+	cfg, err := v.cfg()
+	if err != nil {
+		return nil, err
+	}
+
+	cfgSecrets, err := cfg.Secrets()
+	if err != nil {
+		return nil, err
+	}
+
+	// NOTE: This is probably slow for large N, but ok for the start.
+	combinedInfo := func(vs core.VerifiedSecret) SecretInfo {
+		idx := slices.IndexFunc(cfgSecrets, func(s sesamConf.Secret) bool {
+			return s.Path == vs.RevealedPath
+		})
+
+		info := SecretInfo{
+			VerifiedSecret: vs,
+		}
+
+		if idx >= 0 {
+			info.Config = cfgSecrets[idx]
+		}
+
+		return info
+	}
+
 	out := make([]SecretInfo, 0, len(v.vstate.Secrets))
 	if len(paths) == 0 {
 		for _, secret := range v.vstate.Secrets {
-			out = append(out, SecretInfo{VerifiedSecret: secret})
+			out = append(out, combinedInfo(secret))
 		}
 		return out, nil
 	}
 
 	for _, path := range paths {
 		for _, secret := range v.secretsUnder(path) {
-			out = append(out, SecretInfo{VerifiedSecret: secret})
+			out = append(out, combinedInfo(secret))
 		}
 	}
 
@@ -161,11 +224,11 @@ func (v *View) Clean(ctx context.Context, opts CleanOpts) error {
 		return CleanAggressive(ctx, v.sesamDir, v.identityPaths, opts)
 	}
 
-	if err := deleteRevealedSecrets(v.sesamDir, v.secret.State.Secrets, opts.CheckFunc); err != nil {
+	if err := deleteRevealedSecrets(v.root, v.secret.State.Secrets, opts.CheckFunc); err != nil {
 		return fmt.Errorf("failed to delete revealed secrets: %w", err)
 	}
 
-	_, err := recursiveRmEmptyDirs(v.sesamDir, map[string]bool{
+	_, err := core.PruneEmptyDirs(v.root, ".", map[string]bool{
 		sesamSuffix: true,
 		gitSuffix:   true,
 	}, opts.CheckFunc)
@@ -415,7 +478,7 @@ func (v *View) secretsUnder(rel string) []core.VerifiedSecret {
 
 func (v *View) cleanablePaths() ([]string, error) {
 	paths := []string{}
-	err := cleanup(v.gitRepo, v.sesamDir, func(path string) (bool, error) {
+	err := cleanup(v.root, v.gitRepo, func(path string) (bool, error) {
 		paths = append(paths, path)
 		return false, nil
 	})

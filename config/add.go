@@ -31,6 +31,12 @@ func (c *Config) SecretAdd(path string, nested bool, access []string) error {
 	// where it was first added to a sub-file and is now re-added to the main
 	// file, or vice versa.
 	if c.trackedRevealedPaths()[rel] {
+		if len(access) == 0 {
+			// if no groups change and secret exists, we assume no change requested.
+			// If [admin] is given explicitly we would set it explicitly.
+			return nil
+		}
+
 		return c.changeSecretGroups(rel, access)
 	}
 
