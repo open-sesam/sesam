@@ -83,7 +83,7 @@ func Main(args []string) error {
 			{
 				Name:     "doctor",
 				Category: catRepository,
-				Action:   commands.HandleStub,
+				Action:   commands.HandleDoctor,
 				Usage:    "Check sesam installation for possible problems",
 			},
 
