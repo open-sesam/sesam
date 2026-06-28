@@ -85,7 +85,7 @@ const colorDim = colorGrey
 func glyphFor(state repo.SecretState) (glyph, color string) {
 	switch state {
 	case repo.SecretStateNotInSync:
-		return "M", colorAmber // modified - needs seal
+		return "M", colorYellow // modified - needs seal
 	case repo.SecretStateNoSealedPath:
 		return "A", colorGreen // added - never sealed
 	case repo.SecretStateNoRevealedPath:

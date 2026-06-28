@@ -17,6 +17,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/muesli/termenv"
+	"github.com/open-sesam/sesam/core"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
@@ -280,11 +281,31 @@ func identityCheck(env doctorEnv) DoctorCheck {
 		},
 		subChecks: []DoctorCheck{
 			identityReadableCheck(paths),
+			identityTypeCheck(paths),
 			identityPermsCheck(paths),
 			identityPluginCheck(paths),
 			identityUserCheck(env),
 		},
 	}
+}
+
+// identityTypeCheck reports each identity's type (age x25519, ssh, age-plugin, …)
+// purely for debugging - it never decrypts or contacts a plugin. Always info.
+func identityTypeCheck(paths []string) DoctorCheck {
+	return &genericCheck{name: "identity-type", run: func() DoctorDiagnosis {
+		var types []string
+		for _, p := range paths {
+			data, err := os.ReadFile(expandHome(p))
+			if err != nil {
+				continue // identity-readable already reports access problems
+			}
+			types = append(types, core.IdentityType(string(data)))
+		}
+		if len(types) == 0 {
+			return docInfo("no identity files to inspect")
+		}
+		return docInfo(strings.Join(types, ", "))
+	}}
 }
 
 func identityReadableCheck(paths []string) DoctorCheck {
@@ -688,7 +709,7 @@ func (s *doctorSummary) problems() int { return s.issue + s.failed }
 // per-check lines and the summary tally.
 const (
 	colorHealthy = colorGreen
-	colorWarning = colorAmber
+	colorWarning = colorYellow
 	colorIssue   = colorRed
 	colorInfo    = colorBlue
 	colorSkipped = colorGrey
@@ -790,6 +811,7 @@ func RunDoctor(ctx context.Context, env doctorEnv) error {
 	blueTip := out.String("Tip:").Foreground(out.Color(colorBlue))
 	fmt.Printf("%s include this output when filing a bug report,\n", blueTip)
 	fmt.Println("     just double check that anything sensitive is readacted.")
+	fmt.Println()
 	fmt.Printf("%s `sesam doctor` finds only issues related to installation issues.\n", blueTip)
 	fmt.Println("     If you want integrity check then run `sesam verify`.")
 	fmt.Println()
@@ -869,21 +891,11 @@ func pluginBinaryForIdentityFile(path string) (string, bool) {
 	return "", false
 }
 
-// pluginBinaryForIdentity maps an `AGE-PLUGIN-<NAME>-1…` identity string to its
-// `age-plugin-<name>` binary. The name is the bech32 HRP between the prefix and
-// the `1` separator.
+// pluginBinaryForIdentity maps an `AGE-PLUGIN-<NAME>-1…` identity string to the
+// `age-plugin-<name>` binary git/age would invoke.
 func pluginBinaryForIdentity(line string) (string, bool) {
-	const prefix = "AGE-PLUGIN-"
-	if !strings.HasPrefix(strings.ToUpper(line), prefix) {
-		return "", false
+	if name, ok := core.PluginName(line); ok {
+		return "age-plugin-" + name, true
 	}
-	name, _, ok := strings.Cut(line[len(prefix):], "1")
-	if !ok {
-		return "", false
-	}
-	name = strings.ToLower(strings.Trim(name, "-"))
-	if name == "" {
-		return "", false
-	}
-	return "age-plugin-" + name, true
+	return "", false
 }

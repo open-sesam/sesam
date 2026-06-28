@@ -285,6 +285,57 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *
 	return sshKeyToIdentity(rawKey)
 }
 
+// PluginName extracts the plugin name from an `AGE-PLUGIN-<NAME>-1…` identity
+// line - the bech32 HRP between the prefix and the `1` separator, lowercased
+// (e.g. "yubikey"). ok is false when line is not a plugin identity. It parses
+// the string only; it never invokes the plugin.
+func PluginName(line string) (name string, ok bool) {
+	const prefix = "AGE-PLUGIN-"
+	if !strings.HasPrefix(strings.ToUpper(line), prefix) {
+		return "", false
+	}
+	name, _, ok = strings.Cut(line[len(prefix):], "1")
+	if !ok {
+		return "", false
+	}
+	name = strings.ToLower(strings.Trim(name, "-"))
+	if name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+// IdentityType returns a short, human-readable description of the identity
+// encoded in raw, classified by its payload prefix only - no decryption, no
+// parsing, no plugin invocation. It mirrors the dispatch in ParseIdentity and
+// is meant for diagnostics (sesam doctor). Returns "unknown" if unrecognised.
+func IdentityType(raw string) string {
+	line, _ := scanAgeIdentity(raw)
+	switch {
+	case line == "":
+		return "empty"
+	case strings.HasPrefix(line, "AGE-SECRET-KEY-PQ-1"):
+		return "age hybrid (post-quantum)"
+	case strings.HasPrefix(line, "AGE-SECRET-KEY-1"):
+		return "age x25519"
+	case strings.HasPrefix(line, "AGE-PLUGIN-"):
+		if name, ok := PluginName(line); ok {
+			return "age-plugin (" + name + ")"
+		}
+		return "age-plugin"
+	case strings.HasPrefix(line, "-----BEGIN AGE"), strings.HasPrefix(line, "age-encryption.org/v1"):
+		return "encrypted age identity"
+	case strings.Contains(line, "OPENSSH PRIVATE KEY"):
+		return "ssh (openssh)"
+	case strings.Contains(line, "RSA PRIVATE KEY"):
+		return "ssh (rsa)"
+	case strings.HasPrefix(line, "-----BEGIN") && strings.Contains(line, "PRIVATE KEY"):
+		return "ssh"
+	default:
+		return "unknown"
+	}
+}
+
 // scanAgeIdentity walks an identity file, returning the first non-comment
 // line (the identity payload) and any `# public key: …` value carried in
 // the file's header comments. age-keygen emits `# public key:`,
