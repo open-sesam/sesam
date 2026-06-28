@@ -4,6 +4,7 @@ go 1.26.4
 
 require (
 	filippo.io/age v1.3.1
+	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/chzyer/readline v1.5.1
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/goccy/go-yaml v1.19.2

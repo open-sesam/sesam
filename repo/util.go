@@ -10,8 +10,8 @@ import (
 	"github.com/open-sesam/sesam/core"
 )
 
-// expandHomeDir expands "~" and "~/..." in path input.
-func expandHomeDir(path string) (string, error) {
+// ExpandHomeDir expands "~" and "~/..." in path input.
+func ExpandHomeDir(path string) (string, error) {
 	switch {
 	case path == "~":
 		homeDir, err := os.UserHomeDir()
@@ -85,7 +85,7 @@ func loadIdentitiesWith(identityPaths []string, newProvider func(keyFingerprint 
 			return nil, fmt.Errorf("missing identity path: pass --identity")
 		}
 
-		expandedPath, err := expandHomeDir(identityPath)
+		expandedPath, err := ExpandHomeDir(identityPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve identity path: %w", err)
 		}

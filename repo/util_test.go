@@ -60,7 +60,7 @@ func TestExpandHomeDir(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := expandHomeDir(tc.in)
+			got, err := ExpandHomeDir(tc.in)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got)
 		})
