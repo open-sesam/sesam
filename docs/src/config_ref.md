@@ -17,13 +17,49 @@ bring both in sync.
 **Public key formats.** A user's `key` field accepts four forms:
 
 - A literal SSH or age public key (e.g. `ssh-ed25519 AAAA…`)
-- A forge identity shorthand (e.g. `github:alice`) — resolved once and pinned in the audit log
+- A forge identity shorthand (e.g. `github:alice`)
 - An HTTPS URL pointing to a public key (treated the same as a forge-id)
 - A local file path (useful for larger or machine-generated keys)
 
 Forge-ids and URLs are resolved by the admin on first use. Any subsequent
 change to the remote content is flagged as a warning when running `sesam
 verify`.
+
+## YAML anchors
+
+If you want to re-use a part of your configuration, you can create a snippet:
+
+```yaml
+# Everything starting with "x-" on toplevel will be ignored.
+x-default-access: &default-access
+  access:
+    - group1
+    - group2
+    - group3
+
+# Use it: 
+secrets:
+  - path: foo.txt
+    <<: *default-access
+  - path: bar.txt
+    <<: *default-access
+```
+  
+
+For less often-used snippets it is sometimes useful to just reference another part directly:
+
+```yaml
+secrets:
+  - path: foo.txt
+    access: &default-access
+      - group1
+      - group2
+      - group3
+  - path: bar.txt
+    <<: *default-access
+```
+
+Read up on [YAML anchors](https://en.wikipedia.org/wiki/YAML#Advanced_components) for more background.
 
 ---
 
