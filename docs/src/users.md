@@ -2,7 +2,7 @@
 
 ## Managing users via config
 
-As mentioned during [Initialization](/init.md) there is always at least one admin user.
+As mentioned during [Initialisation](/init.md) there is always at least one admin user.
 When you created your admin repo you will see something like this in your config:
 
 ```yaml
@@ -19,7 +19,6 @@ config:
 As you can see, `bob` is an admin. Let's assume we are building a cloud backend
 in a team and want to give some users the access to the required secrets for
 deployment. We can do so by adding some more users and a new group:
-
 
 ```diff
    users:
@@ -82,7 +81,8 @@ If you run `sesam apply` again, other users will have access. You have to commit
 
 ```bash
 # on the laptop of alice:
-$ sesam reveal --pull
+$ git pull
+$ sesam open
 ```
 
 ## Managing users via CLI
@@ -91,10 +91,10 @@ You can have the same effect without editing configs - which is nice for scripti
 
 ```bash
 # Add users like above:
-$ sesam tell --user alice --desc "Mrs. Wonderland" --pub "github:alice"
-$ sesam tell --user peter --desc "Peter Lustig" --pub "file://keys/peter.txt"
+$ sesam tell --user alice --desc "Mrs. Wonderland" --recipient "github:alice"
+$ sesam tell --user peter --desc "Peter Lustig" --recipient "file://keys/peter.txt"
 # --access can be given several times:
-$ sesam add --path some_password.txt --access deployment
+$ sesam add some_password.txt --access deployment
 ```
 
 Files automatically get re-encrypted ("sealed").
@@ -104,7 +104,7 @@ Files automatically get re-encrypted ("sealed").
 Removing users is also something only admins can do:
 
 ```bash
-$ sesam kill alice
+$ sesam kill --user alice
 ```
 
 This will remove `alice` from all the access, delete any group that is now empty and then re-encrypt all files.
@@ -112,3 +112,25 @@ This will remove `alice` from all the access, delete any group that is now empty
 ```admonish note
 You can not remove the last admin. There has to be always at least one user.
 ```
+
+### Audit log
+
+`sesam` is based on a log that keeps track of all modifications made in the repository.
+It can be useful to view it, if you're unsure on what happened:
+
+```bash
+$ sesam log
+```
+
+### Auxiliary operations
+
+There are a couple of operations that are worth knowing they exist,
+but since they are not daily drivers we only briefly mentioned them.
+By now you should be able to guess what they do:
+
+- `sesam list` - List all users.
+- `sesam change-groups` - Change the groups a user is in.
+- `sesam add-recipient` - Add one or more recipients to an existing user.
+- `sesam remove-recipient` - Remove one or more recipients from an existing user.
+- `sesam regen-sign-key` - Regenerate the signing key of a user (seldomly useful)
+- `sesam rename` - Rename an existing user.
