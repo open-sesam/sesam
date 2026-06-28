@@ -296,6 +296,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		"Making sure another one bites the dust…",
 	}
 
+	//nolint:gosec
 	opts.PrintStep(eggs[rand.IntN(len(eggs))])
 	if err := r.secret.SealAll(); err != nil {
 		return nil, err
