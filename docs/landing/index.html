@@ -150,7 +150,7 @@
 
 * { box-sizing: border-box; }
 
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; overflow-x: hidden; }
 
 body {
   min-height: 100vh;
@@ -529,15 +529,31 @@ h1 .fn-mark {
    no mask or fade needed; its own silhouette blends into the page. It is sized
    to the full viewport width (the art is deliberately wide) and pinned to the
    bottom, at z-index -1 so it sits behind all content. */
-.scene {
+/* The artwork is a 5568×1536 panorama (3.625:1); its detailed heart — the cave —
+   is the middle 50%. Three width regimes, each continuous with the next:
+     • up to 7:5 (1.4:1) — sized to WIDTH (200%, centred): the cave fills the
+       viewport just as the old square-ish art did, side desert overflowing off.
+     • 7:5 to 14:5 — fixed HEIGHT (--scene-h): height stops growing, so the extra
+       width reveals more side desert instead of blowing the cave up.
+     • beyond 14:5 (2.8:1) — the panorama no longer spans the viewport, so we
+       scale to WIDTH again (fill) rather than leak sky into the gutters; the art
+       isn't seamless, so tiling would show a hard seam / duplicate cave.
+   --scene-h = 2·1.4/3.625 = 77.24vh makes all three meet without a jump. */
+:root { --scene-h: 77.24vh; }
+
+.scene, .sparkles {
   position: fixed;
-  left: 0;
-  /* nudged below the fold so the peak clears the content above the terminal;
-     vw-based so the shift stays proportional to the (width-scaled) artwork */
+  left: 50%;
+  transform: translateX(-50%);
+  /* nudged below the fold so the peak clears the content above the terminal */
   bottom: -5vw;
-  width: 100%;
+  width: 200%;
+  max-width: none;
   z-index: -1;
   pointer-events: none;
+}
+
+.scene {
   user-select: none;
   /* softened so the terminal & buttons sit cleanly on top; --scene-opacity is
      0.85 by day and 0.5 at night (the light, sandy art needs more taming on the
@@ -548,6 +564,23 @@ h1 .fn-mark {
      scene a faintly living, slightly eerie quality */
   animation: scene-breathe 10s ease-in-out infinite;
 }
+
+/* 7:5+ — freeze height, let width grow off-screen to reveal the sides. */
+@media (min-aspect-ratio: 7/5) {
+  .scene, .sparkles {
+    width: auto;
+    height: var(--scene-h);
+    bottom: -5vh;
+  }
+}
+/* 14:5+ — the panorama no longer fills the viewport width; fill it (height
+   grows back, capped by the 3.625:1 art) instead of showing sky gutters. */
+@media (min-aspect-ratio: 14/5) {
+  .scene, .sparkles {
+    width: 100%;
+    height: auto;
+  }
+}
 @keyframes scene-breathe {
   0%, 100% { filter: saturate(0.95) brightness(0.85)contrast(0.85); }
   50%      { filter: saturate(1.05)  brightness(1.05) contrast(1.05); }
@@ -557,15 +590,9 @@ h1 .fn-mark {
    Quick golden twinkles over the hoard in the cave. The container matches the
    scene's image box (same anchor + aspect-ratio) so the percentage positions
    land on the treasure; --spark-max makes them brighter at night. */
-.sparkles {
-  position: fixed;
-  left: 0;
-  bottom: -5vw;
-  width: 100%;
-  aspect-ratio: 2784 / 1536;
-  z-index: -1;
-  pointer-events: none;
-}
+/* shares the scene's box (sizing above) so the % positions land on the treasure;
+   aspect-ratio matches the panorama, so its coordinate space is the full art */
+.sparkles { aspect-ratio: 5568 / 1536; }
 .spark {
   position: absolute;
   width: 12px;
@@ -634,14 +661,14 @@ h1 .fn-mark {
   <img class="scene" src="bg.png" alt="" aria-hidden="true" />
 </picture>
 <div class="sparkles" aria-hidden="true">
-  <span class="spark" style="left:47%;top:50%;animation-delay:0s;animation-duration:1.3s"></span>
+  <span class="spark" style="left:48.5%;top:50%;animation-delay:0s;animation-duration:1.3s"></span>
   <span class="spark" style="left:50%;top:53%;animation-delay:.4s;animation-duration:1.6s"></span>
-  <span class="spark" style="left:45%;top:54%;animation-delay:.9s;animation-duration:1.4s"></span>
-  <span class="spark" style="left:49%;top:48%;animation-delay:.6s;animation-duration:1.1s"></span>
-  <span class="spark" style="left:52%;top:51%;animation-delay:1.2s;animation-duration:1.7s"></span>
-  <span class="spark" style="left:46%;top:52%;animation-delay:.2s;animation-duration:1.5s"></span>
-  <span class="spark" style="left:51%;top:55%;animation-delay:1.5s;animation-duration:1.2s"></span>
-  <span class="spark" style="left:48%;top:53%;animation-delay:.8s;animation-duration:1.9s"></span>
+  <span class="spark" style="left:47.5%;top:54%;animation-delay:.9s;animation-duration:1.4s"></span>
+  <span class="spark" style="left:49.5%;top:48%;animation-delay:.6s;animation-duration:1.1s"></span>
+  <span class="spark" style="left:51%;top:51%;animation-delay:1.2s;animation-duration:1.7s"></span>
+  <span class="spark" style="left:48%;top:52%;animation-delay:.2s;animation-duration:1.5s"></span>
+  <span class="spark" style="left:50.5%;top:55%;animation-delay:1.5s;animation-duration:1.2s"></span>
+  <span class="spark" style="left:49%;top:53%;animation-delay:.8s;animation-duration:1.9s"></span>
 </div>
 <main>
   <span class="beta">beta — pre-1.0, not production ready</span>
