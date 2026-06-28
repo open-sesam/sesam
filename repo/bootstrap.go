@@ -200,6 +200,59 @@ func ensureDefaultGitAttributes(sesamDir string) error {
 	return appendMissingLines(gitAttributesPath, gitattributesTemplate, 0o600)
 }
 
+// mergeDriverName is the display name git shows for sesam's audit-log merge
+// driver. Shared by ensureGitConfig (which sets it) and expectedGitConfig
+// (which `sesam doctor` checks against).
+const mergeDriverName = "merge the audit log of sesam"
+
+// gitConfigEntry is one git-config key sesam manages, together with the value
+// `sesam init` installs for it.
+type gitConfigEntry struct {
+	display    string // dotted path, e.g. "merge.sesam-merge.driver"
+	section    string
+	subsection string // empty for plain sections such as "alias"
+	option     string
+	value      string
+}
+
+// expectedGitConfig returns the git-config entries `sesam init` installs for the
+// repository at sesamDir. It is the single source of truth for both writing the
+// config (ensureGitConfig) and checking it (CheckGitConfig); the driver command
+// strings come from sesamCmd, so writer and checker can never drift.
+func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, error) {
+	// Every git driver below is `sesam <subcommand>` run through the
+	// shell with cwd = worktree root; for nested layouts each one
+	// needs the same --sesam-dir treatment to find `.sesam/`.
+	mergeCmd, err := sesamCmd(r, sesamDir, "audit", "merge", "%O", "%A", "%B", "%L", "%P")
+	if err != nil {
+		return nil, err
+	}
+
+	textconvCmd, err := sesamCmd(r, sesamDir, "show")
+	if err != nil {
+		return nil, err
+	}
+
+	smudgeCmd, err := sesamCmd(r, sesamDir, "smudge")
+	if err != nil {
+		return nil, err
+	}
+
+	aliasCmd, err := sesamCmd(r, sesamDir)
+	if err != nil {
+		return nil, err
+	}
+
+	return []gitConfigEntry{
+		{"merge.sesam-merge.name", "merge", "sesam-merge", "name", mergeDriverName},
+		{"merge.sesam-merge.driver", "merge", "sesam-merge", "driver", mergeCmd},
+		{"diff.sesam-diff.textconv", "diff", "sesam-diff", "textconv", textconvCmd},
+		{"filter.sesam-filter.required", "filter", "sesam-filter", "required", "false"},
+		{"filter.sesam-filter.process", "filter", "sesam-filter", "process", smudgeCmd},
+		{"alias.sesam", "alias", "", "sesam", "!" + aliasCmd},
+	}, nil
+}
+
 func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) error {
 	cfg, err := r.ConfigScoped(gogitconfig.LocalScope)
 	if err != nil {
@@ -218,38 +271,28 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 		return nil
 	}
 
-	// Every git driver below is `sesam <subcommand>` run through the
-	// shell with cwd = worktree root; for nested layouts each one
-	// needs the same --sesam-dir treatment to find `.sesam/`.
-	mergeCmd, err := sesamCmd(r, sesamDir, "audit", "merge", "%O", "%A", "%B", "%L", "%P")
+	entries, err := expectedGitConfig(r, sesamDir)
 	if err != nil {
 		return err
 	}
-
-	textconvCmd, err := sesamCmd(r, sesamDir, "show")
-	if err != nil {
-		return err
-	}
-
-	smudgeCmd, err := sesamCmd(r, sesamDir, "smudge")
-	if err != nil {
-		return err
-	}
-
-	aliasCmd, err := sesamCmd(r, sesamDir)
-	if err != nil {
-		return err
+	val := func(display string) string {
+		for _, e := range entries {
+			if e.display == display {
+				return e.value
+			}
+		}
+		return ""
 	}
 
 	if !mergeConfigured {
 		opts.PrintStep("  • Installing merge driver…")
 
-		mergeSection.SetOption("name", "merge the audit log of sesam")
-		mergeSection.SetOption("driver", mergeCmd)
+		mergeSection.SetOption("name", val("merge.sesam-merge.name"))
+		mergeSection.SetOption("driver", val("merge.sesam-merge.driver"))
 
 		opts.PrintStep("  • installing diff driver…")
 		diffSection := cfg.Raw.Section("diff").Subsection("sesam-diff")
-		diffSection.SetOption("textconv", textconvCmd)
+		diffSection.SetOption("textconv", val("diff.sesam-diff.textconv"))
 	}
 
 	if !processConfigured {
@@ -259,13 +302,13 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 		// `git checkout`; the encrypted bytes land instead. We rely
 		// on this to keep history bisects working when the audit log
 		// is unavailable.
-		filterSection.SetOption("required", "false")
+		filterSection.SetOption("required", val("filter.sesam-filter.required"))
 
 		// Long-running filter process - amortises identity loading
 		// across all blobs in a single git operation AND lets the
 		// handler load the audit log once per session for the
 		// sealer-vs-access check. Requires git >= 2.11 (Dec 2016).
-		filterSection.SetOption("process", smudgeCmd)
+		filterSection.SetOption("process", val("filter.sesam-filter.process"))
 	}
 
 	if !aliasConfigured {
@@ -274,7 +317,7 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 		// without any PATH plumbing. Git runs the command with cwd =
 		// worktree root, which is what sesam wants anyway.
 		opts.PrintStep("  • Making sure sesam can be called as `git sesam`…")
-		aliasSection.SetOption("sesam", "!"+aliasCmd)
+		aliasSection.SetOption("sesam", val("alias.sesam"))
 	}
 
 	if err := r.SetConfig(cfg); err != nil {
