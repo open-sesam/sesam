@@ -546,7 +546,7 @@ func loadAuditViewFromWorktree(sesamDir string, ids core.Identities) (core.Keyri
 // embedded RevealedPath as a side effect. Reveal failures are logged but
 // do not fail the smudge — aborting the git checkout would be worse than a
 // stale or missing revealed file.
-func RunSmudgeFilter(ctx context.Context, sesamDir string, identityPaths []string, in io.Reader, out io.Writer) error {
+func RunSmudgeFilter(ctx context.Context, sesamDir string, identityPaths []string, askpassProgram string, in io.Reader, out io.Writer) error {
 	if len(identityPaths) == 0 {
 		return fmt.Errorf("need at least one identity")
 	}
@@ -555,8 +555,11 @@ func RunSmudgeFilter(ctx context.Context, sesamDir string, identityPaths []strin
 	if err != nil {
 		return err
 	}
-
-	ids, err := loadIdentitiesKeyringOnly(identityPaths, core.NewNonInteractivePluginUI())
+	ids, err := loadIdentitiesWith(
+		identityPaths,
+		RepoOpts{AskpassProgram: askpassProgram}.passphraseProvider,
+		core.NewNonInteractivePluginUI(),
+	)
 	if err != nil {
 		return err
 	}

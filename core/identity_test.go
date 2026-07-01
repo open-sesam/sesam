@@ -7,6 +7,8 @@ import (
 	"crypto/rsa"
 	"encoding/pem"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -50,6 +52,50 @@ func (m *mockPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
 func (m *mockPassphraseProvider) PassphraseVerified(_ []byte, success bool) {
 	m.verifiedCalled = true
 	m.verifiedSuccess = success
+}
+
+func TestAskpassProviderReadsPassphrase(t *testing.T) {
+	helper := writeAskpassHelper(t, "printf '%s\\n' secret")
+
+	passphrase, err := (&AskpassProvider{Program: helper}).ReadPassphrase("Prompt: ")
+	require.NoError(t, err)
+	require.Equal(t, []byte("secret"), passphrase)
+}
+
+func TestAskpassProviderUsesEnvOrder(t *testing.T) {
+	t.Setenv("SESAM_ASKPASS", "")
+	t.Setenv("GIT_ASKPASS", writeAskpassHelper(t, "printf git"))
+	t.Setenv("SSH_ASKPASS", writeAskpassHelper(t, "printf ssh"))
+
+	passphrase, err := (&AskpassProvider{}).ReadPassphrase("Prompt: ")
+	require.NoError(t, err)
+	require.Equal(t, []byte("git"), passphrase)
+}
+
+func TestAskpassProviderProgramOverridesEnv(t *testing.T) {
+	t.Setenv("SESAM_ASKPASS", writeAskpassHelper(t, "printf env"))
+	helper := writeAskpassHelper(t, "printf flag")
+
+	passphrase, err := (&AskpassProvider{Program: helper}).ReadPassphrase("Prompt: ")
+	require.NoError(t, err)
+	require.Equal(t, []byte("flag"), passphrase)
+}
+
+func TestAskpassProviderUnavailable(t *testing.T) {
+	t.Setenv("SESAM_ASKPASS", "")
+	t.Setenv("GIT_ASKPASS", "")
+	t.Setenv("SSH_ASKPASS", "")
+
+	_, err := (&AskpassProvider{}).ReadPassphrase("Prompt: ")
+	require.ErrorIs(t, err, errAskpassUnavailable)
+}
+
+func writeAskpassHelper(t *testing.T, body string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "askpass")
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700))
+	return path
 }
 
 func encryptIdentityForTest(t *testing.T, plaintext string, passphrase []byte, armored bool) string {

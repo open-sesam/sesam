@@ -88,6 +88,9 @@ type RepoOpts struct {
 	// Interactive should be true when we can talk to the user via the terminal.
 	Interactive bool
 
+	// AskpassProgram overrides SESAM_ASKPASS when set.
+	AskpassProgram string
+
 	// LockTimeout bounds how long acquiring the on-disk repo lock waits.
 	// Zero means use the default.
 	LockTimeout time.Duration
@@ -129,14 +132,23 @@ func (opts RepoOpts) pluginUI() *core.PluginUI {
 	return core.NewNonInteractivePluginUI()
 }
 
+func (opts RepoOpts) passphraseProvider(keyFingerprint string) core.PassphraseProvider {
+	chain := core.PassphraseChain{}
+	if askpassRequired() != "never" {
+		chain = append(chain, &core.AskpassProvider{Program: opts.AskpassProgram})
+	}
+	if opts.Interactive && askpassRequired() != "force" {
+		chain = append(chain, &core.StdinPassphraseProvider{})
+	}
+	return &core.KeyringPassphraseProvider{
+		KeyFingerprint: keyFingerprint,
+		Fallback:       chain,
+	}
+}
+
 // LoadIdentities reads the user's age identity files.
 func LoadIdentities(identityPaths []string, opts RepoOpts) (core.Identities, error) {
-	idLoader := loadIdentities
-	if !opts.Interactive {
-		idLoader = loadIdentitiesKeyringOnly
-	}
-
-	return idLoader(identityPaths, opts.pluginUI())
+	return loadIdentitiesWith(identityPaths, opts.passphraseProvider, opts.pluginUI())
 }
 
 func guessInitUserNameFromGitConfig(repo *git.Repository) (string, error) {
