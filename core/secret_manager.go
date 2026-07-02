@@ -147,6 +147,9 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 }
 
 // SealAll seals all known secrets.
+// TODO: We could use something like EqualPlaintext() to check if we really need to encrypt this secret.
+//
+//	This would have advantages on merging -> nothing really changed -> nothing needs to be sealed.
 func (sm *SecretManager) SealAll() error {
 	objects := sm.objectsDir()
 	if err := sm.root.MkdirAll(objects, 0o700); err != nil {

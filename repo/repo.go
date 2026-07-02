@@ -31,6 +31,16 @@ import (
 
 const defaultLockTimeout = 30 * time.Second
 
+const (
+	sesamSuffix    = ".sesam"
+	gitSuffix      = ".git"
+	objectsSegment = sesamSuffix + "/objects/"
+
+	// sesamLockName is the repo lock file, a sibling of .sesam at the worktree
+	// root (see acquireLock). It is sesam-internal infrastructure, not a secret.
+	sesamLockName = sesamSuffix + ".lock"
+)
+
 var ErrClosed = errors.New("sesam repo is closed")
 
 // Repo is a handle to a sesam repo. See package-level docs for lifetime

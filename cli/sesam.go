@@ -347,14 +347,6 @@ func Main(args []string) error {
 				Action:   commands.WithRepo(commands.HandleLog),
 				Usage:    "Show the audit log of secret changes",
 			},
-
-			// --- Plumbing: invoked by git or tooling, hidden from help ---
-			{
-				Name:   "smudge",
-				Hidden: true,
-				Action: commands.HandleSmudge,
-				Usage:  "Git smudge filter: reveal a secret to its plaintext path (called by git)",
-			},
 			{
 				Name:   "docgen",
 				Hidden: true,
