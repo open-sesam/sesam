@@ -2,6 +2,7 @@ package repo
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"fmt"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/go-git/go-git/v5"
 	gogitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/google/renameio/v2"
@@ -243,14 +245,48 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 		return nil, err
 	}
 
-	return []gitConfigEntry{
+	preCommitCmd, err := sesamCmd(r, sesamDir, "hook", "pre-commit")
+	if err != nil {
+		return nil, err
+	}
+
+	postCheckoutCmd, err := sesamCmd(r, sesamDir, "hook", "post-checkout")
+	if err != nil {
+		return nil, err
+	}
+
+	baseEntries := []gitConfigEntry{
 		{"merge.sesam-merge.name", "merge", "sesam-merge", "name", mergeDriverName},
 		{"merge.sesam-merge.driver", "merge", "sesam-merge", "driver", mergeCmd},
 		{"diff.sesam-diff.textconv", "diff", "sesam-diff", "textconv", textconvCmd},
 		{"filter.sesam-filter.required", "filter", "sesam-filter", "required", "false"},
 		{"filter.sesam-filter.process", "filter", "sesam-filter", "process", smudgeCmd},
 		{"alias.sesam", "alias", "", "sesam", "!" + aliasCmd},
-	}, nil
+	}
+
+	var gitSupportsConfigHooks bool
+	ver, err := ReadGitVersion(context.Background())
+	if err != nil {
+		slog.Warn("failed to figure out git --version", slog.Any("err", err))
+	}
+
+	// See: https://github.blog/open-source/git/highlights-from-git-2-54/#h-config-based-hooks
+	if ver.GreaterThanEqual(semver.MustParse("2.54.0")) {
+		gitSupportsConfigHooks = true
+	} else {
+		slog.Warn("not installing hooks, because git >= 2.54.0 is needed")
+	}
+
+	if gitSupportsConfigHooks {
+		baseEntries = append(baseEntries, []gitConfigEntry{
+			{"hook.sesam-precommit.event", "hook", "sesam-precommit", "event", "pre-commit"},
+			{"hook.sesam-precommit.command", "hook", "sesam-precommit", "command", preCommitCmd},
+			{"hook.sesam-postcheckout.event", "hook", "sesam-postcheckout", "event", "post-checkout"},
+			{"hook.sesam-postcheckout.command", "hook", "sesam-postcheckout", "command", postCheckoutCmd},
+		}...)
+	}
+
+	return baseEntries, nil
 }
 
 func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) error {
@@ -260,14 +296,12 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 	}
 
 	mergeSection := cfg.Raw.Section("merge").Subsection("sesam-merge")
-	filterSection := cfg.Raw.Section("filter").Subsection("sesam-filter")
 	aliasSection := cfg.Raw.Section("alias")
 
 	mergeConfigured := mergeSection.Option("driver") != ""
-	processConfigured := filterSection.Option("process") != ""
 	aliasConfigured := aliasSection.Option("sesam") != ""
 
-	if mergeConfigured && processConfigured && aliasConfigured {
+	if mergeConfigured {
 		return nil
 	}
 
@@ -293,22 +327,6 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 		opts.PrintStep("  • installing diff driver…")
 		diffSection := cfg.Raw.Section("diff").Subsection("sesam-diff")
 		diffSection.SetOption("textconv", val("diff.sesam-diff.textconv"))
-	}
-
-	if !processConfigured {
-		opts.PrintStep("  • Installing smudge filter…")
-
-		// required=false means a smudge failure doesn't abort
-		// `git checkout`; the encrypted bytes land instead. We rely
-		// on this to keep history bisects working when the audit log
-		// is unavailable.
-		filterSection.SetOption("required", val("filter.sesam-filter.required"))
-
-		// Long-running filter process - amortises identity loading
-		// across all blobs in a single git operation AND lets the
-		// handler load the audit log once per session for the
-		// sealer-vs-access check. Requires git >= 2.11 (Dec 2016).
-		filterSection.SetOption("process", val("filter.sesam-filter.process"))
 	}
 
 	if !aliasConfigured {

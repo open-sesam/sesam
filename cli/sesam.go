@@ -86,6 +86,33 @@ func Main(args []string) error {
 				Action:   commands.HandleDoctor,
 				Usage:    "Check sesam installation for possible problems",
 			},
+			{
+				Name:     "hook",
+				Category: catRepository,
+				Usage:    "Util to manage git hooks",
+				Commands: []*cli.Command{
+					{
+						Name:   "pre-commit",
+						Usage:  "Execute the pre-commit hook - meant to be run by git!",
+						Action: commands.HandleHookPreCommit,
+					},
+					{
+						Name:   "post-checkout",
+						Usage:  "Execute the post-checkout hook - meant to be run by git!",
+						Action: commands.HandleHookPostCheckout,
+					},
+					{
+						Name:   "install",
+						Usage:  "Make sure the git hooks are installed",
+						Action: commands.HandleHookPreCommit,
+					},
+					{
+						Name:   "uninstall",
+						Usage:  "Uninstall any hooks",
+						Action: commands.HandleHookPreCommit,
+					},
+				},
+			},
 
 			// --- Secrets: manage which files are secrets and their content ---
 			{
