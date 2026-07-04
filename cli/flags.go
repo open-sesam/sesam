@@ -29,7 +29,7 @@ var flagNoSeal = &cli.BoolFlag{
 	Usage: "Do not run 'sesam seal' afterwards - useful when batching",
 }
 
-var flagSealAll = &cli.BoolFlag{
+var flagSeal = &cli.BoolFlag{
 	Name:  "seal-all",
 	Usage: "When we seal, seal also files that did not change",
 }
@@ -145,7 +145,7 @@ var flagsSeal = []cli.Flag{
 		Name:  "clean",
 		Usage: "Delete revealed secret files after successful seal",
 	},
-	flagSealAll,
+	flagSeal,
 }
 
 var flagsClean = []cli.Flag{
@@ -166,7 +166,7 @@ var flagsReveal = []cli.Flag{}
 var flagsAdd = []cli.Flag{
 	groupFlag(false, "Group assignment for the secret (repeatable) - 'admin' is implicit"),
 	flagNoSeal,
-	flagSealAll,
+	flagSeal,
 	&cli.BoolFlag{
 		Name:  "nested",
 		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file",
@@ -186,14 +186,14 @@ var flagsTell = []cli.Flag{
 	recipientsFlag(true),
 	groupFlag(true, "Group assignment (repeatable)"),
 	flagNoSeal,
-	flagSealAll,
+	flagSeal,
 }
 
 // flagsKill contains controls for removing users.
 var flagsKill = []cli.Flag{
 	userFlag(true, "User name to remove"),
 	flagNoSeal,
-	flagSealAll,
+	flagSeal,
 }
 
 // flagsListSecrets contains output controls for secret listing.
@@ -208,21 +208,21 @@ var flagsUserChangeGroups = []cli.Flag{
 	userFlag(true, "Which user should be changed"),
 	groupFlag(true, "Group assignment for the secret (repeatable) - 'admin' is implicit"),
 	flagNoSeal,
-	flagSealAll,
+	flagSeal,
 }
 
 var flagsUserAddRecipient = []cli.Flag{
 	userFlag(true, "Which user receives the new recipient"),
 	recipientsFlag(true),
 	flagNoSeal,
-	flagSealAll,
+	flagSeal,
 }
 
 var flagsUserRemoveRecipient = []cli.Flag{
 	userFlag(true, "Which user looses the specified recipient"),
 	recipientsFlag(true),
 	flagNoSeal,
-	flagSealAll,
+	flagSeal,
 }
 
 var flagsUserRegenerateSignKey = []cli.Flag{

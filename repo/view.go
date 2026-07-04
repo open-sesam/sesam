@@ -409,15 +409,15 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 			continue
 		}
 
-		same, err := v.secret.EqualPlaintext(revealedPath, v.identities)
+		needsSeal, _, err := v.secret.NeedsSeal(revealedPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to compare %s and %s: %w", revealedPath, sealedPath, err)
 		}
 
-		if same {
-			add(SecretStateInSync)
-		} else {
+		if needsSeal {
 			add(SecretStateNotInSync)
+		} else {
+			add(SecretStateInSync)
 		}
 	}
 

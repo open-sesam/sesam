@@ -179,6 +179,7 @@ The header contains this information encoded as a single JSON line:
 {
   "path": "README.md",
   "hash": "FiD+6bLnYpaa8RWQpfwrQKTVDZfFz17qAmfKjxdsFxOQcA==",
+  "recipients_hash": "FiCq0k0rk9x8m1pQ0T8g8w3n1sWt8B6l3u2n0f1e6a==",
   "signature": "7aEDQNZXqGc4p593Nnxjq4ap3eOiriXe+oB/AOs5wW9AJVP45a4QPSk/tHfeXe2xT+z0NjmBX7BCR+a4ZSD1e9Ot4Qk=",
   "sealed_by": "alice"
 }
@@ -186,6 +187,11 @@ The header contains this information encoded as a single JSON line:
 
 - The hash used is `sha3-256`
 - The signature used is `ed25519` using the sealer's signing key.
+- `recipients_hash` is an order-independent `sha3-256` over the recipients'
+  public keys. It lets an incremental seal detect a changed recipient set (e.g.
+  a user told into a group) without decrypting the object. It is folded into the
+  signed payload alongside the content hashes, so a forged hash is rejected on
+  verify.
 - On reveal, `sealed_by` is checked against the access list of `path` in the
   verified state. A signature is rejected if its sealer has no current access
   to the secret, even when the signature is cryptographically valid.

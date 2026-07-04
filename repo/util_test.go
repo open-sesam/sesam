@@ -211,65 +211,6 @@ func TestLoadIdentitiesWithEncryptedAgeIdentity(t *testing.T) {
 	require.Contains(t, provider.prompt, core.KeyFingerprint([]byte(key)))
 }
 
-func TestSplitObjectPath(t *testing.T) {
-	cases := []struct {
-		name     string
-		pathname string
-		wantOk   bool
-		wantDir  string
-		wantPath string
-	}{
-		{
-			name:     "worktree root",
-			pathname: ".sesam/objects/secrets/token.sesam",
-			wantOk:   true,
-			wantDir:  ".",
-			wantPath: "secrets/token",
-		},
-		{
-			name:     "nested sesam dir",
-			pathname: "subdir/.sesam/objects/secrets/token.sesam",
-			wantOk:   true,
-			wantDir:  "subdir",
-			wantPath: "secrets/token",
-		},
-		{
-			name:     "deep revealed path",
-			pathname: ".sesam/objects/a/b/c/d.sesam",
-			wantOk:   true,
-			wantDir:  ".",
-			wantPath: "a/b/c/d",
-		},
-		{
-			name:     "missing .sesam suffix",
-			pathname: ".sesam/objects/token",
-			wantOk:   false,
-		},
-		{
-			name:     "no objects segment",
-			pathname: "outside/path.txt",
-			wantOk:   false,
-		},
-		{
-			name:     "completely unrelated",
-			pathname: "",
-			wantOk:   false,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			gotDir, gotPath, ok := splitObjectPath(tc.pathname)
-			require.Equal(t, tc.wantOk, ok)
-			if !tc.wantOk {
-				return
-			}
-			require.Equal(t, tc.wantDir, gotDir)
-			require.Equal(t, tc.wantPath, gotPath)
-		})
-	}
-}
-
 func TestIsInitialized(t *testing.T) {
 	cases := []struct {
 		name    string

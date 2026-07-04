@@ -733,7 +733,8 @@ func runCheckRecursive(check DoctorCheck, depth int, skipped bool, out *termenv.
 
 	if skipped {
 		sum.skipped++
-		fmt.Printf("%s- %s %s: %s\n",
+		fmt.Printf(
+			"%s- %s %s: %s\n",
 			indent,
 			out.String("·").Foreground(out.Color(colorSkipped)),
 			check.Name(),
@@ -749,7 +750,8 @@ func runCheckRecursive(check DoctorCheck, depth int, skipped bool, out *termenv.
 	sum.add(diag.Type)
 
 	icon, color := iconAndColor(diag.Type)
-	fmt.Printf("%s- %s %s: %s\n",
+	fmt.Printf(
+		"%s- %s %s: %s\n",
 		indent,
 		out.String(icon).Foreground(out.Color(color)),
 		check.Name(),
@@ -792,7 +794,8 @@ func printSummary(out *termenv.Output, sum *doctorSummary) {
 	case sum.problems() > 0:
 		fmt.Println(color(
 			"Some checks failed. Fix the issues above and re-run `sesam doctor` - "+
-				"a failing check can hide the ones nested under it.", colorIssue))
+				"a failing check can hide the ones nested under it.", colorIssue,
+		))
 	case sum.warning > 0:
 		fmt.Println(color("Some warnings worth a look, but nothing blocking.", colorWarning))
 	default:

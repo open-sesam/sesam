@@ -302,7 +302,7 @@ func (s *Stage) UserKill(user string) error {
 	return cfg.UserKill(user)
 }
 
-// SealAll re-encrypts all revealed content into the staged sealed storage.
+// Seal re-encrypts all revealed content into the staged sealed storage.
 func (s *Stage) Seal(all bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

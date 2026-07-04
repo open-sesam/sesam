@@ -17,11 +17,12 @@ exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
 exec git add -A
 exec git commit -m 'init sesam with a secret and bob'
 
-# Clone into a fresh worktree. The clone has no sesam git config: git filters
-# live in .git/config, which clone never copies. So nothing is revealed yet.
+# Clone into a fresh worktree. The clone has no sesam git config: the driver
+# entries live in .git/config, which clone never copies. So nothing is revealed
+# yet.
 exec git clone . clone_bob
 cd clone_bob
-! exec git config --local filter.sesam-filter.process
+! exec git config --local diff.sesam-diff.textconv
 ! exists app.env
 
 # `sesam init` detects the existing repo and runs setup: wires git and (since
@@ -29,8 +30,8 @@ cd clone_bob
 exec sesam --identity $BOB_KEY init
 stdout 'Adjusting git config'
 stdout 'Revealing secrets'
-exec git config --local filter.sesam-filter.process
-stdout 'sesam smudge'
+exec git config --local diff.sesam-diff.textconv
+stdout 'sesam show'
 exists app.env
 grep 'super-secret' app.env
 
@@ -42,8 +43,8 @@ exec git clone . clone_carol
 cd clone_carol
 exec sesam --identity $CAROL_KEY init
 stdout 'wired up'
-exec git config --local filter.sesam-filter.process
-stdout 'sesam smudge'
+exec git config --local diff.sesam-diff.textconv
+stdout 'sesam show'
 ! exists app.env
 
 -- secret.env --

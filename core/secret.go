@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 
 	"github.com/google/renameio/v2"
 	"golang.org/x/crypto/hkdf"
@@ -22,9 +23,29 @@ type secretFooter struct {
 	RevealedPath    string `json:"path"`
 	CipherTextHash  string `json:"cipher_text_hash"`
 	HMACContentHash string `json:"hmac_content_hash"`
+	RecipientsHash  string `json:"recipients_hash"`
 	Signature       string `json:"signature"`
 	SealedBy        string `json:"sealed_by"`
 	Version         int    `json:"version"`
+}
+
+// recipientsHash digests the recipients' public keys, order-independent, so
+// Seal can detect a changed recipient set (e.g. a user told into a group)
+// without decrypting the object. It is folded into the footer signature, so a
+// forged hash is caught by verification.
+func recipientsHash(recipients Recipients) []byte {
+	keys := make([]string, 0, len(recipients))
+	for _, r := range recipients {
+		keys = append(keys, r.String())
+	}
+	slices.Sort(keys)
+
+	h := sha3.New256()
+	for _, k := range keys {
+		_, _ = h.Write([]byte(k))
+		_, _ = h.Write([]byte{0}) // separate entries so a||b != ab
+	}
+	return h.Sum(nil)
 }
 
 func readAgeEncryptionKey(r io.Reader, ageIds []age.Identity) ([]byte, error) {
@@ -119,9 +140,10 @@ func sealSecret(
 
 	hmacContentHash := keyContentHash(ageKey, contentHash.Sum(nil))
 	ciphertextHashBytes := ciphertextHash.Sum(nil)
+	recipientsHashBytes := recipientsHash(recipients)
 	sig, err := sm.Signer.Sign(
 		SesamDomainSignSecretTag,
-		append(ciphertextHashBytes, hmacContentHash...),
+		slices.Concat(ciphertextHashBytes, hmacContentHash, recipientsHashBytes),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compute signature for %s: %w", destPath, err)
@@ -133,6 +155,7 @@ func sealSecret(
 		Signature:       sig,
 		SealedBy:        sealedByUser,
 		HMACContentHash: MulticodeEncode(hmacContentHash, MhSHA3_256),
+		RecipientsHash:  MulticodeEncode(recipientsHashBytes, MhSHA3_256),
 		Version:         1,
 	}
 
@@ -303,9 +326,14 @@ func revealStreamAndVerify(
 		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", computedhash, footer.CipherTextHash)
 	}
 
+	recipientsHashBytes, _, err := multicodeDecode(footer.RecipientsHash)
+	if err != nil {
+		return fmt.Errorf("failed to decode recipients hash for %s: %w", footer.RevealedPath, err)
+	}
+
 	sealer, err := kr.Verify(
 		SesamDomainSignSecretTag,
-		append(cipherTextHash, contentHashBytes...),
+		slices.Concat(cipherTextHash, contentHashBytes, recipientsHashBytes),
 		footer.Signature,
 		footer.SealedBy,
 	)
