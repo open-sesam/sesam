@@ -130,14 +130,26 @@ func TestRemoveManagedLines(t *testing.T) {
 
 // clearGitAttributes must undo ensureDefaultGitAttributes: sesam's lines go
 // away, a user's own lines survive, and a file sesam solely created is removed.
+// The suffix must round-trip (install and clear use the same one) and reach the
+// driver references, so several sesam repos can carry distinct drivers.
 func TestClearGitAttributes(t *testing.T) {
 	t.Run("round-trips to a removed file", func(t *testing.T) {
 		dir := t.TempDir()
-		require.NoError(t, ensureDefaultGitAttributes(dir))
+		require.NoError(t, ensureDefaultGitAttributes(dir, "-sub"))
 		require.FileExists(t, filepath.Join(dir, ".gitattributes"))
 
-		require.NoError(t, clearGitAttributes(dir))
+		require.NoError(t, clearGitAttributes(dir, "-sub"))
 		require.NoFileExists(t, filepath.Join(dir, ".gitattributes"))
+	})
+
+	t.Run("suffix reaches the driver references", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, ensureDefaultGitAttributes(dir, "-sub"))
+
+		got, err := os.ReadFile(filepath.Join(dir, ".gitattributes"))
+		require.NoError(t, err)
+		require.Contains(t, string(got), "merge=sesam-merge-secret-sub")
+		require.Contains(t, string(got), "diff=sesam-diff-sub")
 	})
 
 	t.Run("preserves user lines", func(t *testing.T) {
@@ -145,8 +157,8 @@ func TestClearGitAttributes(t *testing.T) {
 		path := filepath.Join(dir, ".gitattributes")
 		require.NoError(t, os.WriteFile(path, []byte("*.txt text\n"), 0o600))
 
-		require.NoError(t, ensureDefaultGitAttributes(dir))
-		require.NoError(t, clearGitAttributes(dir))
+		require.NoError(t, ensureDefaultGitAttributes(dir, ""))
+		require.NoError(t, clearGitAttributes(dir, ""))
 
 		got, err := os.ReadFile(path)
 		require.NoError(t, err)
@@ -154,8 +166,25 @@ func TestClearGitAttributes(t *testing.T) {
 	})
 
 	t.Run("missing file is a no-op", func(t *testing.T) {
-		require.NoError(t, clearGitAttributes(t.TempDir()))
+		require.NoError(t, clearGitAttributes(t.TempDir(), ""))
 	})
+}
+
+func TestEncodeSubsection(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"sub", "sub"},
+		{"services/secrets", "services/secrets"}, // slash stays
+		{"my dir", "my%20dir"},                   // space encoded
+		{"weird%name", "weird%25name"},           // percent encoded (reversible)
+		{"a\tb", "a%09b"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			require.Equal(t, tc.want, encodeSubsection(tc.in))
+		})
+	}
 }
 
 // wrapHookCmd must guard on sesam's presence and keep the sesam call last, so

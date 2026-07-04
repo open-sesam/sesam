@@ -180,7 +180,11 @@ func configureGitIntegration(gitRepo *git.Repository, sesamDir string, opts Repo
 	}
 
 	opts.PrintStep("Telling git when to call sesam…")
-	if err := ensureDefaultGitAttributes(sesamDir); err != nil {
+	suffix, err := sesamSubsectionSuffix(gitRepo, sesamDir)
+	if err != nil {
+		return err
+	}
+	if err := ensureDefaultGitAttributes(sesamDir, suffix); err != nil {
 		return err
 	}
 
@@ -197,14 +201,20 @@ func ensureDefaultGitIgnore(sesamDir string) error {
 	return appendMissingLines(gitignorePath, gitignoreTemplate, 0o600)
 }
 
-func ensureDefaultGitAttributes(sesamDir string) error {
-	gitAttributesPath := filepath.Join(sesamDir, ".gitattributes")
-	return appendMissingLines(gitAttributesPath, gitattributesTemplate, 0o600)
+func ensureDefaultGitAttributes(sesamDir, suffix string) error {
+	content, err := renderGitAttributes(suffix)
+	if err != nil {
+		return err
+	}
+	return appendMissingLines(filepath.Join(sesamDir, ".gitattributes"), content, 0o600)
 }
 
-func clearGitAttributes(sesamDir string) error {
-	gitAttributesPath := filepath.Join(sesamDir, ".gitattributes")
-	return removeManagedLines(gitAttributesPath, gitattributesTemplate, 0o600)
+func clearGitAttributes(sesamDir, suffix string) error {
+	content, err := renderGitAttributes(suffix)
+	if err != nil {
+		return err
+	}
+	return removeManagedLines(filepath.Join(sesamDir, ".gitattributes"), content, 0o600)
 }
 
 func clearGitIgnore(sesamDir string) error {
@@ -246,11 +256,6 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 		return nil, err
 	}
 
-	aliasCmd, err := sesamCmd(r, sesamDir)
-	if err != nil {
-		return nil, err
-	}
-
 	preCommitCmd, err := sesamCmd(r, sesamDir, "hook", "pre-commit")
 	if err != nil {
 		return nil, err
@@ -261,17 +266,29 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 		return nil, err
 	}
 
+	// suffix uniquifies the subsection names per sesam repo so several sesam
+	// repos can coexist in one git repo without clobbering each other's config
+	// (and, for hooks, so all of them fire). It also lands in .gitattributes as
+	// the driver name; keep the two in sync via this one function. The display
+	// path stays unsuffixed so `sesam doctor` shows stable labels.
+	suffix, err := sesamSubsectionSuffix(r, sesamDir)
+	if err != nil {
+		return nil, err
+	}
+
 	// report=true marks the entries `sesam doctor` surfaces. The duplicate
 	// log-merge subsection (same display path) and the fixed hook `event` lines
-	// are left out to avoid redundant/uninteresting doctor rows.
+	// are left out to avoid redundant/uninteresting doctor rows. The alias is
+	// deliberately a plain `!sesam` (no --sesam-dir, no suffix): it is a
+	// convenience shim, cannot be namespaced per repo, and any repo's init may
+	// (harmlessly) rewrite it to the same value.
 	baseEntries := []gitConfigEntry{
-		// TODO: Add a repo-uuid (or rel path to sesam repo) to the subsections so it we can support several sesam repos per git repo
-		{"merge.sesam-merge.name", "merge", "sesam-merge-secret", "name", "sesam-secret merge driver", true},
-		{"merge.sesam-merge.driver", "merge", "sesam-merge-secret", "driver", mergeSecretCmd, true},
-		{"merge.sesam-merge.name", "merge", "sesam-merge-log", "name", "sesam-audit-log merge driver", false},
-		{"merge.sesam-merge.driver", "merge", "sesam-merge-log", "driver", mergeLogCmd, false},
-		{"diff.sesam-diff.textconv", "diff", "sesam-diff", "textconv", textconvCmd, true},
-		{"alias.sesam", "alias", "", "sesam", "!" + aliasCmd, true},
+		{"merge.sesam-merge.name", "merge", "sesam-merge-secret" + suffix, "name", "sesam-secret merge driver", true},
+		{"merge.sesam-merge.driver", "merge", "sesam-merge-secret" + suffix, "driver", mergeSecretCmd, true},
+		{"merge.sesam-merge.name", "merge", "sesam-merge-log" + suffix, "name", "sesam-audit-log merge driver", false},
+		{"merge.sesam-merge.driver", "merge", "sesam-merge-log" + suffix, "driver", mergeLogCmd, false},
+		{"diff.sesam-diff.textconv", "diff", "sesam-diff" + suffix, "textconv", textconvCmd, true},
+		{"alias.sesam", "alias", "", "sesam", "!sesam", true},
 	}
 
 	var gitSupportsConfigHooks bool
@@ -289,10 +306,10 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 
 	if gitSupportsConfigHooks {
 		baseEntries = append(baseEntries, []gitConfigEntry{
-			{"hook.sesam-precommit.event", "hook", "sesam-precommit", "event", "pre-commit", false},
-			{"hook.sesam-precommit.command", "hook", "sesam-precommit", "command", wrapHookCmd(preCommitCmd), true},
-			{"hook.sesam-postcheckout.event", "hook", "sesam-postcheckout", "event", "post-checkout", false},
-			{"hook.sesam-postcheckout.command", "hook", "sesam-postcheckout", "command", wrapHookCmd(postCheckoutCmd), true},
+			{"hook.sesam-precommit.event", "hook", "sesam-precommit" + suffix, "event", "pre-commit", false},
+			{"hook.sesam-precommit.command", "hook", "sesam-precommit" + suffix, "command", wrapHookCmd(preCommitCmd), true},
+			{"hook.sesam-postcheckout.event", "hook", "sesam-postcheckout" + suffix, "event", "post-checkout", false},
+			{"hook.sesam-postcheckout.command", "hook", "sesam-postcheckout" + suffix, "command", wrapHookCmd(postCheckoutCmd), true},
 		}...)
 	}
 
@@ -330,8 +347,12 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 
 	if opts.GitConfigOpts.InstallDiff {
 		opts.PrintStep("  • installing diff driver…")
-		diffSection := cfg.Raw.Section("diff").Subsection("sesam-diff")
-		diffSection.SetOption("textconv", val("diff.sesam-diff.textconv"))
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.display, "diff.") {
+				section := cfg.Raw.Section(entry.section).Subsection(entry.subsection)
+				section.SetOption(entry.option, entry.value)
+			}
+		}
 	}
 
 	if opts.GitConfigOpts.InstallAlias {
@@ -383,6 +404,60 @@ func clearGitConfig(r *git.Repository, sesamDir, sectionPrefix string) error {
 	}
 
 	return nil
+}
+
+// sesamSubsectionSuffix returns the suffix appended to sesam's git-config
+// subsection names (and the driver names in .gitattributes) so several sesam
+// repos can coexist in one git repo without clobbering each other. It is empty
+// for a repo at the worktree root; otherwise it is "-" + the worktree-relative
+// sesam dir, encoded to a safe, whitespace-free token.
+//
+// Note: the suffix pins the sesam dir at install time. Moving the sesam dir
+// (e.g. `git mv`) leaves stale names and a wrong --sesam-dir in the command;
+// re-run `sesam init` to refresh the git integration after such a move.
+func sesamSubsectionSuffix(r *git.Repository, sesamDir string) (string, error) {
+	rel, err := core.SesamGitPrefix(r, sesamDir)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." || rel == "" {
+		return "", nil
+	}
+	return "-" + encodeSubsection(rel), nil
+}
+
+// encodeSubsection percent-encodes any byte outside a safe set so the result is
+// a valid git-config subsection name and a whitespace-free .gitattributes driver
+// token. `/` is kept (valid in both, keeps nested paths readable); everything
+// else - spaces, quotes, `%` itself - is encoded, so the mapping is injective
+// and reversible (percent-decode).
+func encodeSubsection(s string) string {
+	const safe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-/"
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; strings.IndexByte(safe, c) >= 0 {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
+}
+
+// renderGitAttributes fills the .gitattributes template with the per-repo driver
+// suffix so its merge=/diff= references match the installed git-config
+// subsections (see sesamSubsectionSuffix).
+func renderGitAttributes(suffix string) (string, error) {
+	tmpl, err := template.New("gitattributes").Parse(gitattributesTemplate)
+	if err != nil {
+		return "", fmt.Errorf("parse gitattributes template: %w", err)
+	}
+
+	var out bytes.Buffer
+	if err := tmpl.Execute(&out, struct{ Suffix string }{Suffix: suffix}); err != nil {
+		return "", fmt.Errorf("render gitattributes template: %w", err)
+	}
+	return out.String(), nil
 }
 
 // wrapHookCmd makes a config-based hook a no-op when sesam is not on PATH,

@@ -1,0 +1,38 @@
+# Regression: `git checkout -- <sealed object>` restores an object without the
+# audit log, so the on-disk seal root hash no longer matches the log. A normal
+# (full) verify fails on that, but the post-checkout hook must tolerate it - it
+# loads with no-disk verification and reveals from the checked-out object rather
+# than aborting the checkout with a root-hash error.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+cp secret.env app.env
+exec sesam add app.env --group admin
+exec git add -A
+exec git commit -m 'v1 of the secret'
+
+# Rotate + re-seal the secret: new object and a new seal root hash (uncommitted).
+cp secret2.env app.env
+exec sesam seal
+
+# Restore ONLY the sealed object from HEAD - it now disagrees with the (v2) log.
+exec git checkout HEAD -- .sesam/objects/app.env.sesam
+
+# A normal full verify fails on the on-disk root-hash mismatch…
+! exec sesam verify
+stderr 'root hash mismatch'
+
+# …but the post-checkout hook loads with no-disk verify and reveals the
+# checked-out (v1) object instead of aborting.
+rm app.env
+exec sesam hook post-checkout HEAD HEAD 0
+exists app.env
+grep 'super-secret' app.env
+
+-- secret.env --
+TOKEN=super-secret
+-- secret2.env --
+TOKEN=rotated-secret

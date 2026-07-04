@@ -717,7 +717,12 @@ func Uninstall(sesamDir string, all bool) error {
 		return fmt.Errorf("failed to clear git config: %w", err)
 	}
 
-	if err := clearGitAttributes(resolvedDir); err != nil {
+	suffix, err := sesamSubsectionSuffix(gitRepo, resolvedDir)
+	if err != nil {
+		return fmt.Errorf("failed to compute subsection suffix: %w", err)
+	}
+
+	if err := clearGitAttributes(resolvedDir, suffix); err != nil {
 		return fmt.Errorf("failed to clear .gitattributes: %w", err)
 	}
 
