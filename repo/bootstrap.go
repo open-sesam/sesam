@@ -202,6 +202,16 @@ func ensureDefaultGitAttributes(sesamDir string) error {
 	return appendMissingLines(gitAttributesPath, gitattributesTemplate, 0o600)
 }
 
+func clearGitAttributes(sesamDir string) error {
+	gitAttributesPath := filepath.Join(sesamDir, ".gitattributes")
+	return removeManagedLines(gitAttributesPath, gitattributesTemplate, 0o600)
+}
+
+func clearGitIgnore(sesamDir string) error {
+	gitignorePath := filepath.Join(sesamDir, ".gitignore")
+	return removeManagedLines(gitignorePath, gitignoreTemplate, 0o600)
+}
+
 // gitConfigEntry is one git-config key sesam manages, together with the value
 // `sesam init` installs for it.
 type gitConfigEntry struct {
@@ -210,6 +220,7 @@ type gitConfigEntry struct {
 	subsection string // empty for plain sections such as "alias"
 	option     string
 	value      string
+	report     bool
 }
 
 // expectedGitConfig returns the git-config entries `sesam init` installs for the
@@ -250,14 +261,17 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 		return nil, err
 	}
 
+	// report=true marks the entries `sesam doctor` surfaces. The duplicate
+	// log-merge subsection (same display path) and the fixed hook `event` lines
+	// are left out to avoid redundant/uninteresting doctor rows.
 	baseEntries := []gitConfigEntry{
-		// TODO: Add a repo-uuid to the subsections.
-		{"merge.sesam-merge.name", "merge", "sesam-merge-secret", "name", "sesam-secret merge driver"},
-		{"merge.sesam-merge.driver", "merge", "sesam-merge-secret", "driver", mergeSecretCmd},
-		{"merge.sesam-merge.name", "merge", "sesam-merge-log", "name", "sesam-audit-log merge driver"},
-		{"merge.sesam-merge.driver", "merge", "sesam-merge-log", "driver", mergeLogCmd},
-		{"diff.sesam-diff.textconv", "diff", "sesam-diff", "textconv", textconvCmd},
-		{"alias.sesam", "alias", "", "sesam", "!" + aliasCmd},
+		// TODO: Add a repo-uuid (or rel path to sesam repo) to the subsections so it we can support several sesam repos per git repo
+		{"merge.sesam-merge.name", "merge", "sesam-merge-secret", "name", "sesam-secret merge driver", true},
+		{"merge.sesam-merge.driver", "merge", "sesam-merge-secret", "driver", mergeSecretCmd, true},
+		{"merge.sesam-merge.name", "merge", "sesam-merge-log", "name", "sesam-audit-log merge driver", false},
+		{"merge.sesam-merge.driver", "merge", "sesam-merge-log", "driver", mergeLogCmd, false},
+		{"diff.sesam-diff.textconv", "diff", "sesam-diff", "textconv", textconvCmd, true},
+		{"alias.sesam", "alias", "", "sesam", "!" + aliasCmd, true},
 	}
 
 	var gitSupportsConfigHooks bool
@@ -275,10 +289,10 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 
 	if gitSupportsConfigHooks {
 		baseEntries = append(baseEntries, []gitConfigEntry{
-			{"hook.sesam-precommit.event", "hook", "sesam-precommit", "event", "pre-commit"},
-			{"hook.sesam-precommit.command", "hook", "sesam-precommit", "command", preCommitCmd},
-			{"hook.sesam-postcheckout.event", "hook", "sesam-postcheckout", "event", "post-checkout"},
-			{"hook.sesam-postcheckout.command", "hook", "sesam-postcheckout", "command", postCheckoutCmd},
+			{"hook.sesam-precommit.event", "hook", "sesam-precommit", "event", "pre-commit", false},
+			{"hook.sesam-precommit.command", "hook", "sesam-precommit", "command", wrapHookCmd(preCommitCmd), true},
+			{"hook.sesam-postcheckout.event", "hook", "sesam-postcheckout", "event", "post-checkout", false},
+			{"hook.sesam-postcheckout.command", "hook", "sesam-postcheckout", "command", wrapHookCmd(postCheckoutCmd), true},
 		}...)
 	}
 
@@ -351,12 +365,16 @@ func clearGitConfig(r *git.Repository, sesamDir, sectionPrefix string) error {
 
 	entries, err := expectedGitConfig(r, sesamDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("expected config: %w", err)
 	}
 
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.section, sectionPrefix) {
-			cfg.Raw = cfg.Raw.RemoveSubsection(entry.section, entry.subsection)
+			if entry.subsection == "" {
+				cfg.Raw.Section(entry.section).RemoveOption(entry.option)
+			} else {
+				cfg.Raw = cfg.Raw.RemoveSubsection(entry.section, entry.subsection)
+			}
 		}
 	}
 
@@ -365,6 +383,15 @@ func clearGitConfig(r *git.Repository, sesamDir, sectionPrefix string) error {
 	}
 
 	return nil
+}
+
+// wrapHookCmd makes a config-based hook a no-op when sesam is not on PATH,
+// instead of aborting the commit/checkout with "command not found". git runs the
+// value as `sh -c '<value> "$@"' … <hook-args>`, so the sesam invocation must
+// stay last for the appended "$@" to reach it. When sesam is present its exit
+// status is honored, so pre-commit can still block a bad commit.
+func wrapHookCmd(sesamHookCmd string) string {
+	return "command -v sesam >/dev/null 2>&1 || exit 0; exec " + sesamHookCmd
 }
 
 // sesamCmd builds a shell-safe `sesam ...` invocation suitable for git
@@ -456,6 +483,49 @@ func appendMissingLines(path, content string, mode os.FileMode) error {
 		return fmt.Errorf("failed to update %s: %w", path, err)
 	}
 
+	return nil
+}
+
+// removeManagedLines strips every line sesam appended (the non-blank lines of
+// content, matched after trimming, as appendMissingLines writes them) from the
+// file at path, keeping any lines the user added. If nothing sesam-managed is
+// left the file is removed, since sesam created it. A missing file is a no-op.
+func removeManagedLines(path, content string, mode os.FileMode) error {
+	data, err := os.ReadFile(path) //nolint:gosec
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to access %s: %w", path, err)
+	}
+
+	managed := make(map[string]bool)
+	for line := range strings.SplitSeq(content, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			managed[line] = true
+		}
+	}
+
+	kept := make([]string, 0)
+	for _, line := range strings.Split(string(data), "\n") {
+		if managed[strings.TrimSpace(line)] {
+			continue
+		}
+		kept = append(kept, line)
+	}
+
+	remaining := strings.Join(kept, "\n")
+	if strings.TrimSpace(remaining) == "" {
+		// Only sesam's lines were in the file: drop the file sesam created.
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove %s: %w", path, err)
+		}
+		return nil
+	}
+
+	if err := renameio.WriteFile(path, []byte(remaining), mode); err != nil {
+		return fmt.Errorf("failed to update %s: %w", path, err)
+	}
 	return nil
 }
 

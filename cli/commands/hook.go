@@ -67,18 +67,28 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 }
 
 func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
+	// git passes (prev-HEAD, new-HEAD, is-branch-checkout). The flag is "1" for a
+	// branch switch (and clone), "0" for a file checkout (git checkout -- path).
+	// git does not tell us which files changed, so we cannot reveal selectively.
+	branchCheckout := cmd.Args().Get(2) != "0"
+
 	// Run clean and open (only if .sesam exists) - is also run on git clone.
 	// NOTE: Returning an error here does not stop git checkout, just makes the exit-code go red.
 	//       We just print warnings therefore.
 	return silentWithRepo(func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-		if err := r.Clean(ctx, repo.CleanOpts{
-			Aggressive: false,
-		}); err != nil {
-			slog.Warn("failed to clean up previous revealed secrets", slog.Any("err", err))
+		// On a branch switch, aggressively drop stale plaintext under .sesam
+		// (secrets removed or now inaccessible on the new branch) before
+		// revealing the new set. Aggressive clean is confined to the sesam dir.
+		// A file checkout must not wipe the worktree, so it only re-reveals
+		// (e.g. restoring a checked-out sealed object).
+		if branchCheckout {
+			if err := r.Clean(ctx, repo.CleanOpts{Aggressive: true}); err != nil {
+				slog.Warn("failed to clean up previous revealed secrets", slog.Any("err", err))
+			}
 		}
 
 		if err := r.RevealAll(); err != nil {
-			slog.Warn("failed to clean up previous revealed secrets", slog.Any("err", err))
+			slog.Warn("failed to reveal secrets after checkout", slog.Any("err", err))
 		}
 
 		return nil

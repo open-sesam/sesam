@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -112,6 +113,7 @@ type RepoInitOpts struct {
 	// InitStep receives logs whenever something interesting happens
 	InitStep func(fmt string, args ...any)
 
+	// GitConfigOpts tells init what to configure
 	GitConfigOpts GitConfigOpts
 }
 
@@ -696,4 +698,57 @@ type StatusOpts struct {
 
 	// IgnoreUnmanaged will ignore files not managed by sesam.
 	IgnoreUnmanaged bool
+}
+
+// Uninstall removes the git integration of sesam from the git repo,
+// and if all is true it will remove also all sesam specific files.
+func Uninstall(sesamDir string, all bool) error {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve: %w", err)
+	}
+
+	if err := isInitialized(resolvedDir); err == nil {
+		// not yet initialized.
+		return nil
+	}
+
+	if err := clearGitConfig(gitRepo, resolvedDir, ""); err != nil {
+		return fmt.Errorf("failed to clear git config: %w", err)
+	}
+
+	if err := clearGitAttributes(resolvedDir); err != nil {
+		return fmt.Errorf("failed to clear .gitattributes: %w", err)
+	}
+
+	if err := clearGitIgnore(resolvedDir); err != nil {
+		return fmt.Errorf("failed to clear .gitignore: %w", err)
+	}
+
+	if !all {
+		return nil
+	}
+
+	root, err := os.OpenRoot(resolvedDir)
+	if err != nil {
+		return err
+	}
+
+	// Remove all sesam.yml files
+	if err := fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.Type().IsRegular() && filepath.Base(path) == "sesam.yml" {
+			return root.Remove(path)
+		}
+
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to remove sesam.yml files: %w", err)
+	}
+
+	// remove all of sesam:
+	return root.RemoveAll(".sesam")
 }

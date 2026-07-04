@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/chzyer/readline"
 	"github.com/muesli/termenv"
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
@@ -29,8 +30,6 @@ func boolWithDefault(cmd *cli.Command, name string, def bool) bool {
 
 	return cmd.Bool(name)
 }
-
-// TODO: Implement the sesam deinit commands.
 
 // HandleInit bootstraps sesam in a git repository. In a fresh repo it creates
 // the sesam state (repo.Init); in an already-initialized one - typically a
@@ -103,5 +102,32 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 		fmt.Println()
 		printInfo("Tip: Put %s in your shell config", homeExport)
 	}
+	return nil
+}
+
+func HandleUninstall(ctx context.Context, cmd *cli.Command) error {
+	ask := !cmd.Bool("no-ask")
+	all := cmd.Bool("all")
+	if all && ask {
+		confirm, err := readline.Line("‼ Are you sure you want to delete .sesam/, sesam.yml and remove all git config?\n  Make sure you reveal all secrets. [y/N] ")
+		if err != nil {
+			return err
+		}
+
+		confirm = strings.ToLower(confirm)
+		if confirm != "y" && confirm != "yes" && confirm != "yarp" {
+			slog.Info("aborted!")
+			return nil
+		}
+	}
+
+	if err := repo.Uninstall(cmd.String("sesam-dir"), all); err != nil {
+		return err
+	}
+
+	if all {
+		slog.Info("If you want to remove revealed files now: run `git clean -fdx`")
+	}
+
 	return nil
 }

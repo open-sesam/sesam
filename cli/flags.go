@@ -139,6 +139,17 @@ var flagsInit = []cli.Flag{
 	userFlag(false, "Initial admin user name (if not given, git config is used to guess)"),
 }
 
+var flagsUninstall = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "no-ask",
+		Usage: "Do not ask for confirmation for --all",
+	},
+	&cli.BoolFlag{
+		Name:  "all",
+		Usage: "Also remove sesam.yml and .sesam/",
+	},
+}
+
 // flagsSeal contains optional controls for sealing.
 var flagsSeal = []cli.Flag{
 	&cli.BoolFlag{

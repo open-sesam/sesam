@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -329,16 +330,22 @@ func (v *View) GitAddDotSesam() error {
 		return ErrClosed
 	}
 
-	sesamDotDir := filepath.Join(v.sesamDir, sesamSuffix)
-
 	wt, err := v.gitRepo.Worktree()
 	if err != nil {
 		return err
 	}
 
+	// go-git addresses index paths relative to the worktree root, and .sesam may
+	// sit in a subdirectory (nested layout), so relativize against it. Adding the
+	// directory pulls in its untracked objects too.
+	prefix, err := core.SesamGitPrefix(v.gitRepo, v.sesamDir)
+	if err != nil {
+		return err
+	}
+
 	return wt.AddWithOptions(&git.AddOptions{
-		All:  true, // add untracked files as well.
-		Path: sesamDotDir,
+		All:  false, // true would add all files and ignore the path.
+		Path: path.Join(prefix, sesamSuffix),
 	})
 }
 
