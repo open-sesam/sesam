@@ -303,11 +303,11 @@ func (s *Stage) UserKill(user string) error {
 }
 
 // SealAll re-encrypts all revealed content into the staged sealed storage.
-func (s *Stage) SealAll() error {
+func (s *Stage) Seal(all bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.secret.SealAll(); err != nil {
+	if err := s.secret.Seal(all); err != nil {
 		return fmt.Errorf("failed to seal secrets: %w", err)
 	}
 	return nil

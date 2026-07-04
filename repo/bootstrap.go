@@ -202,11 +202,6 @@ func ensureDefaultGitAttributes(sesamDir string) error {
 	return appendMissingLines(gitAttributesPath, gitattributesTemplate, 0o600)
 }
 
-// mergeDriverName is the display name git shows for sesam's audit-log merge
-// driver. Shared by ensureGitConfig (which sets it) and expectedGitConfig
-// (which `sesam doctor` checks against).
-const mergeDriverName = "merge the audit log of sesam"
-
 // gitConfigEntry is one git-config key sesam manages, together with the value
 // `sesam init` installs for it.
 type gitConfigEntry struct {
@@ -225,17 +220,17 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 	// Every git driver below is `sesam <subcommand>` run through the
 	// shell with cwd = worktree root; for nested layouts each one
 	// needs the same --sesam-dir treatment to find `.sesam/`.
-	mergeCmd, err := sesamCmd(r, sesamDir, "audit", "merge", "%O", "%A", "%B", "%L", "%P")
+	mergeSecretCmd, err := sesamCmd(r, sesamDir, "merge", "secret", "%O", "%A", "%B", "%L", "%P")
+	if err != nil {
+		return nil, err
+	}
+
+	mergeLogCmd, err := sesamCmd(r, sesamDir, "merge", "log", "%O", "%A", "%B", "%L", "%P")
 	if err != nil {
 		return nil, err
 	}
 
 	textconvCmd, err := sesamCmd(r, sesamDir, "show")
-	if err != nil {
-		return nil, err
-	}
-
-	smudgeCmd, err := sesamCmd(r, sesamDir, "smudge")
 	if err != nil {
 		return nil, err
 	}
@@ -256,11 +251,11 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 	}
 
 	baseEntries := []gitConfigEntry{
-		{"merge.sesam-merge.name", "merge", "sesam-merge", "name", mergeDriverName},
-		{"merge.sesam-merge.driver", "merge", "sesam-merge", "driver", mergeCmd},
+		{"merge.sesam-merge.name", "merge", "sesam-merge-secret", "name", "sesam-secret merge driver"},
+		{"merge.sesam-merge.driver", "merge", "sesam-merge-secret", "driver", mergeSecretCmd},
+		{"merge.sesam-merge.name", "merge", "sesam-merge-log", "name", "sesam-audit-log merge driver"},
+		{"merge.sesam-merge.driver", "merge", "sesam-merge-log", "driver", mergeLogCmd},
 		{"diff.sesam-diff.textconv", "diff", "sesam-diff", "textconv", textconvCmd},
-		{"filter.sesam-filter.required", "filter", "sesam-filter", "required", "false"},
-		{"filter.sesam-filter.process", "filter", "sesam-filter", "process", smudgeCmd},
 		{"alias.sesam", "alias", "", "sesam", "!" + aliasCmd},
 	}
 
@@ -295,16 +290,6 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 		return fmt.Errorf("read local git config: %w", err)
 	}
 
-	mergeSection := cfg.Raw.Section("merge").Subsection("sesam-merge")
-	aliasSection := cfg.Raw.Section("alias")
-
-	mergeConfigured := mergeSection.Option("driver") != ""
-	aliasConfigured := aliasSection.Option("sesam") != ""
-
-	if mergeConfigured {
-		return nil
-	}
-
 	entries, err := expectedGitConfig(r, sesamDir)
 	if err != nil {
 		return err
@@ -318,24 +303,47 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 		return ""
 	}
 
-	if !mergeConfigured {
+	if opts.GitConfigOpts.InstallMerge {
 		opts.PrintStep("  • Installing merge driver…")
-
+		mergeSection := cfg.Raw.Section("merge").Subsection("sesam-merge")
 		mergeSection.SetOption("name", val("merge.sesam-merge.name"))
 		mergeSection.SetOption("driver", val("merge.sesam-merge.driver"))
+	}
 
+	if opts.GitConfigOpts.InstallDiff {
 		opts.PrintStep("  • installing diff driver…")
 		diffSection := cfg.Raw.Section("diff").Subsection("sesam-diff")
 		diffSection.SetOption("textconv", val("diff.sesam-diff.textconv"))
 	}
 
-	if !aliasConfigured {
-		// `!` makes git execute the value as a shell command instead of
-		// looking for `git-sesam` on PATH, so users get `git sesam ...`
-		// without any PATH plumbing. Git runs the command with cwd =
-		// worktree root, which is what sesam wants anyway.
+	if opts.GitConfigOpts.InstallAlias {
 		opts.PrintStep("  • Making sure sesam can be called as `git sesam`…")
+		aliasSection := cfg.Raw.Section("alias")
 		aliasSection.SetOption("sesam", val("alias.sesam"))
+	}
+
+	if err := r.SetConfig(cfg); err != nil {
+		return fmt.Errorf("write git config: %w", err)
+	}
+
+	return nil
+}
+
+func clearGitConfig(r *git.Repository, sesamDir string, sectionPrefix string) error {
+	cfg, err := r.ConfigScoped(gogitconfig.LocalScope)
+	if err != nil {
+		return fmt.Errorf("read local git config: %w", err)
+	}
+
+	entries, err := expectedGitConfig(r, sesamDir)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.section, sectionPrefix) {
+			cfg.Raw = cfg.Raw.RemoveSubsection(entry.section, entry.subsection)
+		}
 	}
 
 	if err := r.SetConfig(cfg); err != nil {

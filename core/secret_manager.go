@@ -150,7 +150,7 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 // TODO: We could use something like EqualPlaintext() to check if we really need to encrypt this secret.
 //
 //	This would have advantages on merging -> nothing really changed -> nothing needs to be sealed.
-func (sm *SecretManager) SealAll() error {
+func (sm *SecretManager) Seal(all bool) error {
 	objects := sm.objectsDir()
 	if err := sm.root.MkdirAll(objects, 0o700); err != nil {
 		return fmt.Errorf("create objects dir: %w", err)
@@ -159,7 +159,7 @@ func (sm *SecretManager) SealAll() error {
 	wanted := make(map[string]bool, len(sm.State.Secrets))
 	sigs := make([]*secretFooter, 0, len(sm.State.Secrets))
 	for _, vsecret := range sm.State.Secrets {
-		sig, err := sm.sealOrPreserve(vsecret.RevealedPath)
+		sig, err := sm.sealOrPreserve(vsecret.RevealedPath, true)
 		if err != nil {
 			return fmt.Errorf("seal %s: %w", vsecret.RevealedPath, err)
 		}
@@ -185,7 +185,7 @@ func (sm *SecretManager) SealAll() error {
 // plaintext it re-encrypts (renameio replaces the object); otherwise it leaves
 // the existing ciphertext untouched and reads back its footer. It is an error
 // if there is neither plaintext nor an existing object.
-func (sm *SecretManager) sealOrPreserve(revealedPath string) (*secretFooter, error) {
+func (sm *SecretManager) sealOrPreserve(revealedPath string, all bool) (*secretFooter, error) {
 	dest := sm.cryptPath(revealedPath)
 	if err := sm.root.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return nil, fmt.Errorf("create objects subdir: %w", err)
@@ -195,7 +195,19 @@ func (sm *SecretManager) sealOrPreserve(revealedPath string) (*secretFooter, err
 	case err == nil:
 		sealer := sm.Signer.UserName()
 		if sm.State.SealerAuthorized(sealer, revealedPath) {
-			return sealSecret(sm, revealedPath, sm.recipientsFor(revealedPath), dest, sealer)
+			var sameSame bool
+
+			if !all {
+				sameSame, err = sm.EqualPlaintext(revealedPath, sm.Identities)
+				if err != nil {
+					return nil, fmt.Errorf("failed to check for plain text equality: %w", err)
+				}
+			}
+
+			if !sameSame {
+				// only encrypt if all=true or revealed text changed vs the decrypted text
+				return sealSecret(sm, revealedPath, sm.recipientsFor(revealedPath), dest, sealer)
+			}
 		}
 
 		// Expected for non-recipients: they cannot re-seal what they cannot

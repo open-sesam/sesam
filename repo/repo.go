@@ -95,6 +95,13 @@ type RepoOpts struct {
 	VerifyMode VerifyMode
 }
 
+type GitConfigOpts struct {
+	InstallHooks bool
+	InstallMerge bool
+	InstallDiff  bool
+	InstallAlias bool
+}
+
 type RepoInitOpts struct {
 	RepoOpts
 
@@ -104,6 +111,8 @@ type RepoInitOpts struct {
 
 	// InitStep receives logs whenever something interesting happens
 	InitStep func(fmt string, args ...any)
+
+	GitConfigOpts GitConfigOpts
 }
 
 func (rio *RepoInitOpts) PrintStep(fmt string, args ...any) {
@@ -332,7 +341,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 
 	opts.PrintStep(eggs[rand.IntN(len(eggs))]) //nolint:gosec
-	if err := r.secret.SealAll(); err != nil {
+	if err := r.secret.Seal(true); err != nil {
 		return nil, err
 	}
 
