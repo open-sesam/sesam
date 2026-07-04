@@ -758,3 +758,33 @@ func Uninstall(sesamDir string, all bool) error {
 	// remove all of sesam:
 	return root.RemoveAll(".sesam")
 }
+
+// InstallHooks (re)installs sesam's git hooks for the repo at sesamDir. It only
+// writes git config, so it neither loads the audit log nor takes the repo lock.
+func InstallHooks(sesamDir string) error {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	if err != nil {
+		return err
+	}
+
+	if ok, err := IsInitialized(resolvedDir); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("no sesam repository at %s", resolvedDir)
+	}
+
+	return ensureGitConfig(gitRepo, resolvedDir, RepoInitOpts{
+		GitConfigOpts: GitConfigOpts{InstallHooks: true},
+	})
+}
+
+// UninstallHooks removes sesam's git hooks from the repo at sesamDir. Like
+// InstallHooks it only touches git config.
+func UninstallHooks(sesamDir string) error {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	if err != nil {
+		return err
+	}
+
+	return clearGitConfig(gitRepo, resolvedDir, "hook")
+}

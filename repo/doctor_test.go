@@ -31,7 +31,7 @@ func TestCheckGitConfigReportsHooks(t *testing.T) {
 	}
 
 	admin := writeTestIdentity(t, "admin")
-	dir, r := bootstrapRepo(t, admin) // installs no git config
+	dir, _ := bootstrapRepo(t, admin) // installs no git config; auto-closed via t.Cleanup
 
 	// Reported as present-but-unset: doctor renders this as "not installed".
 	checks, err := CheckGitConfig(dir)
@@ -42,7 +42,7 @@ func TestCheckGitConfigReportsHooks(t *testing.T) {
 	require.Empty(t, c.Actual)
 
 	// After installing, it matches the expected `sesam ... hook pre-commit`.
-	require.NoError(t, r.InstallHooks())
+	require.NoError(t, InstallHooks(dir))
 	checks, err = CheckGitConfig(dir)
 	require.NoError(t, err)
 	c, ok = findGitConfigCheck(checks, "hook.sesam-precommit.command")

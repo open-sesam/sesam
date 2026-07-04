@@ -1,0 +1,36 @@
+# The pre-commit hook loads with no-disk verify so it can self-heal an on-disk
+# root-hash mismatch (a sealed object restored without its audit log). Its seal
+# re-records the current state, so the commit is not blocked by a stale root
+# hash. We create the mismatch with a plain copy so no hook fires early.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+cp secret.env app.env
+exec sesam add app.env --group admin
+exec git add -A
+exec git commit -m 'v1 of the secret'
+cp .sesam/objects/app.env.sesam v1.sealed
+
+# Rotate + re-seal (new object + new seal root hash).
+cp secret2.env app.env
+exec sesam seal
+
+# Restore the v1 object underneath the (v2) log -> stale on-disk root hash.
+cp v1.sealed .sesam/objects/app.env.sesam
+
+# A normal full verify fails on the mismatch…
+! exec sesam verify
+stderr 'root hash mismatch'
+
+# …but pre-commit loads no-disk, re-seals the working-tree secret, and thereby
+# reconciles the log instead of aborting the commit.
+exec sesam hook pre-commit
+exec sesam verify
+
+-- secret.env --
+TOKEN=super-secret
+-- secret2.env --
+TOKEN=rotated-secret

@@ -128,12 +128,12 @@ func Main(args []string) error {
 					{
 						Name:   "install",
 						Usage:  "Make sure the git hooks are installed",
-						Action: commands.WithRepo(commands.HandleHookInstall),
+						Action: commands.HandleHookInstall,
 					},
 					{
 						Name:   "uninstall",
 						Usage:  "Uninstall any hooks",
-						Action: commands.WithRepo(commands.HandleHookUninstall),
+						Action: commands.HandleHookUninstall,
 					},
 				},
 			},
