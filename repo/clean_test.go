@@ -130,4 +130,3 @@ func TestCleanupErrorsOnMissingSesamDir(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not a sesam directory")
 }
-

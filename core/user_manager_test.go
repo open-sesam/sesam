@@ -185,10 +185,9 @@ func TestTellThenSealGivesNewRecipientAccess(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-
 	writeSecret(t, sesamDir, "secrets/api", "shared")
 	require.NoError(t, secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}))
-	require.NoError(t, secMgr.SealAll()) // sealed for admin only; "dev" is empty
+	require.NoError(t, secMgr.Seal(true)) // sealed for admin only; "dev" is empty
 
 	um, err := BuildUserManager(testRoot(t, sesamDir), admin.Signer, al, state, secMgr)
 	require.NoError(t, err)
@@ -212,7 +211,7 @@ func TestTellThenSealGivesNewRecipientAccess(t *testing.T) {
 	require.False(t, ok, "bob must not be a recipient before an explicit seal")
 
 	// An explicit seal re-encrypts to include the new "dev" member.
-	require.NoError(t, secMgr.SealAll())
+	require.NoError(t, secMgr.Seal(true))
 
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
 	fd, err = os.Open(cryptPath)
@@ -247,7 +246,6 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-
 	um, err := BuildUserManager(testRoot(t, sesamDir), admin.Signer, al, state, secMgr)
 	require.NoError(t, err)
 
@@ -261,7 +259,7 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 
 	writeSecret(t, sesamDir, "secrets/api", "shared")
 	require.NoError(t, secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}))
-	require.NoError(t, secMgr.SealAll())
+	require.NoError(t, secMgr.Seal(true))
 
 	// Sanity: bob can decrypt before kill.
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
@@ -275,7 +273,7 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 
 	// Kill does not auto-seal; an explicit seal must drop bob from the recipients.
 	require.NoError(t, um.UserKill("bob"))
-	require.NoError(t, secMgr.SealAll())
+	require.NoError(t, secMgr.Seal(true))
 
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
 	fd, err = os.Open(cryptPath)

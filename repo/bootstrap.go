@@ -251,6 +251,7 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 	}
 
 	baseEntries := []gitConfigEntry{
+		// TODO: Add a repo-uuid to the subsections.
 		{"merge.sesam-merge.name", "merge", "sesam-merge-secret", "name", "sesam-secret merge driver"},
 		{"merge.sesam-merge.driver", "merge", "sesam-merge-secret", "driver", mergeSecretCmd},
 		{"merge.sesam-merge.name", "merge", "sesam-merge-log", "name", "sesam-audit-log merge driver"},
@@ -305,9 +306,12 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 
 	if opts.GitConfigOpts.InstallMerge {
 		opts.PrintStep("  • Installing merge driver…")
-		mergeSection := cfg.Raw.Section("merge").Subsection("sesam-merge")
-		mergeSection.SetOption("name", val("merge.sesam-merge.name"))
-		mergeSection.SetOption("driver", val("merge.sesam-merge.driver"))
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.display, "merge.") {
+				section := cfg.Raw.Section(entry.section).Subsection(entry.subsection)
+				section.SetOption(entry.option, entry.value)
+			}
+		}
 	}
 
 	if opts.GitConfigOpts.InstallDiff {
@@ -322,6 +326,16 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 		aliasSection.SetOption("sesam", val("alias.sesam"))
 	}
 
+	if opts.GitConfigOpts.InstallHooks {
+		opts.PrintStep("  • Installing pre-commit+post-checkout hooks…")
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.display, "hook.") {
+				section := cfg.Raw.Section(entry.section).Subsection(entry.subsection)
+				section.SetOption(entry.option, entry.value)
+			}
+		}
+	}
+
 	if err := r.SetConfig(cfg); err != nil {
 		return fmt.Errorf("write git config: %w", err)
 	}
@@ -329,7 +343,7 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 	return nil
 }
 
-func clearGitConfig(r *git.Repository, sesamDir string, sectionPrefix string) error {
+func clearGitConfig(r *git.Repository, sesamDir, sectionPrefix string) error {
 	cfg, err := r.ConfigScoped(gogitconfig.LocalScope)
 	if err != nil {
 		return fmt.Errorf("read local git config: %w", err)

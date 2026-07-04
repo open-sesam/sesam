@@ -68,15 +68,20 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 
 func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 	// Run clean and open (only if .sesam exists) - is also run on git clone.
+	// NOTE: Returning an error here does not stop git checkout, just makes the exit-code go red.
+	//       We just print warnings therefore.
 	return silentWithRepo(func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-		if err := r.RevealAll(); err != nil {
-			// what happens when the post-checkout hook fails?
-			return err
+		if err := r.Clean(ctx, repo.CleanOpts{
+			Aggressive: false,
+		}); err != nil {
+			slog.Warn("failed to clean up previous revealed secrets", slog.Any("err", err))
 		}
 
-		return r.Clean(ctx, repo.CleanOpts{
-			Aggressive: false,
-		})
+		if err := r.RevealAll(); err != nil {
+			slog.Warn("failed to clean up previous revealed secrets", slog.Any("err", err))
+		}
+
+		return nil
 	})(ctx, cmd)
 }
 

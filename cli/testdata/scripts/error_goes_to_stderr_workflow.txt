@@ -1,19 +1,18 @@
 # Regression: a failing sesam command must print its error to stderr and leave
 # stdout completely untouched.
 #
-# When sesam runs as the git filter `process` (sesam-filter), git reads
-# pkt-lines from sesam's stdout; as the sesam-diff `textconv` it reads the
-# decrypted content from stdout; as the sesam-merge driver it likewise drives
-# stdout. A stray "✘ ..." error line on stdout corrupts that stream and git
-# aborts with `fatal: protocol error: bad line length character: ✘`.
+# `sesam show` is git's sesam-diff `textconv`: git reads the decrypted content
+# from sesam's stdout. A stray "✘ ..." error line on stdout corrupts that
+# stream and git aborts with `fatal: protocol error: bad line length
+# character: ✘`.
 #
-# `sesam smudge` with no identity fails before reading git's request stream,
-# which is the exact path that produced the corruption.
+# `sesam show` with no identity fails while loading identities, before it writes
+# any content, which is the exact path that must stay clean.
 
 env SESAM_ID=
 env SESAM_IDENTITY=
-! exec sesam smudge
-stderr 'need at least one identity'
+! exec sesam show secrets/token
+stderr 'at least one --identity'
 
 # Nothing at all may reach stdout on the error path.
 ! stdout .

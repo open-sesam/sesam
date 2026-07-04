@@ -164,4 +164,3 @@ func TestWriteAuditKeyExtendsRecipients(t *testing.T) {
 	require.Len(t, loaded.Entries, 1)
 	require.NoError(t, loaded.Close())
 }
-

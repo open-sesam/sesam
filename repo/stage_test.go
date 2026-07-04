@@ -95,7 +95,7 @@ func TestStageRollbackDiscards(t *testing.T) {
 }
 
 // A failing Update must leave the live state byte-untouched and reap the fork.
-// This is the atomicity guarantee that used to live inside SealAll's seal-stage
+// This is the atomicity guarantee that used to live inside Seal's seal-stage
 // and now belongs to the stage layer.
 func TestStageUpdateErrorLeavesLiveUntouched(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
@@ -160,7 +160,7 @@ func TestStageSealOnlyLeavesConfigUntouched(t *testing.T) {
 	before, err := os.Stat(cfgPath)
 	require.NoError(t, err)
 
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SealAll() }))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }))
 
 	after, err := os.Stat(cfgPath)
 	require.NoError(t, err)

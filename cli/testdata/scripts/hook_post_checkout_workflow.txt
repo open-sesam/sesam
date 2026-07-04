@@ -1,0 +1,37 @@
+# `sesam hook post-checkout` is run by git after a checkout (and after clone).
+# It must reveal the secrets the caller can access into the worktree so the
+# freshly checked-out sealed objects show up as usable plaintext.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+# Init, register a secret and commit the sealed object.
+exec sesam init --user admin
+cp secret.env app.env
+exec sesam add app.env --group admin
+exec git add -A
+exec git commit -m 'init sesam with a secret'
+
+# Simulate a fresh checkout: the gitignored plaintext is absent, only the
+# sealed object is present.
+rm app.env
+! exists app.env
+
+# The hook reveals the secret back into the worktree.
+exec sesam hook post-checkout
+exists app.env
+grep 'super-secret' app.env
+
+# On a repo that was never initialized, the hook is a silent no-op.
+cd $WORK
+mkdir plain
+cd plain
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam hook post-checkout
+! stdout .
+
+-- secret.env --
+TOKEN=super-secret

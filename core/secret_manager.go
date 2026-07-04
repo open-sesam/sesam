@@ -146,10 +146,8 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 	return sm.State.FeedEntry(sm.Signer, auditEntry)
 }
 
-// SealAll seals all known secrets.
-// TODO: We could use something like EqualPlaintext() to check if we really need to encrypt this secret.
-//
-//	This would have advantages on merging -> nothing really changed -> nothing needs to be sealed.
+// Seal seals all known secrets.
+// This would have advantages on merging -> nothing really changed -> nothing needs to be sealed.
 func (sm *SecretManager) Seal(all bool) error {
 	objects := sm.objectsDir()
 	if err := sm.root.MkdirAll(objects, 0o700); err != nil {
@@ -159,7 +157,7 @@ func (sm *SecretManager) Seal(all bool) error {
 	wanted := make(map[string]bool, len(sm.State.Secrets))
 	sigs := make([]*secretFooter, 0, len(sm.State.Secrets))
 	for _, vsecret := range sm.State.Secrets {
-		sig, err := sm.sealOrPreserve(vsecret.RevealedPath, true)
+		sig, err := sm.sealOrPreserve(vsecret.RevealedPath, all)
 		if err != nil {
 			return fmt.Errorf("seal %s: %w", vsecret.RevealedPath, err)
 		}
@@ -195,19 +193,22 @@ func (sm *SecretManager) sealOrPreserve(revealedPath string, all bool) (*secretF
 	case err == nil:
 		sealer := sm.Signer.UserName()
 		if sm.State.SealerAuthorized(sealer, revealedPath) {
-			var sameSame bool
-
+			// Unless forced (all), skip the reseal only when the existing object
+			// still matches both the plaintext and the recipient set. NeedsSeal
+			// hands back the footer it read so we can return it without a second
+			// read when nothing changed.
+			needsSeal, footer := true, (*secretFooter)(nil)
 			if !all {
-				sameSame, err = sm.EqualPlaintext(revealedPath, sm.Identities)
-				if err != nil {
-					return nil, fmt.Errorf("failed to check for plain text equality: %w", err)
+				if needsSeal, footer, err = sm.NeedsSeal(revealedPath); err != nil {
+					return nil, fmt.Errorf("failed to check whether reseal is needed: %w", err)
 				}
 			}
 
-			if !sameSame {
-				// only encrypt if all=true or revealed text changed vs the decrypted text
+			if needsSeal {
 				return sealSecret(sm, revealedPath, sm.recipientsFor(revealedPath), dest, sealer)
 			}
+
+			return footer, nil
 		}
 
 		// Expected for non-recipients: they cannot re-seal what they cannot
@@ -366,8 +367,8 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 	}
 
 	// Materialize the moved object so it survives the cleanup above and the
-	// caller's SealAll can preserve it. No per-move seal entry is emitted: the
-	// caller runs a single SealAll after the whole move cascade, which writes
+	// caller's Seal can preserve it. No per-move seal entry is emitted: the
+	// caller runs a single Seal after the whole move cascade, which writes
 	// the one authoritative seal entry (instead of one per moved secret).
 	_, err := sealSecret(
 		sm,
@@ -494,40 +495,56 @@ func RevealBlob(
 	return true, dst.CloseAtomicallyReplace()
 }
 
-// EqualPlaintext will check if revealedPath has the same content as the sealed
-// text. It does not need to decrypt the sealed file for that and only needs to
-// read the revealedPath once.
-func (sm *SecretManager) EqualPlaintext(revealedPath string, ids Identities) (bool, error) {
+// NeedsSeal reports whether revealedPath must be (re-)sealed: its recipient set
+// or its plaintext drifted from the sealed object, or either the sealed object
+// or the plaintext is missing. A missing file is reported as "needs seal"
+// rather than an error, so callers (Seal, `sesam status`) can probe freely
+// without pre-checking existence. When the object is read, its footer is
+// returned so the caller can reuse it instead of reading it a second time.
+//
+// The recipient check works off the signed footer alone (no decryption), so it
+// holds even when the current sealer cannot read the existing object; only the
+// plaintext comparison decrypts the sealed file's age key.
+func (sm *SecretManager) NeedsSeal(revealedPath string) (bool, *secretFooter, error) {
 	sealFd, err := sm.root.Open(sm.cryptPath(revealedPath))
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil, nil
+	}
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	defer closeLogged(sealFd)
 
 	plainFd, err := sm.root.Open(revealedPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil, nil
+	}
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	defer closeLogged(plainFd)
 
-	ageKey, err := readAgeEncryptionKey(sealFd, ids.AgeIdentities())
-	if err != nil {
-		return false, err
-	}
-
 	_, footer, err := readFooter(sealFd)
 	if err != nil {
-		return false, err
+		return false, nil, err
+	}
+
+	want := MulticodeEncode(recipientsHash(sm.recipientsFor(revealedPath)), MhSHA3_256)
+	if footer.RecipientsHash != want {
+		return true, footer, nil
+	}
+
+	ageKey, err := readAgeEncryptionKey(sealFd, sm.Identities.AgeIdentities())
+	if err != nil {
+		return false, footer, err
 	}
 
 	plainContentHash := sha3.New256()
 	if _, err := io.Copy(plainContentHash, plainFd); err != nil {
-		return false, err
+		return false, footer, err
 	}
-
 	_, _ = plainContentHash.Write([]byte(revealedPath))
 
-	plainHmacContentHashBytes := keyContentHash(ageKey, plainContentHash.Sum(nil))
-	plainHmacContentHash := MulticodeEncode(plainHmacContentHashBytes, MhSHA3_256)
-	return plainHmacContentHash == footer.HMACContentHash, nil
+	plainHmacContentHash := MulticodeEncode(keyContentHash(ageKey, plainContentHash.Sum(nil)), MhSHA3_256)
+	return plainHmacContentHash != footer.HMACContentHash, footer, nil
 }

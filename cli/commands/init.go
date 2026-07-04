@@ -22,6 +22,16 @@ aa    ]8I  "8b,   ,aa  aa    ]8I  88,    ,88  88      88      88
 `
 )
 
+func boolWithDefault(cmd *cli.Command, name string, def bool) bool {
+	if !cmd.IsSet(name) {
+		return def
+	}
+
+	return cmd.Bool(name)
+}
+
+// TODO: Implement the sesam deinit commands.
+
 // HandleInit bootstraps sesam in a git repository. In a fresh repo it creates
 // the sesam state (repo.Init); in an already-initialized one - typically a
 // fresh clone - it only wires up local git integration and
@@ -42,10 +52,10 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 			fmt.Printf(format, args...)
 		},
 		GitConfigOpts: repo.GitConfigOpts{
-			InstallHooks: cmd.Bool("install-hooks"),
-			InstallMerge: cmd.Bool("install-merge") && false, // TODO: not yet implemented.
-			InstallDiff:  cmd.Bool("install-diff"),
-			InstallAlias: cmd.Bool("install-alias"),
+			InstallHooks: boolWithDefault(cmd, "install-hooks", true),
+			InstallMerge: boolWithDefault(cmd, "install-merge", false), // TODO: not yet implemented.
+			InstallDiff:  boolWithDefault(cmd, "install-diff", true),
+			InstallAlias: boolWithDefault(cmd, "install-alias", true),
 		},
 	}
 

@@ -235,7 +235,9 @@ func TestRepo_UserTell_AddsUserAndReSeals(t *testing.T) {
 
 	_, r := bootstrapRepo(t, admin)
 
-	err := r.Update(func(s *Stage) error { return s.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"developers"}) })
+	err := r.Update(func(s *Stage) error {
+		return s.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"developers"})
+	})
 	require.NoError(t, err)
 
 	users, err := r.ListUsers()
@@ -366,7 +368,7 @@ func TestRepo_SealReveal_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, original, got, "RevealAll restores the original plaintext")
 
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SealAll() }), "SealAll on an already-sealed tree is a no-op")
+	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }), "Seal on an already-sealed tree is a no-op")
 }
 
 // --- Clean (method dispatch) ----------------------------------------------
@@ -507,7 +509,7 @@ func TestRepoStatusStates(t *testing.T) {
 	add("secrets/unsealed", "seal-removed")
 
 	// Add only records the audit entry; seal writes the ciphertext objects.
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SealAll() }))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }))
 	require.NoError(t, r.Close())
 
 	// Reload so the runtime user (whoami) is resolved - Status needs it to
@@ -545,6 +547,30 @@ func TestRepoStatusStates(t *testing.T) {
 	})
 }
 
+// A recipient change (a user told into a secret's group) makes the secret
+// drift even though its plaintext is untouched: it must be re-sealed to add the
+// new recipient. Status compares the recipient set, so it must surface this as
+// not-in-sync until a re-seal happens.
+func TestRepoStatusRecipientDrift(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	dir, r := bootstrapRepo(t, admin)
+
+	writeRepoFile(t, dir, "secrets/dev", "dev-content")
+	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/dev"}, []string{"dev"}, false) }))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }))
+	require.Equal(t, SecretStateInSync, statusStates(t, r, StatusOpts{})["secrets/dev"])
+
+	// Tell bob into "dev" but do not seal: the recipient set now differs from
+	// the sealed object, though the plaintext is identical.
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"dev"})
+	}))
+
+	require.Equal(t, SecretStateNotInSync, statusStates(t, r, StatusOpts{})["secrets/dev"],
+		"a user added to the group must show the secret out of sync until re-sealed")
+}
+
 // A user without access to a secret must see it reported as no-access, and
 // Status must not try to decrypt it (the user is not a recipient).
 func TestRepoStatusUserHasNoAccess(t *testing.T) {
@@ -557,7 +583,9 @@ func TestRepoStatusUserHasNoAccess(t *testing.T) {
 	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/ops"}, []string{"ops"}, false) }))
 
 	// Tell bob, but only into "dev" - he has no access to the "ops" secret.
-	require.NoError(t, r.Update(func(s *Stage) error { return s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"dev"}) }))
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"dev"})
+	}))
 	require.NoError(t, r.Close())
 
 	rb := reloadSesamRepo(t, dir, bob)
@@ -574,7 +602,7 @@ func TestRepoStatusDiffDir(t *testing.T) {
 
 	writeRepoFile(t, dir, "secrets/diff", "v1-sealed")
 	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/diff"}, []string{"admin"}, false) }))
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SealAll() }))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }))
 	require.NoError(t, r.Close())
 
 	// Reload so whoami is resolved (Init does not set it).

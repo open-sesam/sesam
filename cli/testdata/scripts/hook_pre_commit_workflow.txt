@@ -1,0 +1,50 @@
+# `sesam hook pre-commit` is run by git before a commit. It re-seals any
+# revealed secret whose plaintext drifted from its sealed object, verifies the
+# audit log, and stages `.sesam` so the fresh ciphertext lands in the commit.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+# Init, register a secret and commit the sealed baseline.
+exec sesam init --user admin
+cp secret.env app.env
+exec sesam add app.env --group admin
+exec git add -A
+exec git commit -m 'init sesam with a secret'
+
+# Sanity: the sealed object matches the plaintext right after add.
+exec sesam status --json
+stdout '"in_sync"'
+
+# Drift the plaintext. The sealed object no longer matches.
+cp modified.env app.env
+exec sesam status --json
+stdout '"out_of_sync"'
+
+# The hook re-seals the drift and stages the updated object.
+exec sesam hook pre-commit
+
+# The object now matches the plaintext again…
+exec sesam status --json
+stdout '"in_sync"'
+
+# …and the re-sealed object is staged for the pending commit.
+exec git diff --cached --name-only
+stdout 'app\.env\.sesam'
+
+# On a repo that was never initialized, the hook is a silent no-op so it never
+# blocks commits in non-sesam repos.
+cd $WORK
+mkdir plain
+cd plain
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam hook pre-commit
+! stdout .
+
+-- secret.env --
+TOKEN=super-secret
+-- modified.env --
+TOKEN=rotated-secret
