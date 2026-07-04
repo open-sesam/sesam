@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -276,12 +277,6 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 		return nil, err
 	}
 
-	// report=true marks the entries `sesam doctor` surfaces. The duplicate
-	// log-merge subsection (same display path) and the fixed hook `event` lines
-	// are left out to avoid redundant/uninteresting doctor rows. The alias is
-	// deliberately a plain `!sesam` (no --sesam-dir, no suffix): it is a
-	// convenience shim, cannot be namespaced per repo, and any repo's init may
-	// (harmlessly) rewrite it to the same value.
 	baseEntries := []gitConfigEntry{
 		{"merge.sesam-merge.name", "merge", "sesam-merge-secret" + suffix, "name", "sesam-secret merge driver", true},
 		{"merge.sesam-merge.driver", "merge", "sesam-merge-secret" + suffix, "driver", mergeSecretCmd, true},
@@ -410,7 +405,8 @@ func clearGitConfig(r *git.Repository, sesamDir, sectionPrefix string) error {
 // subsection names (and the driver names in .gitattributes) so several sesam
 // repos can coexist in one git repo without clobbering each other. It is empty
 // for a repo at the worktree root; otherwise it is "-" + the worktree-relative
-// sesam dir, encoded to a safe, whitespace-free token.
+// sesam dir, percent-encoded (url.PathEscape) so it is a valid, whitespace-free
+// git-config subsection name and .gitattributes driver token.
 //
 // Note: the suffix pins the sesam dir at install time. Moving the sesam dir
 // (e.g. `git mv`) leaves stale names and a wrong --sesam-dir in the command;
@@ -423,25 +419,7 @@ func sesamSubsectionSuffix(r *git.Repository, sesamDir string) (string, error) {
 	if rel == "." || rel == "" {
 		return "", nil
 	}
-	return "-" + encodeSubsection(rel), nil
-}
-
-// encodeSubsection percent-encodes any byte outside a safe set so the result is
-// a valid git-config subsection name and a whitespace-free .gitattributes driver
-// token. `/` is kept (valid in both, keeps nested paths readable); everything
-// else - spaces, quotes, `%` itself - is encoded, so the mapping is injective
-// and reversible (percent-decode).
-func encodeSubsection(s string) string {
-	const safe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-/"
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		if c := s[i]; strings.IndexByte(safe, c) >= 0 {
-			b.WriteByte(c)
-		} else {
-			fmt.Fprintf(&b, "%%%02X", c)
-		}
-	}
-	return b.String()
+	return "-" + url.PathEscape(rel), nil
 }
 
 // renderGitAttributes fills the .gitattributes template with the per-repo driver
