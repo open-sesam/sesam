@@ -10,14 +10,18 @@ exec git config user.name 'Sesam Test'
 mkdir sub
 exec sesam init --user admin --sesam-dir sub
 
-# The installed driver/alias entries in .git/config must carry --sesam-dir=sub
-# so the binary resolves the nested .sesam/ when git invokes it from the
-# worktree root.
-exec git config --local diff.sesam-diff.textconv
+# The driver subsection is suffixed with the (encoded) relative sesam dir, so
+# multiple sesam repos in one git repo don't collide. Its command still carries
+# --sesam-dir=sub so the binary resolves the nested .sesam/ when git invokes it
+# from the worktree root.
+exec git config --local diff.sesam-diff-sub.textconv
 stdout '^sesam --sesam-dir=sub show$'
+# The unsuffixed subsection must NOT exist for a nested repo.
+! exec git config --local diff.sesam-diff.textconv
 
+# The alias is a plain convenience shim, never repo-specific.
 exec git config --local alias.sesam
-stdout '^!sesam --sesam-dir=sub$'
+stdout '^!sesam$'
 
 exec git add -A
 exec git commit -m 'init sesam'

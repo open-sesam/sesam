@@ -2,7 +2,10 @@ package repo
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/stretchr/testify/require"
@@ -46,4 +49,44 @@ func TestCheckGitConfigReportsHooks(t *testing.T) {
 	require.True(t, ok)
 	require.True(t, c.OK, "installed hook must match expected: got %q want %q", c.Actual, c.Expected)
 	require.Contains(t, c.Expected, "hook pre-commit")
+}
+
+// Two sesam repos in one git repo must not clobber each other's hooks: the
+// subsection names are suffixed with the sesam dir, so a second `sesam init`
+// installs its own hook alongside the first instead of overwriting it. Requires
+// git >= 2.54 (config-based hooks).
+func TestInitMultipleSesamReposKeepDistinctHooks(t *testing.T) {
+	v, err := ReadGitVersion(context.Background())
+	require.NoError(t, err)
+	if v.LessThan(semver.MustParse("2.54.0")) {
+		t.Skipf("git %s < 2.54: config-based hooks unavailable", v)
+	}
+
+	admin := writeTestIdentity(t, "admin")
+	dir := freshGitRepo(t)
+
+	initSub := func(sub string) {
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, sub), 0o700))
+		r, err := Init(context.Background(), filepath.Join(dir, sub), []string{admin.Path}, RepoInitOpts{
+			InitialUserName: admin.Name,
+			GitConfigOpts:   GitConfigOpts{InstallHooks: true},
+			RepoOpts:        RepoOpts{LockTimeout: 5 * time.Second},
+		})
+		require.NoError(t, err)
+		require.NoError(t, r.Close())
+	}
+
+	initSub("sub-a")
+	initSub("sub-b") // must not overwrite sub-a's hook
+
+	// Each repo still sees its own installed pre-commit hook, pointing at its
+	// own sesam dir.
+	for _, sub := range []string{"sub-a", "sub-b"} {
+		checks, err := CheckGitConfig(filepath.Join(dir, sub))
+		require.NoError(t, err)
+		c, ok := findGitConfigCheck(checks, "hook.sesam-precommit.command")
+		require.True(t, ok)
+		require.True(t, c.OK, "%s pre-commit hook must survive the other repo's init", sub)
+		require.Contains(t, c.Expected, "--sesam-dir="+sub)
+	}
 }

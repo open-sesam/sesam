@@ -27,6 +27,12 @@ func installHelpOrdering() {
 		1,
 	)
 
+	// The per-command and per-subcommand help topics print the raw category in
+	// their CATEGORY section; route those through trimCat too so the numeric
+	// sort-prefix (e.g. "20\x1f") never reaches the terminal.
+	cli.CommandHelpTemplate = strings.ReplaceAll(cli.CommandHelpTemplate, "{{.Category}}", "{{trimCat .Category}}")
+	cli.SubcommandHelpTemplate = strings.ReplaceAll(cli.SubcommandHelpTemplate, "{{.Category}}", "{{trimCat .Category}}")
+
 	cli.HelpPrinter = func(w io.Writer, templ string, data any) {
 		cli.HelpPrinterCustom(w, templ, data, template.FuncMap{
 			"trimCat": trimCat,
