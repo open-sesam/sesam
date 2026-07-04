@@ -68,12 +68,6 @@ func Main(args []string) error {
 				Usage:    "Removes git integration and optionally all of the sesam repo",
 			},
 			{
-				Name:     "deinit",
-				Category: catRepository,
-				Action:   commands.HandleStub,
-				Usage:    "Remove all traces of sesam",
-			},
-			{
 				Name:     "verify",
 				Category: catRepository,
 				Flags:    flagsVerify,
@@ -95,6 +89,7 @@ func Main(args []string) error {
 			},
 			{
 				Name:     "merge",
+				Hidden:   true,
 				Category: catRepository,
 				Usage:    "Merge driver (should be called by git)",
 				Commands: []*cli.Command{
