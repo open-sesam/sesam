@@ -47,7 +47,7 @@ func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if noSeal {
 			return nil
 		}
-		return s.SealAll()
+		return s.Seal(cmd.Bool("seal-all"))
 	})
 }
 
@@ -63,7 +63,7 @@ func HandleKill(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if noSeal {
 			return nil
 		}
-		return s.SealAll()
+		return s.Seal(cmd.Bool("seal-all"))
 	})
 }
 
@@ -79,7 +79,7 @@ func HandleUserChangeGroups(_ context.Context, cmd *cli.Command, r *repo.Repo) e
 		if noSeal {
 			return nil
 		}
-		return s.SealAll()
+		return s.Seal(cmd.Bool("seal-all"))
 	})
 }
 
@@ -107,7 +107,7 @@ func HandleUserAddRecipient(ctx context.Context, cmd *cli.Command, r *repo.Repo)
 		if noSeal {
 			return nil
 		}
-		return s.SealAll()
+		return s.Seal(cmd.Bool("seal-all"))
 	})
 }
 
@@ -123,7 +123,7 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 		if noSeal {
 			return nil
 		}
-		return s.SealAll()
+		return s.Seal(cmd.Bool("seal-all"))
 	})
 }
 

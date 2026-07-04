@@ -87,6 +87,23 @@ func Main(args []string) error {
 				Usage:    "Check sesam installation for possible problems",
 			},
 			{
+				Name:     "merge",
+				Category: catRepository,
+				Usage:    "Merge driver (should be called by git)",
+				Commands: []*cli.Command{
+					{
+						Name:   "secret",
+						Usage:  "Merge secrets",
+						Action: commands.HandleStub,
+					},
+					{
+						Name:   "log",
+						Usage:  "Merge audit log",
+						Action: commands.HandleStub,
+					},
+				},
+			},
+			{
 				Name:     "hook",
 				Category: catRepository,
 				Usage:    "Util to manage git hooks",
@@ -104,12 +121,12 @@ func Main(args []string) error {
 					{
 						Name:   "install",
 						Usage:  "Make sure the git hooks are installed",
-						Action: commands.HandleHookPreCommit,
+						Action: commands.WithRepo(commands.HandleHookInstall),
 					},
 					{
 						Name:   "uninstall",
 						Usage:  "Uninstall any hooks",
-						Action: commands.HandleHookPreCommit,
+						Action: commands.WithRepo(commands.HandleHookUninstall),
 					},
 				},
 			},

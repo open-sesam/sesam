@@ -29,6 +29,11 @@ var flagNoSeal = &cli.BoolFlag{
 	Usage: "Do not run 'sesam seal' afterwards - useful when batching",
 }
 
+var flagSealAll = &cli.BoolFlag{
+	Name:  "seal-all",
+	Usage: "When we seal, seal also files that did not change",
+}
+
 // userFlag builds the --user flag. Required-ness and help text differ per
 // command (init guesses from git, kill needs it), so it is parametrized rather
 // than a single shared variable.
@@ -115,6 +120,22 @@ var flagsGeneral = []cli.Flag{
 
 // flagsInit are specific to repository bootstrap.
 var flagsInit = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "install-hooks",
+		Usage: "Install pre-commit and post-commit git hooks (needs git >= 2.54.0)",
+	},
+	&cli.BoolFlag{
+		Name:  "install-merge",
+		Usage: "Install merge support in repo git config",
+	},
+	&cli.BoolFlag{
+		Name:  "install-diff",
+		Usage: "Install diff support in repo git config",
+	},
+	&cli.BoolFlag{
+		Name:  "install-alias",
+		Usage: "Make it possible to call sesam as `git sesam`",
+	},
 	userFlag(false, "Initial admin user name (if not given, git config is used to guess)"),
 }
 
@@ -124,6 +145,7 @@ var flagsSeal = []cli.Flag{
 		Name:  "clean",
 		Usage: "Delete revealed secret files after successful seal",
 	},
+	flagSealAll,
 }
 
 var flagsClean = []cli.Flag{
@@ -144,6 +166,7 @@ var flagsReveal = []cli.Flag{}
 var flagsAdd = []cli.Flag{
 	groupFlag(false, "Group assignment for the secret (repeatable) - 'admin' is implicit"),
 	flagNoSeal,
+	flagSealAll,
 	&cli.BoolFlag{
 		Name:  "nested",
 		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file",
@@ -163,12 +186,14 @@ var flagsTell = []cli.Flag{
 	recipientsFlag(true),
 	groupFlag(true, "Group assignment (repeatable)"),
 	flagNoSeal,
+	flagSealAll,
 }
 
 // flagsKill contains controls for removing users.
 var flagsKill = []cli.Flag{
 	userFlag(true, "User name to remove"),
 	flagNoSeal,
+	flagSealAll,
 }
 
 // flagsListSecrets contains output controls for secret listing.
@@ -183,18 +208,21 @@ var flagsUserChangeGroups = []cli.Flag{
 	userFlag(true, "Which user should be changed"),
 	groupFlag(true, "Group assignment for the secret (repeatable) - 'admin' is implicit"),
 	flagNoSeal,
+	flagSealAll,
 }
 
 var flagsUserAddRecipient = []cli.Flag{
 	userFlag(true, "Which user receives the new recipient"),
 	recipientsFlag(true),
 	flagNoSeal,
+	flagSealAll,
 }
 
 var flagsUserRemoveRecipient = []cli.Flag{
 	userFlag(true, "Which user looses the specified recipient"),
 	recipientsFlag(true),
 	flagNoSeal,
+	flagSealAll,
 }
 
 var flagsUserRegenerateSignKey = []cli.Flag{

@@ -320,6 +320,28 @@ func (v *View) Log(fn func(e *core.AuditEntrySigned) error) error {
 	return nil
 }
 
+// GitAddDotSesam is equivalent to `git add .sesam`
+func (v *View) GitAddDotSesam() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return ErrClosed
+	}
+
+	sesamDotDir := filepath.Join(v.sesamDir, sesamSuffix)
+
+	wt, err := v.gitRepo.Worktree()
+	if err != nil {
+		return err
+	}
+
+	return wt.AddWithOptions(&git.AddOptions{
+		All:  true, // add untracked files as well.
+		Path: sesamDotDir,
+	})
+}
+
 // Status computes a comparison between the revealed and sealed state.
 func (v *View) Status(opts StatusOpts) (*Status, error) {
 	v.mu.Lock()
@@ -559,4 +581,30 @@ func (v *View) statusToDiffDir(status *Status) (diffDir string, err error) {
 	}
 
 	return tmpDir, nil
+}
+
+func (v *View) InstallHooks() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return ErrClosed
+	}
+
+	return ensureGitConfig(v.gitRepo, v.sesamDir, RepoInitOpts{
+		GitConfigOpts: GitConfigOpts{
+			InstallHooks: true,
+		},
+	})
+}
+
+func (v *View) UninstallHooks() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return ErrClosed
+	}
+
+	return clearGitConfig(v.gitRepo, v.sesamDir, "hook")
 }

@@ -41,6 +41,12 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 			format = prefix + format + "\n"
 			fmt.Printf(format, args...)
 		},
+		GitConfigOpts: repo.GitConfigOpts{
+			InstallHooks: cmd.Bool("install-hooks"),
+			InstallMerge: cmd.Bool("install-merge") && false, // TODO: not yet implemented.
+			InstallDiff:  cmd.Bool("install-diff"),
+			InstallAlias: cmd.Bool("install-alias"),
+		},
 	}
 
 	ids := cmd.StringSlice("identity")
