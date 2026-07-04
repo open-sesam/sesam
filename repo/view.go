@@ -589,29 +589,3 @@ func (v *View) statusToDiffDir(status *Status) (diffDir string, err error) {
 
 	return tmpDir, nil
 }
-
-func (v *View) InstallHooks() error {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	if v.isClosed() {
-		return ErrClosed
-	}
-
-	return ensureGitConfig(v.gitRepo, v.sesamDir, RepoInitOpts{
-		GitConfigOpts: GitConfigOpts{
-			InstallHooks: true,
-		},
-	})
-}
-
-func (v *View) UninstallHooks() error {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	if v.isClosed() {
-		return ErrClosed
-	}
-
-	return clearGitConfig(v.gitRepo, v.sesamDir, "hook")
-}

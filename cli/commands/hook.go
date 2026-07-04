@@ -51,8 +51,13 @@ func silentWithRepo(verifyMode repo.VerifyMode, action RepoAction) cli.ActionFun
 }
 
 // Run seal (only if needed, depending on audit log and if .sesam exists) and verify. If very fails we should abort the commit.
+//
+// no-disk verify: an object may have been checked out without its audit log,
+// leaving the on-disk root hash stale. Load must tolerate that so the Seal below
+// can reconcile the log; the seal-less full verify would otherwise reject the
+// load and block the commit without a way to self-heal.
 func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
-	return silentWithRepo(repo.VerifyModeDefault, func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+	return silentWithRepo(repo.VerifyModeNoDisk, func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if err := r.Update(func(s *repo.Stage) error {
 			return s.Seal(false)
 		}); err != nil {
@@ -92,29 +97,41 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 	// no-disk verify: a checkout may have changed sealed objects on disk, so the
 	// on-disk root hash is expected to differ from the log until we reveal.
 	return silentWithRepo(repo.VerifyModeNoDisk, func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-		// On a branch switch, aggressively drop stale plaintext under .sesam
-		// (secrets removed or now inaccessible on the new branch) before
-		// revealing the new set. Aggressive clean is confined to the sesam dir.
-		// A file checkout must not wipe the worktree, so it only re-reveals
-		// (e.g. restoring a checked-out sealed object).
 		if branchCheckout {
+			// Branch switch/clone: the objects and audit log arrived together and
+			// are consistent. Aggressively drop stale plaintext under .sesam
+			// (secrets removed or now inaccessible on the new branch), then reveal
+			// the new set. Aggressive clean is confined to the sesam dir.
 			if err := r.Clean(ctx, repo.CleanOpts{Aggressive: true}); err != nil {
 				slog.Warn("failed to clean up previous revealed secrets", slog.Any("err", err))
 			}
+			if err := r.RevealAll(); err != nil {
+				slog.Warn("failed to reveal secrets after checkout", slog.Any("err", err))
+			}
+			return nil
 		}
 
+		// File checkout (git checkout -- path): a single sealed object may have
+		// been restored without its audit log, leaving the on-disk root hash
+		// stale. Reveal from the checked-out object, then seal to record it in the
+		// log so the repo is consistent again (a no-op when nothing drifted).
 		if err := r.RevealAll(); err != nil {
 			slog.Warn("failed to reveal secrets after checkout", slog.Any("err", err))
+		}
+		if err := r.Update(func(s *repo.Stage) error { return s.Seal(false) }); err != nil {
+			slog.Warn("failed to reseal after file checkout", slog.Any("err", err))
 		}
 
 		return nil
 	})(ctx, cmd)
 }
 
-func HandleHookInstall(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	return r.InstallHooks()
+// HandleHookInstall (re)installs the git hooks. It only touches git config, so
+// it does not load the repo (no lock, no audit-log verify).
+func HandleHookInstall(_ context.Context, cmd *cli.Command) error {
+	return repo.InstallHooks(cmd.String("sesam-dir"))
 }
 
-func HandleHookUninstall(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	return r.UninstallHooks()
+func HandleHookUninstall(_ context.Context, cmd *cli.Command) error {
+	return repo.UninstallHooks(cmd.String("sesam-dir"))
 }

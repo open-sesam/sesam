@@ -1,8 +1,11 @@
-# Regression: `git checkout -- <sealed object>` restores an object without the
-# audit log, so the on-disk seal root hash no longer matches the log. A normal
-# (full) verify fails on that, but the post-checkout hook must tolerate it - it
-# loads with no-disk verification and reveals from the checked-out object rather
-# than aborting the checkout with a root-hash error.
+# A sealed object can end up out of sync with the audit log when it is restored
+# without the log (a `git checkout -- <object>`, a merge, a manual swap). The
+# on-disk root hash then no longer matches the log and a full verify fails. The
+# post-checkout hook loads with no-disk verify, reveals from the on-disk object,
+# and re-seals to record it - reconciling the repo instead of aborting.
+#
+# We create the mismatch with a plain file copy rather than `git checkout` so the
+# real post-checkout hook doesn't fire and heal it before we can invoke it.
 
 exec git init
 exec git config user.email test@sesam.dev
@@ -13,24 +16,28 @@ cp secret.env app.env
 exec sesam add app.env --group admin
 exec git add -A
 exec git commit -m 'v1 of the secret'
+cp .sesam/objects/app.env.sesam v1.sealed
 
-# Rotate + re-seal the secret: new object and a new seal root hash (uncommitted).
+# Rotate + re-seal the secret: new object and a new seal root hash.
 cp secret2.env app.env
 exec sesam seal
 
-# Restore ONLY the sealed object from HEAD - it now disagrees with the (v2) log.
-exec git checkout HEAD -- .sesam/objects/app.env.sesam
+# Restore the v1 object underneath the (v2) log -> stale on-disk root hash.
+cp v1.sealed .sesam/objects/app.env.sesam
 
 # A normal full verify fails on the on-disk root-hash mismatch…
 ! exec sesam verify
 stderr 'root hash mismatch'
 
-# …but the post-checkout hook loads with no-disk verify and reveals the
-# checked-out (v1) object instead of aborting.
+# …but the post-checkout hook loads no-disk, reveals the restored (v1) object,
+# and re-seals to reconcile the log.
 rm app.env
 exec sesam hook post-checkout HEAD HEAD 0
 exists app.env
 grep 'super-secret' app.env
+
+# The log now matches the on-disk object, so a full verify passes again.
+exec sesam verify
 
 -- secret.env --
 TOKEN=super-secret

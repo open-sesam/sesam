@@ -1,0 +1,23 @@
+# `sesam hook install` / `uninstall` only touch git config: they must not load
+# the repo (no lock, no audit-log verify, no identity). So they work even with
+# no identity available, and fail cleanly on a non-sesam repo.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam init --user admin
+
+# No identity in the environment: a full repo load would fail here, but hook
+# install/uninstall must still succeed (they never load the audit log).
+env SESAM_ID=
+env SESAM_IDENTITY=
+exec sesam hook install
+exec sesam hook uninstall
+
+# On a git repo that is not a sesam repo, it errors clearly instead of loading.
+cd $WORK
+mkdir plain
+cd plain
+exec git init
+! exec sesam hook install
+stderr 'no sesam repository'
