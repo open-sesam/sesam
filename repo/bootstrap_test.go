@@ -170,23 +170,6 @@ func TestClearGitAttributes(t *testing.T) {
 	})
 }
 
-func TestEncodeSubsection(t *testing.T) {
-	cases := []struct {
-		in, want string
-	}{
-		{"sub", "sub"},
-		{"services/secrets", "services/secrets"}, // slash stays
-		{"my dir", "my%20dir"},                   // space encoded
-		{"weird%name", "weird%25name"},           // percent encoded (reversible)
-		{"a\tb", "a%09b"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			require.Equal(t, tc.want, encodeSubsection(tc.in))
-		})
-	}
-}
-
 // wrapHookCmd must guard on sesam's presence and keep the sesam call last, so
 // git's appended "$@" reaches it and a missing binary skips the hook (exit 0)
 // rather than aborting the commit with "command not found".

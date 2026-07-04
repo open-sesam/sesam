@@ -207,22 +207,20 @@ func (sm *SecretManager) sealOrPreserve(revealedPath string, all bool) (*secretF
 	case err == nil:
 		sealer := sm.Signer.UserName()
 		if sm.State.SealerAuthorized(sealer, revealedPath) {
-			// Unless forced (all), skip the reseal only when the existing object
-			// still matches both the plaintext and the recipient set. NeedsSeal
-			// hands back the footer it read so we can return it without a second
-			// read when nothing changed.
-			needsSeal, footer := true, (*secretFooter)(nil)
+			// Unless forced (all), skip the reseal when the existing object still
+			// matches both the plaintext and the recipient set. NeedsSeal hands
+			// back the footer it read so we can return it without a second read.
 			if !all {
-				if needsSeal, footer, err = sm.NeedsSeal(revealedPath); err != nil {
+				needsSeal, footer, err := sm.NeedsSeal(revealedPath)
+				if err != nil {
 					return nil, fmt.Errorf("failed to check whether reseal is needed: %w", err)
+				}
+				if !needsSeal {
+					return footer, nil
 				}
 			}
 
-			if needsSeal {
-				return sealSecret(sm, revealedPath, sm.recipientsFor(revealedPath), dest, sealer)
-			}
-
-			return footer, nil
+			return sealSecret(sm, revealedPath, sm.recipientsFor(revealedPath), dest, sealer)
 		}
 
 		// Expected for non-recipients: they cannot re-seal what they cannot
