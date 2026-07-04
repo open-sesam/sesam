@@ -146,8 +146,11 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 	return sm.State.FeedEntry(sm.Signer, auditEntry)
 }
 
-// Seal seals all known secrets.
-// This would have advantages on merging -> nothing really changed -> nothing needs to be sealed.
+// Seal (re-)seals the known secrets. With all=false only secrets whose plaintext
+// or recipient set drifted are re-encrypted; unchanged ones keep their existing
+// ciphertext. When nothing was re-sealed or pruned, no audit entry is written,
+// so a no-op seal (e.g. the pre-commit hook on a commit that touched no secrets)
+// does not churn the log.
 func (sm *SecretManager) Seal(all bool) error {
 	objects := sm.objectsDir()
 	if err := sm.root.MkdirAll(objects, 0o700); err != nil {
@@ -170,10 +173,21 @@ func (sm *SecretManager) Seal(all bool) error {
 		return fmt.Errorf("prune stale objects: %w", err)
 	}
 
+	// The seal entry attests the root hash of the current sealed manifest. When
+	// that is unchanged (nothing re-encrypted, added, removed or moved) there is
+	// nothing new to record, so skip the entry - otherwise a no-op seal (e.g. the
+	// pre-commit hook on a commit that touched no secrets) would append an entry
+	// on every commit. A reseal changes the ciphertext hash, so this also covers
+	// content and recipient drift.
+	rootHash := buildRootHash(sigs)
+	if rootHash == sm.State.LastSealRootHash {
+		return nil
+	}
+
 	return sm.State.FeedEntry(
 		sm.Signer,
 		newAuditEntry(sm.Signer.UserName(), &DetailSeal{
-			RootHash:    buildRootHash(sigs),
+			RootHash:    rootHash,
 			FilesSealed: len(sigs),
 		}),
 	)
@@ -234,7 +248,8 @@ func (sm *SecretManager) sealOrPreserve(revealedPath string, all bool) (*secretF
 }
 
 // pruneObjects removes object files under objects/ whose sesam-relative path is
-// not in `wanted` (the set just sealed/preserved). Empty directories are left in place.
+// not in `wanted` (the set just sealed/preserved). Empty directories are left in
+// place.
 func (sm *SecretManager) pruneObjects(wanted map[string]bool) error {
 	objects := sm.objectsDir()
 	if _, err := sm.root.Stat(objects); os.IsNotExist(err) {

@@ -27,16 +27,6 @@ type ManagedFileCheck struct {
 	Missing []string
 }
 
-// doctorGitConfigPaths is the subset of managed git-config entries `sesam
-// doctor` reports on. The filter driver and `filter…required` are intentionally
-// left out here; doctor focuses on the merge/diff/alias wiring.
-var doctorGitConfigPaths = map[string]bool{
-	"merge.sesam-merge.name":   true,
-	"merge.sesam-merge.driver": true,
-	"diff.sesam-diff.textconv": true,
-	"alias.sesam":              true,
-}
-
 // GitWorktreeRoot opens the git repository containing dir (searching upward for
 // a .git) and returns the absolute path of its worktree root. It errors when
 // dir is not inside a git repository.
@@ -59,8 +49,10 @@ func GitWorktreeRoot(dir string) (string, error) {
 	return wt.Filesystem.Root(), nil
 }
 
-// CheckGitConfig compares the merge/diff/alias git-config entries sesam relies
-// on against what `sesam init` would install for the repo at sesamDir.
+// CheckGitConfig compares the git-config entries sesam surfaces in `sesam
+// doctor` (those flagged report in expectedGitConfig - merge/diff/alias and, on
+// git >= 2.54, the hook commands) against what `sesam init` would install for
+// the repo at sesamDir.
 func CheckGitConfig(sesamDir string) ([]GitConfigCheck, error) {
 	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
 	if err != nil {
@@ -79,7 +71,7 @@ func CheckGitConfig(sesamDir string) ([]GitConfigCheck, error) {
 
 	var checks []GitConfigCheck
 	for _, e := range entries {
-		if !doctorGitConfigPaths[e.display] {
+		if !e.report {
 			continue
 		}
 

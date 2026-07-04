@@ -22,9 +22,12 @@ stdout '^!sesam --sesam-dir=sub$'
 exec git add -A
 exec git commit -m 'init sesam'
 
-# End-to-end: git runs the alias (`!sesam --sesam-dir=sub`) as a shell command
-# with cwd = worktree root. The baked-in flag must let it resolve the nested
-# repo and list its secrets - here the README init created under sub/.
-exec git sesam ls
+# End-to-end: git runs its drivers/aliases with cwd = worktree root, passing the
+# baked-in --sesam-dir=sub. Invoke sesam the same way (from the worktree root
+# with that flag) and confirm it resolves the nested repo and lists the README
+# init created under sub/. We call sesam directly rather than via `git sesam` so
+# the check doesn't depend on the ambient shell's PATH resolving `sesam` (the
+# git alias path is covered by git_sesam_alias_workflow.txt).
+exec sesam --sesam-dir=sub ls
 stdout 'README\.md'
 stdout 'admin'

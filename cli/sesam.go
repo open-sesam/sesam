@@ -61,6 +61,13 @@ func Main(args []string) error {
 				Usage:    "Initialize sesam in the current repository",
 			},
 			{
+				Name:     "uninstall",
+				Category: catRepository,
+				Flags:    flagsUninstall,
+				Action:   commands.HandleUninstall,
+				Usage:    "Removes git integration and optionally all of the sesam repo",
+			},
+			{
 				Name:     "deinit",
 				Category: catRepository,
 				Action:   commands.HandleStub,

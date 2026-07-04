@@ -138,6 +138,21 @@ func TestSealFailsMissingPlaintext(t *testing.T) {
 	require.Error(t, err, "seal should fail when plaintext file is missing")
 }
 
+// A seal that changes nothing must not append a DetailSeal entry - otherwise the
+// pre-commit hook would churn the audit log on every commit. A seal that does
+// change something appends exactly one.
+func TestSealNoopSkipsAuditEntry(t *testing.T) {
+	mgr := sealedSecretManager(t)
+
+	before := len(mgr.AuditLog.Entries)
+	require.NoError(t, mgr.Seal(false))
+	require.Len(t, mgr.AuditLog.Entries, before, "a no-op seal must not append an audit entry")
+
+	writeSecret(t, mgr.SesamDir, "secrets/test", "changed")
+	require.NoError(t, mgr.Seal(false))
+	require.Len(t, mgr.AuditLog.Entries, before+1, "a reseal must append exactly one entry")
+}
+
 // TestSealIncrementalNewSecret pins that Seal(false) can seal a brand-new
 // secret. The incremental path compares against an existing object; a new
 // secret has none, so it must seal rather than fail on the missing ciphertext.

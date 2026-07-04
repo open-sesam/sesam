@@ -1,0 +1,36 @@
+# `sesam hook post-checkout` gets git's is-branch-checkout flag as its 3rd arg.
+# A branch switch ("1", also clone) aggressively drops stale plaintext under
+# .sesam before revealing; a file checkout ("0", `git checkout -- path`) must
+# only re-reveal and never wipe the worktree.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+cp secret.env app.env
+exec sesam add app.env --group admin
+exec git add -A
+exec git commit -m 'init sesam with a secret'
+
+# Absent plaintext (so we can observe the reveal) plus an untracked file that a
+# clean would remove.
+rm app.env
+cp junk keep.txt
+
+# File checkout (flag 0): reveals, but must NOT clean the untracked file.
+exec sesam hook post-checkout prev new 0
+exists app.env
+exists keep.txt
+
+# Branch checkout (flag 1): aggressively cleans stale untracked files under
+# .sesam, then re-reveals the current secrets.
+exec sesam hook post-checkout prev new 1
+! exists keep.txt
+exists app.env
+grep 'super-secret' app.env
+
+-- secret.env --
+TOKEN=super-secret
+-- junk --
+untracked leftover

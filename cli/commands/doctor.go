@@ -492,14 +492,14 @@ func gitCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 		run: func() DoctorDiagnosis {
 			path, err := exec.LookPath("git")
 			if err != nil {
-				return docIssue("git not found in PATH", "install git (>= 2.54 for upcoming hook support)")
+				return docIssue("git not found in PATH", "install git (>= 2.54 for git config hook support)")
 			}
 			return docHealthy(path)
 		},
 		subChecks: []DoctorCheck{
 			gitVersionCheck(ctx),
 			gitConfigCheck(env),
-			gitHooksCheck(),
+			gitHooksCheck(env),
 		},
 	}
 }
@@ -583,19 +583,77 @@ func gitConfigCheck(env doctorEnv) DoctorCheck {
 	}
 }
 
-func gitHooksCheck() DoctorCheck {
-	// TODO: @adel need to be implenmented when git hooks come in.
-	stub := func(name string) DoctorCheck {
+// gitHooksCheck reports on the config-based hooks `sesam init` installs. These
+// live in git config (hook.sesam-*.command), so they are checked the same way
+// as the merge/diff/alias wiring. They only exist when git is new enough; when
+// expectedGitConfig omits them (older git) the entries are absent from the
+// results and reported as unavailable rather than misconfigured.
+func gitHooksCheck(env doctorEnv) DoctorCheck {
+	var (
+		once    sync.Once
+		checks  []repo.GitConfigCheck
+		loadErr error
+	)
+	load := func() {
+		once.Do(func() { checks, loadErr = repo.CheckGitConfig(env.sesamDir) })
+	}
+
+	supported := func() bool {
+		for _, c := range checks {
+			if strings.HasPrefix(c.Path, "hook.") {
+				return true
+			}
+		}
+		return false
+	}
+
+	entry := func(name, path string) DoctorCheck {
 		return &genericCheck{name: name, run: func() DoctorDiagnosis {
-			return docInfo("planned, not implemented yet")
+			load()
+			if loadErr != nil {
+				return docFailed("git config unreadable")
+			}
+			for _, c := range checks {
+				if c.Path != path {
+					continue
+				}
+				switch {
+				case c.OK:
+					return docHealthy("installed")
+				case c.Actual == "":
+					return docIssue("not installed", "run `sesam init` to (re)install sesam's git hooks")
+				default:
+					return docIssue(
+						fmt.Sprintf("unexpected value %q (want %q)", c.Actual, c.Expected),
+						"run `sesam init` to (re)install sesam's git hooks",
+					)
+				}
+			}
+			return docInfo(fmt.Sprintf("requires git >= %s", minGitVersion))
 		}}
 	}
+
 	return &genericCheck{
 		name: "git-hooks",
-		run:  func() DoctorDiagnosis { return docInfo("hook installation not implemented yet") },
+		run: func() DoctorDiagnosis {
+			load()
+			if loadErr != nil {
+				return docIssue(
+					fmt.Sprintf("could not read git config: %v", loadErr),
+					"run `sesam init` inside the repository",
+				)
+			}
+			if !supported() {
+				return docWarn(
+					fmt.Sprintf("config-based hooks unavailable: git >= %s required", minGitVersion),
+					"upgrade git to auto-seal on commit and auto-reveal on checkout",
+				)
+			}
+			return docHealthy("sesam git hooks (each checked below)")
+		},
 		subChecks: []DoctorCheck{
-			stub("pre-commit (seal+verify)"),
-			stub("post-commit (open)"),
+			entry("pre-commit (seal+verify)", "hook.sesam-precommit.command"),
+			entry("post-checkout (reveal)", "hook.sesam-postcheckout.command"),
 		},
 	}
 }
