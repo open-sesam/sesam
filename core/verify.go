@@ -696,7 +696,7 @@ func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, erro
 	if state.LastSealRootHash != "" {
 		sigs, err := readAllSignatures(log.root)
 		if err != nil {
-			return nil, fmt.Errorf("reading signatures for root hash check: %w", err)
+			return nil, fmt.Errorf("reading signatures for root hash check: %w (try --verify-mode no-disk)", err)
 		}
 
 		diskRootHash := buildRootHash(sigs)
