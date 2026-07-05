@@ -162,11 +162,11 @@ func Main(args []string) error {
 				Arguments: []cli.Argument{
 					&cli.StringArg{
 						Name:      "oldpath",
-						UsageText: "The old revealed path to move from",
+						UsageText: "<OLD_PATH>",
 					},
 					&cli.StringArg{
 						Name:      "newpath",
-						UsageText: "The new revealed path to move to",
+						UsageText: "<NEW_PATH>",
 					},
 				},
 			},
@@ -174,7 +174,7 @@ func Main(args []string) error {
 				Name:     "edit",
 				Category: catSecrets,
 				Action:   commands.HandleStub,
-				Usage:    "Edit an secret and immediately seal it afterwards",
+				Usage:    "Open secret in $EDITOR and immediately seal it afterwards",
 			},
 			{
 				Name:     "seal",
@@ -225,7 +225,7 @@ func Main(args []string) error {
 				Arguments: []cli.Argument{
 					&cli.StringArgs{
 						Name:      "dir",
-						UsageText: "Only show secrets in specific dirs",
+						UsageText: "[<DIR>...]",
 						Max:       255, // apparently we have to set max to something here...
 					},
 				},
@@ -320,11 +320,11 @@ func Main(args []string) error {
 						Arguments: []cli.Argument{
 							&cli.StringArg{
 								Name:      "olduser",
-								UsageText: "The old user name",
+								UsageText: "<OLD_NAME>",
 							},
 							&cli.StringArg{
 								Name:      "newuser",
-								UsageText: "The new user name",
+								UsageText: "<NEW_NAME>",
 							},
 						},
 					},
@@ -332,6 +332,11 @@ func Main(args []string) error {
 			},
 
 			// --- Config: the declarative sesam.yml workflow ---
+			{
+				Name:   "apply",
+				Usage:  "Alias for `sesam config apply`",
+				Action: commands.HandleStub,
+			},
 			{
 				Name:     "config",
 				Category: catConfig,
@@ -354,6 +359,11 @@ func Main(args []string) error {
 					},
 					{
 						Name:   "set",
+						Usage:  "Set specific config keys",
+						Action: commands.HandleStub,
+					},
+					{
+						Name:   "reset",
 						Usage:  "Set specific config keys",
 						Action: commands.HandleStub,
 					},
