@@ -6,14 +6,6 @@
 or you can create a whole new one. If you use an existing repository we recommend an empty sub-directory to manage
 your secret files in. The `.sesam` directory does not need to be on the same level as the `.git` folder.
 
-```admonish warning
-Sesam relies on git history to be linear. You should therefore disable `git push --force`
-in your repository. Most git forges allow this in their settings (example: [GitHub](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#allow-force-pushes))
-
-If force pushes are possible, someone could truncate the audit log (see [Design](/design.md) for more info).
-This can lead to security issues. If you must, restricting this to trusted admins should be fine too.
-```
-
 ## Creating a new repository
 
 In the folder you've selected run:
@@ -22,15 +14,14 @@ In the folder you've selected run:
 $ sesam init --identity ~/.ssh/whatever-key-you-want
 ```
 
-Some things to note here:
+This command will do the following:
 
-- This command will do the following:
-  - Create a folder `.sesam/` in the current directory.
-  - Create a default config file in `sesam.yml`. It is a declarative config describing the state we want in our repo.
-  - Create a `.gitignore` that ignores everything but `.sesam/` and `.sesam.yml`. This is to protect revealed secret so they **never get accidentally added to git**.
-  - Create `.gitattributes` that tells `git` what to do with the encrypted files.
-  - It will also do a couple other `git` operations that are described [here](./tips.md).
-  - It will also create a first secret: `README.sesam`. Read it for a very condensed version of this tutorial.
+- Create a folder `.sesam/` in the current directory.
+- Create a default config file in `sesam.yml`. It is a declarative config describing the state we want in our repo.
+- Create a `.gitignore` that ignores everything but `.sesam/` and `.sesam.yml`. This is to protect revealed secret so they **never get accidentally added to git**.
+- Create `.gitattributes` that tells `git` what to do with the encrypted files.
+- It will also do a couple other `git` operations that are described [here](./git_integration.md).
+- It will also create a first secret: `README.sesam`. Read it for a very condensed version of this tutorial.
 - We will guess the initial user's name from your `git config`. If you want a different name then use the `--user` parameter or rename later.
 - The initial user will automatically be an `admin` user. `sesam` has the concept of users with different access levels.
 - Every user needs an **identity** - a cryptographic way to prove he is this specific user.
@@ -98,10 +89,17 @@ $ sesam id --json
 }
 ```
 
-### Encrypted identities
+```admonish info
+We try to be very script-friendly - you will find that most commands support a
+`--json` switch that can then be piped to helpers like `jq` easily.
+```
 
-Both `ssh` and `age` support encrypting keys at rest. To unlock them before use we have to ask the user what the passphrase is. 
-This can be done either:
+
+### Passphrase protected identities
+
+Both `ssh` and `age` support encrypting keys at rest with a passphrase. To
+unlock them before use we have to ask the user what the passphrase is. This can
+be done either:
 
 1. By asking the user directly on terminal when we detect such a key.
 2. By reading the passphrase from the OS keyring (e.g. where it was stored from last time)
@@ -133,7 +131,7 @@ Every user of `sesam` has at least one **recipient**. Think of it as the public 
 
 We have support for shell completion for most popular shells thanks to the [urfave/cli package](https://cli.urfave.org/v3/examples/completions/shell-completions/).
 
-```
+```bash
 # Choose your shell:
 source <(../sesam completion bash)
 source <(../sesam completion zsh)
@@ -141,4 +139,56 @@ source <(../sesam completion fish)
 ```
 
 This will enable it only for the current shell. Put it in your shell config (`.bashrc`, `.zshrc`, ...) to make it permanent.
-Some day this might be pre-installed for you.
+Some day this might be pre-installed for you. When this day comes we document it here.
+
+## `git push --force` and `sesam`
+
+The tamper detection of `sesam` assumes **linear, append-only history**. The audit log
+is verified by walking git history and checking that the log at each commit is a
+strict prefix of the log at the next - it may grow, but never shrink or change
+underneath you. The `init` UUID pinned in the first commit anchors that chain.
+
+A force-push breaks the assumption. By rewriting history it can drop or replace
+commits, so a truncated or substituted audit log can be made to look like the
+legitimate tip. `sesam`` can still *detect* this if it has an older copy to compare
+against (a local clone, a CI checkout, another collaborator's repo), but it
+cannot detect it from the rewritten remote alone.
+
+```admonish warning
+Treat force-push as out of scope for sesam's guarantees. Disable it at the forge
+for any branch that carries a `.sesam` directory:
+
+- **GitHub/Gitea:** enable branch protection and forbid force-push.
+- **GitLab:** mark the branch protected with "Allowed to force push" off.
+- **Self-hosted:** `receive.denyNonFastForwards = true`, or a pre-receive hook.
+
+If a force-push does happen, do not trust the remote state. Compare against a
+known-good clone and run `sesam verify --all` before relying on any secret.
+
+The linear-history requirement is usually the better default anyway, and most
+forges make it a one-click setting.
+
+If the force pushed did only affect files out of sesam, then we should be fine.
+
+`- -force-with-lease` makes no difference here by the way.
+```
+
+
+## Calling the doctor
+
+If you are unsure if there's something wrong with your installation of `sesam`, then run this:
+
+```bash
+$ sesam doctor
+```
+
+This will check the installation and print any issue along with tips on how to fix them.
+
+## Uninstalling `sesam`
+
+If you want to get rid of `sesam` (☹) then you can just run `sesam uninstall`.
+This will by default remove all git integration that was previously installed
+(i.e. remove our `.gitignore` changes, `.gitattributes` and `.git/config`).
+
+If you also want to get rid of all the `sesam.yml` files and `.sesam/` directory
+then run `sesam uninstall --all`. That will ask you though.

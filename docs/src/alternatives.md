@@ -71,29 +71,33 @@ concept to docker-compose or terraform).
 
 ## Decentralized / Git-native tools
 
-If you want a full overview of what existing tools we are aware of: Please read on.
-Let us also know if you found something wrong here.
+The table below maps the five reasons above onto the tools most similar to sesam.
+We are obviously biased since we defined the categories we compare against,
+so take it with a grain of salt. Your requirements might be different than what we want from a tool.
 
-The table below maps the five reasons above onto the tools most similar to sesam:
+Let us also know if you found something wrong here, there's so many tools that do
+roughly the same thing and it makes keeping an overview hard.
 
-| | [git-crypt](https://github.com/AGWA/git-crypt) | [git-secret](https://git-secret.io) | [sops](https://github.com/getsops/sops) | [agebox](https://github.com/slok/agebox) | [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) | sesam |
-|--|--|--|--|--|--|--|
-| **1. Works natively with git** | | | | | | |
-| Transparent git UX (clean/smudge) | ✓ | ✗ | ✗ | ✗ | ✗ | ✓           |
-| **2. Leveled, per-user access** | | | | | | |
-| Named per-user recipients | ✓¹ | ✓¹ | ✓ | ✓ | ✗ | ✓ |
-| Per-file selective access | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ |
-| Leveled access (admin / user roles) | ✗ | ✗ | ✗ | ✗ | ✓² | ✓ |
-| **3. Decentralized — no service to run** | | | | | | |
-| Self-hosted / offline, no server | ✓ | ✓ | ✓ | ✓ | ✗³ | ✓ |
-| **4. Modern crypto & verifiable security** | | | | | | |
-| Modern crypto (no GPG) | ✗⁴ | ✗ | ✓⁵ | ✓ | ✓ | ✓ |
-| Signed + hash-chained audit log | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| Detects content swaps / history tampering | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| Rekey on user removal | ✗ | manual | manual⁶ | manual | ✗ | ✓ (automatic) |
-| **5. Modern, declarative UX** | | | | | | |
-| Declarative desired-state + `apply` | ✗ | ✗ | partial⁷ | ✗⁸ | partial⁹ | ✓ |
-| Production-ready | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ (in development) |
+
+
+| | [git-crypt](https://github.com/AGWA/git-crypt) | [git-agecrypt](https://github.com/vlaci/git-agecrypt) | [git-age](https://github.com/prskr/git-age) | [git-secret](https://git-secret.io) | [sops](https://github.com/getsops/sops) | [agebox](https://github.com/slok/agebox) | [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) | sesam |
+|--|--|--|--|--|--|--|--|--|
+| **1. Works natively with git** | | | | | | | | |
+| Transparent git UX                | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| **2. Leveled, per-user access** | | | | | | | | |
+| Named per-user recipients | ✓¹ | ✓ | ✓ | ✓¹ | ✓ | ✓ | ✗ | ✓ |
+| Per-file selective access | ✗ | ✓ | ✗¹⁰ | ✗ | ✓ | ✗ | ✗ | ✓ |
+| Leveled access (admin / user roles) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓² | ✓ |
+| **3. Decentralized — no service to run** | | | | | | | | |
+| Self-hosted / offline, no server | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗³ | ✓ |
+| **4. Modern crypto & verifiable security** | | | | | | | | |
+| Modern crypto (no GPG) | ✗⁴ | ✓ | ✓ | ✗ | ✓⁵ | ✓ | ✓ | ✓ |
+| Signed + hash-chained audit log | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| Detects content swaps / history tampering | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| Rekey on user removal | ✗ | manual | manual | manual | manual⁶ | manual | ✗ | ✓ (automatic) |
+| **5. Modern, declarative UX** | | | | | | | | |
+| Declarative desired-state + `apply` | ✗ | ✗ | ✗ | ✗ | partial⁷ | ✗⁸ | partial⁹ | ✓ |
+| Production-ready | ✓ | ✗¹¹ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ (in development) |
 
 ¹ Per-user identities come via GPG keys.  
 ² Access levels are enforced by Kubernetes cluster RBAC at runtime, not in git.  
@@ -103,7 +107,9 @@ The table below maps the five reasons above onto the tools most similar to sesam
 ⁶ `sops updatekeys`, run manually per file.  
 ⁷ `.sops.yaml` `creation_rules` apply only to newly-created files; existing files need a manual `sops updatekeys`.  
 ⁸ `.ageboxreg.yml` is an auto-generated tracking file, not an authored desired-state spec.  
-⁹ `SealedSecret` manifests are reconciled by the controller (GitOps), but users/access live in separate cluster RBAC, not the spec.
+⁹ `SealedSecret` manifests are reconciled by the controller (GitOps), but users/access live in separate cluster RBAC, not the spec.  
+¹⁰ Recipients are managed repo-wide in a single `.agerecipients`; every recipient can decrypt every file.  
+¹¹ Functional but dormant (no releases since 2024).
 
 
 ### Overview
@@ -119,9 +125,11 @@ The table below maps the five reasons above onto the tools most similar to sesam
 | [**gopass**](https://www.gopass.pw) | Go | 2017 | active | git backend (pass-compatible) | GPG / age |
 | [**sops**](https://github.com/getsops/sops) | Go | 2015 | very active | none native² | age / PGP / KMS |
 | [**agebox**](https://github.com/slok/agebox) | Go | 2021 | moderate | none native² | age (X25519) |
+| [**git-agecrypt**](https://github.com/vlaci/git-agecrypt) | Rust | 2021 | dormant | transparent (clean/smudge) | age (X25519 / SSH) |
+| [**git-age**](https://github.com/prskr/git-age) | Go | 2024 | active | transparent (clean/smudge) | age (X25519) |
 | [**Sealed Secrets**](https://github.com/bitnami-labs/sealed-secrets) | Go | 2018 | active | commit sealed YAML | RSA-OAEP + AES-GCM |
 | [**cottage**](https://github.com/sayanarijit/cottage) | Rust | 2026 | new³ | explicit encrypt/decrypt (`ctg`) + env-inject | age (X25519 / ssh) |
-| **sesam** | Go | 2025 | in development | transparent (smudge, diff, merge) + pre-commit | age / ChaCha20-Poly1305 |
+| **sesam** | Go | 2025 | in development | transparent (hooks, diff, merge)  | age / ChaCha20-Poly1305 / ssh |
 
 ¹ AES-CBC via OpenSSL — considered weaker than GCM/ChaCha20.  
 ² Works alongside git but requires explicit encrypt/decrypt invocation.  
@@ -140,6 +148,8 @@ The table below maps the five reasons above onto the tools most similar to sesam
 | [gopass](https://www.gopass.pw) | team mounts | ✗ | ✗ | ✗ |
 | [sops](https://github.com/getsops/sops) | yes | ✓ | ✓ | ✗ |
 | [agebox](https://github.com/slok/agebox) | age recipients | ✗ | ✗ | ✗ |
+| [git-agecrypt](https://github.com/vlaci/git-agecrypt) | age recipients | ✗ | ✓ | ✗ |
+| [git-age](https://github.com/prskr/git-age) | age recipients | ✗ | ✗ | ✗ |
 | [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) | cluster RBAC | ✗ | ✓ | ✓ (cluster RBAC) |
 | [cottage](https://github.com/sayanarijit/cottage) | age recipients | ✗ | ✓ (allow/deny globs) | ✗ |
 | sesam | age recipients | ✓ | ✓ | ✓ |
@@ -158,6 +168,8 @@ The table below maps the five reasons above onto the tools most similar to sesam
 | [gopass](https://www.gopass.pw) | partial | ✗ | ✗ | manual | ✗ |
 | [sops](https://github.com/getsops/sops) | ✓ | ✗ | ✗ | `sops rotate` | manual |
 | [agebox](https://github.com/slok/agebox) | ✓ | ✗ | ✗ | partial | manual |
+| [git-agecrypt](https://github.com/vlaci/git-agecrypt) | ✓ | ✗ | ✗ | manual | ✗ |
+| [git-age](https://github.com/prskr/git-age) | ✓ | ✗ | ✗ | manual | ✗ |
 | [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) | ✓ | ✗ | k8s audit | key renewal | ✗ |
 | [cottage](https://github.com/sayanarijit/cottage) | ✓ | ✗ | ✗ (checksum only) | not documented | ✗ |
 | sesam | ✓ | ✓ | ✓ (encrypted, signed, hash-chained) | manual | ✓ |
@@ -166,9 +178,9 @@ The table below maps the five reasons above onto the tools most similar to sesam
 
 ## Env-file / app-config focused tools
 
-This is a bit of a separte niche: These tools manage `.env` files. Their
+This is a bit of a separate niche: These tools manage `.env` files. Their
 smallest level of secret is an environment variable that is being managed,
-while for `sesam` it is files.
+while for `sesam` it is files (except for templates).
 
 They fit well for use cases where you inject your configuration via environment
 and don't have a lot of complete files. In some sense `sops` could be added here as well.

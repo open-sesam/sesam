@@ -254,6 +254,16 @@ body {
     font-family: "Rubik", sans-serif;
 }
 
+/* Content reads a touch larger than mdBook's stock 1.6rem. Scoped to the
+   content column so the sidebar (its own explicit 1.6rem) is untouched; the
+   page-TOC is pinned below so it doesn't grow with it. */
+.content main {
+    font-size: 1.8rem;
+}
+.pagetoc {
+    font-size: 1.5rem;
+}
+
 h1, h2, h3, h4, h5, h6 {
     font-family: "Josefin Sans", sans-serif;
 }
@@ -423,6 +433,21 @@ html {
     color: var(--sesam-emerald-hover);
 }
 
+/* --- Theme-swapped diagrams ---
+   Ship both the light and dark artwork; show whichever matches the active
+   theme. Keyed on the same signal as the palette above (explicit data-theme,
+   else prefers-color-scheme), so it needs no JS and never flashes. */
+.arch-diagram { max-width: 100%; height: auto; }
+.arch-dark    { display: none; }
+
+html[data-theme="dark"] .arch-light { display: none; }
+html[data-theme="dark"] .arch-dark  { display: inline; }
+
+@media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]):not([data-theme="dark"]) .arch-light { display: none; }
+    html:not([data-theme="light"]):not([data-theme="dark"]) .arch-dark  { display: inline; }
+}
+
 /* --- Code blocks ---
    JetBrains Mono everywhere (matches the landing terminal + wordmark). Fenced
    blocks get a warm terminal-like surface; inline code stays a small chip. */
@@ -487,6 +512,13 @@ pre > code.hljs {
 .hljs-emphasis               { font-style: italic; }
 .hljs-strong                 { font-weight: 700; }
 
+/* --- sesam CLI accents ---
+   Applied by theme/bash-highlight.js to command examples: the `sesam` command
+   (emerald), its subcommand(s) (gold) and --flags (clay). Tokens track theme. */
+pre code .sesam-cmd    { color: var(--sesam-emerald); font-weight: 700; }
+pre code .sesam-subcmd { color: var(--code-attr); font-weight: 600; }
+pre code .sesam-flag   { color: var(--code-number); }
+
 /* --- Admonish box accents --- */
 
 :is(.admonition.admonish-tip) {
@@ -528,6 +560,19 @@ pre > code.hljs {
 :is(.admonition.admonish-note) > :is(.admonition-title, summary.admonition-title)::before {
     background-color: var(--sesam-emerald-muted);
 }
+
+/* --- Tables ---
+   mdBook only paints even rows (--table-alternate-bg); odd rows were left
+   transparent, letting the arabic page pattern bleed through. Give them an
+   explicit surface so both stripes stay opaque and the zebra reads cleanly. */
+.content main table tbody tr:nth-child(2n+1) {
+    background: var(--sesam-surface);
+}
+
+/* ✓/✗ glyphs (wrapped by theme/table-marks.js): supported reads emerald, the
+   absent one a muted red — softened so a column of ✗ doesn't shout. */
+.content main table .mark-yes { color: var(--sesam-emerald); font-weight: 700; }
+.content main table .mark-no  { color: color-mix(in srgb, var(--code-deletion) 60%, var(--sesam-text-muted)); }
 
 /* --- Pagetoc --- */
 

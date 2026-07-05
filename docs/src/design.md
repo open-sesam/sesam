@@ -13,8 +13,8 @@ This is a *very* brief summary of what components we have.
 - **secret:** A single age-encrypted file with a footer that can be decrypted by all configured recipients.
 - **footer**: Each file has a footer, storing the revealed content's path, it's encrypted and decrypted hash (here as HMAC) and a signature.
 - **repo:** The place where `sesam` stores all of it's state (i.e. `.sesam/`). That's the main part you want to commit.
-- **recpient:** A public key attached to a user, required fro decryption (terminology copied from `age`).
-- **identity:** The private key used by users, required for decryption (terminology copied from `age`). 
+- **recipient:** A public key attached to a user, required fro decryption (terminology copied from `age`).
+- **identity:** The private key used by users, required for decryption (terminology copied from `age`).
 - **audit log**: A log that keeps track of what file operations were done on the repository. It is signed and append-only,
   so that tampering would be immediately detected. By replaying the log we can defer the **verified state**.
 - **verified state:** The state that we expect in the repository. Contains information about all users, groups and secrets.
@@ -25,7 +25,8 @@ This is a *very* brief summary of what components we have.
 - **user:** Users are user IDs that have a signkey, one or more identities, one or more recipients an that are in one or more groups.
 
 <div style="text-align: center;">
-  <img src="architecture_overview_light.svg" width="900" />
+  <img class="arch-diagram arch-light" src="architecture_overview_light.svg" width="900" alt="Architecture overview" />
+  <img class="arch-diagram arch-dark" src="architecture_overview_dark.svg" width="900" alt="Architecture overview" />
 </div>
 
 ### Design guidelines
@@ -128,7 +129,7 @@ state is treated as a request, never as truth. This is what makes the
 `sesam` will store all its data inside the `.sesam` directory. This directory may be in the
 same directory as a `.git` folder or inside a sub-folder of a `git` repository.
 
-```
+```text
 sesam.yml
 .gitattributes
 .gitignore

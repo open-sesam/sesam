@@ -47,4 +47,6 @@ additional-js = [
   "theme/pagetoc.js",
   "theme/sidebar-logo.js",
   "theme/theme-switch.js",
+  "theme/bash-highlight.js",
+  "theme/table-marks.js",
 ]

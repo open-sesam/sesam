@@ -5,6 +5,7 @@
 ```admonish note
 All secrets must be in the same folder as `sesam.yml` or below it.
 We do not support adding secrets outside of the sesam repository.
+Attempts to do so will error out.
 ```
 
 If you have a secret at `path/to/secret`, then having it managed by `sesam` is only a matter of this command:
@@ -18,9 +19,17 @@ This will:
 1. Record that this file is now managed by `sesam` by adding it to the audit log.
 2. Encrypt the file and place it in `.sesam/objects`. This is what is being pushed in the end.
 
-If you also like to have it committed, then just append a `--commit`.
+If you omit the ``--group`` parameter then only the `admin` group will have access to the file.
+You can change this at any point by just re-running the `add` command with any groups you want to set.
 
 ## Adding a secret via config (declarative)
+
+```admonish warning
+The `sesam apply` feature is not yet implemented.
+Please see here to view the [plan](https://github.com/open-sesam/sesam/issues/62).
+
+The documentation here is just a preview.
+```
 
 Adding secrets via CLI is nice for scripts. `sesam` also supports describing
 the desired state in a declarative way via `sesam.yml`. If you executed the
@@ -97,9 +106,8 @@ In that sense, it works a bit like `git add`.
 
 ## Modifying secrets
 
-Running `sesam add` will work too though, adding them is idempotent. It is
-enough to run `sesam seal` if you only modified existing secrets though. This
-simply encrypts ("seals") all known secrets by default, unless you pass `--no-pass`.
+Running `sesam add` will work here too, similar to `git add`. By default this will also re-seal the secrets,
+except if you pass `--no-seal`.
 
 If you want to change the access groups of a user, then just pass a different set of `--group` flags.
 
@@ -120,13 +128,14 @@ $ sesam status --all
 
 ```
 
+This will show you files you edited directly without calling `sesam add` on them.
+
 ## Removing secrets
 
 If you have deleted files you can run this:
 
 ```bash
-$ sesam rm  files/ dir/
-
+$ sesam rm files/ dir/
 ```
 
 ```admonish warning
@@ -141,7 +150,6 @@ Probably not very surprising by now, but we have a `mv` command as well:
 
 ```bash
 $ sesam mv old_name new_name
-
 ```
 
 

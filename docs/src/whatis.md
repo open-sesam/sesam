@@ -19,7 +19,7 @@ while a secret manager is focused on sharing some of those secrets with other us
 
 ## Features
 
-- High integration with `git`.
+- High level of integration with `git`.
 - Both declarative (config) and imperative (CLI) workflows possible.
 - Different access levels through user groups.
 - Secure - common crypto, minimal info leakage in rest.

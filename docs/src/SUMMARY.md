@@ -20,6 +20,7 @@
 
 # Reference
 
+- [FAQ](./faq.md)
 - [Config Reference](./config_ref.md)
 - [CLI](./cli_ref.md)
 - [Design](./design.md)
