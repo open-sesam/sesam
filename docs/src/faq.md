@@ -125,3 +125,13 @@ $ sesam --verify-mode no-disk seal
 
 This will re-seal existing revealed paths and add a new root hash to the audit log.
 If it still is not fixed, an admin might have to run the same command (as you can only seal files that you have access to).
+
+## I have entered my identity passphrase, but it's outdated
+
+You can clear the cached passphrase in the system keyring:
+
+```bash
+$ sesam keyring clear
+```
+
+Next run will query the password again.

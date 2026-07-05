@@ -569,6 +569,9 @@ pre code .sesam-flag   { color: var(--code-number); }
     background: var(--sesam-surface);
 }
 
+/* Tables span the full content width rather than shrinking to their content. */
+.content main table { width: 100%; }
+
 /* ✓/✗ glyphs (wrapped by theme/table-marks.js): supported reads emerald, the
    absent one a muted red — softened so a column of ✗ doesn't shout. */
 .content main table .mark-yes { color: var(--sesam-emerald); font-weight: 700; }
