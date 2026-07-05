@@ -74,7 +74,9 @@ jobs:
       # GitHub repo (see https://go.dev/ref/mod). One go-import page per package,
       # written under public/ at the path matching each import path.
       - name: Generate Go vanity-import pages
-        run: scripts/gen-vanity-imports.sh public
+        run: |
+          chmod +x scripts/gen-vanity-imports.sh
+          scripts/gen-vanity-imports.sh public
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
