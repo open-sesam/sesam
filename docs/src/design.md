@@ -60,6 +60,54 @@ Additionally `age` offers a full [plugin
 system](https://github.com/FiloSottile/awesome-age#plugins), making extending
 `sesam` with new ways of authenticating (e.g. FIDO keys) easier.
 
+
+### Why not a clean/smudge filter?
+
+The obvious git-native approach would be a [clean/smudge filter](https://git-scm.com/book/en/v2/Customizing-Git-Git-Attributes) à la git-crypt:
+track the secret at its real path, encrypt on `git add`, decrypt on checkout,
+and let the ciphertext live only as a blob in `.git/objects`. We deliberately
+don't do this. sesam keeps the ciphertext as a real file under
+`.sesam/objects/` and owns those bytes end to end.
+
+- **age is non-deterministic, on purpose:** Every seal produces fresh
+  ciphertext (and a fresh footer signature over it), which hides *which*
+  secret changed. A clean filter is expected to be roughly deterministic.
+  `git` compares `clean(worktree)` against the stored blob to decide if a file
+  changed. Non-deterministic clean output means every checkout, stash or
+  `add -A` can mark unchanged secrets as modified, causing spurious re-encrypts
+  and history churn. [We are ](https://github.com/FiloSottile/age/discussions/507)[ not alone](https://blog.9wd.eu/posts/git-encryption-age/) alone on that view either.
+
+- **The current layout is fail-safe; a filter fails open:** In our model the plaintext
+  paths are gitignored and only ciphertext objects are tracked, so committing a
+  plaintext secret is very hard. With a filter the plaintext path
+  *is* the tracked file, and "don't leak plaintext" rests entirely on the filter
+  actually running. A fresh clone without sesam configured, or a filter that
+  breaks silently could commit plaintext without the user realizing.
+
+- **Leveled users doesn't fit the filter model:** Not every user can decrypt
+  every secret. With separate ciphertext/plaintext files this is trivial: a
+  user reveals only what they can, and the rest stay as ciphertext objects with
+  no plaintext pendant. A smudge filter would have to pass undecryptable
+  ciphertext straight into the real path, so a user's worktree becomes a mix of
+  plaintext and ciphertext files that are indistinguishable by name.
+  Not writing revealed paths we don't have access to is no option either, as
+  those would be counted as deleted by `git` on the next `git add`.
+
+- **Atomicity:** git gives us atomic blobs, index and ref updates, but our
+  invariant spans several files (secrets ↔ audit-log root hash ↔ signkeys). `git`
+  can't express that transaction; our `.sesam-tmp` staging swap can. A filter
+  would split the write across git's index and our pre-commit hook, leaving a
+  window where sealed blobs are staged with no matching audit entry.
+
+- **We want to stay mostly decoupled from git.**
+  What we want is to integrate with `git`, not fully depend on it.
+  If we would ever extend support to other VCS then having a hard dependency
+  on clean/smudge we would have a hard time migrating. The existing integrations
+  tie nicely into the core model of `sesam`, which is independent of any VCS.
+  Having our own layout also gives us some freedom to change.
+
+In short: clean/smudge is a nice idea, [but was not really build with encryption in mind](https://github.com/AGWA/git-crypt#limitations).
+
 ### Two state representations
 
 `sesam` operates on two different views of the repository:
