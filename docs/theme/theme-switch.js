@@ -1,6 +1,7 @@
 (function () {
     const STORAGE_KEY = 'sesam-theme';
     const html = document.documentElement;
+    const mql = window.matchMedia('(prefers-color-scheme: dark)');
 
     const getPref = () => localStorage.getItem(STORAGE_KEY) || 'auto';
     const setPref = (p) => {
@@ -8,6 +9,17 @@
         else localStorage.setItem(STORAGE_KEY, p);
     };
 
+    // Resolve the theme that is actually showing: an explicit choice, or the OS
+    // preference when on 'auto'.
+    const effective = () => {
+        const p = getPref();
+        if (p === 'dark' || p === 'light') return p;
+        return mql.matches ? 'dark' : 'light';
+    };
+
+    // Apply an *explicit* choice via data-theme; on 'auto' we clear it so the
+    // prefers-color-scheme media query (in sesam.css) drives the theme — that
+    // keeps it working without JS and updating live with the OS.
     const applyTheme = () => {
         const pref = getPref();
         if (pref === 'dark' || pref === 'light') {
@@ -17,56 +29,52 @@
         }
     };
 
-    const updateButtons = () => {
-        const pref = getPref();
-        document.querySelectorAll('#theme-list [data-sesam-theme]').forEach((btn) => {
-            const on = btn.dataset.sesamTheme === pref;
-            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-            btn.classList.toggle('theme-active', on);
-        });
+    // The menu-bar button shows the *current* celestial body — a sun by day, a
+    // moon by night — and clicking it flips to the other (like the landing page).
+    const refreshIcon = (btn) => {
+        if (!btn) return;
+        const eff = effective();
+        const icon = btn.querySelector('i');
+        if (icon) icon.className = 'fa ' + (eff === 'dark' ? 'fa-moon-o' : 'fa-sun-o');
+        const label = eff === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+        btn.setAttribute('aria-label', label);
+        btn.setAttribute('title', label);
+        btn.setAttribute('aria-haspopup', 'false');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.removeAttribute('aria-controls');
     };
 
-    const setupList = () => {
-        const list = document.getElementById('theme-list');
-        if (!list) return;
+    const setup = () => {
+        const btn = document.getElementById('theme-toggle');
+        if (!btn) return;
 
-        list.innerHTML = '';
-        list.setAttribute('role', 'menu');
+        // Intercept on the capture phase and stop immediately, so mdBook's own
+        // bubble-phase click handler (which opens the theme popup) never runs.
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            setPref(effective() === 'dark' ? 'light' : 'dark');
+            applyTheme();
+            refreshIcon(btn);
+        }, true);
 
-        const options = [
-            ['auto', 'Auto'],
-            ['light', 'Light'],
-            ['dark', 'Dark'],
-        ];
+        refreshIcon(btn);
 
-        options.forEach(([value, label]) => {
-            const li = document.createElement('li');
-            li.setAttribute('role', 'none');
-            const btn = document.createElement('button');
-            btn.className = 'theme';
-            btn.setAttribute('role', 'menuitem');
-            btn.dataset.sesamTheme = value;
-            btn.textContent = label;
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                setPref(value);
+        // When following the OS ('auto'), track live changes.
+        mql.addEventListener('change', () => {
+            if (getPref() === 'auto') {
                 applyTheme();
-                updateButtons();
-                list.style.display = 'none';
-            });
-            li.appendChild(btn);
-            list.appendChild(li);
+                refreshIcon(btn);
+            }
         });
-
-        updateButtons();
     };
 
-    // Apply as early as possible to minimize flash of wrong theme.
+    // Apply as early as possible to minimize a flash of the wrong theme.
     applyTheme();
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', setupList);
+        document.addEventListener('DOMContentLoaded', setup);
     } else {
-        setupList();
+        setup();
     }
 })();

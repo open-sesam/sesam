@@ -45,8 +45,9 @@
     .pagetoc .pagetoc-H3 {
         padding-left: 40px;
     }
+    /* Limit the page-TOC to three levels (H1–H3). */
     .pagetoc .pagetoc-H4 {
-        padding-left: 60px;
+        display: none;
     }
     .pagetoc .pagetoc-H5 {
         display: none;

@@ -16,13 +16,16 @@
   "type": "object",
   "properties": {
     "version": {
-      "description": "The version of this recipients file",
+      "x-order": 0,
+      "description": "The version of this config file format.",
       "type": "integer",
       "default": 1,
       "minimum": 1,
       "maximum": 1
     },
     "users": {
+      "x-order": 1,
+      "description": "List of users known to this repository.",
       "type": "array",
       "items": {
         "type": "object",
@@ -32,14 +35,12 @@
         ],
         "properties": {
           "name": {
+            "x-order": 0,
             "$ref": "#/$defs/non-empty-string",
             "description": "Name of a user"
           },
-          "desc": {
-            "$ref": "#/$defs/non-empty-string",
-            "description": "Description or full name of this user"
-          },
           "key": {
+            "x-order": 1,
             "description": "Public key(s) of this user. May be given once or several times.",
             "anyOf": [
               {
@@ -52,11 +53,18 @@
                 }
               }
             ]
+          },
+          "desc": {
+            "x-order": 2,
+            "$ref": "#/$defs/non-empty-string",
+            "description": "Description or full name of this user"
           }
         }
       }
     },
     "groups": {
+      "x-order": 2,
+      "description": "Named groups of users. Each key is a group name mapped to a list of user names from the users list.",
       "type": "object",
       "additionalProperties": {
         "type": "array",
@@ -67,11 +75,13 @@
       }
     },
     "secrets": {
+      "x-order": 3,
+      "description": "List of secret definitions and sub-file includes.",
       "type": "array",
       "items": {
-        "description": "Either an include of another sesam.yml or a secret definition with type and path.",
         "oneOf": [
           {
+            "description": "Include form — delegates to a subordinate sesam.yml in a sub-directory",
             "type": "object",
             "required": [
               "include"
@@ -79,11 +89,12 @@
             "properties": {
               "include": {
                 "$ref": "#/$defs/non-empty-string",
-                "description": "An include path to another sub sesam.yml file"
+                "description": "Path to a subordinate sesam.yml file"
               }
             }
           },
           {
+            "description": "Secret form — registers a file as a managed secret",
             "type": "object",
             "required": [
               "path"
@@ -95,6 +106,7 @@
               },
               "access": {
                 "type": "array",
+                "description": "Groups or users allowed to reveal this secret. Defaults to admin only when omitted.",
                 "items": {
                   "$ref": "#/$defs/non-empty-string"
                 }

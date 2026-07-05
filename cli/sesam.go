@@ -352,8 +352,19 @@ func Main(args []string) error {
 			{
 				Name:   "docgen",
 				Hidden: true,
-				Action: commands.HandleDocGen,
-				Usage:  "Write a markdown command reference to stdout",
+				Usage:  "Generate reference documentation",
+				Commands: []*cli.Command{
+					{
+						Name:   "cli",
+						Action: commands.HandleDocGenCLI,
+						Usage:  "Write a markdown CLI reference to stdout",
+					},
+					{
+						Name:   "config",
+						Action: commands.HandleDocGenConfig,
+						Usage:  "Write a markdown config reference to stdout",
+					},
+				},
 			},
 		},
 	}

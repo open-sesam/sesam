@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>sesam - a clever git secrets manager</title>
+
+<!-- Apply a *saved* theme choice before first paint. With no saved choice we
+     leave data-theme unset so the prefers-color-scheme media query drives the
+     theme — that keeps it working without JS and updating live with the OS. -->
+<script>
+  (function () {
+    try {
+      var saved = localStorage.getItem("sesam-theme");
+      if (saved) document.documentElement.dataset.theme = saved;
+    } catch (e) {}
+  })();
+</script>
+<meta name="description" content="sesam is a git-native secret manager: multi-user age encryption and a signed, replayable audit log. Your secrets live in the repo — versioned, decentralized, offline-ready." />
+
+<!-- Open Graph / social -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="sesam — a clver git secrets manager" />
+<meta property="og:description" content="Encrypted, multi-user secrets that live in your git repo." />
+<meta property="og:url" content="https://opensesam.org/" />
+<meta property="og:image" content="https://opensesam.org/sesam_bg.png" />
+
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&family=Rubik:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+/* ==========================================================================
+   sesam landing — emerald · clay · gold (shares the docs design tokens)
+   ========================================================================== */
+
+/* The three lower sky stops are registered as typed <color> custom properties so
+   they can be *interpolated* — a plain custom property (or a bare gradient) won't
+   animate its colours. The keyframes below (sky-day / sky-night) breathe these a
+   hair warmer/cooler; --sky references them, so the whole gradient shifts hue in
+   place instead of drifting. initial-value is the day base. */
+@property --sky-a { syntax: "<color>"; inherits: true; initial-value: #dce8ec; }
+@property --sky-b { syntax: "<color>"; inherits: true; initial-value: #ecdec0; }
+@property --sky-c { syntax: "<color>"; inherits: true; initial-value: #f0d9aa; }
+
+:root {
+  --emerald:       #2d6e3f;
+  --emerald-hover: #3a7d4e;
+  --emerald-muted: #5a9e6e;
+  --gold:          #b8963e;
+  --gold-light:    #d4b56a;
+  --clay:          #c4a265;
+  --orange:        #d4880c;
+  --page-bg:       #f8f5ef;
+  --surface:       #f4f1eb;
+  --surface-alt:   #f0ebe0;
+  --border-subtle: #ddd5c5;
+  --text:          #2c2c2c;
+  --text-muted:    #7d7a70;
+  --logo-inner:    #f8f5ef;
+  --arabic:        url("arabic-pattern.svg");
+  --term-bg:       #fbf9f4;
+  /* terminal accent hues, tuned to harmonise with the brand palette */
+  --t-user:        #2f8f7d;
+  --t-secret:      #b5683c;
+  /* theme-driven visuals (day defaults): sun shown, moon & stars hidden */
+  --sun-display:   block;
+  --moon-display:  none;
+  --sky-display:   none;
+  --scene-opacity: 0.85;
+  --spark-max:     0.8;  /* treasure sparkle peak opacity (brighter still at night) */
+  /* day sky: flat behind the text, a barely-there cool dip, then warm sand at
+     the horizon — atmosphere, not a banner. The three lower stops are the
+     animatable @property colours (see sky-day). */
+  --sky-a: #dce8ec;
+  --sky-b: #ecdec0;
+  --sky-c: #f0d9aa;
+  --sky-anim: sky-day;
+  --sky: linear-gradient(to bottom,
+            var(--page-bg) 0%,
+            var(--page-bg) 30%,
+            var(--sky-a) 57%,
+            var(--sky-b) 83%,
+            var(--sky-c) 100%);
+}
+
+/* Dark palette (night). Applied when the visitor explicitly picked dark, OR the
+   OS prefers dark and they haven't explicitly picked light. The two selectors
+   share the same body but can't be merged across the @media boundary, so the
+   declarations are defined once in a custom-property set and referenced below.
+   Theme resolution, in order of precedence:
+     1. saved choice            → html[data-theme="dark"|"light"]   (JS)
+     2. OS preference           → @media (prefers-color-scheme)     (works w/o JS,
+                                                                      updates live) */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --emerald:       #6fc088;
+  --emerald-hover: #8cd4a3;
+  --emerald-muted: #4a9566;
+  --gold:          #d4b56a;
+  --gold-light:    #e8cd88;
+  --clay:          #b8955c;
+  --orange:        #e8a040;
+  --page-bg:       #1e1c17;
+  --surface:       #272319;
+  --surface-alt:   #2c2820;
+  --border-subtle: #3d3628;
+  --text:          #e8e3d8;
+  --text-muted:    #8a8476;
+  --logo-inner:    #1e1c17;
+  --arabic:        url("arabic-pattern-dark.svg");
+  --term-bg:       #16140f;
+  --t-user:        #5ec9b4;
+  --t-secret:      #d99a6a;
+  --sun-display:   none;
+  --moon-display:  block;
+  --sky-display:   block;
+  --scene-opacity: 0.62;
+  --spark-max:     1;
+  /* night sky: deep indigo up top (so the stars sit in dusk, not flat black),
+     deepening through violet into a faint warm-magenta glow at the horizon
+     behind the dunes, then back into page-bg at the very bottom. The three
+     animatable stops carry the night palette here (see sky-night). */
+  --sky-a: #1b1c33;
+  --sky-b: #2c2342;
+  --sky-c: #45304499;
+  --sky-anim: sky-night;
+  --sky: linear-gradient(to bottom,
+            #15172a 0%,
+            var(--sky-a) 34%,
+            var(--sky-b) 60%,
+            var(--sky-c) 80%,
+            var(--page-bg) 100%);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --emerald:       #6fc088;
+    --emerald-hover: #8cd4a3;
+    --emerald-muted: #4a9566;
+    --gold:          #d4b56a;
+    --gold-light:    #e8cd88;
+    --clay:          #b8955c;
+    --orange:        #e8a040;
+    --page-bg:       #1e1c17;
+    --surface:       #272319;
+    --surface-alt:   #2c2820;
+    --border-subtle: #3d3628;
+    --text:          #e8e3d8;
+    --text-muted:    #8a8476;
+    --logo-inner:    #1e1c17;
+    --arabic:        url("arabic-pattern-dark.svg");
+    --term-bg:       #16140f;
+    --t-user:        #5ec9b4;
+    --t-secret:      #d99a6a;
+    --sun-display:   none;
+    --moon-display:  block;
+    --sky-display:   block;
+    --scene-opacity: 0.62;
+    --spark-max:     1;
+    --sky-a: #1b1c33;
+    --sky-b: #2c2342;
+    --sky-c: #45304499;
+    --sky-anim: sky-night;
+    --sky: linear-gradient(to bottom,
+              #15172a 0%,
+              var(--sky-a) 34%,
+              var(--sky-b) 60%,
+              var(--sky-c) 80%,
+              var(--page-bg) 100%);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; overflow-x: hidden; }
+
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--page-bg);
+  /* two canvas layers: the arabic pattern tiles on TOP of a viewport-fixed sky
+     gradient (--sky). The gradient is page-bg behind the wordmark/tagline up
+     top — so text contrast is untouched — and only warms (day) or deepens into
+     a violet twilight (night) toward the horizon where it meets the scene. */
+  background-image: var(--arabic), var(--sky);
+  background-repeat: repeat, no-repeat;
+  background-size: 80px 80px, 100% 100%;
+  background-position: 0 0, center bottom;
+  background-attachment: scroll, fixed;
+  color: var(--text);
+  font-family: "Rubik", system-ui, sans-serif;
+  font-weight: 300;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  /* smooth the sun/moon theme toggle */
+  transition: background-color 0.35s ease, color 0.35s ease;
+  /* a very slow breath in the sky's colour — the warm horizon (day) or twilight
+     glow (night) shifts a hair warmer/cooler in place. Barely perceptible.
+     --sky-anim picks the per-theme keyframes. */
+  animation: var(--sky-anim) 12s ease-in-out infinite alternate;
+}
+/* Breathe the three animatable sky stops between their base and a slightly
+   shifted tint. Only these registered <color> props change, so the gradient
+   recolours smoothly without moving. */
+@keyframes sky-day {
+  from { --sky-a: #dce8ec; --sky-b: #ecdec0; --sky-c: #f0d9aa; }
+  to   { --sky-a: #d6e6ec; --sky-b: #f2e1bc; --sky-c: #f6dca4; }
+}
+@keyframes sky-night {
+  from { --sky-a: #1b1c33; --sky-b: #2c2342; --sky-c: #45304499; }
+  to   { --sky-a: #1d1f3b; --sky-b: #33264c; --sky-c: #4d3252aa; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body { animation: none; }
+}
+
+a { color: var(--emerald); text-decoration: none; }
+a:hover { color: var(--gold); }
+
+/* --- Layout --- */
+main {
+  flex: 1;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: clamp(2rem, 6vh, 4.5rem) 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* --- Beta pill --- */
+.beta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--orange);
+  border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  border-radius: 999px;
+  padding: 0.3em 0.9em;
+  margin-bottom: 1.8rem;
+}
+.beta::before { content: "✦"; font-size: 0.8em; }
+
+/* --- Wordmark --- */
+h1 {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 700;
+  font-size: clamp(2.6rem, 8vw, 4.6rem);
+  letter-spacing: 0.04em;
+  line-height: 1;
+  margin: 1.6rem 0 0;
+  color: var(--emerald);
+  text-transform: lowercase;
+}
+h1 .open { color: var(--gold); font-weight: 500; }
+h1 .fn-mark {
+  font-size: 0.3em;
+  font-weight: 500;
+  color: var(--gold);
+  vertical-align: super;
+  margin-left: 0.12em;
+}
+
+/* gold rule under the wordmark, echoing the docs h1 border */
+.rule {
+  width: 84px;
+  height: 2px;
+  margin: 1.1rem 0 1.4rem;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+}
+
+.tagline {
+  font-size: clamp(1.05rem, 2.6vw, 1.35rem);
+  font-weight: 300;
+  max-width: 30ch;
+  margin: 0 0 2.2rem;
+  color: var(--text);
+  /* legibility halo where the tagline overlaps the mountain on tall viewports */
+  text-shadow: 0 0 4px var(--page-bg), 0 0 8px var(--page-bg), 0 0 12px var(--page-bg);
+}
+.tagline b { font-weight: 500; color: var(--emerald-hover); }
+
+/* --- Terminal --- */
+.term {
+  width: 100%;
+  max-width: 560px;
+  text-align: left;
+  background: var(--term-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
+  overflow: hidden;
+  margin-bottom: 2.4rem;
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+}
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.6em 0.9em;
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.term-bar i {
+  width: 11px; height: 11px; border-radius: 50%;
+  display: inline-block;
+}
+.term-bar i:nth-child(1) { background: #e06c5a; }
+.term-bar i:nth-child(2) { background: var(--gold-light); }
+.term-bar i:nth-child(3) { background: var(--emerald-muted); }
+.term-bar span {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+.term-body {
+  padding: 1.05em 1.15em 1.25em;
+  line-height: 1.75;
+  overflow-x: auto;
+}
+/* semantic colours, mirroring `sesam log` / `sesam status` */
+.term-body .prompt { color: var(--emerald); font-weight: 600; }
+.term-body .seq    { color: var(--text-muted); }
+.term-body .time   { color: var(--emerald-muted); }
+.term-body .hash   { color: var(--text-muted); }
+.term-body .user   { color: var(--t-user); font-weight: 500; }
+.term-body .secret { color: var(--t-secret); }
+.term-body .group  { color: var(--gold); }
+.term-body .repo   { color: var(--emerald-hover); font-weight: 600; }
+.term-body .dim    { color: var(--text-muted); }
+.term-body .warn   { color: var(--orange); }
+.term-body .dir    { color: var(--emerald-muted); font-weight: 500; }
+/* fixed-width cell so the action/status glyph (+, ~, →, ✓, ★, M) never throws
+   the columns off, whatever advance width the font gives those symbols */
+.term-body .gl  { display: inline-block; width: 1.3ch; text-align: center; }
+/* each command's output; the script shows one at a time */
+.term-body .out { display: none; }
+.term-body .out.show { display: block; }
+
+/* typed command — text is driven by the loop script below; the cursor is a
+   blinking right border that sits after whatever has been typed so far. */
+.typed {
+  display: inline-block;
+  white-space: pre;
+  border-right: 2px solid var(--emerald);
+  animation: blink 0.9s step-end infinite;
+  vertical-align: bottom;
+}
+@keyframes blink { 50% { border-color: transparent; } }
+
+/* output rows fade in one after another (toggled by the script) */
+.row { display: block; white-space: pre; opacity: 0; transition: opacity 0.35s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  .typed { animation: none; border-right: none; }
+  .row { opacity: 1; transition: none; }
+}
+
+/* --- CTAs --- */
+.cta {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.btn {
+  font-family: "Josefin Sans", sans-serif;
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: 0.03em;
+  padding: 0.72em 1.5em;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  transition: transform 0.12s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.btn:hover { transform: translateY(-2px); }
+.btn-primary {
+  background: var(--emerald);
+  color: var(--logo-inner);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 60%, transparent);
+}
+.btn-primary:hover { background: var(--emerald-hover); color: var(--logo-inner); }
+.btn-ghost {
+  background: var(--surface-alt);
+  color: var(--text);
+  border: 1px solid var(--border-subtle);
+}
+.btn-ghost:hover { color: var(--emerald); border-color: var(--emerald); background: var(--surface); }
+
+/* secondary text links */
+.subnav {
+  margin: 0.2rem 0 2rem;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+  /* legibility halo where the subnav overlaps the illustration */
+  text-shadow: 0 0 4px var(--page-bg), 0 0 8px var(--page-bg), 0 0 12px var(--page-bg);
+}
+.subnav a { margin: 0 0.55em; }
+
+/* --- Sky ---
+   A fixed layer behind all content (z-index -1). Light mode (day): a bright sun
+   glowing in the upper-right. Dark mode (night): white stars scattered across
+   the sky, with a subset gently twinkling. */
+/* --- Sky: starfield (night only) ---
+   Gradients are defined unconditionally; --sky-display (day=none, night=block)
+   decides whether the layer shows, so no theme-specific selectors are needed. */
+.sky {
+  display: var(--sky-display);
+  position: fixed;
+  /* slight overscan so the very slow drift below never reveals a hard edge */
+  inset: -3%;
+  z-index: -1;
+  pointer-events: none;
+  /* a barely-there parallax drift gives the whole starfield a living quality */
+  animation: sky-drift-stars 120s ease-in-out infinite alternate;
+}
+@keyframes sky-drift-stars {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(1%, -0.6%, 0); }
+}
+.sky::before,
+.sky::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+  /* a soft halo around each star so they read a touch brighter */
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.55));
+}
+/* steady stars across the whole sky */
+.sky::before {
+  background-image:
+    radial-gradient(1.3px 1.3px at 5% 12%,  rgba(255,255,255,.85), transparent),
+    radial-gradient(1px 1px     at 12% 28%, rgba(255,255,255,.6),  transparent),
+    radial-gradient(1.4px 1.4px at 18% 6%,  rgba(255,255,255,.8),  transparent),
+    radial-gradient(1px 1px     at 24% 20%, rgba(255,255,255,.55), transparent),
+    radial-gradient(1.2px 1.2px at 31% 35%, rgba(255,255,255,.7),  transparent),
+    radial-gradient(1px 1px     at 9% 38%,  rgba(255,255,255,.5),  transparent),
+    radial-gradient(1.3px 1.3px at 38% 10%, rgba(255,255,255,.8),  transparent),
+    radial-gradient(1px 1px     at 44% 25%, rgba(255,255,255,.55), transparent),
+    radial-gradient(1.5px 1.5px at 50% 14%, rgba(255,255,255,.9),  transparent),
+    radial-gradient(1px 1px     at 56% 33%, rgba(255,255,255,.6),  transparent),
+    radial-gradient(1.2px 1.2px at 62% 7%,  rgba(255,255,255,.75), transparent),
+    radial-gradient(1px 1px     at 68% 23%, rgba(255,255,255,.55), transparent),
+    radial-gradient(1.3px 1.3px at 80% 12%, rgba(255,255,255,.8),  transparent),
+    radial-gradient(1px 1px     at 86% 29%, rgba(255,255,255,.6),  transparent),
+    radial-gradient(1.4px 1.4px at 92% 9%,  rgba(255,255,255,.85), transparent),
+    radial-gradient(1px 1px     at 96% 24%, rgba(255,255,255,.55), transparent),
+    radial-gradient(1px 1px     at 33% 5%,  rgba(255,255,255,.6),  transparent),
+    radial-gradient(1.2px 1.2px at 15% 17%, rgba(255,255,255,.7),  transparent),
+    radial-gradient(1px 1px     at 71% 16%, rgba(255,255,255,.6),  transparent),
+    radial-gradient(1px 1px     at 3% 25%,  rgba(255,255,255,.5),  transparent),
+    radial-gradient(1.2px 1.2px at 21% 40%, rgba(255,255,255,.65), transparent),
+    radial-gradient(1px 1px     at 28% 9%,  rgba(255,255,255,.55), transparent),
+    radial-gradient(1.3px 1.3px at 41% 19%, rgba(255,255,255,.75), transparent),
+    radial-gradient(1px 1px     at 47% 6%,  rgba(255,255,255,.5),  transparent),
+    radial-gradient(1.2px 1.2px at 53% 27%, rgba(255,255,255,.6),  transparent),
+    radial-gradient(1px 1px     at 59% 16%, rgba(255,255,255,.55), transparent),
+    radial-gradient(1.4px 1.4px at 65% 38%, rgba(255,255,255,.7),  transparent),
+    radial-gradient(1px 1px     at 74% 30%, rgba(255,255,255,.5),  transparent),
+    radial-gradient(1.2px 1.2px at 83% 21%, rgba(255,255,255,.65), transparent),
+    radial-gradient(1px 1px     at 88% 6%,  rgba(255,255,255,.55), transparent),
+    radial-gradient(1.3px 1.3px at 94% 34%, rgba(255,255,255,.75), transparent),
+    radial-gradient(1px 1px     at 99% 14%, rgba(255,255,255,.5),  transparent),
+    radial-gradient(1.2px 1.2px at 7% 6%,   rgba(255,255,255,.6),  transparent),
+    radial-gradient(1px 1px     at 36% 30%, rgba(255,255,255,.5),  transparent);
+  /* a slow, faint shimmer across the whole field — runs at a different period
+     than the twinkle below, so the two never pulse in lockstep */
+  animation: shimmer 6.5s ease-in-out infinite;
+}
+@keyframes shimmer { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
+/* twinkling subset */
+.sky::after {
+  background-image:
+    radial-gradient(1.6px 1.6px at 8% 22%,  #fff, transparent),
+    radial-gradient(1.6px 1.6px at 28% 12%, #fff, transparent),
+    radial-gradient(2px 2px     at 41% 30%, #fff, transparent),
+    radial-gradient(1.6px 1.6px at 53% 8%,  #fff, transparent),
+    radial-gradient(1.6px 1.6px at 66% 28%, #fff, transparent),
+    radial-gradient(2px 2px     at 77% 19%, #fff, transparent),
+    radial-gradient(1.6px 1.6px at 90% 20%, #fff, transparent);
+  animation: twinkle 4.5s ease-in-out infinite;
+}
+/* a livelier curve than a plain pulse — the bright subset glints rather than
+   just fading, so the night sky reads as glistening */
+@keyframes twinkle {
+  0%, 100% { opacity: 0.2;  }
+  25%      { opacity: 0.85; }
+  50%      { opacity: 1;    }
+  75%      { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sky { animation: none !important; }
+  .sky::before, .sky::after { animation: none !important; }
+}
+
+/* --- Sun (day) & moon (night): the celestial toggle ---
+   Both are real buttons in the upper-right corner; --sun-display / --moon-display
+   show exactly one per theme. Clicking either flips the theme (see script). They
+   sit above content (z-index 4) so they stay clickable, but only their small
+   discs capture clicks — the glows are box-shadow / filter and don't. */
+.sun, .moon {
+  position: fixed;
+  top: 9%;
+  right: 9%;
+  /* identical box so the two share the same centre — no jump when toggling */
+  width: 60px;
+  height: 60px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  z-index: 4;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.sun:focus-visible, .moon:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 5px;
+}
+
+/* a soft sun — warm-white core that melts into the sandy page (the gradient
+   fades to transparent before the box edge, so there is no hard disc rim) with
+   a muted clay-toned glow */
+.sun {
+  display: var(--sun-display);
+  background: radial-gradient(circle,
+    #fdf7ea 0%,
+    color-mix(in srgb, var(--gold-light) 60%, var(--page-bg)) 40%,
+    color-mix(in srgb, var(--clay) 45%, transparent) 66%,
+    transparent 82%);
+  box-shadow:
+    0 0 26px 6px   color-mix(in srgb, var(--clay) 30%, transparent),
+    0 0 60px 24px  color-mix(in srgb, var(--clay) 14%, transparent),
+    0 0 120px 60px color-mix(in srgb, var(--clay) 6%, transparent);
+  /* soften the whole disc so it blends into the sky rather than reading as a
+     crisp circle (also gently blurs the rays, which suits radiating light) */
+  filter: blur(2.5px);
+}
+/* sun rays: thin conic spokes masked into a ring around the disc (transparent
+   at the core, fading out past the rim) so the sun reads as radiating light.
+   pointer-events:none keeps the click target the 60px disc, not the rays. */
+.sun::before {
+  content: "";
+  position: absolute;
+  inset: -46%;
+  border-radius: 50%;
+  pointer-events: none;
+  background: repeating-conic-gradient(from 0deg,
+    color-mix(in srgb, var(--gold) 70%, transparent) 0deg 2.4deg,
+    transparent 2.4deg 30deg);
+  -webkit-mask: radial-gradient(circle closest-side, transparent 40%, #000 56%, transparent 82%);
+          mask: radial-gradient(circle closest-side, transparent 40%, #000 56%, transparent 82%);
+  filter: blur(0.8px);
+  animation: sun-rays 120s linear infinite;
+}
+@keyframes sun-rays { to { transform: rotate(360deg); } }
+
+/* a pale disc carved into a crescent by a transparent bite (mask) offset toward
+   the upper-right, so the night sky shows through rather than a flat dark disc */
+.moon {
+  display: var(--moon-display);
+  background: #e8e3d3;
+  -webkit-mask: radial-gradient(circle 30px at 44px 20px, transparent 29px, #fff 30px);
+          mask: radial-gradient(circle 30px at 44px 20px, transparent 29px, #fff 30px);
+  filter: drop-shadow(0 0 7px color-mix(in srgb, #e8e3d3 30%, transparent));
+}
+
+/* on narrow screens the centred wordmark reaches the corner — tuck them up */
+@media (max-width: 560px) {
+  .sun, .moon { top: 5%; right: 7%; }
+}
+
+/* --- Cave-of-treasures backdrop, fixed to the foot of the page ---
+   The artwork has a transparent background, so it overlays the page directly —
+   no mask or fade needed; its own silhouette blends into the page. It is sized
+   to the full viewport width (the art is deliberately wide) and pinned to the
+   bottom, at z-index -1 so it sits behind all content. */
+/* The artwork is a 5568×1536 panorama (3.625:1); its detailed heart — the cave —
+   is the middle 50%. Three width regimes, each continuous with the next:
+     • up to 7:5 (1.4:1) — sized to WIDTH (200%, centred): the cave fills the
+       viewport just as the old square-ish art did, side desert overflowing off.
+     • 7:5 to 14:5 — fixed HEIGHT (--scene-h): height stops growing, so the extra
+       width reveals more side desert instead of blowing the cave up.
+     • beyond 14:5 (2.8:1) — the panorama no longer spans the viewport, so we
+       scale to WIDTH again (fill) rather than leak sky into the gutters; the art
+       isn't seamless, so tiling would show a hard seam / duplicate cave.
+   --scene-h = 2·1.4/3.625 = 77.24vh makes all three meet without a jump. */
+:root { --scene-h: 77.24vh; }
+
+.scene, .sparkles, .water {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  /* pinned to the foot of the viewport so the foreground (pond, caravan) isn't
+     clipped; the peak still clears the content above the terminal */
+  bottom: 0;
+  width: 200%;
+  max-width: none;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.scene {
+  user-select: none;
+  /* softened so the terminal & buttons sit cleanly on top; --scene-opacity is
+     0.85 by day and 0.5 at night (the light, sandy art needs more taming on the
+     dark page) */
+  opacity: var(--scene-opacity);
+  transition: opacity 0.35s ease;
+  /* a slow, barely-there shift in saturation/brightness/contrast gives the
+     scene a faintly living, slightly eerie quality */
+  animation: scene-breathe 10s ease-in-out infinite;
+}
+
+/* 7:5+ — freeze height, let width grow off-screen to reveal the sides. */
+@media (min-aspect-ratio: 7/5) {
+  .scene, .sparkles, .water {
+    width: auto;
+    height: var(--scene-h);
+    bottom: 0;
+  }
+}
+/* 14:5+ — the panorama no longer fills the viewport width; fill it (height
+   grows back, capped by the 3.625:1 art) instead of showing sky gutters. */
+@media (min-aspect-ratio: 14/5) {
+  .scene, .sparkles, .water {
+    width: 100%;
+    height: auto;
+  }
+}
+@keyframes scene-breathe {
+  0%, 100% { filter: saturate(0.95) brightness(0.90)contrast(0.90); }
+  50%      { filter: saturate(1.05)  brightness(1.02) contrast(1.02); }
+}
+
+/* --- Treasure sparkles ---
+   Quick golden twinkles over the hoard in the cave. The container matches the
+   scene's image box (same anchor + aspect-ratio) so the percentage positions
+   land on the treasure; --spark-max makes them brighter at night. */
+/* shares the scene's box (sizing above) so the % positions land on the treasure;
+   aspect-ratio matches the panorama, so its coordinate space is the full art */
+.sparkles { aspect-ratio: 5568 / 1536; }
+.spark {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  background: radial-gradient(circle, #fff7d6 0%, var(--gold) 50%, transparent 72%);
+  clip-path: polygon(50% 0%, 58% 42%, 100% 50%, 58% 58%, 50% 100%, 42% 58%, 0% 50%, 42% 42%);
+  opacity: 0;
+  animation: spark 1.5s ease-in-out infinite;
+}
+@keyframes spark {
+  0%, 100% { opacity: 0;                  transform: scale(0.3) rotate(0deg); }
+  50%      { opacity: var(--spark-max, 0.6); transform: scale(1) rotate(40deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scene { animation: none; }
+  .spark { animation: none; opacity: 0; }
+  .sun::before { animation: none; }
+}
+
+/* --- Sun on the oasis pond ---
+   The .water layer shares the scene's image box (same anchor + aspect-ratio as
+   .sparkles), so the percentage positions below land on the pond in the
+   lower-left of the art. The glints show by day only (--sun-display). */
+.water { aspect-ratio: 5568 / 1536; }
+
+/* small specular sparkles where the sun catches the ripples; cooler and tinier
+   than the treasure sparks, scattered across the pond and twinkling out of sync */
+.glint {
+  display: var(--sun-display);
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  background: radial-gradient(circle, #fffdf3 0%,
+    color-mix(in srgb, var(--gold-light) 70%, #fff) 45%, transparent 70%);
+  border-radius: 50%;
+  opacity: 0;
+  animation: glisten 3.2s ease-in-out infinite;
+}
+@keyframes glisten {
+  0%, 100% { opacity: 0;  transform: scale(.4); }
+  50%      { opacity: .9; transform: scale(1);  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .glint { animation: none; opacity: 0; }
+}
+
+/* --- Footnote: the "open sesame" reference, pinned lower-left --- */
+.footnote {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  max-width: 18rem;
+  z-index: 4;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  /* a faint card keeps it readable over the busy caravan below */
+  padding: 0.5em 0.7em;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--page-bg) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 55%, transparent);
+  -webkit-backdrop-filter: blur(3px);
+          backdrop-filter: blur(3px);
+}
+.footnote sup { color: var(--gold); font-weight: 600; }
+.footnote i   { font-style: italic; }
+.footnote a {
+  color: var(--emerald);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.footnote a:hover { color: var(--gold); }
+/* on narrow screens it would crowd the centred content — drop it */
+@media (max-width: 620px) {
+  .footnote { display: none; }
+}
+</style>
+
+<!-- Without JS the loop can't run, so show the log command + output statically. -->
+<noscript><style>
+  .typed::after { content: "sesam log"; }
+  .out-log { display: block !important; }
+  .row { opacity: 1 !important; }
+</style></noscript>
+</head>
+<body>
+<div class="sky" aria-hidden="true"></div>
+<button class="sun" type="button" aria-label="Switch to dark mode"></button>
+<button class="moon" type="button" aria-label="Switch to light mode"></button>
+<picture>
+  <source srcset="bg.webp" type="image/webp" />
+  <img class="scene" src="bg.png" alt="" aria-hidden="true" />
+</picture>
+<div class="sparkles" aria-hidden="true">
+  <span class="spark" style="left:48.5%;top:50%;animation-delay:0s;animation-duration:1.3s"></span>
+  <span class="spark" style="left:50%;top:53%;animation-delay:.4s;animation-duration:1.6s"></span>
+  <span class="spark" style="left:47.5%;top:54%;animation-delay:.9s;animation-duration:1.4s"></span>
+  <span class="spark" style="left:49.5%;top:48%;animation-delay:.6s;animation-duration:1.1s"></span>
+  <span class="spark" style="left:51%;top:51%;animation-delay:1.2s;animation-duration:1.7s"></span>
+  <span class="spark" style="left:48%;top:52%;animation-delay:.2s;animation-duration:1.5s"></span>
+  <span class="spark" style="left:50.5%;top:55%;animation-delay:1.5s;animation-duration:1.2s"></span>
+  <span class="spark" style="left:49%;top:53%;animation-delay:.8s;animation-duration:1.9s"></span>
+</div>
+<div class="water" aria-hidden="true">
+  <span class="glint" style="left:30%;top:85%;animation-delay:.2s;animation-duration:3.4s"></span>
+  <span class="glint" style="left:33%;top:90%;animation-delay:1.1s;animation-duration:2.9s"></span>
+  <span class="glint" style="left:37%;top:86%;animation-delay:.7s;animation-duration:3.6s"></span>
+  <span class="glint" style="left:31.5%;top:91%;animation-delay:1.6s;animation-duration:3.1s"></span>
+  <span class="glint" style="left:35.5%;top:88%;animation-delay:.45s;animation-duration:2.7s"></span>
+  <span class="glint" style="left:38.5%;top:90.5%;animation-delay:1.3s;animation-duration:3.3s"></span>
+</div>
+<main>
+  <h1><span class="open">open</span>sesam</h1>
+  <br />
+
+  <p class="tagline">Encrypted, multi-user secrets that <br /><b>live in your git repo</b>.</p>
+
+  <nav class="subnav">
+    <a href="/docs/whatis.html">What is it?</a> ·
+    <a href="/docs/installation.html">How to install?</a> ·
+    <a href="/docs/alternatives.html">Why another tool?</a>
+  </nav>
+
+  <div class="term" aria-hidden="true">
+    <div class="term-bar"><i></i><i></i><i></i><span>~/work/secrets</span></div>
+    <div class="term-body">
+      <div class="cmdline"><span class="prompt">$</span> <span class="cmd typed"></span></div>
+      <div class="out out-log">
+        <div class="row"><span class="seq">#6</span> <span class="gl user">~</span> <span class="time">2026 Apr 19 08:30</span>  <span class="user">alice</span>  set groups of <span class="user">bob</span> to <span class="group">backend, ops</span></div>
+        <div class="row"><span class="seq">#5</span> <span class="gl secret">→</span> <span class="time">2026 Mar 02 10:48</span>  <span class="user">bob</span>    renamed <span class="secret">db/prod.env</span> → <span class="secret">db/prod.toml</span></div>
+        <div class="row"><span class="seq">#4</span> <span class="gl repo">✓</span> <span class="time">2026 Feb 08 14:22</span>  <span class="user">bob</span>    <span class="repo">sealed 2 secrets</span> <span class="hash">9f2c1a0b</span></div>
+        <div class="row"><span class="seq">#3</span> <span class="gl secret">+</span> <span class="time">2026 Feb 08 14:22</span>  <span class="user">bob</span>    added <span class="secret">db/prod.env</span> (<span class="group">backend, admin</span>)</div>
+        <div class="row"><span class="seq">#2</span> <span class="gl user">+</span> <span class="time">2026 Jan 06 09:15</span>  <span class="user">alice</span>  told <span class="user">bob</span> into <span class="group">backend</span></div>
+        <div class="row"><span class="seq">#1</span> <span class="gl repo">★</span> <span class="time">2026 Jan 06 09:14</span>  <span class="user">alice</span>  <span class="repo">initialized repo</span> <span class="hash">7f3a9c2e</span></div>
+      </div>
+      <div class="out out-status">
+        <div class="row"><span class="dim">.</span></div>
+        <div class="row"><span class="dim">├─</span> <span class="gl repo">✓</span> <span class="secret">.env</span> <span class="dim">(</span><span class="group">admin</span><span class="dim">)</span></div>
+        <div class="row"><span class="dim">╰─</span> <span class="dir">db</span></div>
+        <div class="row"><span class="dim">   ├─</span> <span class="gl warn">M</span> <span class="secret">prod.toml</span> <span class="dim">(</span><span class="group">backend, admin</span><span class="dim">)</span></div>
+        <div class="row"><span class="dim">   ╰─</span> <span class="gl repo">✓</span> <span class="secret">staging.toml</span> <span class="dim">(</span><span class="group">backend, ops</span><span class="dim">)</span></div>
+        <div class="row">  <span class="warn">1 out of sync</span> <span class="dim">·</span> <span class="repo">2 in sync</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cta">
+    <a class="btn btn-primary" href="/docs/whatis.html"><svg viewBox="0 0 24 24" width="1.1em" height="1.1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4h6a3 3 0 0 1 3 3v13a2.5 2.5 0 0 0-2.5-2.5H2z"/><path d="M22 4h-6a3 3 0 0 0-3 3v13a2.5 2.5 0 0 1 2.5-2.5H22z"/></svg>Enter the docs →</a>
+    <a class="btn btn-ghost" href="https://github.com/open-sesam/sesam">★ GitHub</a>
+  </div>
+</main>
+
+<script>
+// Replays the terminal, alternating between `sesam log` and `sesam status`:
+// type the command, stream that command's rows in, hold, then move on.
+(function () {
+  var typed = document.querySelector(".typed");
+  if (!typed) return;
+
+  var COMMANDS = [
+    { cmd: "sesam log",    out: document.querySelector(".out-log") },
+    { cmd: "sesam status --all", out: document.querySelector(".out-status") },
+  ].filter(function (c) { return c.out; });
+  if (!COMMANDS.length) return;
+
+  var rowsOf = function (c) {
+    return Array.prototype.slice.call(c.out.querySelectorAll(".row"));
+  };
+
+  // Respect reduced-motion: render the log output once, no looping.
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    typed.textContent = COMMANDS[0].cmd;
+    COMMANDS[0].out.classList.add("show");
+    rowsOf(COMMANDS[0]).forEach(function (r) { r.style.opacity = 1; });
+    return;
+  }
+
+  var sleep = function (ms) { return new Promise(function (res) { setTimeout(res, ms); }); };
+
+  async function loop() {
+    var i = 0;
+    while (true) {
+      var c = COMMANDS[i % COMMANDS.length];
+      var rows = rowsOf(c);
+
+      // reset: clear prompt, show only this command's (hidden) output
+      typed.textContent = "";
+      COMMANDS.forEach(function (other) { other.out.classList.remove("show"); });
+      rows.forEach(function (r) { r.style.opacity = 0; });
+      c.out.classList.add("show");
+      await sleep(700);
+
+      for (var k = 0; k < c.cmd.length; k++) {
+        typed.textContent += c.cmd[k];
+        await sleep(50);
+      }
+      await sleep(450);
+
+      for (var j = 0; j < rows.length; j++) {
+        rows[j].style.opacity = 1;
+        await sleep(173);
+      }
+
+      await sleep(2500);                                   // hold the output
+      typed.textContent = "";                              // clear the command too
+      rows.forEach(function (r) { r.style.opacity = 0; }); // fade out together
+      await sleep(900);                                    // pause before next
+      i++;
+    }
+  }
+
+  loop();
+})();
+
+// Easter egg: clicking the sun (day) or moon (night) toggles the theme. The
+// current theme may come from an explicit choice (data-theme) or, if unset,
+// from the OS preference — resolve that before flipping.
+(function () {
+  var root = document.documentElement;
+  function current() {
+    if (root.dataset.theme) return root.dataset.theme;
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  function toggle() {
+    var next = current() === "dark" ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("sesam-theme", next); } catch (e) {}
+  }
+  document.querySelectorAll(".sun, .moon").forEach(function (el) {
+    el.addEventListener("click", toggle);
+  });
+})();
+</script>
+</body>
+</html>

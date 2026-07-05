@@ -8,6 +8,11 @@ on:
       - "cli/**"
       - "Taskfile.yml"
       - ".github/workflows/docs.yml"
+      # go.mod (module path) and the generator drive the vanity-import pages.
+      # Adding a brand-new top-level package also needs a deploy to publish its
+      # page; any docs/cli change (or a manual run) will pick it up.
+      - "go.mod"
+      - "scripts/gen-vanity-imports.sh"
 
 permissions:
   contents: read
@@ -32,10 +37,11 @@ jobs:
         with:
           fetch-depth: 0 # needed for mdbook-gitinfo
 
-      - name: Set up mdBook and preprocessors
+      - name: Set up Go, mdBook and preprocessors
         uses: jdx/mise-action@v4
         with:
-          install_args: "mdbook cargo:mdbook-admonish cargo:mdbook-pagetoc cargo:mdbook-gitinfo"
+          # go is needed by scripts/gen-vanity-imports.sh (`go list`)
+          install_args: "go mdbook cargo:mdbook-admonish cargo:mdbook-pagetoc cargo:mdbook-gitinfo"
 
       - name: Cache mdbook build
         id: book-cache
@@ -50,10 +56,30 @@ jobs:
         if: steps.book-cache.outputs.cache-hit != 'true'
         run: cd docs && mdbook build
 
+      # Assemble the published site: the standalone landing page at the root
+      # (opensesam.org/) and the mdBook under /docs/. The book is built with
+      # site-url = "/docs/" (book.toml) so its internal links resolve there.
+      # The landing page references a few shared assets by bare filename, so we
+      # copy them next to it at the root too. Runs even on a book cache hit,
+      # since the landing source is not part of the book cache key.
+      - name: Assemble site
+        run: |
+          mkdir -p public/docs
+          cp -r docs/book/. public/docs/
+          cp docs/landing/index.html docs/landing/bg.png docs/landing/bg.webp public/
+          cp docs/src/sesam_bg.png docs/src/arabic-pattern.svg docs/src/arabic-pattern-dark.svg public/
+          cp docs/book/favicon.svg docs/book/favicon.png public/
+
+      # Vanity-import pages so `go get opensesam.org/sesam/...` resolves to the
+      # GitHub repo (see https://go.dev/ref/mod). One go-import page per package,
+      # written under public/ at the path matching each import path.
+      - name: Generate Go vanity-import pages
+        run: scripts/gen-vanity-imports.sh public
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/book
+          path: public
 
       - name: Deploy to GitHub Pages
         id: deployment

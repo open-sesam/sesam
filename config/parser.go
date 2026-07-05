@@ -23,6 +23,11 @@ var schemaFS embed.FS
 
 const schemaFile = "sesam_schema.json"
 
+// RawSchema returns the raw bytes of the embedded sesam_schema.json.
+func RawSchema() ([]byte, error) {
+	return schemaFS.ReadFile(schemaFile)
+}
+
 // Config holds every loaded file. MainFile is the top level file
 // passed to Load; it is also present in SourceFiles (keyed by path) so Save can
 // iterate one map and treat every file uniformly.

@@ -3,7 +3,7 @@
    ========================================================================== */
 
 /* --- Fonts --- */
-@import url("https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600;700&family=Rubik:ital,wght@0,300..900;1,300..900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&family=Rubik:ital,wght@0,300..900;1,300..900&display=swap");
 
 /* --- Palette tokens ---
    Declare both light and dark tokens, then set active tokens to the light
@@ -35,6 +35,27 @@ html.ayu {
     --l-pod-lattice:   url("../pod-lattice.svg");
     --l-arabic:        url("../arabic-pattern.svg");
     --l-logo-inner:    #f8f5ef;
+    --l-term-bg:       #fbf9f4;
+    /* day sky: flat page-bg behind the upper content, a barely-there cool dip,
+       then warm sand toward the bottom of the viewport (subtle — readability
+       first). Ported from the landing page. */
+    --l-sky: linear-gradient(to bottom,
+                var(--l-page-bg) 0%,
+                var(--l-page-bg) 55%,
+                #eef1ee 80%,
+                #f2ebda 100%);
+    /* syntax palette (light): emerald keyword anchor, gold/clay/teal accents */
+    --l-code-comment:  #9c9482;
+    --l-code-keyword:  #2d6e3f;
+    --l-code-builtin:  #2f8f7d;
+    --l-code-string:   #5f7d3a;
+    --l-code-number:   #b5683c;
+    --l-code-literal:  #b5683c;
+    --l-code-attr:     #97701f;
+    --l-code-variable: #9a5a2b;
+    --l-code-meta:     #2d6e3f;
+    --l-code-addition: #3a7d4e;
+    --l-code-deletion: #a23a2a;
 
     /* Dark palette */
     --d-emerald:       #6fc088;
@@ -56,6 +77,26 @@ html.ayu {
     --d-pod-lattice:   url("../pod-lattice-dark.svg");
     --d-arabic:        url("../arabic-pattern-dark.svg");
     --d-logo-inner:    #1e1c17;
+    --d-term-bg:       #16140f;
+    /* night sky: page-bg up top, deepening into a faint indigo/violet twilight
+       toward the bottom of the viewport */
+    --d-sky: linear-gradient(to bottom,
+                var(--d-page-bg) 0%,
+                var(--d-page-bg) 50%,
+                #221f33 82%,
+                #2a2236 100%);
+    /* syntax palette (dark): brighter brand hues that read on the dark surface */
+    --d-code-comment:  #837c6b;
+    --d-code-keyword:  #6fc088;
+    --d-code-builtin:  #5ec9b4;
+    --d-code-string:   #b6c987;
+    --d-code-number:   #d99a6a;
+    --d-code-literal:  #d99a6a;
+    --d-code-attr:     #e8cd88;
+    --d-code-variable: #d6a878;
+    --d-code-meta:     #6fc088;
+    --d-code-addition: #8cd4a3;
+    --d-code-deletion: #e58a78;
 
     /* Active tokens (default = light) */
     --sesam-emerald:       var(--l-emerald);
@@ -77,6 +118,19 @@ html.ayu {
     --pod-lattice:         var(--l-pod-lattice);
     --arabic-pattern:      var(--l-arabic);
     --logo-inner-bg:       var(--l-logo-inner);
+    --term-bg:             var(--l-term-bg);
+    --sky:                 var(--l-sky);
+    --code-comment:        var(--l-code-comment);
+    --code-keyword:        var(--l-code-keyword);
+    --code-builtin:        var(--l-code-builtin);
+    --code-string:         var(--l-code-string);
+    --code-number:         var(--l-code-number);
+    --code-literal:        var(--l-code-literal);
+    --code-attr:           var(--l-code-attr);
+    --code-variable:       var(--l-code-variable);
+    --code-meta:           var(--l-code-meta);
+    --code-addition:       var(--l-code-addition);
+    --code-deletion:       var(--l-code-deletion);
 
     /* mdBook variable mappings */
     /* Widen the content column from mdBook's stock 750px — the wide
@@ -137,6 +191,19 @@ html[data-theme="dark"].ayu {
     --pod-lattice:         var(--d-pod-lattice);
     --arabic-pattern:      var(--d-arabic);
     --logo-inner-bg:       var(--d-logo-inner);
+    --term-bg:             var(--d-term-bg);
+    --sky:                 var(--d-sky);
+    --code-comment:        var(--d-code-comment);
+    --code-keyword:        var(--d-code-keyword);
+    --code-builtin:        var(--d-code-builtin);
+    --code-string:         var(--d-code-string);
+    --code-number:         var(--d-code-number);
+    --code-literal:        var(--d-code-literal);
+    --code-attr:           var(--d-code-attr);
+    --code-variable:       var(--d-code-variable);
+    --code-meta:           var(--d-code-meta);
+    --code-addition:       var(--d-code-addition);
+    --code-deletion:       var(--d-code-deletion);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -165,6 +232,19 @@ html[data-theme="dark"].ayu {
         --pod-lattice:         var(--d-pod-lattice);
         --arabic-pattern:      var(--d-arabic);
         --logo-inner-bg:       var(--d-logo-inner);
+        --term-bg:             var(--d-term-bg);
+        --sky:                 var(--d-sky);
+        --code-comment:        var(--d-code-comment);
+        --code-keyword:        var(--d-code-keyword);
+        --code-builtin:        var(--d-code-builtin);
+        --code-string:         var(--d-code-string);
+        --code-number:         var(--d-code-number);
+        --code-literal:        var(--d-code-literal);
+        --code-attr:           var(--d-code-attr);
+        --code-variable:       var(--d-code-variable);
+        --code-meta:           var(--d-code-meta);
+        --code-addition:       var(--d-code-addition);
+        --code-deletion:       var(--d-code-deletion);
     }
 }
 
@@ -172,6 +252,16 @@ html[data-theme="dark"].ayu {
 
 body {
     font-family: "Rubik", sans-serif;
+}
+
+/* Content reads a touch larger than mdBook's stock 1.6rem. Scoped to the
+   content column so the sidebar (its own explicit 1.6rem) is untouched; the
+   page-TOC is pinned below so it doesn't grow with it. */
+.content main {
+    font-size: 1.8rem;
+}
+.pagetoc {
+    font-size: 1.5rem;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -196,13 +286,12 @@ h1, h2, h3, h4, h5, h6 {
 
 .sidebar-logo {
     display: block;
-    width: 130px;
-    height: 130px;
+    position: relative;
+    width: 148px;
+    height: 148px;
     margin: 1.2rem auto 0.5rem;
-    background:
-        url("../sesam_bg.png") center / 80% no-repeat,
-        url("../arabic-pattern.svg") center / 60px 60px repeat,
-        var(--logo-inner-bg);
+    /* a crop of the treasure cave from the landing-page artwork */
+    background: url("../cave-logo.png") center / cover no-repeat, var(--logo-inner-bg);
     border-radius: 50%;
     border: 4px solid var(--sesam-emerald);
     box-shadow:
@@ -217,6 +306,34 @@ h1, h2, h3, h4, h5, h6 {
         0 0 0 2px var(--sesam-gold),
         0 0 0 8px rgba(45, 110, 63, 0.35),
         0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* a twinkle over the hoard — only at night (the cave is darker then, so it
+   reads), echoing the treasure sparkles on the landing page */
+.sidebar-logo::after {
+    content: "";
+    display: none;
+    position: absolute;
+    left: 46%;
+    top: 73%;
+    width: 18px;
+    height: 18px;
+    margin: -9px 0 0 -9px;
+    background: radial-gradient(circle, #fff7d6 0%, var(--sesam-gold-light) 50%, transparent 72%);
+    clip-path: polygon(50% 0%, 58% 42%, 100% 50%, 58% 58%, 50% 100%, 42% 58%, 0% 50%, 42% 42%);
+    pointer-events: none;
+    animation: logo-sparkle 1.9s ease-in-out infinite;
+}
+@keyframes logo-sparkle {
+    0%, 100% { opacity: 0; transform: scale(0.4) rotate(0deg); }
+    50%      { opacity: 1; transform: scale(1) rotate(35deg); }
+}
+html[data-theme="dark"] .sidebar-logo::after { display: block; }
+@media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) .sidebar-logo::after { display: block; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .sidebar-logo::after { animation: none; }
 }
 
 .sidebar .sidebar-scrollbox a:hover {
@@ -272,7 +389,24 @@ h1, h2, h3, h4, h5, h6 {
     font-size: 2.4rem;
 }
 
-/* --- Arabic geometric background pattern --- */
+/* --- Sky gradient + arabic geometric background pattern ---
+   The sky gradient is painted on <html> and fixed to the viewport, so it always
+   spans the full viewport and can never be clipped to a short/tall content box
+   (which left an uncovered bar at the page bottom when on .page-wrapper). The
+   page-wrapper is made transparent so the gradient shows through; the sidebar
+   and the sticky menu-bar keep their own opaque backgrounds. The arabic pattern
+   tiles on top on .page. Code blocks/tables carry solid surfaces, so legibility
+   holds. */
+html {
+    background-image: var(--sky);
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    background-size: 100% 100%;
+}
+
+.page-wrapper {
+    background-color: transparent;
+}
 
 .page-wrapper .page {
     background-image: var(--arabic-pattern);
@@ -299,20 +433,91 @@ h1, h2, h3, h4, h5, h6 {
     color: var(--sesam-emerald-hover);
 }
 
-/* --- Code blocks --- */
+/* --- Theme-swapped diagrams ---
+   Ship both the light and dark artwork; show whichever matches the active
+   theme. Keyed on the same signal as the palette above (explicit data-theme,
+   else prefers-color-scheme), so it needs no JS and never flashes. */
+.arch-diagram { max-width: 100%; height: auto; }
+.arch-dark    { display: none; }
 
-code.hljs {
-    background-color: var(--sesam-surface) !important;
-    border: 1px solid var(--sesam-border-faint);
-    border-radius: 4px;
+html[data-theme="dark"] .arch-light { display: none; }
+html[data-theme="dark"] .arch-dark  { display: inline; }
+
+@media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]):not([data-theme="dark"]) .arch-light { display: none; }
+    html:not([data-theme="light"]):not([data-theme="dark"]) .arch-dark  { display: inline; }
 }
 
+/* --- Code blocks ---
+   JetBrains Mono everywhere (matches the landing terminal + wordmark). Fenced
+   blocks get a warm terminal-like surface; inline code stays a small chip. */
+
+code, pre, kbd {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* fenced block: terminal panel */
+pre > code.hljs {
+    background-color: var(--term-bg) !important;
+    color: var(--sesam-text);
+    border: 1px solid var(--sesam-border-subtle);
+    border-radius: 8px;
+    padding: 0.85em 1em;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.07);
+}
+
+/* inline code: small warm chip. !important is required because mdBook tags
+   inline code with .hljs too, and the active highlight stylesheet's base
+   `.hljs { background }` (a dark one) would otherwise win on specificity. */
 :not(pre) > code {
-    background-color: var(--sesam-surface-alt);
+    background-color: var(--sesam-surface-alt) !important;
+    color: var(--sesam-text) !important;
     border: 1px solid var(--sesam-border-faint);
     border-radius: 3px;
     padding: 0.1em 0.3em;
+    font-size: 0.92em;
 }
+
+/* --- Syntax palette ---
+   Brand-tuned highlight.js token colors, driven by the --code-* tokens so they
+   track light/dark. sesam.css loads after mdBook's highlight stylesheets, so
+   these win on source order; !important guards against any active dark sheet. */
+.hljs-comment,
+.hljs-quote                  { color: var(--code-comment) !important; font-style: italic; }
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-section,
+.hljs-name                   { color: var(--code-keyword) !important; }
+.hljs-built_in,
+.hljs-title,
+.hljs-type                   { color: var(--code-builtin) !important; }
+.hljs-string,
+.hljs-regexp,
+.hljs-symbol,
+.hljs-bullet                 { color: var(--code-string) !important; }
+.hljs-number                 { color: var(--code-number) !important; }
+.hljs-literal                { color: var(--code-literal) !important; }
+.hljs-attr,
+.hljs-attribute,
+.hljs-meta .hljs-keyword     { color: var(--code-attr) !important; }
+.hljs-variable,
+.hljs-template-variable      { color: var(--code-variable) !important; }
+/* shell prompts / preprocessor / diff headers — the emerald prompt accent */
+.hljs-meta,
+.hljs-meta .hljs-string      { color: var(--code-meta) !important; }
+.hljs-addition               { color: var(--code-addition) !important;
+                               background-color: color-mix(in srgb, var(--code-addition) 13%, transparent); }
+.hljs-deletion               { color: var(--code-deletion) !important;
+                               background-color: color-mix(in srgb, var(--code-deletion) 13%, transparent); }
+.hljs-emphasis               { font-style: italic; }
+.hljs-strong                 { font-weight: 700; }
+
+/* --- sesam CLI accents ---
+   Applied by theme/bash-highlight.js to command examples: the `sesam` command
+   (emerald), its subcommand(s) (gold) and --flags (clay). Tokens track theme. */
+pre code .sesam-cmd    { color: var(--sesam-emerald); font-weight: 700; }
+pre code .sesam-subcmd { color: var(--code-attr); font-weight: 600; }
+pre code .sesam-flag   { color: var(--code-number); }
 
 /* --- Admonish box accents --- */
 
@@ -356,6 +561,22 @@ code.hljs {
     background-color: var(--sesam-emerald-muted);
 }
 
+/* --- Tables ---
+   mdBook only paints even rows (--table-alternate-bg); odd rows were left
+   transparent, letting the arabic page pattern bleed through. Give them an
+   explicit surface so both stripes stay opaque and the zebra reads cleanly. */
+.content main table tbody tr:nth-child(2n+1) {
+    background: var(--sesam-surface);
+}
+
+/* Tables span the full content width rather than shrinking to their content. */
+.content main table { width: 100%; }
+
+/* ✓/✗ glyphs (wrapped by theme/table-marks.js): supported reads emerald, the
+   absent one a muted red — softened so a column of ✗ doesn't shout. */
+.content main table .mark-yes { color: var(--sesam-emerald); font-weight: 700; }
+.content main table .mark-no  { color: color-mix(in srgb, var(--code-deletion) 60%, var(--sesam-text-muted)); }
+
 /* --- Pagetoc --- */
 
 .pagetoc a:hover,
@@ -369,14 +590,19 @@ code.hljs {
     border-left: 2px solid var(--sesam-border-subtle) !important;
 }
 
-/* --- Theme picker (Auto/Light/Dark) --- */
-
-#theme-list .theme-active {
-    color: var(--sesam-emerald);
-    font-weight: 700;
+/* --- Theme toggle ---
+   The theme control is now a single sun/moon button (theme-switch.js); the
+   stock popup list is suppressed. */
+#theme-list {
+    display: none !important;
 }
-#theme-list .theme-active::before {
-    content: "✓ ";
+
+/* the sun glows gold, the moon a cool silver, on hover */
+#theme-toggle .fa-sun-o:hover {
+    color: var(--sesam-gold);
+}
+#theme-toggle .fa-moon-o:hover {
+    color: var(--sesam-gold-light);
 }
 
 /* --- Search focus --- */
@@ -385,6 +611,21 @@ code.hljs {
     border-color: var(--sesam-emerald);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--sesam-emerald) 25%, transparent);
 }
+
+/* --- Git build-info footer ---
+   mdbook-gitinfo renders a centered <footer> at the end of the content with
+   inline styles; restyle it (over those inline styles, hence !important) into a
+   subtle page footer pinned to the bottom-right, set off by a divider. */
+.gitinfo-footer {
+    text-align: right !important;
+    margin: 2.5rem 0 0.5rem !important;
+    padding-top: 0.6rem !important;
+    border-top: 1px solid var(--sesam-border-faint);
+    color: var(--sesam-text-muted);
+    font-style: italic;
+}
+.gitinfo-footer a { color: var(--sesam-text-muted); }
+.gitinfo-footer a:hover { color: var(--sesam-emerald); }
 
 /* --- Scrollbar --- */
 
