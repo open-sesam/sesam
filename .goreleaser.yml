@@ -13,13 +13,14 @@ before:
     - go mod tidy
 
 builds:
-  - main: ./cmd/app
-    binary: app
+  - main: .
+    binary: sesam
     env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/open-sesam/sesam/cli.version={{ .Version }}
     goos:
       - linux
-      - windows
       - darwin
     goarch:
       - amd64
@@ -32,11 +33,22 @@ archives:
       - goos: windows
         formats: [zip]
 
+dockers_v2:
+  - images:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}"
+    tags:
+      - "{{ .Tag }}"
+      - "{{ if not .IsNightly }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    annotations:
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.source": "{{ .GitURL }}"
+      "org.opencontainers.image.created": "{{ .Date }}"
+
+# Release notes are produced by git-cliff (see .github/workflows/cd.yml) and
+# passed via --release-notes, so GoReleaser's own changelog is disabled.
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^ci:"
-      - Merge pull request
+  disable: true
