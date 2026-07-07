@@ -19,8 +19,8 @@ while a secret manager is focused on sharing some of those secrets with other us
 
 ## Features
 
-- High integration with `git`.
-- Declarative config as main interface.
+- High level of integration with `git`.
+- Both declarative (config) and imperative (CLI) workflows possible.
 - Different access levels through user groups.
 - Secure - common crypto, minimal info leakage in rest.
 - Familiarity to `git` users.
@@ -42,3 +42,13 @@ How to use this manual:
 - Go to [Basic Usage](./secret.md) to walk through what it can do.
 - Go to [Advanced Usage](./template.md) if you need some more depth.
 - Go to [Reference](./config_ref.md) if you need to look up things later on.
+
+## The name
+
+It is a reference to [Ali Baba and the Forty Thieves](https://en.wikipedia.org/wiki/Ali_Baba_and_the_Forty_Thieves)
+out of the story collection [One Thousand and One Nights](https://en.wikipedia.org/wiki/One_Thousand_and_One_Nights).
+In this story the cave opens upon calling the passphrase *"Open, Sesam!"*
+
+You see this scene depicted on the [landing page](https://opensesam.org/).
+
+The logo is a sesame pod, with the seeds replaced by cute little keys.

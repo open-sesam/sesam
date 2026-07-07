@@ -1,7 +1,7 @@
 # sesam: A clever git secrets manager 
 
 [![CI](https://github.com/open-sesam/sesam/actions/workflows/ci.yml/badge.svg)](https://github.com/open-sesam/sesam/actions/workflows/ci.yml)
-[![Docs](https://img.shields.io/badge/docs-mdBook-blue)](https://opensesam.org/)
+[![Docs](https://img.shields.io/badge/docs-mdBook-blue)](https://opensesam.org/docs/)
 [![Go Reference](https://pkg.go.dev/badge/github.com/open-sesam/sesam.svg)](https://pkg.go.dev/github.com/open-sesam/sesam)
 [![Latest tag](https://img.shields.io/github/v/tag/open-sesam/sesam)](https://github.com/open-sesam/sesam/tags)
 [![Maintenance](https://img.shields.io/maintenance/yes/2026)](https://github.com/open-sesam/sesam/commits/main)
@@ -12,9 +12,9 @@
 <p align="center"><b>Encrypted, multi-user secrets that live in your git repo</b></p>
 
 <p align="center">
-  <a href="https://opensesam.org/">Documentation</a> ·
-  <a href="https://opensesam.org/installation.html">Installation</a> ·
-  <a href="https://opensesam.org/alternatives.html">Alternatives</a> ·
+  <a href="https://opensesam.org/docs/">Documentation</a> ·
+  <a href="https://opensesam.org/docs/installation.html">Installation</a> ·
+  <a href="https://opensesam.org/docs/alternatives.html">Alternatives</a> ·
   <a href="https://github.com/open-sesam/sesam/blob/main/CHANGELOG.md">Changelog</a>
 </p>
 
@@ -29,7 +29,7 @@
 no unauthorised persons have access to them. Other than a password manager,
 which targets a single user, it is targeting teams that need access to a set of
 secrets. It is more capable [than existing decentralized secret
-managers](https://opensesam.org/alternatives.html).
+managers](https://opensesam.org/docs/alternatives.html).
 
 <a href="https://asciinema.org/a/1251104" target="_blank"><img src="https://asciinema.org/a/1251104.svg" /></a>
 
@@ -50,19 +50,19 @@ managers](https://opensesam.org/alternatives.html).
 
 - Rotation and exchange of secrets.
 - Better support for env-file based workflows.
-- Allow merging of git branches with secrets in them.
+- allow merging of git branches with secrets in them.
 - Possibly also a TUI.
 
 # Quickstart Links
 
-- [Documentation](https://opensesam.org/)
-- [Installation](https://opensesam.org/installation.html)
+- [Documentation](https://opensesam.org/docs/)
+- [Installation](https://opensesam.org/docs/installation.html)
 - [Contributing](https://github.com/open-sesam/sesam/blob/main/CONTRIBUTING.md)
 - [Changelog](https://github.com/open-sesam/sesam/blob/main/CHANGELOG.md)
 - [Releases](https://github.com/open-sesam/sesam/releases)
 - [License](https://github.com/open-sesam/sesam/blob/main/LICENSE)
-- [Alternatives](https://opensesam.org/alternatives.html)
-- [Design](https://opensesam.org/design.html)
+- [Alternatives](https://opensesam.org/docs/alternatives.html)
+- [Design](https://opensesam.org/docs/design.html)
 
 # AI Disclaimer
 
@@ -72,8 +72,12 @@ We use AI-based assistants so far for:
   - Reviewing / Auditing.
   - Ideation / Design feedback.
   - Building test suites.
-  - Occasional clearly scoped code change. 
+  - Writing HTML/CSS.
+  - Occasional clearly scoped code change.
 
 The majority of the code is still hand-written to make sure we don't lose touch
 to what we build. To be clear: **This is not a vibe-coded project.** The design
-was done by an experienced software engineer the old-fashioned way.
+was done by an experienced software engineer the old-fashioned way. If you want
+to read more about our stance regarding AI-usage in software development you can read
+some [slides](https://sahib.github.io/misc/the-vibes-that-i-summoned/slides.pdf) here ([with notes](https://sahib.github.io/misc/the-vibes-that-i-summoned/slides-with-notes.pdf))
+

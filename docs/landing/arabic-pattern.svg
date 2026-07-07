@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
+  <!-- Islamic geometric star pattern tile -->
+  <defs>
+    <style>
+      .line { stroke: #c8c0b0; stroke-width: 0.5; fill: none; opacity: 0.35; }
+    </style>
+  </defs>
+  <!-- 8-pointed star at center -->
+  <polygon class="line" points="40,10 46,28 64,22 52,36 70,40 52,44 64,58 46,52 40,70 34,52 16,58 28,44 10,40 28,36 16,22 34,28"/>
+  <!-- corner stars (tiling) -->
+  <polygon class="line" points="0,0 6,12 0,20 -6,12" transform="translate(0,0)"/>
+  <polygon class="line" points="80,0 86,12 80,20 74,12" transform="translate(0,0)"/>
+  <polygon class="line" points="0,80 6,92 0,100 -6,92" transform="translate(0,-20)"/>
+  <polygon class="line" points="80,80 86,92 80,100 74,92" transform="translate(0,-20)"/>
+</svg>

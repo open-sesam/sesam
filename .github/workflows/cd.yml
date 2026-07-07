@@ -10,9 +10,10 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      packages: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -20,7 +21,7 @@ jobs:
         uses: jdx/mise-action@v4
 
       - name: Cache Go modules and build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/go/pkg/mod
@@ -29,16 +30,34 @@ jobs:
           restore-keys: |
             go-${{ runner.os }}-
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Lint
         run: task lint
 
       - name: Run tests
         run: task test
 
+      # Render release notes for the pushed tag from conventional-commit
+      # history; GoReleaser's own changelog is disabled in .goreleaser.yml.
+      - name: Generate release notes
+        run: git-cliff --latest --strip header -o RELEASE_NOTES.md
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=RELEASE_NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

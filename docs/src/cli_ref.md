@@ -103,6 +103,8 @@ Add a secret file or directory at `PATH`
 
 **--help, -h**: show help
 
+**--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file
+
 **--no-seal**: Do not run `sesam seal` afterwards - useful when batching
 
 ## rm
@@ -137,19 +139,19 @@ Decrypt all secrets available to the current user
 
 **--help, -h**: show help
 
-## status
+## status, s
 
-Show secrets that are not sealed yet
+Show overview over repo state (revealed, sealed, unmanaged, ...)
 
 **--all, -a**: Also show in-sync secrets and unmanaged files (hidden by default)
 
-**--diff, -d**: Also show the actual diff
+**--diff, -d**: Show the actual diff using git (extra args are passed to git)
 
 **--help, -h**: show help
 
 **--json**: Print output as JSON
 
-**--sort-by-state, -s**: Sort by state instead of path
+**--users, -u**: Show users instead of groups
 
 ## show
 
@@ -221,6 +223,38 @@ Change the groups a user is in
 
 **--user**="": Which user should be changed
 
+### add-recipient, ar
+
+Add a recipient to an existing user
+
+**--help, -h**: show help
+
+**--no-seal**: Do not run `sesam seal` afterwards - useful when batching
+
+**--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
+
+**--user**="": Which user receives the new recipient
+
+### remove-recipient, rr
+
+Remove a recipient from an existing user (may not be the last one)
+
+**--help, -h**: show help
+
+**--no-seal**: Do not run `sesam seal` afterwards - useful when batching
+
+**--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
+
+**--user**="": Which user looses the specified recipient
+
+### regen-sign-key, rsk
+
+Regenerate the signing key of a specific user
+
+**--help, -h**: show help
+
+**--user**="": Regenerate the signing key for a user
+
 ### rename
 
 Give a user a different name
@@ -286,6 +320,8 @@ Clear cached passphrases from the keyring
 ## log
 
 Show the audit log of secret changes
+
+**--full, -f**: Show full timestamps and ids instead of shortened ones
 
 **--help, -h**: show help
 

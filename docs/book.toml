@@ -33,6 +33,9 @@ footer = "Built {{date}}{{sep}}commit: {{hash}}"
 scroll_offset = 10 # pixels added to scroll position for active header detection (default: 10)
 
 [output.html]
+# The standalone landing page owns the site root; the book is deployed under
+# /docs/ (see the "Assemble site" step in .github/workflows/docs.yml).
+site-url = "/docs/"
 git-repository-url = "https://github.com/open-sesam/sesam"
 git-repository-icon = "fa-github"
 additional-css = [
@@ -44,4 +47,6 @@ additional-js = [
   "theme/pagetoc.js",
   "theme/sidebar-logo.js",
   "theme/theme-switch.js",
+  "theme/bash-highlight.js",
+  "theme/table-marks.js",
 ]

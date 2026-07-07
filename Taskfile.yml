@@ -3,19 +3,15 @@ version: "3"
 
 tasks:
   default:
-    deps: [build]
+    deps: [build-amd64]
 
-  build:
+  _build:
     desc: "Build the sesam binary"
-    aliases:
-      - build-cli
     vars:
-      # Last reachable tag (+commits-since), or a bare hash when untagged.
-      # Commit and date come from the toolchain's embedded VCS stamps.
       VERSION:
         sh: git describe --tags --always
     cmds:
-      - cmd: CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/open-sesam/sesam/cli.version={{.VERSION}}" -o sesam .
+      - cmd: CGO_ENABLED=0 GOARCH={{.GOARCH}} GOOS={{.GOOS}} go build -ldflags "-s -w -X github.com/open-sesam/sesam/cli.version={{.VERSION}}" -o sesam .
     sources:
       - ./*.go
       - ./**/*.go
@@ -23,6 +19,22 @@ tasks:
     generates:
       - ./sesam
     method: checksum
+
+  build-arm64:
+    cmds:
+      - task: _build
+        vars:
+          GOOS: linux
+          GOARCH: arm64
+
+  build-amd64:
+    aliases:
+      - build
+    cmds:
+      - task: _build
+        vars:
+          GOOS: linux
+          GOARCH: amd64
 
   test:
     desc: Run go tests
@@ -36,8 +48,6 @@ tasks:
       - go tool cover -func=coverage.out
       - go tool cover -html=coverage.out
 
-  # TODO: Build an docker image for CI + also for end users.
-
   lint:
     desc: Run the linter
     cmds:
@@ -50,15 +60,31 @@ tasks:
       - gofumpt -w -extra .
 
   docgen:
+    desc: Generate all reference docs (CLI + config)
+    deps: [docgen:cli, docgen:cfg]
+
+  docgen:cli:
     desc: Generate CLI reference markdown from live command tree
     deps: [build]
     cmds:
-      - ./sesam docgen > docs/src/cli_ref.md
+      - ./sesam docgen cli > docs/src/cli_ref.md
     sources:
       - ./sesam
       - cli/**/*.go
     generates:
       - docs/src/cli_ref.md
+
+  docgen:cfg:
+    desc: Generate config reference markdown from sesam_schema.json
+    deps: [build]
+    cmds:
+      - ./sesam docgen config > docs/src/config_ref.md
+    sources:
+      - ./sesam
+      - config/sesam_schema.json
+      - cli/commands/docgen_cfg_template.md
+    generates:
+      - docs/src/config_ref.md
 
   vuln:
     desc: Scan dependencies and stdlib usage for known vulnerabilities (govulncheck)

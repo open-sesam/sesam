@@ -1,16 +1,17 @@
 # Managing secrets
 
-## Adding a secret via CLI
+## Adding a secret via CLI (imperative)
 
 ```admonish note
 All secrets must be in the same folder as `sesam.yml` or below it.
 We do not support adding secrets outside of the sesam repository.
+Attempts to do so will error out.
 ```
 
 If you have a secret at `path/to/secret`, then having it managed by `sesam` is only a matter of this command:
 
 ```bash
-$ sesam add path/to/secret
+$ sesam add path/to/secret --group deploy
 ```
 
 This will:
@@ -18,19 +19,27 @@ This will:
 1. Record that this file is now managed by `sesam` by adding it to the audit log.
 2. Encrypt the file and place it in `.sesam/objects`. This is what is being pushed in the end.
 
-If you also like to have it committed, then just append a `--commit`.
+If you omit the ``--group`` parameter then only the `admin` group will have access to the file.
+You can change this at any point by just re-running the `add` command with any groups you want to set.
 
-## Adding a secret via Config
+## Adding a secret via config (declarative)
+
+```admonish warning
+The `sesam apply` feature is not yet implemented.
+Please see here to view the [plan](https://github.com/open-sesam/sesam/issues/62).
+
+The documentation here is just a preview.
+```
 
 Adding secrets via CLI is nice for scripts. `sesam` also supports describing
 the desired state in a declarative way via `sesam.yml`. If you executed the
 above command you will notice the secret was added already to the config:
 
 ```yaml
-config:
-  secrets:
-    - path: path/to/secret
-      description: Where it used, who owns it, Contact...
+secrets:
+  - path: path/to/secret
+    access: [deploy]
+    description: Where it used, who owns it, Contact...
 ```
 
 If you did not run the `add` command above, then you can also add the entry manually and then run:
@@ -97,23 +106,58 @@ In that sense, it works a bit like `git add`.
 
 ## Modifying secrets
 
-Running `sesam add` will work too though, adding them is idempotent.
-It is enough to run `sesam seal` if you only modified existing secrets though.
-This simply encrypts ("seals") all known secrets. As per usual, it also has a ``--commit`` option.
+Running `sesam add` will work here too, similar to `git add`. By default this will also re-seal the secrets,
+except if you pass `--no-seal`.
+
+If you want to change the access groups of a user, then just pass a different set of `--group` flags.
+
+### Getting an overview
+
+If you need to see which files were modified but not yet sealed you can use `sesam status`:
+
+```bash
+# without --all you will only see the modified files:
+$ sesam status --all
+.
+├─ M README.md (admin)
+├─ ✓ bg.png (admin)
+╰─ services/
+   ├─ ✓ gateway.env (admin)
+   ╰─ ✓ registry.env (admin)
+  1 out of sync · 3 in sync
+
+```
+
+This will show you files you edited directly without calling `sesam add` on them.
 
 ## Removing secrets
 
 If you have deleted files you can run this:
 
 ```bash
-$ sesam add --deleted files/ dir/
-
+$ sesam rm files/ dir/
 ```
 
-```admonish note
-The command above only helps you deleted files on disk and want to tell `sesam` now that
-these files do not exist anymore. If you removed them from the config, then `sesam apply`
-will not find them anymore.
+```admonish warning
+Please do not delete secrets just with `rm`. This will just remove the revealed file, but the
+sealed file in `.sesam/` will still exist. On the next `sesam open` it will suddenly be back.
+```
+
+
+## Moving secrets
+
+Probably not very surprising by now, but we have a `mv` command as well:
+
+```bash
+$ sesam mv old_name new_name
+```
+
+
+```admonish warning
+The same warning as with `sesam rm` applies: Please do not just move the file
+with `mv`. This will just move  the revealed file to a new name, but the sealed
+file in `.sesam/` will still exist. On the next `sesam open` it will suddenly
+be back with the old path.
 ```
 
 ## Listing secrets
