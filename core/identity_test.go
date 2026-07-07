@@ -7,6 +7,8 @@ import (
 	"crypto/rsa"
 	"encoding/pem"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -52,11 +54,61 @@ func (m *mockPassphraseProvider) PassphraseVerified(_ []byte, success bool) {
 	m.verifiedSuccess = success
 }
 
+func TestAskpassProviderReadsPassphrase(t *testing.T) {
+	helper := writeAskpassHelper(t, "printf '%s\\n' secret")
+
+	passphrase, err := (&AskpassProvider{Program: helper}).ReadPassphrase("Prompt: ")
+	require.NoError(t, err)
+	require.Equal(t, []byte("secret"), passphrase)
+}
+
+func TestAskpassProviderTrimsProgram(t *testing.T) {
+	helper := writeAskpassHelper(t, "printf flag")
+
+	passphrase, err := (&AskpassProvider{Program: " " + helper + " "}).ReadPassphrase("Prompt: ")
+	require.NoError(t, err)
+	require.Equal(t, []byte("flag"), passphrase)
+}
+
+func TestAskpassProviderUnavailable(t *testing.T) {
+	_, err := (&AskpassProvider{}).ReadPassphrase("Prompt: ")
+	require.ErrorIs(t, err, errAskpassUnavailable)
+}
+
+func TestAskpassProviderFallsBackWhenUnconfigured(t *testing.T) {
+	fallback := &mockPassphraseProvider{passphrase: []byte("fallback")}
+
+	passphrase, err := (&AskpassProvider{Fallback: fallback}).ReadPassphrase("Prompt: ")
+	require.NoError(t, err)
+	require.Equal(t, []byte("fallback"), passphrase)
+	require.True(t, fallback.called)
+	require.Equal(t, "Prompt: ", fallback.lastPrompt)
+}
+
+func TestAskpassProviderDoesNotFallBackWhenHelperFails(t *testing.T) {
+	helper := writeAskpassHelper(t, "exit 1")
+	fallback := &mockPassphraseProvider{passphrase: []byte("fallback")}
+
+	_, err := (&AskpassProvider{Program: helper, Fallback: fallback}).ReadPassphrase("Prompt: ")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "askpass failed")
+	require.False(t, fallback.called)
+}
+
+func writeAskpassHelper(t *testing.T, body string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "askpass")
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700))
+	return path
+}
+
 func encryptIdentityForTest(t *testing.T, plaintext string, passphrase []byte, armored bool) string {
 	t.Helper()
 
 	recipient, err := age.NewScryptRecipient(string(passphrase))
 	require.NoError(t, err)
+	recipient.SetWorkFactor(10)
 
 	var buf bytes.Buffer
 	w := io.Writer(&buf)

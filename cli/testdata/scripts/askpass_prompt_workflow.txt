@@ -1,0 +1,19 @@
+# Verify the CLI askpass prompt identifies sesam and the encrypted identity.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+
+env SESAM_ID=$ADMIN_ENCRYPTED_KEY
+env SESAM_ASKPASS=$ASKPASS_RECORD_HELPER
+env SESAM_ASKPASS_REQUIRED=force
+env ASKPASS_PROMPT=$WORK/askpass.prompt
+exec sesam id
+stdout 'admin'
+
+exec cat askpass.prompt
+stdout 'sesam'
+stdout 'ADMIN\.encrypted\.age'
+stdout 'sesam\.identity\.[0-9a-f]{32}'

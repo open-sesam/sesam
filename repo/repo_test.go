@@ -457,6 +457,14 @@ func TestRepoOpts_PluginUI(t *testing.T) {
 	require.NotNil(t, RepoOpts{Interactive: true}.pluginUI(), "interactive variant")
 }
 
+func TestRepoOpts_AskpassRequired(t *testing.T) {
+	require.Equal(t, "prefer", RepoOpts{}.askpassRequired())
+	require.Equal(t, "prefer", RepoOpts{AskpassRequired: "invalid"}.askpassRequired())
+	require.Equal(t, "prefer", RepoOpts{AskpassRequired: "prefer"}.askpassRequired())
+	require.Equal(t, "force", RepoOpts{AskpassRequired: "force"}.askpassRequired())
+	require.Equal(t, "never", RepoOpts{AskpassRequired: "never"}.askpassRequired())
+}
+
 // --- Status ----------------------------------------------------------------
 
 // writeRepoFile writes content to dir/rel, creating parent dirs as needed.

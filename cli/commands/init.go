@@ -28,8 +28,10 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 	opts := repo.RepoInitOpts{
 		InitialUserName: cmd.String("user"),
 		RepoOpts: repo.RepoOpts{
-			Interactive: true,
-			LockTimeout: cmd.Duration("lock-timeout"),
+			Interactive:     true,
+			AskpassProgram:  cmd.String("askpass"),
+			AskpassRequired: askpassRequired(),
+			LockTimeout:     cmd.Duration("lock-timeout"),
 		},
 		InitStep: func(format string, args ...any) {
 			prefix := output.String(" ✓ ").Foreground(output.Color("#008000")).String()

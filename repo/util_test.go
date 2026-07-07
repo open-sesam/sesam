@@ -13,9 +13,11 @@ import (
 
 type repoMockPassphraseProvider struct {
 	passphrase []byte
+	prompt     string
 }
 
-func (m *repoMockPassphraseProvider) ReadPassphrase(string) ([]byte, error) {
+func (m *repoMockPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
+	m.prompt = prompt
 	return m.passphrase, nil
 }
 
@@ -26,6 +28,7 @@ func encryptRepoIdentityForTest(t *testing.T, plaintext string, passphrase []byt
 
 	recipient, err := age.NewScryptRecipient(string(passphrase))
 	require.NoError(t, err)
+	recipient.SetWorkFactor(10)
 
 	var buf bytes.Buffer
 	w, err := age.Encrypt(&buf, recipient)
@@ -189,16 +192,21 @@ func TestLoadIdentitiesWithEncryptedAgeIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "encrypted.age")
 	require.NoError(t, os.WriteFile(path, []byte(key), 0o600))
 
+	provider := &repoMockPassphraseProvider{passphrase: passphrase}
 	ids, err := loadIdentitiesWith(
 		[]string{path},
-		func(string) core.PassphraseProvider {
-			return &repoMockPassphraseProvider{passphrase: passphrase}
+		func(keyFingerprint string) core.PassphraseProvider {
+			require.Equal(t, core.KeyFingerprint([]byte(key)), keyFingerprint)
+			return provider
 		},
 		core.NewNonInteractivePluginUI(),
 	)
 	require.NoError(t, err)
 	require.Len(t, ids, 1)
 	require.Equal(t, []string{ageID.Recipient().String()}, ids.RecipientStrings())
+	require.Contains(t, provider.prompt, "sesam")
+	require.Contains(t, provider.prompt, filepath.Base(path))
+	require.Contains(t, provider.prompt, core.KeyFingerprint([]byte(key)))
 }
 
 func TestSplitObjectPath(t *testing.T) {
