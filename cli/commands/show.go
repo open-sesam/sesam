@@ -24,7 +24,8 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 	object := cmd.StringArg("object")
 
 	ids, err := repo.LoadIdentities(identityPaths, repo.RepoOpts{
-		AskpassProgram: cmd.String("askpass"),
+		AskpassProgram:  cmd.String("askpass"),
+		AskpassRequired: askpassRequired(),
 	})
 	if err != nil {
 		return err

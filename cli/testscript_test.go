@@ -74,7 +74,7 @@ func TestWorkflows(t *testing.T) {
 			}
 			// A second non-admin identity, used as an extra recipient/device
 			// key in the add/remove-recipient and regen workflows.
-			if _, err := writeIdentity("CAROL"); err != nil {
+			if _, _, err := writeIdentity("CAROL"); err != nil {
 				return err
 			}
 
@@ -94,6 +94,13 @@ func TestWorkflows(t *testing.T) {
 				return err
 			}
 			e.Setenv("ASKPASS_HELPER", askpassPath)
+
+			recordAskpassPath := filepath.Join(idDir, "record-askpass")
+			recordAskpassScript := fmt.Sprintf("#!/bin/sh\nprintf %%s \"$1\" >\"$ASKPASS_PROMPT\"\nprintf %%s %q\n", askpassTestPassphrase)
+			if err := os.WriteFile(recordAskpassPath, []byte(recordAskpassScript), 0o700); err != nil {
+				return err
+			}
+			e.Setenv("ASKPASS_RECORD_HELPER", recordAskpassPath)
 
 			// Plugin identity for the mock age-plugin-sesamtest binary
 			// registered via TestMain. Used by plugin_workflow.txt to
@@ -118,6 +125,7 @@ func writeEncryptedIdentity(path string, plaintext []byte, passphrase string) er
 	if err != nil {
 		return err
 	}
+	recipient.SetWorkFactor(10)
 
 	var buf bytes.Buffer
 	armorWriter := armor.NewWriter(&buf)

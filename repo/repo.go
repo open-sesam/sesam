@@ -91,6 +91,10 @@ type RepoOpts struct {
 	// AskpassProgram overrides SESAM_ASKPASS when set.
 	AskpassProgram string
 
+	// AskpassRequired controls whether askpass is used: prefer, force, or never.
+	// Empty means prefer.
+	AskpassRequired string
+
 	// LockTimeout bounds how long acquiring the on-disk repo lock waits.
 	// Zero means use the default.
 	LockTimeout time.Duration
@@ -132,17 +136,26 @@ func (opts RepoOpts) pluginUI() *core.PluginUI {
 	return core.NewNonInteractivePluginUI()
 }
 
-func (opts RepoOpts) passphraseProvider(keyFingerprint string) core.PassphraseProvider {
-	chain := core.PassphraseChain{}
-	if askpassRequired() != "never" {
-		chain = append(chain, &core.AskpassProvider{Program: opts.AskpassProgram})
+func (opts RepoOpts) askpassRequired() string {
+	switch opts.AskpassRequired {
+	case "never", "force", "prefer":
+		return opts.AskpassRequired
+	default:
+		return "prefer"
 	}
-	if opts.Interactive && askpassRequired() != "force" {
-		chain = append(chain, &core.StdinPassphraseProvider{})
+}
+
+func (opts RepoOpts) passphraseProvider(keyFingerprint string) core.PassphraseProvider {
+	var fallback core.PassphraseProvider
+	if opts.Interactive && opts.askpassRequired() != "force" {
+		fallback = &core.StdinPassphraseProvider{}
+	}
+	if opts.askpassRequired() != "never" {
+		fallback = &core.AskpassProvider{Program: opts.AskpassProgram, Fallback: fallback}
 	}
 	return &core.KeyringPassphraseProvider{
 		KeyFingerprint: keyFingerprint,
-		Fallback:       chain,
+		Fallback:       fallback,
 	}
 }
 

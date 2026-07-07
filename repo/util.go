@@ -53,20 +53,6 @@ func loadIdentities(identityPaths []string, pluginUI *core.PluginUI) (core.Ident
 	return loadIdentitiesWith(identityPaths, RepoOpts{Interactive: true}.passphraseProvider, pluginUI)
 }
 
-func askpassRequired() string {
-	for _, name := range []string{"SESAM_ASKPASS_REQUIRED", "GIT_ASKPASS_REQUIRED", "SSH_ASKPASS_REQUIRED"} {
-		switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
-		case "never":
-			return "never"
-		case "force":
-			return "force"
-		case "prefer":
-			return "prefer"
-		}
-	}
-	return "prefer"
-}
-
 // loadIdentitiesWith parses every identity at the given paths. newProvider
 // builds the PassphraseProvider for a single identity, keyed by that key's own
 // fingerprint, so each encrypted key gets a distinct keyring entry instead of
@@ -96,8 +82,9 @@ func loadIdentitiesWith(identityPaths []string, newProvider func(keyFingerprint 
 		}
 
 		key := string(data)
-		prompt := fmt.Sprintf("🔐 Passphrase for %s: ", filepath.Base(expandedPath))
-		provider := newProvider(core.KeyFingerprint(data))
+		keyFingerprint := core.KeyFingerprint(data)
+		prompt := fmt.Sprintf("🔐 sesam passphrase for %s (%s): ", filepath.Base(expandedPath), keyFingerprint)
+		provider := newProvider(keyFingerprint)
 		identity, err := core.ParseIdentity(key, provider, pluginUI, prompt)
 		if err != nil {
 			return nil, err

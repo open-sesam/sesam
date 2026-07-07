@@ -84,7 +84,7 @@ var flagsGeneral = []cli.Flag{
 	&cli.StringFlag{
 		Name:    "askpass",
 		Usage:   "Askpass helper for encrypted identities",
-		Sources: cli.EnvVars("SESAM_ASKPASS"),
+		Sources: cli.EnvVars("SESAM_ASKPASS", "GIT_ASKPASS", "SSH_ASKPASS"),
 	},
 	&cli.BoolFlag{
 		Name:    "no-color",

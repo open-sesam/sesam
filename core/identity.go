@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -65,12 +64,12 @@ type StdinPassphraseProvider struct{}
 
 // AskpassProvider reads a passphrase through an askpass helper.
 type AskpassProvider struct {
-	// Program overrides SESAM_ASKPASS when set, typically from --askpass.
+	// Program is the askpass helper path, typically from --askpass.
 	Program string
-}
 
-// PassphraseChain tries providers in order until one returns a passphrase.
-type PassphraseChain []PassphraseProvider
+	// Fallback is used when no askpass program is configured.
+	Fallback PassphraseProvider
+}
 
 // KeyringPassphraseProvider tries to read the passphrase from the system
 // keyring (GNOME Keyring, KWallet, macOS Keychain, ...).
@@ -394,6 +393,9 @@ func (spp *StdinPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error
 func (ap *AskpassProvider) ReadPassphrase(prompt string) ([]byte, error) {
 	program := ap.program()
 	if program == "" {
+		if ap != nil && ap.Fallback != nil {
+			return ap.Fallback.ReadPassphrase(prompt)
+		}
 		return nil, errAskpassUnavailable
 	}
 	if prompt == "" {
@@ -409,42 +411,16 @@ func (ap *AskpassProvider) ReadPassphrase(prompt string) ([]byte, error) {
 }
 
 func (ap *AskpassProvider) program() string {
-	if ap != nil && strings.TrimSpace(ap.Program) != "" {
-		return ap.Program
-	}
-	for _, name := range []string{"SESAM_ASKPASS", "GIT_ASKPASS", "SSH_ASKPASS"} {
-		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
-			return value
-		}
+	if ap != nil {
+		return strings.TrimSpace(ap.Program)
 	}
 	return ""
 }
 
-func (chain PassphraseChain) ReadPassphrase(prompt string) ([]byte, error) {
-	for _, provider := range chain {
-		if provider == nil {
-			continue
-		}
-
-		passphrase, err := provider.ReadPassphrase(prompt)
-		if err == nil {
-			return passphrase, nil
-		}
-		if errors.Is(err, errAskpassUnavailable) {
-			continue
-		}
-		return nil, err
-	}
-
-	return nil, fmt.Errorf("no passphrase provider available")
-}
-
 func (ap *AskpassProvider) PassphraseVerified(passphrase []byte, success bool) {
-	// no-op
-}
-
-func (chain PassphraseChain) PassphraseVerified(passphrase []byte, success bool) {
-	// The keyring provider owns caching/eviction for the chain fallback.
+	if ap != nil && ap.program() == "" && ap.Fallback != nil {
+		ap.Fallback.PassphraseVerified(passphrase, success)
+	}
 }
 
 func (spp *StdinPassphraseProvider) PassphraseVerified(passphrase []byte, success bool) {

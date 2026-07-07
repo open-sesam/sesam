@@ -457,20 +457,12 @@ func TestRepoOpts_PluginUI(t *testing.T) {
 	require.NotNil(t, RepoOpts{Interactive: true}.pluginUI(), "interactive variant")
 }
 
-func TestAskpassRequired(t *testing.T) {
-	t.Setenv("SESAM_ASKPASS_REQUIRED", "")
-	t.Setenv("GIT_ASKPASS_REQUIRED", "")
-	t.Setenv("SSH_ASKPASS_REQUIRED", "")
-	require.Equal(t, "prefer", askpassRequired())
-
-	t.Setenv("SSH_ASKPASS_REQUIRED", "force")
-	require.Equal(t, "force", askpassRequired())
-
-	t.Setenv("GIT_ASKPASS_REQUIRED", "never")
-	require.Equal(t, "never", askpassRequired())
-
-	t.Setenv("SESAM_ASKPASS_REQUIRED", "prefer")
-	require.Equal(t, "prefer", askpassRequired())
+func TestRepoOpts_AskpassRequired(t *testing.T) {
+	require.Equal(t, "prefer", RepoOpts{}.askpassRequired())
+	require.Equal(t, "prefer", RepoOpts{AskpassRequired: "invalid"}.askpassRequired())
+	require.Equal(t, "prefer", RepoOpts{AskpassRequired: "prefer"}.askpassRequired())
+	require.Equal(t, "force", RepoOpts{AskpassRequired: "force"}.askpassRequired())
+	require.Equal(t, "never", RepoOpts{AskpassRequired: "never"}.askpassRequired())
 }
 
 // --- Status ----------------------------------------------------------------

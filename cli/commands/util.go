@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	json "github.com/neilotoole/jsoncolor"
 
@@ -34,10 +35,11 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 			cmd.String("sesam-dir"),
 			cmd.StringSlice("identity"),
 			repo.RepoOpts{
-				Interactive:    true,
-				AskpassProgram: cmd.String("askpass"),
-				LockTimeout:    cmd.Duration("lock-timeout"),
-				VerifyMode:     verifyMode,
+				Interactive:     true,
+				AskpassProgram:  cmd.String("askpass"),
+				AskpassRequired: askpassRequired(),
+				LockTimeout:     cmd.Duration("lock-timeout"),
+				VerifyMode:      verifyMode,
 			},
 		)
 		if err != nil {
@@ -57,6 +59,16 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 		}()
 		return action(ctx, cmd, r)
 	}
+}
+
+func askpassRequired() string {
+	for _, name := range []string{"SESAM_ASKPASS_REQUIRED", "GIT_ASKPASS_REQUIRED", "SSH_ASKPASS_REQUIRED"} {
+		switch s := strings.ToLower(strings.TrimSpace(os.Getenv(name))); s {
+		case "never", "force", "prefer":
+			return s
+		}
+	}
+	return "prefer"
 }
 
 func printJSON(value any) error {
