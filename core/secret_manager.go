@@ -173,14 +173,14 @@ func (sm *SecretManager) Seal(all bool) error {
 		return fmt.Errorf("prune stale objects: %w", err)
 	}
 
-	// The seal entry attests the root hash of the current sealed manifest. When
-	// that is unchanged (nothing re-encrypted, added, removed or moved) there is
-	// nothing new to record, so skip the entry - otherwise a no-op seal (e.g. the
-	// pre-commit hook on a commit that touched no secrets) would append an entry
-	// on every commit. A reseal changes the ciphertext hash, so this also covers
-	// content and recipient drift.
+	// Check if the root hash actually changed, we might be able to just skip
+	// adding the seal entry because nothing effectively happened.
+	//
+	// The exception are operations like "adding a user that has access to nothing"
+	// That will still trigger the warning that we should seal, but in this case
+	// we can just append the audit entry anyways.
 	rootHash := buildRootHash(sigs)
-	if rootHash == sm.State.LastSealRootHash {
+	if rootHash == sm.State.LastSealRootHash && sm.State.SealRequiredSeqID == 0 {
 		return nil
 	}
 

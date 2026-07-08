@@ -252,6 +252,34 @@ func TestSealIncrementalResealsOnRecipientChange(t *testing.T) {
 	require.Equal(t, "dev-content", string(got), "new recipient must be able to decrypt")
 }
 
+// TestSealDischargesObligationWithoutRecipientChange pins the fix for the
+// permanent "seal is pending" trap: an operation that records a seal obligation
+// but leaves every secret's recipient set unchanged (here: change_access to a
+// group with no members) re-encrypts nothing, yet Seal(false) must still emit a
+// seal entry so SealRequiredSeqID clears. Otherwise verify nags forever and only
+// Seal(true) fixes it.
+func TestSealDischargesObligationWithoutRecipientChange(t *testing.T) {
+	mgr := sealedSecretManager(t) // admin-only "secrets/test", already sealed
+
+	obj := filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test"))
+	before, err := os.ReadFile(obj)
+	require.NoError(t, err)
+
+	// change_access to an empty group: recipients still resolve to admin-only.
+	require.NoError(t, mgr.SecretChangeGroups("secrets/test", []string{"deploy"}))
+	require.NotZero(t, mgr.State.SealRequiredSeqID, "change_access must record a seal obligation")
+
+	entriesBefore := len(mgr.AuditLog.Entries)
+	require.NoError(t, mgr.Seal(false))
+
+	require.Zero(t, mgr.State.SealRequiredSeqID, "seal must clear the pending obligation")
+	require.Len(t, mgr.AuditLog.Entries, entriesBefore+1, "seal must append exactly one entry to discharge the obligation")
+
+	after, err := os.ReadFile(obj)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "an unchanged recipient set must not re-encrypt the object")
+}
+
 func TestRevealAllFailsMissingAge(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	// No .sesam files exist, so reveal should fail.

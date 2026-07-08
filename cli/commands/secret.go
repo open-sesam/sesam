@@ -33,6 +33,7 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if noSeal {
 			return nil
 		}
+
 		return s.Seal(cmd.Bool("seal-all"))
 	})
 }
