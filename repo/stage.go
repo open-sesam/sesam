@@ -329,6 +329,9 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, nested bool) error {
 
 	var files []string
 	for _, p := range revealedPaths {
+		if err := core.IsForbiddenPath(p); err != nil {
+			return err
+		}
 		expanded, err := s.expandSecretFiles(p)
 		if err != nil {
 			return fmt.Errorf("failed to expand %q: %w", p, err)
@@ -415,6 +418,10 @@ func (s *Stage) SecretMove(oldRevealedPath, newRevealedPath string, nested bool)
 		newRel := newBase
 		if sub != "." {
 			newRel = filepath.Join(newBase, sub)
+		}
+
+		if err := core.IsForbiddenPath(newRel); err != nil {
+			return err
 		}
 
 		if err := s.secret.SecretMove(oldRel, newRel); err != nil {

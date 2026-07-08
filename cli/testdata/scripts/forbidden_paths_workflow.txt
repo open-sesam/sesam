@@ -1,0 +1,33 @@
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Track a normal secret to move around later.
+exists secret.txt
+exec sesam add secret.txt
+exists .sesam/objects/secret.txt.sesam
+
+# add must refuse an explicitly named forbidden path (config, git plumbing,
+# metadata tree) instead of silently doing nothing.
+! exec sesam add sesam.yml
+! exec sesam add .gitattributes
+! exec sesam add .gitignore
+
+# move must refuse a forbidden destination, otherwise a legal move could
+# clobber sesam's own config or git filter routing.
+! exec sesam mv secret.txt sesam.yml
+! exec sesam mv secret.txt .gitattributes
+! exec sesam mv secret.txt .sesam/stolen
+
+# The rejected operations must have changed nothing: the secret is still
+# tracked at its original path and sesam.yml is intact.
+exec sesam verify
+grep 'secret.txt' sesam.yml
+! grep 'stolen' sesam.yml
+
+-- secret.txt --
+Some content
