@@ -89,13 +89,13 @@ func (fc failCloser) Close() error {
 
 func TestIsForbiddenPathSesamSubdir(t *testing.T) {
 	// A relative path that points inside .sesam/ must be rejected.
-	err := IsForbiddenPath(".", filepath.Join(".sesam", "signkeys", "admin.age"))
+	err := IsForbiddenPath(filepath.Join(".sesam", "signkeys", "admin.age"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), ".sesam")
 }
 
 func TestValidSecretPathFormatNormalPath(t *testing.T) {
-	require.NoError(t, validSecretPathFormat(".", "secrets/db_password"))
+	require.NoError(t, validSecretPathFormat("secrets/db_password"))
 }
 
 // sesam.yml is sesam's own config and must never be sealed as a secret,
@@ -109,7 +109,7 @@ func TestIsForbiddenPathRejectsSesamYml(t *testing.T) {
 
 	for _, path := range cases {
 		t.Run(path, func(t *testing.T) {
-			err := IsForbiddenPath(".", path)
+			err := IsForbiddenPath(path)
 			require.Error(t, err, "should reject %q", path)
 			require.Contains(t, err.Error(), "sesam.yml")
 		})
@@ -117,25 +117,22 @@ func TestIsForbiddenPathRejectsSesamYml(t *testing.T) {
 }
 
 // Anything living inside a .sesam directory must be rejected no matter where
-// the component appears in the path, and independent of whether sesamDir is
-// relative or absolute (the leading-prefix check alone misses both).
+// the component appears in the path.
 func TestIsForbiddenPathRejectsDotSesam(t *testing.T) {
 	cases := []struct {
 		name        string
-		sesamDir    string
 		revealed    string
 		wantMessage string
 	}{
-		{"leading", ".", filepath.Join(".sesam", "secret"), ".sesam"},
-		{"signkey", ".", filepath.Join(".sesam", "signkeys", "admin.age"), ".sesam"},
-		{"nested component", ".", filepath.Join("a", ".sesam", "b"), ".sesam"},
-		{"bare", ".", ".sesam", ".sesam"},
-		{"absolute sesam dir", "/repo/root", filepath.Join(".sesam", "secret"), ".sesam"},
+		{"leading", filepath.Join(".sesam", "secret"), ".sesam"},
+		{"signkey", filepath.Join(".sesam", "signkeys", "admin.age"), ".sesam"},
+		{"nested component", filepath.Join("a", ".sesam", "b"), ".sesam"},
+		{"bare", ".sesam", ".sesam"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := IsForbiddenPath(tc.sesamDir, tc.revealed)
+			err := IsForbiddenPath(tc.revealed)
 			require.Error(t, err, "should reject %q", tc.revealed)
 			require.Contains(t, err.Error(), tc.wantMessage)
 		})
@@ -154,7 +151,7 @@ func TestIsForbiddenPathAllowsLookalikes(t *testing.T) {
 
 	for _, path := range cases {
 		t.Run(path, func(t *testing.T) {
-			require.NoError(t, IsForbiddenPath(".", path), "should accept %q", path)
+			require.NoError(t, IsForbiddenPath(path), "should accept %q", path)
 		})
 	}
 }
@@ -201,21 +198,23 @@ func TestReadFileLimitedMissing(t *testing.T) {
 // that doesn't hold.
 func TestCopyFileHardlinksWhenPossible(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "src")
-	dst := filepath.Join(dir, "dst")
-	require.NoError(t, os.WriteFile(src, []byte("payload"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src"), []byte("payload"), 0o600))
 
-	require.NoError(t, copyFile(src, dst))
-
-	srcInfo, err := os.Stat(src)
+	root, err := os.OpenRoot(dir)
 	require.NoError(t, err)
-	dstInfo, err := os.Stat(dst)
+	t.Cleanup(func() { _ = root.Close() })
+
+	require.NoError(t, copyFile(root, "src", "dst"))
+
+	srcInfo, err := os.Stat(filepath.Join(dir, "src"))
+	require.NoError(t, err)
+	dstInfo, err := os.Stat(filepath.Join(dir, "dst"))
 	require.NoError(t, err)
 	require.True(t, os.SameFile(srcInfo, dstInfo),
 		"copyFile should hardlink when src and dst sit on the same fs")
 
 	// Sanity: contents match.
-	got, err := os.ReadFile(dst)
+	got, err := os.ReadFile(filepath.Join(dir, "dst"))
 	require.NoError(t, err)
 	require.Equal(t, []byte("payload"), got)
 }
@@ -224,20 +223,22 @@ func TestCopyFileHardlinksWhenPossible(t *testing.T) {
 // back to a byte-for-byte copy and not surface an error.
 func TestCopyFileFallsBackOnLinkFailure(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "src")
-	dst := filepath.Join(dir, "dst")
-	require.NoError(t, os.WriteFile(src, []byte("payload"), 0o600))
-	require.NoError(t, os.WriteFile(dst, []byte("stale"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src"), []byte("payload"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "dst"), []byte("stale"), 0o600))
 
-	require.NoError(t, copyFile(src, dst))
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
 
-	got, err := os.ReadFile(dst)
+	require.NoError(t, copyFile(root, "src", "dst"))
+
+	got, err := os.ReadFile(filepath.Join(dir, "dst"))
 	require.NoError(t, err)
 	require.Equal(t, []byte("payload"), got)
 
-	srcInfo, err := os.Stat(src)
+	srcInfo, err := os.Stat(filepath.Join(dir, "src"))
 	require.NoError(t, err)
-	dstInfo, err := os.Stat(dst)
+	dstInfo, err := os.Stat(filepath.Join(dir, "dst"))
 	require.NoError(t, err)
 	require.False(t, os.SameFile(srcInfo, dstInfo),
 		"fallback path should produce a fresh inode, not link to src")

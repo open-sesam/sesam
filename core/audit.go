@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ import (
 	"time"
 
 	"filippo.io/age"
-	"github.com/google/renameio"
+	"github.com/google/renameio/v2"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/chacha20poly1305"
 )
@@ -26,6 +27,10 @@ import (
 const (
 	sesamInitialHashSeed = "sesam.init"
 )
+
+// Repo-relative audit-log paths (relative to the sesam root).
+func auditLogPath() string  { return filepath.Join(".sesam", "audit", "log.jsonl") }
+func auditInitPath() string { return filepath.Join(".sesam", "audit", "init") }
 
 // Operation specifies what Operation a specific entry describes.
 // It is unlikely you need to use this directly.
@@ -340,8 +345,12 @@ type DetailSeal struct {
 type AuditLog struct {
 	Entries []AuditEntrySigned `json:"entries"`
 
-	// SesamDir is the dir in which .sesam resides.
+	// SesamDir is the absolute dir in which .sesam resides. Kept for git
+	// interop (e.g. the init-file trust-anchor check); file I/O goes via root.
 	SesamDir string `json:"-"`
+
+	// root confines audit-log file I/O to the repository. Paths are relative.
+	root *os.Root `json:"-"`
 
 	// The hash from the .sesam/audit/init file.
 	// It should be the same hash as the prev_hash of the 2nd entry.
@@ -468,15 +477,14 @@ func encryptAuditKey(key [32]byte, recps Recipients) ([]byte, error) {
 // WriteAuditKey rewrites the log with the same symmetric key but a new recipient
 // set. The update is atomic: a tmp file is written and then renamed into place.
 func (al *AuditLog) WriteAuditKey(recps Recipients) error {
-	logPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl")
+	logPath := auditLogPath()
 
 	newLine1, err := encryptAuditKey(al.key, recps)
 	if err != nil {
 		return err
 	}
 
-	tmpDir := filepath.Join(al.SesamDir, ".sesam", "tmp")
-	tmp, err := renameio.TempFile(tmpDir, logPath)
+	tmp, err := renameio.NewPendingFile(logPath, renameio.WithRoot(al.root), renameio.WithTempDir(SesamTmpDir()), renameio.WithPermissions(0o600))
 	if err != nil {
 		return fmt.Errorf("create tmp audit log: %w", err)
 	}
@@ -505,8 +513,7 @@ func (al *AuditLog) WriteAuditKey(recps Recipients) error {
 	}
 
 	_ = al.fd.Close()
-	//nolint:gosec
-	al.fd, err = os.OpenFile(logPath, os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
+	al.fd, err = al.root.OpenFile(logPath, os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
 	return err
 }
 
@@ -519,10 +526,9 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 		return fmt.Errorf("init aead with new key: %w", err)
 	}
 
-	logPath := filepath.Join(al.SesamDir, ".sesam", "audit", "log.jsonl")
+	logPath := auditLogPath()
 
-	tmpDir := filepath.Join(al.SesamDir, ".sesam", "tmp")
-	tmp, err := renameio.TempFile(tmpDir, logPath)
+	tmp, err := renameio.NewPendingFile(logPath, renameio.WithRoot(al.root), renameio.WithTempDir(SesamTmpDir()), renameio.WithPermissions(0o600))
 	if err != nil {
 		return fmt.Errorf("create tmp audit log: %w", err)
 	}
@@ -553,8 +559,7 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 		return fmt.Errorf("swap rotated log into place: %w", err)
 	}
 
-	//nolint:gosec
-	newFd, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
+	newFd, err := al.root.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
 	if err != nil {
 		_ = al.Close()
 		return fmt.Errorf("reopen rotated audit log: %w", err)
@@ -569,37 +574,45 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 
 // cleanupAuditTmp removes any leftover tmp files created by renameio in a
 // previous WriteAuditKey or RotateKey run that crashed before the rename.
-// renameio names them ".log.jsonlXXXXXX" (dot prefix + random suffix).
-// We don't know how much was written, so we just delete and let the caller retry.
-func cleanupAuditTmp(sesamDir string) {
-	dir := filepath.Join(sesamDir, ".sesam", "audit")
-	pattern := filepath.Join(dir, ".log.jsonl*")
-	if matches, err := filepath.Glob(pattern); err == nil {
-		for _, m := range matches {
-			slog.Warn("removing leftover tmp audit log", slog.String("path", m))
-			_ = os.Remove(m)
+// Under os.Root, renameio creates them at the repository root as
+// ".log.jsonlXXXXXX" (dot prefix + random suffix). We don't know how much was
+// written, so we just delete and let the caller retry.
+func cleanupAuditTmp(root *os.Root) {
+	tmpDir := SesamTmpDir()
+	entries, err := fs.ReadDir(root.FS(), tmpDir)
+	if err != nil {
+		return
+	}
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), ".log.jsonl") {
+			continue
 		}
+
+		p := filepath.Join(tmpDir, e.Name())
+		slog.Warn("removing leftover tmp audit log", slog.String("path", p))
+		_ = root.Remove(p)
 	}
 }
 
 // InitAuditLog initializes an empty audit log on repo init.
 // It creates the first init entry which also establishes the initial admin user.
-func InitAuditLog(sesamDir string, signer Signer, recps Recipients, admin DetailUserTell) (*AuditLog, error) {
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
-	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
+func InitAuditLog(root *os.Root, signer Signer, recps Recipients, admin DetailUserTell) (*AuditLog, error) {
+	logPath := auditLogPath()
+	initPath := auditInitPath()
 
-	if err := os.MkdirAll(filepath.Dir(initPath), 0o700); err != nil {
+	if err := root.MkdirAll(filepath.Dir(initPath), 0o700); err != nil {
 		return nil, err
 	}
 
-	//nolint:gosec
-	fd, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
+	fd, err := root.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
 
 	al := &AuditLog{
-		SesamDir: sesamDir,
+		SesamDir: root.Name(),
+		root:     root,
 		fd:       fd,
 	}
 
@@ -640,6 +653,8 @@ func InitAuditLog(sesamDir string, signer Signer, recps Recipients, admin Detail
 		initPath,
 		[]byte(initHash),
 		0o600,
+		renameio.WithRoot(root),
+		renameio.WithTempDir(SesamTmpDir()),
 	); err != nil {
 		closeLogged(al.fd)
 		return nil, fmt.Errorf("failed to write init file: %w", err)
@@ -757,9 +772,8 @@ func loadAuditKey(data []byte, ids Identities) ([]byte, error) {
 
 // loadAuditLogFile parses a log.jsonl file and returns the populated AuditLog.
 // The returned struct has fd=nil; callers that need to append must open their own fd.
-func loadAuditLogFile(logPath string, ids Identities) (*AuditLog, error) {
-	//nolint:gosec
-	fd, err := os.Open(logPath)
+func loadAuditLogFile(root *os.Root, logPath string, ids Identities) (*AuditLog, error) {
+	fd, err := root.Open(logPath)
 	if err != nil {
 		return nil, err
 	}
@@ -859,27 +873,27 @@ func loadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
 
 // LoadAuditLog reads the audit log from disk and gives you a handle to operate on it.
 // It does NOT verify the log yet. Call Verify() for that.
-func LoadAuditLog(sesamDir string, ids Identities) (*AuditLog, error) {
-	cleanupAuditTmp(sesamDir)
+func LoadAuditLog(root *os.Root, ids Identities) (*AuditLog, error) {
+	cleanupAuditTmp(root)
 
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
-	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
+	logPath := auditLogPath()
+	initPath := auditInitPath()
 
-	al, err := loadAuditLogFile(logPath, ids)
+	al, err := loadAuditLogFile(root, logPath, ids)
 	if err != nil {
 		return nil, err
 	}
 
-	al.SesamDir = sesamDir
+	al.SesamDir = root.Name()
+	al.root = root
 
-	initData, err := ReadFileLimited(initPath, 256)
+	initData, err := readFileLimitedRoot(root, initPath, 256)
 	if err != nil {
 		return nil, err
 	}
 	al.InitHash = strings.TrimSpace(string(initData))
 
-	//nolint:gosec
-	al.fd, err = os.OpenFile(logPath, os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
+	al.fd, err = root.OpenFile(logPath, os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -910,12 +924,28 @@ func buildRootHash(sigs []*secretFooter) string {
 // path may be an arbitrary file path (e.g. a git temp-file blob) - sesamDir
 // is not used for key lookup.
 func ShowAuditLog(ids Identities, path string, w io.Writer) (bool, error) {
-	al, err := loadAuditLogFile(path, ids)
+	//nolint:gosec
+	fd, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
+		return true, err
+	}
+	defer closeLogged(fd)
 
+	info, err := fd.Stat()
+	if err != nil {
+		return true, err
+	}
+
+	// Reject audit logs bigger than 512M.
+	if info.Size() > 512*1024*1024 {
+		return true, fmt.Errorf("audit log too big (> 512M). Please consider opening a bug report")
+	}
+
+	al, err := loadAuditLogFromReader(fd, ids)
+	if err != nil {
 		return true, err
 	}
 

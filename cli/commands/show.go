@@ -44,15 +44,33 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	ok, err := core.ShowSecret(sesamDir, ids, object, os.Stdout)
+	// A relative argument is translated into a sesam-relative path and read
+	// through the root. An absolute path comes from git's diff textconv (a
+	// blob extracted to a temp file outside the repo) and is passed through
+	// untouched - ShowSecret opens it directly.
+	showPath := object
+	if !filepath.IsAbs(object) {
+		cwd, _ := os.Getwd()
+		if rel, relErr := toRepoPath(sesamDir, cwd, object); relErr == nil {
+			showPath = rel
+		}
+	}
+
+	root, rootErr := os.OpenRoot(sesamDir)
+	if rootErr != nil {
+		return rootErr
+	}
+
+	ok, showErr := core.ShowSecret(root, ids, showPath, os.Stdout)
+	_ = root.Close()
 	if ok {
-		return err
+		return showErr
 	}
 
 	// Last resort: the object might be a user name. This needs the audit
 	// log + managers, so we accept the load cost only on this branch.
 	return WithRepo(func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-		ok, err = r.ShowUser(object, os.Stdout)
+		ok, err := r.ShowUser(object, os.Stdout)
 		if ok {
 			return err
 		}

@@ -16,12 +16,12 @@ func buildConfig(t *testing.T, nested bool, files ...string) (string, string) {
 	dir := t.TempDir()
 	main := writeMainFile(t, dir)
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 	for _, f := range files {
 		p := filepath.Join(dir, f)
 		touch(t, p)
-		require.NoError(t, cr.SecretAdd(p, nested, []string{"group1"}))
+		require.NoError(t, cr.SecretAdd(f, nested, []string{"group1"}))
 	}
 	require.NoError(t, cr.Save())
 
@@ -33,9 +33,9 @@ func buildConfig(t *testing.T, nested bool, files ...string) (string, string) {
 func TestSecretRemove_FileFromMain(t *testing.T) {
 	dir, main := buildConfig(t, false, "token.txt")
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
-	require.NoError(t, cr.SecretRemove(filepath.Join(dir, "token.txt")))
+	require.NoError(t, cr.SecretRemove("token.txt"))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"existing.txt"}, resolvedPaths(t, main))
@@ -49,9 +49,9 @@ func TestSecretRemove_FileFromSubfile(t *testing.T) {
 
 	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
-	require.NoError(t, cr.SecretRemove(filepath.Join(dir, "sub", "api.key")))
+	require.NoError(t, cr.SecretRemove(filepath.Join("sub", "api.key")))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"existing.txt"}, resolvedPaths(t, main))
@@ -64,9 +64,9 @@ func TestSecretRemove_FileFromSubfile(t *testing.T) {
 func TestSecretRemove_SubfileKeepsSecret(t *testing.T) {
 	dir, main := buildConfig(t, true, "sub/b.txt", "sub/c.txt")
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
-	require.NoError(t, cr.SecretRemove(filepath.Join(dir, "sub", "b.txt")))
+	require.NoError(t, cr.SecretRemove(filepath.Join("sub", "b.txt")))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"c.txt", "existing.txt"}, resolvedPaths(t, main))
@@ -75,11 +75,11 @@ func TestSecretRemove_SubfileKeepsSecret(t *testing.T) {
 
 // TestSecretRemove_NotFound errors when nothing matches the path.
 func TestSecretRemove_NotFound(t *testing.T) {
-	dir, main := buildConfig(t, false)
+	_, main := buildConfig(t, false)
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
-	require.Error(t, cr.SecretRemove(filepath.Join(dir, "stray.txt")))
+	require.Error(t, cr.SecretRemove("stray.txt"))
 }
 
 // TestSecretRemove_DoesNotMisattributeComments guards against the comment
@@ -107,9 +107,9 @@ func TestSecretRemove_DoesNotMisattributeComments(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "alpha.txt"), []byte("x"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "beta.txt"), []byte("x"), 0o644))
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
-	require.NoError(t, cr.SecretRemove(filepath.Join(dir, "alpha.txt")))
+	require.NoError(t, cr.SecretRemove("alpha.txt"))
 	require.NoError(t, cr.Save())
 
 	out, err := os.ReadFile(main)
@@ -149,9 +149,9 @@ func TestSecretRemove_RemovesCommentWithNode(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644))
 	}
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
-	require.NoError(t, cr.SecretRemove(filepath.Join(dir, "beta.txt")))
+	require.NoError(t, cr.SecretRemove("beta.txt"))
 	require.NoError(t, cr.Save())
 
 	out, err := os.ReadFile(main)

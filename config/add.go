@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 )
@@ -25,30 +24,26 @@ import (
 // single file. Per-file metadata other than access is left empty for the user
 // to fill in.
 func (c *Config) SecretAdd(path string, nested bool, access []string) error {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("failed to resolve secret path %q: %w", path, err)
-	}
-	abs = filepath.Clean(abs)
+	rel := filepath.Clean(path)
 
 	// Self-deciding: an already-tracked file is an access change, not an add.
 	// This also keeps a file from being declared twice — including the case
 	// where it was first added to a sub-file and is now re-added to the main
 	// file, or vice versa.
-	if c.trackedRevealedPaths()[abs] {
-		return c.changeSecretGroups(abs, access)
+	if c.trackedRevealedPaths()[rel] {
+		return c.changeSecretGroups(rel, access)
 	}
 
-	return c.placeSecret(abs, nested, Secret{Access: access})
+	return c.placeSecret(rel, nested, Secret{Access: access})
 }
 
 // placeSecret inserts a brand-new secret for the on-disk file at abs into the
 // appropriate sesam.yml, honoring nested (see SecretAdd). The caller supplies
 // the secret's metadata (access, description, …); placeSecret fills in Path
 // relative to the owning file's directory. abs must not already be tracked.
-func (c *Config) placeSecret(abs string, nested bool, sec Secret) error {
+func (c *Config) placeSecret(rel string, nested bool, sec Secret) error {
 	mainDir := filepath.Dir(c.MainFile.Path)
-	fileDir := filepath.Dir(abs)
+	fileDir := filepath.Dir(rel)
 
 	src := c.MainFile
 	if nested && !sameDir(fileDir, mainDir) {
@@ -65,12 +60,12 @@ func (c *Config) placeSecret(abs string, nested bool, sec Secret) error {
 		src = s
 	}
 
-	rel, err := filepath.Rel(filepath.Dir(src.Path), abs)
+	secRel, err := filepath.Rel(filepath.Dir(src.Path), rel)
 	if err != nil {
-		return fmt.Errorf("failed to locate %q under %q: %w", abs, filepath.Dir(src.Path), err)
+		return fmt.Errorf("failed to locate %q under %q: %w", rel, filepath.Dir(src.Path), err)
 	}
 
-	sec.Path = rel
+	sec.Path = secRel
 	return appendSecretsItems(src, []Secret{sec})
 }
 
@@ -100,7 +95,7 @@ func (c *Config) loadOrCreate(path string) (*FileSource, error) {
 		return existing, nil
 	}
 
-	if _, err := os.Stat(path); err == nil {
+	if _, err := c.root.Stat(path); err == nil {
 		return c.loadTree(path)
 	}
 

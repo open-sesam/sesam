@@ -69,11 +69,11 @@ func (f *historyFixture) tellUser(t *testing.T, newUser *testUser, groups []stri
 	require.NoError(t, verify(state))
 
 	secMgr, err := BuildSecretManager(
-		f.SesamDir, Identities{f.Admin.Identity}, f.Admin.Signer, kr, f.AuditLog, state,
+		f.SesamDir, f.AuditLog.root, Identities{f.Admin.Identity}, f.Admin.Signer, kr, f.AuditLog, state,
 	)
 	require.NoError(t, err)
 
-	um, err := BuildUserManager(f.SesamDir, f.Admin.Signer, f.AuditLog, state, secMgr)
+	um, err := BuildUserManager(f.AuditLog.root, f.Admin.Signer, f.AuditLog, state, secMgr)
 	require.NoError(t, err)
 
 	require.NoError(t, um.UserTell(

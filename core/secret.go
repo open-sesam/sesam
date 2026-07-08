@@ -6,10 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 
-	"github.com/google/renameio"
+	"github.com/google/renameio/v2"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/sha3"
 
@@ -56,29 +55,28 @@ func keyContentHash(ageKey, contentHash []byte) []byte {
 	return hmacContentHash
 }
 
-// sealSecret encrypts the plaintext at sm.SesamDir/revealedPath to `destPath`
-// for `recipients`, recording `sealedByUser` in the footer. The destination
-// directory is created if missing; the write goes through a renameio temp
-// file in .sesam/tmp so the final destination is replaced atomically.
+// sealSecret encrypts the plaintext at revealedPath to `destPath` (both
+// repo-relative) for `recipients`, recording `sealedByUser` in the footer. The
+// destination directory is created if missing; the write goes through a
+// renameio temp file confined to the root so the final destination is replaced
+// atomically.
 func sealSecret(
 	sm *SecretManager,
 	revealedPath string,
 	recipients Recipients,
 	destPath, sealedByUser string,
 ) (*secretFooter, error) {
-	//nolint:gosec
-	rd, err := os.Open(filepath.Join(sm.SesamDir, revealedPath))
+	rd, err := sm.root.Open(revealedPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secret: %w", err)
 	}
 	defer closeLogged(rd)
 
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o700); err != nil {
+	if err := sm.root.MkdirAll(filepath.Dir(destPath), 0o700); err != nil {
 		return nil, err
 	}
 
-	tmpDir := filepath.Join(sm.SesamDir, ".sesam", "tmp")
-	wc, err := renameio.TempFile(tmpDir, destPath)
+	wc, err := renameio.NewPendingFile(destPath, renameio.WithRoot(sm.root), renameio.WithTempDir(SesamTmpDir()), renameio.WithPermissions(0o600))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open encrypted file in repo: %w", err)
 	}
@@ -218,8 +216,7 @@ func readFooter(fd io.ReadSeeker) (io.ReadSeeker, *secretFooter, error) {
 func revealSecret(sm *SecretManager, revealedPath string) error {
 	cryptPath := sm.cryptPath(revealedPath)
 
-	//nolint:gosec
-	srcFd, err := os.Open(cryptPath)
+	srcFd, err := sm.root.Open(cryptPath)
 	if err != nil {
 		// if it does not exist, it probably means that the secret was not encrypted yet.
 		return fmt.Errorf("opening secret file failed: %w", err)
@@ -227,9 +224,12 @@ func revealSecret(sm *SecretManager, revealedPath string) error {
 
 	defer closeLogged(srcFd)
 
+	if err := sm.root.MkdirAll(filepath.Dir(revealedPath), 0o700); err != nil {
+		return fmt.Errorf("failed to create revealed dir: %w", err)
+	}
+
 	// Write revealed file to a temp file first, so we can get rid of it later easily:
-	dstPath := filepath.Join(sm.SesamDir, revealedPath)
-	dstFd, err := renameio.TempFile(sm.tmpDir(), dstPath)
+	dstFd, err := renameio.NewPendingFile(revealedPath, renameio.WithRoot(sm.root), renameio.WithTempDir(SesamTmpDir()), renameio.WithPermissions(0o600))
 	if err != nil {
 		return fmt.Errorf("failed to create revealed file: %w", err)
 	}

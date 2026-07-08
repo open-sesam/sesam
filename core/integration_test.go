@@ -21,13 +21,13 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	whoami := admin.Name
 
 	// ── Phase 1: init ────────────────────────────────────────────────
-	signer, err := GenerateSignKey(sesamDir, whoami, []age.Recipient{admin.Recipient.Recipient})
+	signer, err := GenerateSignKey(testRoot(t, sesamDir), whoami, []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	keyring := EmptyKeyring()
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
 
-	auditLog, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
+	auditLog, err := InitAuditLog(testRoot(t, sesamDir), signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:       whoami,
 		Groups:     []string{"admin"},
 		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
@@ -42,15 +42,12 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 
 	sm, err := BuildSecretManager(
 		sesamDir,
+		testRoot(t, sesamDir),
 		Identities{admin.Identity},
 		signer, keyring, auditLog, vstate,
 	)
 	require.NoError(t, err)
 
-	origDir, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(sesamDir))
-	t.Cleanup(func() { os.Chdir(origDir) })
 
 	secretPath := "secrets/db_password"
 	writeSecret(t, sesamDir, secretPath, "hunter2")
@@ -68,7 +65,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	// ── Phase 2: regular (simulates opening an existing repo) ────────
 	require.NoError(t, auditLog.Close())
 	keyring2 := EmptyKeyring()
-	auditLog2, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
+	auditLog2, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.NoError(t, err)
 
 	vstate2, err := Verify(auditLog2, keyring2, nil)
@@ -78,17 +75,18 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, whoami, resolvedUser)
 
-	signer2, err := LoadSignKey(sesamDir, resolvedUser, admin.Identity)
+	signer2, err := LoadSignKey(testRoot(t, sesamDir), resolvedUser, admin.Identity)
 	require.NoError(t, err)
 
 	sm2, err := BuildSecretManager(
 		sesamDir,
+		testRoot(t, sesamDir),
 		Identities{admin.Identity},
 		signer2, keyring2, auditLog2, vstate2,
 	)
 	require.NoError(t, err)
 
-	report := VerifyIntegrity(sesamDir, vstate2, keyring2)
+	report := VerifyIntegrity(testRoot(t, sesamDir), vstate2, keyring2)
 	require.True(t, report.OK(), "integrity check failed: %s", report.String())
 
 	require.NoError(t, sm2.RevealAll())
@@ -103,12 +101,12 @@ func TestIntegrationMultiUser(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(sesamDir, "admin", []age.Recipient{admin.Recipient.Recipient})
+	signer, err := GenerateSignKey(testRoot(t, sesamDir), "admin", []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	keyring := EmptyKeyring()
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
+	al, err := InitAuditLog(testRoot(t, sesamDir), signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:       "admin",
 		Groups:     []string{"admin"},
 		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
@@ -122,7 +120,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 
 	// ── Admin adds bob ──
 	bob := newTestUser(t, "bob")
-	bobSignKey, err := GenerateSignKey(sesamDir, "bob", []age.Recipient{bob.Recipient.Recipient})
+	bobSignKey, err := GenerateSignKey(testRoot(t, sesamDir), "bob", []age.Recipient{bob.Recipient.Recipient})
 	require.NoError(t, err)
 
 	bobSignKeyStr := MulticodeEncode(bobSignKey.PublicKey(), MhEd25519Pub)
@@ -151,6 +149,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 
 	smBob, err := BuildSecretManager(
 		sesamDir,
+		testRoot(t, sesamDir),
 		Identities{bob.Identity},
 		bobSignKey, keyring, al, vstate,
 	)
@@ -167,7 +166,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 
 	// Full reload + verify from scratch.
 	keyring3 := EmptyKeyring()
-	al3, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
+	al3, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.NoError(t, err)
 
 	vstate3, err := Verify(al3, keyring3, nil)
@@ -176,7 +175,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	require.Len(t, vstate3.Users, 2)
 	require.Len(t, vstate3.Secrets, 1)
 
-	report := VerifyIntegrity(sesamDir, vstate3, keyring3)
+	report := VerifyIntegrity(testRoot(t, sesamDir), vstate3, keyring3)
 	require.True(t, report.OK(), "integrity failed: %s", report.String())
 }
 
@@ -186,11 +185,11 @@ func TestIntegrationTamperDetection(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(sesamDir, "admin", []age.Recipient{admin.Recipient.Recipient})
+	signer, err := GenerateSignKey(testRoot(t, sesamDir), "admin", []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
+	al, err := InitAuditLog(testRoot(t, sesamDir), signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:       "admin",
 		Groups:     []string{"admin"},
 		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
@@ -214,11 +213,11 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(sesamDir, "admin", []age.Recipient{admin.Recipient.Recipient})
+	signer, err := GenerateSignKey(testRoot(t, sesamDir), "admin", []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
+	al, err := InitAuditLog(testRoot(t, sesamDir), signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:       "admin",
 		Groups:     []string{"admin"},
 		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySourceManual}},
@@ -233,6 +232,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 
 	sm, err := BuildSecretManager(
 		sesamDir,
+		testRoot(t, sesamDir),
 		Identities{admin.Identity},
 		signer,
 		kr,
@@ -241,10 +241,6 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	origDir, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(sesamDir))
-	t.Cleanup(func() { os.Chdir(origDir) })
 
 	// 1. Add secret.
 	writeSecret(t, sesamDir, "secrets/token", "tok-abc")
@@ -267,6 +263,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	sm, err = BuildSecretManager(
 		sesamDir,
+		testRoot(t, sesamDir),
 		Identities{admin.Identity},
 		signer,
 		kr,
@@ -295,7 +292,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 
 	// Full re-verify.
 	kr2 := EmptyKeyring()
-	al2, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
+	al2, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.NoError(t, err)
 
 	vs2, err := Verify(al2, kr2, nil)
@@ -313,11 +310,11 @@ func TestKeySourcePreservedThroughReplay(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 	admin := newTestUser(t, "admin")
 
-	signer, err := GenerateSignKey(sesamDir, "admin", []age.Recipient{admin.Recipient.Recipient})
+	signer, err := GenerateSignKey(testRoot(t, sesamDir), "admin", []age.Recipient{admin.Recipient.Recipient})
 	require.NoError(t, err)
 
 	signKeyStr := MulticodeEncode(signer.PublicKey(), MhEd25519Pub)
-	al, err := InitAuditLog(sesamDir, signer, Recipients{admin.Recipient}, DetailUserTell{
+	al, err := InitAuditLog(testRoot(t, sesamDir), signer, Recipients{admin.Recipient}, DetailUserTell{
 		User:       "admin",
 		Groups:     []string{"admin"},
 		PubKeys:    []UserPubKey{{Key: admin.Recipient.String(), Source: KeySource("github:admin")}},
@@ -326,7 +323,7 @@ func TestKeySourcePreservedThroughReplay(t *testing.T) {
 	require.NoError(t, err)
 
 	bob := newTestUser(t, "bob")
-	bobSignKey, err := GenerateSignKey(sesamDir, "bob", []age.Recipient{bob.Recipient.Recipient})
+	bobSignKey, err := GenerateSignKey(testRoot(t, sesamDir), "bob", []age.Recipient{bob.Recipient.Recipient})
 	require.NoError(t, err)
 	bobSignKeyStr := MulticodeEncode(bobSignKey.PublicKey(), MhEd25519Pub)
 
@@ -342,7 +339,7 @@ func TestKeySourcePreservedThroughReplay(t *testing.T) {
 
 	// Close and reload from disk so we go through the full replay path.
 	require.NoError(t, al.Close())
-	al2, err := LoadAuditLog(sesamDir, Identities{admin.Identity})
+	al2, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.NoError(t, err)
 
 	vstate, err := Verify(al2, EmptyKeyring(), nil)

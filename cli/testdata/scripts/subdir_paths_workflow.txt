@@ -1,0 +1,44 @@
+# Path behaviors from a subdirectory of the sesam repo (like git):
+#   #1 `add ./local` from sub/ registers the secret as the repo-relative
+#      `sub/local` (the API/config never store cwd-relative paths).
+#   #2 `status` renders paths relative to the cwd: `local` from sub/, but
+#      `sub/local` from the repo root.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+# Init at the worktree root: the sesam dir is the repo root itself.
+exec sesam init --user admin
+
+mkdir sub
+cp secretfile sub/local
+
+# #1: add from within sub/ using a cwd-relative path.
+cd sub
+exec sesam add ./local
+
+# The config records the repo-relative path, not the cwd-relative `local`.
+cd $WORK
+grep 'sub/local' sesam.yml
+
+# --json is the stable machine interface and always reports repo-relative paths.
+exec sesam status --json
+stdout '"sub/local"'
+
+# #2: from sub/, the tree shows the path relative to the cwd (`local`); the
+# parent `sub` node does not appear. --all so the freshly sealed (in-sync)
+# secret is listed.
+cd sub
+exec sesam status --all
+stdout 'local'
+! stdout 'sub'
+
+# From the repo root the same secret shows under its full `sub` tree node.
+cd $WORK
+exec sesam status --all
+stdout 'sub'
+stdout 'local'
+
+-- secretfile --
+top secret

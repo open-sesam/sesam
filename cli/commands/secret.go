@@ -19,7 +19,12 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		printInfo("no groups specified, assuming `--group admin` only - only admins can decrypt")
 	}
 
-	if err := r.SecretAdd(cmd.Args().Slice(), groups, cmd.Bool("nested")); err != nil {
+	paths, err := toRepoPaths(r.SesamDir(), cmd.Args().Slice())
+	if err != nil {
+		return err
+	}
+
+	if err := r.SecretAdd(paths, groups, cmd.Bool("nested")); err != nil {
 		return err
 	}
 
@@ -37,7 +42,12 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return fmt.Errorf("missing secret path: pass a path argument")
 	}
 
-	if err := r.SecretRemove([]string{revealedPath}); err != nil {
+	paths, err := toRepoPaths(r.SesamDir(), []string{revealedPath})
+	if err != nil {
+		return err
+	}
+
+	if err := r.SecretRemove(paths); err != nil {
 		return err
 	}
 
@@ -52,7 +62,12 @@ func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return fmt.Errorf("need <old> and <new>")
 	}
 
-	if err := r.SecretMove(oldRevealedPath, newRevealedPath); err != nil {
+	paths, err := toRepoPaths(r.SesamDir(), []string{oldRevealedPath, newRevealedPath})
+	if err != nil {
+		return err
+	}
+
+	if err := r.SecretMove(paths[0], paths[1]); err != nil {
 		return err
 	}
 
