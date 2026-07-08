@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
-	"opensesam.org/sesam/core"
 	"github.com/stretchr/testify/require"
+	"opensesam.org/sesam/core"
 )
 
 // stubKeyring and stubAuthorize satisfy the post-LoadAuditView contract on

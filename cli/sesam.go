@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"opensesam.org/sesam/cli/commands"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/cli/commands"
 )
 
 // Command categories group subcommands in `sesam --help`. urfave/cli sorts

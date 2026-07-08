@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/core"
 	"opensesam.org/sesam/repo"
-	"github.com/urfave/cli/v3"
 )
 
 func guessUserNameFromForgeID(recps []string) (string, error) {

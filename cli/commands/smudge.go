@@ -4,8 +4,8 @@ import (
 	"context"
 	"os"
 
-	"opensesam.org/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/repo"
 )
 
 // HandleSmudge is the git smudge filter entry point. Git invokes it once per

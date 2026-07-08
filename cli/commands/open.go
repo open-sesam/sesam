@@ -3,8 +3,8 @@ package commands
 import (
 	"context"
 
-	"opensesam.org/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/repo"
 )
 
 // HandleOpen decrypts and verifies tracked secrets via Repo.RevealAll.

@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/muesli/termenv"
-	"opensesam.org/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/repo"
 )
 
 const (

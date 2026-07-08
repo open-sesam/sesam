@@ -3,8 +3,8 @@ package commands
 import (
 	"context"
 
-	"opensesam.org/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/repo"
 )
 
 // HandleSeal encrypts and signs tracked secrets via Repo.SealAll.

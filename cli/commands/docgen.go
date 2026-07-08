@@ -10,9 +10,9 @@ import (
 	"strings"
 	"text/template"
 
-	"opensesam.org/sesam/config"
 	clidocs "github.com/urfave/cli-docs/v3"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/config"
 )
 
 //go:embed docgen_cfg_template.md

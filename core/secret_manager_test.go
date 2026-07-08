@@ -24,7 +24,6 @@ func TestSecretAdd(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "secrets"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "secrets", "new"), []byte("blub"), 0o600))
 
-
 	require.NoError(t, mgr.SecretAdd("secrets/new", []string{"admin"}))
 	require.Len(t, mgr.State.Secrets, 2)
 
@@ -151,7 +150,6 @@ func TestRevealAllFailsMissingAge(t *testing.T) {
 func sealedSecretManager(t *testing.T) *SecretManager {
 	t.Helper()
 	mgr := testSecretManagerFull(t)
-
 
 	writeSecret(t, mgr.SesamDir, "secrets/test", "secret-content")
 	require.NoError(t, mgr.SealAll())
@@ -769,7 +767,6 @@ func TestShowSecretRevealedPathConvenience(t *testing.T) {
 	_, err := sealSecret(mgr, s, mgr.recipientsFor(s), mgr.cryptPath(s), "testuser")
 	require.NoError(t, err)
 
-
 	var buf bytes.Buffer
 	ok, err := ShowSecret(mgr.root, mgr.Identities, "secrets/tok", &buf)
 	require.NoError(t, err)
@@ -793,7 +790,6 @@ func TestShowSecretResolvesAgainstSesamDirNotCWD(t *testing.T) {
 	// join would fail without the sesamDir-aware fix.
 	elsewhere := t.TempDir()
 	require.NotEqual(t, mgr.SesamDir, elsewhere)
-
 
 	var buf bytes.Buffer
 	ok, err := ShowSecret(mgr.root, mgr.Identities, "secrets/tok", &buf)

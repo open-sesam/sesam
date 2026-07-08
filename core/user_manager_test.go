@@ -185,7 +185,6 @@ func TestTellThenSealGivesNewRecipientAccess(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-
 	writeSecret(t, sesamDir, "secrets/api", "shared")
 	require.NoError(t, secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}))
 	require.NoError(t, secMgr.SealAll()) // sealed for admin only; "dev" is empty
@@ -246,7 +245,6 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 		testRoot(t, sesamDir), Identities{admin.Identity}, admin.Signer, kr, al, state,
 	)
 	require.NoError(t, err)
-
 
 	um, err := BuildUserManager(testRoot(t, sesamDir), admin.Signer, al, state, secMgr)
 	require.NoError(t, err)

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"opensesam.org/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/repo"
 )
 
 // HandleAdd adds a secret path to sesam metadata.

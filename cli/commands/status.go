@@ -12,8 +12,8 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/list"
 	"github.com/muesli/termenv"
-	"opensesam.org/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/repo"
 )
 
 func printDirectoryDiff(ctx context.Context, status *repo.Status, extraGitArgs []string) error {

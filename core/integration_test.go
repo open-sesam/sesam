@@ -48,7 +48,6 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-
 	secretPath := "secrets/db_password"
 	writeSecret(t, sesamDir, secretPath, "hunter2")
 	require.NoError(t, sm.SecretAdd(secretPath, []string{"admin"}))
@@ -240,7 +239,6 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 		vs,
 	)
 	require.NoError(t, err)
-
 
 	// 1. Add secret.
 	writeSecret(t, sesamDir, "secrets/token", "tok-abc")

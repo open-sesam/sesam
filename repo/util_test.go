@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"filippo.io/age"
-	"opensesam.org/sesam/core"
 	"github.com/stretchr/testify/require"
+	"opensesam.org/sesam/core"
 )
 
 type repoMockPassphraseProvider struct {

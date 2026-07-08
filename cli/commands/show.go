@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/core"
 	"opensesam.org/sesam/repo"
-	"github.com/urfave/cli/v3"
 )
 
 // HandleShow decrypts an object (audit log, secret, or user) and writes a
