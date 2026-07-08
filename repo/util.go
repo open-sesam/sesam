@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/open-sesam/sesam/core"
+	"opensesam.org/sesam/core"
 )
 
 // expandHomeDir expands "~" and "~/..." in path input.

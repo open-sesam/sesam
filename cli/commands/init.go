@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/muesli/termenv"
-	"github.com/open-sesam/sesam/repo"
+	"opensesam.org/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
 

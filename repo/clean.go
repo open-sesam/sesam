@@ -11,7 +11,7 @@ import (
 	"slices"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/open-sesam/sesam/core"
+	"opensesam.org/sesam/core"
 )
 
 // CleanAggressive removes every untracked file under sesamDir, including

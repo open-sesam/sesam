@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"filippo.io/age"
-	"github.com/open-sesam/sesam/core"
+	"opensesam.org/sesam/core"
 	"github.com/stretchr/testify/require"
 )
 

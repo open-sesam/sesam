@@ -10,7 +10,7 @@ import (
 	json "github.com/neilotoole/jsoncolor"
 
 	"github.com/mattn/go-colorable"
-	"github.com/open-sesam/sesam/repo"
+	"opensesam.org/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
 

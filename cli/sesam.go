@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/open-sesam/sesam/cli/commands"
+	"opensesam.org/sesam/cli/commands"
 	"github.com/urfave/cli/v3"
 )
 

@@ -15,7 +15,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 	"github.com/google/renameio/v2"
-	"github.com/open-sesam/sesam/core"
+	"opensesam.org/sesam/core"
 )
 
 // filterProcessHandler decrypts blobs as part of the long-running git filter

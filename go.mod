@@ -1,4 +1,4 @@
-module github.com/open-sesam/sesam
+module opensesam.org/sesam
 
 go 1.26.4
 

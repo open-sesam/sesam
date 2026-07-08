@@ -12,7 +12,7 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/list"
 	"github.com/muesli/termenv"
-	"github.com/open-sesam/sesam/repo"
+	"opensesam.org/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
 

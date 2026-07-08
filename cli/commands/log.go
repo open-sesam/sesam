@@ -11,8 +11,8 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/muesli/termenv"
-	"github.com/open-sesam/sesam/core"
-	"github.com/open-sesam/sesam/repo"
+	"opensesam.org/sesam/core"
+	"opensesam.org/sesam/repo"
 	"github.com/urfave/cli/v3"
 )
 

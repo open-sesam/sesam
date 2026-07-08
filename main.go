@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/muesli/termenv"
-	"github.com/open-sesam/sesam/cli"
+	"opensesam.org/sesam/cli"
 )
 
 func printError(msg string) {

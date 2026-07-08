@@ -10,7 +10,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/open-sesam/sesam/config"
+	"opensesam.org/sesam/config"
 	clidocs "github.com/urfave/cli-docs/v3"
 	"github.com/urfave/cli/v3"
 )

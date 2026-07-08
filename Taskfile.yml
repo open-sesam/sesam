@@ -11,7 +11,7 @@ tasks:
       VERSION:
         sh: git describe --tags --always
     cmds:
-      - cmd: CGO_ENABLED=0 GOARCH={{.GOARCH}} GOOS={{.GOOS}} go build -ldflags "-s -w -X github.com/open-sesam/sesam/cli.version={{.VERSION}}" -o sesam .
+      - cmd: CGO_ENABLED=0 GOARCH={{.GOARCH}} GOOS={{.GOOS}} go build -ldflags "-s -w -X opensesam.org/sesam/cli.version={{.VERSION}}" -o sesam .
     sources:
       - ./*.go
       - ./**/*.go
