@@ -22,6 +22,8 @@ real="$(go list -m)"
 module="${MODULE:-$real}"
 repo="${REPO:-https://github.com/open-sesam/sesam}"
 
+rm -rf "${out}"
+
 # Every package import path rewritten to the vanity prefix, plus the module root
 # itself (needed for go's prefix-verification fetch). Sorted + de-duplicated.
 paths="$(go list ./... | while IFS= read -r p; do printf '%s\n' "${module}${p#"$real"}"; done)"
@@ -47,4 +49,6 @@ HTML
   n=$((n + 1))
 done <<<"$paths"
 
+mv "$out/open-sesam/sesam" "$out/sesam"
+rmdir "$out/open-sesam"
 echo "generated $n go-import page(s) under '$out' (module: $module, repo: $repo)"
