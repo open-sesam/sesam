@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
@@ -50,12 +51,20 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
-	return r.Update(func(s *repo.Stage) error {
+	if err := r.Update(func(s *repo.Stage) error {
 		if err := s.SecretRemove(paths); err != nil {
 			return err
 		}
 		return s.Seal(cmd.Bool("seal-all"))
-	})
+	}); err != nil {
+		return err
+	}
+
+	if !cmd.Bool("force") {
+		return nil
+	}
+
+	return os.RemoveAll(revealedPath)
 }
 
 func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
