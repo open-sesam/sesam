@@ -26,7 +26,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/gofrs/flock"
-	"github.com/google/renameio/v2"
+	"github.com/sahib/renameio/v2"
 	sesamConf "opensesam.org/sesam/config"
 	"opensesam.org/sesam/core"
 )

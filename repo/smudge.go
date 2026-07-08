@@ -14,7 +14,7 @@ import (
 
 	"github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
-	"github.com/google/renameio/v2"
+	"github.com/sahib/renameio/v2"
 	"opensesam.org/sesam/core"
 )
 

@@ -8,7 +8,7 @@ require (
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/goccy/go-yaml v1.19.2
 	github.com/gofrs/flock v0.12.1
-	github.com/google/renameio/v2 v2.0.2
+	github.com/sahib/renameio/v2 v2.0.2
 	github.com/google/uuid v1.6.0
 	github.com/jedib0t/go-pretty/v6 v6.8.0
 	github.com/mattn/go-colorable v0.1.14
@@ -56,6 +56,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
+	github.com/sahib/renameio/v2 v2.0.0-20260708162541-f2fbd94f2f42 // indirect
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
@@ -67,6 +68,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.1.6 // indirect
 )
-
-// Used for this patch: https://github.com/google/renameio/issues/46
-replace github.com/google/renameio/v2 => github.com/sahib/renameio/v2 v2.0.0-20260621194143-d21c25781e22
