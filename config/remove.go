@@ -1,8 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"slices"
 
@@ -20,11 +21,7 @@ import (
 // disk for the user to delete themselves. Directory expansion is the caller's
 // job — SecretRemove only ever touches a single secret.
 func (c *Config) SecretRemove(path string) error {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("failed to resolve secret path %q: %w", path, err)
-	}
-	target := filepath.Clean(abs)
+	target := filepath.Clean(path)
 
 	entries, err := c.secretEntries()
 	if err != nil {
@@ -122,7 +119,7 @@ func (c *Config) deleteSource(path string) error {
 	c.removeIncludeTo(path)
 	delete(c.SourceFiles, path)
 
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := c.root.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 

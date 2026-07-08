@@ -31,23 +31,23 @@ func integritySetup(t *testing.T) (*SecretManager, *VerifiedState) {
 
 func TestIntegrityAllGood(t *testing.T) {
 	mgr, state := integritySetup(t)
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.root, state, mgr.Keyring)
 	require.True(t, report.OK(), "expected no errors, got: %s", report.String())
 }
 
 func TestIntegrityMissingFile(t *testing.T) {
 	mgr, state := integritySetup(t)
-	os.Remove(mgr.cryptPath("secrets/db"))
+	os.Remove(filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/db")))
 
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.root, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect missing .sesam file")
 }
 
 func TestIntegrityCorruptedAgeFile(t *testing.T) {
 	mgr, state := integritySetup(t)
-	require.NoError(t, os.WriteFile(mgr.cryptPath("secrets/db"), []byte("corrupted"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/db")), []byte("corrupted"), 0o600))
 
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.root, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect hash mismatch")
 }
 
@@ -59,7 +59,7 @@ func TestIntegrityExtraFile(t *testing.T) {
 	_, err := sealSecret(mgr, extra, mgr.recipientsFor(extra), mgr.cryptPath(extra), "testuser")
 	require.NoError(t, err)
 
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.root, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect extra .sesam file not in state")
 }
 
@@ -67,7 +67,7 @@ func TestIntegrityRootHashMismatch(t *testing.T) {
 	mgr, state := integritySetup(t)
 	state.LastSealRootHash = "wrong-hash"
 
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.root, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect root hash mismatch")
 }
 
@@ -75,7 +75,7 @@ func TestIntegrityNoSeal(t *testing.T) {
 	mgr, state := integritySetup(t)
 	state.LastSealRootHash = ""
 
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.root, state, mgr.Keyring)
 	require.True(t, report.OK(), "should pass when no seal, got: %s", report.String())
 }
 
@@ -100,19 +100,19 @@ func TestIntegrityMultipleSecrets(t *testing.T) {
 		LastSealRootHash: buildRootHash(sigs),
 	}
 
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.root, state, mgr.Keyring)
 	require.True(t, report.OK(), "all good with 3 secrets: %s", report.String())
 
 	// Now corrupt one.
-	require.NoError(t, os.WriteFile(mgr.cryptPath("secrets/b"), []byte("bad"), 0o600))
-	report = VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	require.NoError(t, os.WriteFile(filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/b")), []byte("bad"), 0o600))
+	report = VerifyIntegrity(mgr.root, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect corruption in one of multiple secrets")
 }
 
 func TestIntegrityHashMismatch(t *testing.T) {
 	mgr, state := integritySetup(t)
 
-	sesamPath := mgr.cryptPath("secrets/db")
+	sesamPath := filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/db"))
 	data, err := os.ReadFile(sesamPath)
 	require.NoError(t, err)
 
@@ -122,7 +122,7 @@ func TestIntegrityHashMismatch(t *testing.T) {
 	data[0] ^= 0xFF
 	require.NoError(t, os.WriteFile(sesamPath, data, 0o600))
 
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.root, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect hash mismatch")
 	require.Contains(t, report.String(), "hash mismatch")
 }
@@ -135,7 +135,7 @@ func TestIntegrityBadSignature(t *testing.T) {
 	other := newTestUser(t, "testuser")
 	mgr.Keyring = testKeyring(t, other)
 
-	report := VerifyIntegrity(mgr.SesamDir, state, mgr.Keyring)
+	report := VerifyIntegrity(mgr.root, state, mgr.Keyring)
 	require.False(t, report.OK(), "should detect invalid signature")
 	require.Contains(t, report.String(), "invalid signature")
 }
@@ -179,19 +179,19 @@ func TestIntegrityRejectsUnauthorizedSealer(t *testing.T) {
 	// and seal) but not an authorized sealer of admin-only per the policy.
 	bobMgr := &SecretManager{
 		SesamDir:   sesamDir,
+		root:       testRoot(t, sesamDir),
 		Identities: Identities{bob.Identity},
 		Signer:     bob.Signer,
 	}
 
 	writeSecret(t, sesamDir, "secrets/admin-only", "bob's payload")
 	recps := kr.Recipients([]string{"admin", "bob"})
-	cryptPath := filepath.Join(sesamDir, ".sesam", "objects", "secrets/admin-only.sesam")
-	sig, err := sealSecret(bobMgr, "secrets/admin-only", recps, cryptPath, "bob")
+	sig, err := sealSecret(bobMgr, "secrets/admin-only", recps, bobMgr.cryptPath("secrets/admin-only"), "bob")
 	require.NoError(t, err)
 
 	state.LastSealRootHash = buildRootHash([]*secretFooter{sig})
 
-	report := VerifyIntegrity(sesamDir, state, kr)
+	report := VerifyIntegrity(testRoot(t, sesamDir), state, kr)
 	require.False(t, report.OK())
 	require.Contains(t, report.String(), "not authorized")
 	require.Contains(t, report.String(), "bob")

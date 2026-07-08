@@ -13,7 +13,12 @@ import (
 
 // HandleListSecrets prints tracked secret metadata.
 func HandleListSecrets(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	secrets, err := r.ListSecrets(cmd.StringArgs("dir"))
+	dirs, err := toRepoPaths(r.SesamDir(), cmd.StringArgs("dir"))
+	if err != nil {
+		return err
+	}
+
+	secrets, err := r.ListSecrets(dirs)
 	if err != nil {
 		return err
 	}
@@ -38,7 +43,7 @@ func HandleListSecrets(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 	t := newTable("Secrets", "Path", "Access Groups")
 	for _, secret := range secrets {
 		t.AppendRow([]any{
-			secret.RevealedPath,
+			displayPath(r.SesamDir(), secret.RevealedPath),
 			commaJoined(secret.AccessGroups),
 		})
 	}

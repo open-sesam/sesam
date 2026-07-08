@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os/exec"
 	"strings"
 	"sync"
 
@@ -60,6 +62,15 @@ type PassphraseProvider interface {
 // StdinPassphraseProvider is a simple PassphraseProvider that reads a password from stdin.
 type StdinPassphraseProvider struct{}
 
+// AskpassProvider reads a passphrase through an askpass helper.
+type AskpassProvider struct {
+	// Program is the askpass helper path, typically from --askpass.
+	Program string
+
+	// Fallback is used when no askpass program is configured.
+	Fallback PassphraseProvider
+}
+
 // KeyringPassphraseProvider tries to read the passphrase from the system
 // keyring (GNOME Keyring, KWallet, macOS Keychain, ...).
 // If no entry exists, it falls back to prompting via the given fallback provider
@@ -80,6 +91,8 @@ type KeyringPassphraseProvider struct {
 }
 
 const keyringService = "sesam"
+
+var errAskpassUnavailable = errors.New("askpass unavailable")
 
 // KeyFingerprint returns a stable, per-key identifier for use as the OS-keyring
 // item name when caching an encrypted identity's passphrase. It is derived from
@@ -375,6 +388,39 @@ func (spp *StdinPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error
 		prompt = "Passphrase: "
 	}
 	return readline.Password(prompt)
+}
+
+func (ap *AskpassProvider) ReadPassphrase(prompt string) ([]byte, error) {
+	program := ap.program()
+	if program == "" {
+		if ap != nil && ap.Fallback != nil {
+			return ap.Fallback.ReadPassphrase(prompt)
+		}
+		return nil, errAskpassUnavailable
+	}
+	if prompt == "" {
+		prompt = "Passphrase: "
+	}
+
+	out, err := exec.CommandContext(context.Background(), program, prompt).Output() // #nosec G204 -- askpass helper is explicitly configured by the user/environment.
+	if err != nil {
+		return nil, fmt.Errorf("askpass failed: %w", err)
+	}
+
+	return []byte(strings.TrimRight(string(out), "\r\n")), nil
+}
+
+func (ap *AskpassProvider) program() string {
+	if ap != nil {
+		return strings.TrimSpace(ap.Program)
+	}
+	return ""
+}
+
+func (ap *AskpassProvider) PassphraseVerified(passphrase []byte, success bool) {
+	if ap != nil && ap.program() == "" && ap.Fallback != nil {
+		ap.Fallback.PassphraseVerified(passphrase, success)
+	}
 }
 
 func (spp *StdinPassphraseProvider) PassphraseVerified(passphrase []byte, success bool) {

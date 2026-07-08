@@ -47,25 +47,10 @@ func identityToUser(identities core.Identities, users map[string]core.Recipients
 }
 
 // loadIdentities reads all given paths and parses all identities. Encrypted
-// identities are unlocked via the system keyring, falling back to a stdin
-// prompt when no entry exists.
+// identities are unlocked via the system keyring, falling back to askpass and
+// then stdin when allowed.
 func loadIdentities(identityPaths []string, pluginUI *core.PluginUI) (core.Identities, error) {
-	return loadIdentitiesWith(identityPaths, func(keyFingerprint string) core.PassphraseProvider {
-		return &core.KeyringPassphraseProvider{
-			KeyFingerprint: keyFingerprint,
-			Fallback:       &core.StdinPassphraseProvider{},
-		}
-	}, pluginUI)
-}
-
-// loadIdentitiesKeyringOnly is like loadIdentities but never prompts on stdin.
-// It is required for the long-running smudge filter, where stdin is owned by
-// the git pkt-line protocol and a passphrase prompt would corrupt the stream.
-// If the keyring has no entry for an encrypted identity, parsing fails.
-func loadIdentitiesKeyringOnly(identityPaths []string, pluginUI *core.PluginUI) (core.Identities, error) {
-	return loadIdentitiesWith(identityPaths, func(keyFingerprint string) core.PassphraseProvider {
-		return &core.KeyringPassphraseProvider{KeyFingerprint: keyFingerprint}
-	}, pluginUI)
+	return loadIdentitiesWith(identityPaths, RepoOpts{Interactive: true}.passphraseProvider, pluginUI)
 }
 
 // loadIdentitiesWith parses every identity at the given paths. newProvider
@@ -97,8 +82,9 @@ func loadIdentitiesWith(identityPaths []string, newProvider func(keyFingerprint 
 		}
 
 		key := string(data)
-		prompt := fmt.Sprintf("🔐 Passphrase for %s: ", filepath.Base(expandedPath))
-		provider := newProvider(core.KeyFingerprint(data))
+		keyFingerprint := core.KeyFingerprint(data)
+		prompt := fmt.Sprintf("🔐 sesam passphrase for %s (%s): ", filepath.Base(expandedPath), keyFingerprint)
+		provider := newProvider(keyFingerprint)
 		identity, err := core.ParseIdentity(key, provider, pluginUI, prompt)
 		if err != nil {
 			return nil, err

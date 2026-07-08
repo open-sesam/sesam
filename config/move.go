@@ -13,16 +13,8 @@ import (
 // pruned) and a fresh entry is placed for the new location. Directory
 // expansion is the caller's job — SecretMove only ever touches one secret.
 func (c *Config) SecretMove(oldPath, newPath string, nested bool) error {
-	oldAbs, err := filepath.Abs(oldPath)
-	if err != nil {
-		return fmt.Errorf("failed to resolve secret path %q: %w", oldPath, err)
-	}
-	newAbs, err := filepath.Abs(newPath)
-	if err != nil {
-		return fmt.Errorf("failed to resolve secret path %q: %w", newPath, err)
-	}
-	oldAbs = filepath.Clean(oldAbs)
-	newAbs = filepath.Clean(newAbs)
+	oldRel := filepath.Clean(oldPath)
+	newRel := filepath.Clean(newPath)
 
 	entries, err := c.secretEntries()
 	if err != nil {
@@ -31,7 +23,7 @@ func (c *Config) SecretMove(oldPath, newPath string, nested bool) error {
 
 	var found *secretEntry
 	for i := range entries {
-		if filepath.Clean(revealedPath(entries[i])) == oldAbs {
+		if filepath.Clean(revealedPath(entries[i])) == oldRel {
 			found = &entries[i]
 			break
 		}
@@ -50,7 +42,7 @@ func (c *Config) SecretMove(oldPath, newPath string, nested bool) error {
 		return err
 	}
 
-	if err := c.placeSecret(newAbs, nested, sec); err != nil {
+	if err := c.placeSecret(newRel, nested, sec); err != nil {
 		return err
 	}
 

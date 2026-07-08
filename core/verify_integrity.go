@@ -60,7 +60,7 @@ func (ir *IntegrityReport) String() string {
 }
 
 func verifyIntegritySingleSecret(
-	sesamDir string,
+	root *os.Root,
 	vs VerifiedSecret,
 	report *IntegrityReport,
 	diskSigMap map[string]*secretFooter,
@@ -75,10 +75,9 @@ func verifyIntegritySingleSecret(
 		return
 	}
 
-	sesamPath := filepath.Join(sesamDir, ".sesam", "objects", vs.RevealedPath+".sesam")
+	sesamPath := filepath.Join(".sesam", "objects", vs.RevealedPath+".sesam")
 
-	//nolint:gosec
-	fd, err := os.Open(sesamPath)
+	fd, err := root.Open(sesamPath)
 	if err != nil {
 		report.add(vs.RevealedPath, fmt.Sprintf("failed to open .sesam file: %v", err))
 		return
@@ -148,10 +147,10 @@ func verifyIntegritySingleSecret(
 //   - The RootHash from the latest seal matches.
 //
 // All errors are collected, not returned early.
-func VerifyIntegrity(sesamDir string, state *VerifiedState, kr Keyring) *IntegrityReport {
+func VerifyIntegrity(root *os.Root, state *VerifiedState, kr Keyring) *IntegrityReport {
 	report := &IntegrityReport{}
 
-	diskSigs, err := readAllSignatures(sesamDir)
+	diskSigs, err := readAllSignatures(root)
 	if err != nil {
 		report.add("", fmt.Sprintf("failed to read signatures: %v", err))
 		return report
@@ -163,7 +162,7 @@ func VerifyIntegrity(sesamDir string, state *VerifiedState, kr Keyring) *Integri
 	}
 
 	for _, vs := range state.Secrets {
-		verifyIntegritySingleSecret(sesamDir, vs, report, diskSigMap, kr, state)
+		verifyIntegritySingleSecret(root, vs, report, diskSigMap, kr, state)
 	}
 
 	// Any remaining entries are .sesam files not tracked in the state.

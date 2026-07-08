@@ -12,7 +12,8 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	gogitconfig "github.com/go-git/go-git/v5/config"
-	"github.com/google/renameio"
+	"github.com/google/renameio/v2"
+	"github.com/open-sesam/sesam/core"
 )
 
 //go:embed assets/gitignore.default
@@ -274,7 +275,7 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 // so it's uniformly attached to the binary regardless of how deep the
 // subcommand path is.
 func sesamCmd(r *git.Repository, sesamDir string, args ...string) (string, error) {
-	rel, err := relSesamDir(r, sesamDir)
+	rel, err := core.SesamGitPrefix(r, sesamDir)
 	if err != nil {
 		return "", err
 	}
@@ -284,22 +285,6 @@ func sesamCmd(r *git.Repository, sesamDir string, args ...string) (string, error
 	}
 	parts = append(parts, args...)
 	return strings.Join(parts, " "), nil
-}
-
-func relSesamDir(r *git.Repository, sesamDir string) (string, error) {
-	wt, err := r.Worktree()
-	if err != nil {
-		return "", fmt.Errorf("worktree: %w", err)
-	}
-	absSesam, err := filepath.Abs(sesamDir)
-	if err != nil {
-		return "", fmt.Errorf("absolute sesam dir: %w", err)
-	}
-	rel, err := filepath.Rel(wt.Filesystem.Root(), absSesam)
-	if err != nil {
-		return "", fmt.Errorf("relative sesam dir: %w", err)
-	}
-	return filepath.ToSlash(rel), nil
 }
 
 // shellQuote returns s wrapped in POSIX single-quotes if it contains

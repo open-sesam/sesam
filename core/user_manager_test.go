@@ -24,13 +24,14 @@ func buildTestUserManager(t *testing.T) (*UserManager, *testUser) {
 	}
 
 	secMgr, err := BuildSecretManager(
-		sesamDir, Identities{admin.Identity}, admin.Signer, kr, al, state,
+		sesamDir,
+		testRoot(t, sesamDir), Identities{admin.Identity}, admin.Signer, kr, al, state,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	um, err := BuildUserManager(sesamDir, admin.Signer, al, state, secMgr)
+	um, err := BuildUserManager(testRoot(t, sesamDir), admin.Signer, al, state, secMgr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,12 +49,13 @@ func TestBuildUserManagerUnknownSigner(t *testing.T) {
 	require.NoError(t, verify(state))
 
 	secMgr, err := BuildSecretManager(
-		sesamDir, Identities{admin.Identity}, admin.Signer, kr, al, state,
+		sesamDir,
+		testRoot(t, sesamDir), Identities{admin.Identity}, admin.Signer, kr, al, state,
 	)
 	require.NoError(t, err)
 
 	stranger := newTestUser(t, "stranger")
-	_, err = BuildUserManager(sesamDir, stranger.Signer, al, state, secMgr)
+	_, err = BuildUserManager(testRoot(t, sesamDir), stranger.Signer, al, state, secMgr)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not exist")
 }
@@ -88,11 +90,12 @@ func TestUserTellNonAdmin(t *testing.T) {
 	require.NoError(t, verify(state))
 
 	secMgr, err := BuildSecretManager(
-		sesamDir, Identities{bob.Identity}, bob.Signer, kr, al, state,
+		sesamDir,
+		testRoot(t, sesamDir), Identities{bob.Identity}, bob.Signer, kr, al, state,
 	)
 	require.NoError(t, err)
 
-	um, err := BuildUserManager(sesamDir, bob.Signer, al, state, secMgr)
+	um, err := BuildUserManager(testRoot(t, sesamDir), bob.Signer, al, state, secMgr)
 	require.NoError(t, err)
 
 	charlie := newTestUser(t, "charlie")
@@ -150,11 +153,12 @@ func TestUserKillNonAdmin(t *testing.T) {
 	require.NoError(t, verify(state))
 
 	secMgr, err := BuildSecretManager(
-		sesamDir, Identities{bob.Identity}, bob.Signer, kr, al, state,
+		sesamDir,
+		testRoot(t, sesamDir), Identities{bob.Identity}, bob.Signer, kr, al, state,
 	)
 	require.NoError(t, err)
 
-	um, err := BuildUserManager(sesamDir, bob.Signer, al, state, secMgr)
+	um, err := BuildUserManager(testRoot(t, sesamDir), bob.Signer, al, state, secMgr)
 	require.NoError(t, err)
 
 	err = um.UserKill("admin")
@@ -176,20 +180,17 @@ func TestTellThenSealGivesNewRecipientAccess(t *testing.T) {
 	require.NoError(t, verify(state))
 
 	secMgr, err := BuildSecretManager(
-		sesamDir, Identities{admin.Identity}, admin.Signer, kr, al, state,
+		sesamDir,
+		testRoot(t, sesamDir), Identities{admin.Identity}, admin.Signer, kr, al, state,
 	)
 	require.NoError(t, err)
 
-	origDir, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(sesamDir))
-	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	writeSecret(t, sesamDir, "secrets/api", "shared")
 	require.NoError(t, secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}))
 	require.NoError(t, secMgr.SealAll()) // sealed for admin only; "dev" is empty
 
-	um, err := BuildUserManager(sesamDir, admin.Signer, al, state, secMgr)
+	um, err := BuildUserManager(testRoot(t, sesamDir), admin.Signer, al, state, secMgr)
 	require.NoError(t, err)
 
 	bob := newTestUser(t, "bob")
@@ -241,16 +242,13 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 	require.NoError(t, verify(state))
 
 	secMgr, err := BuildSecretManager(
-		sesamDir, Identities{admin.Identity}, admin.Signer, kr, al, state,
+		sesamDir,
+		testRoot(t, sesamDir), Identities{admin.Identity}, admin.Signer, kr, al, state,
 	)
 	require.NoError(t, err)
 
-	origDir, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(sesamDir))
-	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
-	um, err := BuildUserManager(sesamDir, admin.Signer, al, state, secMgr)
+	um, err := BuildUserManager(testRoot(t, sesamDir), admin.Signer, al, state, secMgr)
 	require.NoError(t, err)
 
 	bob := newTestUser(t, "bob")
@@ -311,11 +309,12 @@ func nonAdminUserManager(t *testing.T) *UserManager {
 	require.NoError(t, verify(state))
 
 	secMgr, err := BuildSecretManager(
-		sesamDir, Identities{bob.Identity}, bob.Signer, kr, al, state,
+		sesamDir,
+		testRoot(t, sesamDir), Identities{bob.Identity}, bob.Signer, kr, al, state,
 	)
 	require.NoError(t, err)
 
-	um, err := BuildUserManager(sesamDir, bob.Signer, al, state, secMgr)
+	um, err := BuildUserManager(testRoot(t, sesamDir), bob.Signer, al, state, secMgr)
 	require.NoError(t, err)
 	return um
 }
@@ -454,7 +453,7 @@ func TestUserAddRecipientSuccess(t *testing.T) {
 
 	// The audit key was re-encrypted, so the new key alone can load and replay
 	// the log.
-	al := loadAuditLog(t, um.sesamDir, bobDevice)
+	al := loadAuditLog(t, um.root.Name(), bobDevice)
 	_, err := VerifyChain(al, EmptyKeyring(), nil)
 	require.NoError(t, err, "newly added recipient must be able to decrypt and replay the log")
 }
@@ -497,11 +496,11 @@ func TestUserRmRecipientSuccess(t *testing.T) {
 	require.True(t, vu.Recps[0].Equal(bob.Recipient), "the surviving recipient must be the one we kept")
 
 	// The audit key was rotated: the removed device is locked out of the log...
-	_, err := LoadAuditLog(um.sesamDir, Identities{bobDevice.Identity})
+	_, err := LoadAuditLog(um.root, Identities{bobDevice.Identity})
 	require.Error(t, err, "removed recipient must no longer decrypt the rotated audit log")
 
 	// ...while a surviving recipient can still load and replay it.
-	al := loadAuditLog(t, um.sesamDir, bob)
+	al := loadAuditLog(t, um.root.Name(), bob)
 	_, err = VerifyChain(al, EmptyKeyring(), nil)
 	require.NoError(t, err)
 }
@@ -542,7 +541,7 @@ func TestUserRegenerateSignKeySuccess(t *testing.T) {
 	before, _ := um.state.UserExists("bob")
 	oldPub := before.SignPubKey
 	// The signing key generated at tell time, loaded from disk before regen.
-	oldSigner, err := LoadSignKey(um.sesamDir, "bob", bob.Identity)
+	oldSigner, err := LoadSignKey(um.root, "bob", bob.Identity)
 	require.NoError(t, err)
 
 	require.NoError(t, um.UserRegenerateSignKey("bob"))
@@ -552,7 +551,7 @@ func TestUserRegenerateSignKeySuccess(t *testing.T) {
 
 	// The on-disk signing key matches the newly recorded pubkey and verifies as
 	// bob - this catches both the encode/decode bug and a log/disk mismatch.
-	newSigner, err := LoadSignKey(um.sesamDir, "bob", bob.Identity)
+	newSigner, err := LoadSignKey(um.root, "bob", bob.Identity)
 	require.NoError(t, err)
 	require.Equal(t, after.SignPubKey, MulticodeEncode(newSigner.PublicKey(), MhEd25519Pub),
 		"on-disk signing key must match the pubkey recorded in the audit log")
@@ -581,7 +580,7 @@ func TestUserRegenerateSignKeyReloads(t *testing.T) {
 
 	// Replaying the log from disk (including the regenerate entry) must verify
 	// cleanly and yield the new pubkey.
-	al := loadAuditLog(t, um.sesamDir, admin)
+	al := loadAuditLog(t, um.root.Name(), admin)
 	state, err := VerifyChain(al, EmptyKeyring(), nil)
 	require.NoError(t, err)
 

@@ -34,7 +34,7 @@ func exists(path string) bool {
 // the sorted, merged secret paths.
 func resolvedPaths(t *testing.T, mainPath string) []string {
 	t.Helper()
-	cr, err := Load(mainPath)
+	cr, err := loadConfig(t, mainPath)
 	require.NoError(t, err)
 
 	secrets, err := cr.Secrets()
@@ -52,7 +52,7 @@ func resolvedPaths(t *testing.T, mainPath string) []string {
 // secret whose Path equals secretPath.
 func accessFor(t *testing.T, mainPath, secretPath string) []string {
 	t.Helper()
-	cr, err := Load(mainPath)
+	cr, err := loadConfig(t, mainPath)
 	require.NoError(t, err)
 
 	secrets, err := cr.Secrets()
@@ -74,10 +74,10 @@ func TestSecretAdd_FileAtMainLevel(t *testing.T) {
 	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "token.txt"))
 
-	cr, err := Load(mainPath)
+	cr, err := loadConfig(t, mainPath)
 	require.NoError(t, err)
 
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "token.txt"), true, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd("token.txt", true, []string{"group1"}))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"existing.txt", "token.txt"}, resolvedPaths(t, mainPath))
@@ -92,10 +92,10 @@ func TestSecretAdd_FileInSubdirNested(t *testing.T) {
 	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "sub", "api.key"))
 
-	cr, err := Load(mainPath)
+	cr, err := loadConfig(t, mainPath)
 	require.NoError(t, err)
 
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "sub", "api.key"), true, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join("sub", "api.key"), true, []string{"group1"}))
 	require.NoError(t, cr.Save())
 
 	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
@@ -111,10 +111,10 @@ func TestSecretAdd_FileInSubdirFlat(t *testing.T) {
 	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "sub", "api.key"))
 
-	cr, err := Load(mainPath)
+	cr, err := loadConfig(t, mainPath)
 	require.NoError(t, err)
 
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "sub", "api.key"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join("sub", "api.key"), false, []string{"group1"}))
 	require.NoError(t, cr.Save())
 
 	require.False(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
@@ -129,14 +129,14 @@ func TestSecretAdd_ReaddChangesAccess(t *testing.T) {
 	mainPath := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "token.txt"))
 
-	cr, err := Load(mainPath)
+	cr, err := loadConfig(t, mainPath)
 	require.NoError(t, err)
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "token.txt"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd("token.txt", false, []string{"group1"}))
 	require.NoError(t, cr.Save())
 
-	cr2, err := Load(mainPath)
+	cr2, err := loadConfig(t, mainPath)
 	require.NoError(t, err)
-	require.NoError(t, cr2.SecretAdd(filepath.Join(dir, "token.txt"), false, []string{"group2"}))
+	require.NoError(t, cr2.SecretAdd("token.txt", false, []string{"group2"}))
 	require.NoError(t, cr2.Save())
 
 	// No duplicate entry, and the access list reflects the latest add.
@@ -151,9 +151,9 @@ func TestSecretAdd_NonExistentPathStillAdded(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := writeMainFile(t, dir)
 
-	cr, err := Load(mainPath)
+	cr, err := loadConfig(t, mainPath)
 	require.NoError(t, err)
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "later.txt"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd("later.txt", false, []string{"group1"}))
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"existing.txt", "later.txt"}, resolvedPaths(t, mainPath))
@@ -166,11 +166,11 @@ func TestSecretAdd_NoDuplicateSameFileTwice(t *testing.T) {
 	main := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "token.txt"))
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "token.txt"), false, []string{"group1"}))
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "token.txt"), false, []string{"group2"}))
+	require.NoError(t, cr.SecretAdd("token.txt", false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd("token.txt", false, []string{"group2"}))
 
 	require.NoError(t, cr.Save())
 	require.Equal(t, []string{"existing.txt", "token.txt"}, resolvedPaths(t, main))
@@ -185,13 +185,13 @@ func TestSecretAdd_NoDuplicateSubThenMain(t *testing.T) {
 	main := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "sub", "api.key"))
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 
 	// Lands in sub/sesam.yml, included from main.
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "sub", "api.key"), true, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join("sub", "api.key"), true, []string{"group1"}))
 	// Re-add the same physical file flat into main: must not duplicate.
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "sub", "api.key"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join("sub", "api.key"), false, []string{"group1"}))
 
 	require.NoError(t, cr.Save())
 	// Present exactly once across the merged view.
@@ -206,11 +206,11 @@ func TestSecretAdd_NoDuplicateMainThenSub(t *testing.T) {
 	main := writeMainFile(t, dir)
 	touch(t, filepath.Join(dir, "sub", "api.key"))
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "sub", "api.key"), false, []string{"group1"}))
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "sub", "api.key"), true, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join("sub", "api.key"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd(filepath.Join("sub", "api.key"), true, []string{"group1"}))
 
 	require.NoError(t, cr.Save())
 	require.False(t, exists(filepath.Join(dir, "sub", "sesam.yml")), "no empty sub-file created")
@@ -233,9 +233,9 @@ func TestSecretAdd_PreservesExistingComments(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "alpha.txt"), []byte("x"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "beta.txt"), []byte("x"), 0o644))
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "beta.txt"), false, []string{"group1"}))
+	require.NoError(t, cr.SecretAdd("beta.txt", false, []string{"group1"}))
 	require.NoError(t, cr.Save())
 
 	out, err := os.ReadFile(main)
@@ -261,9 +261,9 @@ func TestSecretAdd_PreservesCommentsAndIndentation(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "alpha.txt"), []byte("x"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "beta.txt"), []byte("x"), 0o644))
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
-	require.NoError(t, cr.SecretAdd(filepath.Join(dir, "beta.txt"), false, []string{"group2"}))
+	require.NoError(t, cr.SecretAdd("beta.txt", false, []string{"group2"}))
 	require.NoError(t, cr.Save())
 
 	out, err := os.ReadFile(main)

@@ -24,6 +24,15 @@ task coverage    # tests with coverage report (-coverpkg=./... captures testscri
 - Testing: use table driven tests where applicable.
 - Testing: Use testscripts for e2e CLI based tests.
 
+## Path handling
+
+- Library code (repo and below) works only with **sesam-relative** paths (relative to the dir containing `.sesam`) and never reads the cwd.
+- A single `*os.Root` rooted at `sesamDir` guards all of sesam's own file I/O (symlink-escape safety). One root only.
+- `sesamDir` stays absolute on `Repo`, used solely to open go-git, feed flock/renameio, and compute relative paths.
+- cwd lives only in `cli/`: translate user input (arg+cwd → sesam-relative) and format output (sesam-relative → cwd-relative). If cwd is outside the sesam subtree, treat I/O as already sesam-relative (`--sesam-dir` required).
+- go-git gets an absolute path only at `PlainOpen`; thereafter use worktree-relative paths. git's worktree root may be an ancestor of `sesamDir`, so convert via the stored `Rel(worktreeRoot, sesamDir)` prefix.
+- Don't use `os.Chdir` in production or tests. In production code it breaks usage as library and in tests it hides bugs.
+
 ## Packages
 
 - cli: CLI implementation. Should only contain env/flag parsing and visualization and calling high level API.

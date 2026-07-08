@@ -81,6 +81,11 @@ var flagsGeneral = []cli.Flag{
 		Usage:   "Repository lock wait timeout (e.g. 5s, 30s, 2m)",
 		Sources: cli.EnvVars("SESAM_LOCK_TIMEOUT"),
 	},
+	&cli.StringFlag{
+		Name:    "askpass",
+		Usage:   "Askpass helper for encrypted identities",
+		Sources: cli.EnvVars("SESAM_ASKPASS", "GIT_ASKPASS", "SSH_ASKPASS"),
+	},
 	&cli.BoolFlag{
 		Name:    "no-color",
 		Usage:   "Disable color always",

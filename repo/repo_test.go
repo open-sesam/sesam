@@ -457,6 +457,14 @@ func TestRepoOpts_PluginUI(t *testing.T) {
 	require.NotNil(t, RepoOpts{Interactive: true}.pluginUI(), "interactive variant")
 }
 
+func TestRepoOpts_AskpassRequired(t *testing.T) {
+	require.Equal(t, "prefer", RepoOpts{}.askpassRequired())
+	require.Equal(t, "prefer", RepoOpts{AskpassRequired: "invalid"}.askpassRequired())
+	require.Equal(t, "prefer", RepoOpts{AskpassRequired: "prefer"}.askpassRequired())
+	require.Equal(t, "force", RepoOpts{AskpassRequired: "force"}.askpassRequired())
+	require.Equal(t, "never", RepoOpts{AskpassRequired: "never"}.askpassRequired())
+}
+
 // --- Status ----------------------------------------------------------------
 
 // writeRepoFile writes content to dir/rel, creating parent dirs as needed.
@@ -510,7 +518,7 @@ func TestRepoStatusStates(t *testing.T) {
 	// unrevealed: drop the revealed plaintext (sealed object stays).
 	require.NoError(t, os.Remove(filepath.Join(dir, "secrets/unrevealed")))
 	// unsealed: drop the sealed object (revealed plaintext stays).
-	require.NoError(t, os.Remove(r.secret.SealedPath("secrets/unsealed")))
+	require.NoError(t, os.Remove(filepath.Join(dir, r.secret.SealedPath("secrets/unsealed"))))
 	// unmanaged: an untracked file sesam does not know about.
 	writeRepoFile(t, dir, "loose.txt", "junk")
 

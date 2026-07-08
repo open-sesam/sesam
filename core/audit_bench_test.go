@@ -39,7 +39,7 @@ func BenchmarkAuditLog(b *testing.B) {
 	ids := Identities{admin.Identity}
 
 	// Sanity check the seeded log before timing anything.
-	al, err := LoadAuditLog(sesamDir, ids)
+	al, err := LoadAuditLog(testRoot(b, sesamDir), ids)
 	if err != nil {
 		b.Fatalf("initial load: %v", err)
 	}
@@ -55,7 +55,7 @@ func BenchmarkAuditLog(b *testing.B) {
 	b.Run("Load", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			al, err := LoadAuditLog(sesamDir, ids)
+			al, err := LoadAuditLog(testRoot(b, sesamDir), ids)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -69,7 +69,7 @@ func BenchmarkAuditLog(b *testing.B) {
 	b.Run("LoadAndVerify", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			al, err := LoadAuditLog(sesamDir, ids)
+			al, err := LoadAuditLog(testRoot(b, sesamDir), ids)
 			if err != nil {
 				b.Fatal(err)
 			}

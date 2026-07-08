@@ -26,7 +26,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/gofrs/flock"
-	"github.com/google/renameio"
+	"github.com/google/renameio/v2"
 	sesamConf "github.com/open-sesam/sesam/config"
 	"github.com/open-sesam/sesam/core"
 )
@@ -39,6 +39,7 @@ var ErrClosed = errors.New("sesam repo is closed")
 // semantics.
 type Repo struct {
 	sesamDir string
+	root     *os.Root
 	opts     RepoOpts
 
 	pluginUI *core.PluginUI
@@ -88,6 +89,13 @@ type RepoOpts struct {
 	// Interactive should be true when we can talk to the user via the terminal.
 	Interactive bool
 
+	// AskpassProgram overrides SESAM_ASKPASS when set.
+	AskpassProgram string
+
+	// AskpassRequired controls whether askpass is used: prefer, force, or never.
+	// Empty means prefer.
+	AskpassRequired string
+
 	// LockTimeout bounds how long acquiring the on-disk repo lock waits.
 	// Zero means use the default.
 	LockTimeout time.Duration
@@ -129,14 +137,32 @@ func (opts RepoOpts) pluginUI() *core.PluginUI {
 	return core.NewNonInteractivePluginUI()
 }
 
+func (opts RepoOpts) askpassRequired() string {
+	switch opts.AskpassRequired {
+	case "never", "force", "prefer":
+		return opts.AskpassRequired
+	default:
+		return "prefer"
+	}
+}
+
+func (opts RepoOpts) passphraseProvider(keyFingerprint string) core.PassphraseProvider {
+	var fallback core.PassphraseProvider
+	if opts.Interactive && opts.askpassRequired() != "force" {
+		fallback = &core.StdinPassphraseProvider{}
+	}
+	if opts.askpassRequired() != "never" {
+		fallback = &core.AskpassProvider{Program: opts.AskpassProgram, Fallback: fallback}
+	}
+	return &core.KeyringPassphraseProvider{
+		KeyFingerprint: keyFingerprint,
+		Fallback:       fallback,
+	}
+}
+
 // LoadIdentities reads the user's age identity files.
 func LoadIdentities(identityPaths []string, opts RepoOpts) (core.Identities, error) {
-	idLoader := loadIdentities
-	if !opts.Interactive {
-		idLoader = loadIdentitiesKeyringOnly
-	}
-
-	return idLoader(identityPaths, opts.pluginUI())
+	return loadIdentitiesWith(identityPaths, opts.passphraseProvider, opts.pluginUI())
 }
 
 func guessInitUserNameFromGitConfig(repo *git.Repository) (string, error) {
@@ -205,7 +231,12 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, fmt.Errorf("invalid initial user %q: %w", opts.InitialUserName, err)
 	}
 
-	r := newRepo(resolvedDir, nil, gitRepo, idPaths, opts.RepoOpts)
+	root, err := os.OpenRoot(resolvedDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open repo root %q: %w", resolvedDir, err)
+	}
+
+	r := newRepo(resolvedDir, root, nil, gitRepo, idPaths, opts.RepoOpts)
 	r.whoami = opts.InitialUserName
 	success := false
 	defer func() {
@@ -245,7 +276,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, err
 	}
 
-	configRepo, err := sesamConf.Load(configPath)
+	configRepo, err := sesamConf.Load(root, "sesam.yml")
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +285,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	opts.PrintStep("Creating initial user »%s«…", opts.InitialUserName)
 	signer, auditLog, err := core.InitAdminUser(
 		ctx,
-		resolvedDir,
+		root,
 		opts.InitialUserName,
 		identities.RecipientStrings(),
 		r.pluginUI,
@@ -277,12 +308,12 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 	r.vstate = vstate
 
-	r.secret, err = core.BuildSecretManager(resolvedDir, identities, signer, r.keyring, auditLog, vstate)
+	r.secret, err = core.BuildSecretManager(resolvedDir, root, identities, signer, r.keyring, auditLog, vstate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build secret manager: %w", err)
 	}
 
-	r.user, err = core.BuildUserManager(resolvedDir, signer, auditLog, vstate, r.secret)
+	r.user, err = core.BuildUserManager(root, signer, auditLog, vstate, r.secret)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build user manager: %w", err)
 	}
@@ -334,12 +365,18 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 		return nil, err
 	}
 
-	configRepo, err := sesamConf.Load(filepath.Join(sesamDir, "sesam.yml"))
+	root, err := os.OpenRoot(resolvedDir)
 	if err != nil {
+		return nil, fmt.Errorf("failed to open repo root %q: %w", resolvedDir, err)
+	}
+
+	configRepo, err := sesamConf.Load(root, "sesam.yml")
+	if err != nil {
+		_ = root.Close()
 		return nil, err
 	}
 
-	r := newRepo(resolvedDir, configRepo, gitRepo, ids, opts)
+	r := newRepo(resolvedDir, root, configRepo, gitRepo, ids, opts)
 	success := false
 	defer func() {
 		if !success {
@@ -359,7 +396,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 
 	r.keyring = core.EmptyKeyring()
 
-	auditLog, err := core.LoadAuditLog(resolvedDir, identities)
+	auditLog, err := core.LoadAuditLog(root, identities)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load audit log: %w", err)
 	}
@@ -382,17 +419,17 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	}
 	r.whoami = whoami
 
-	signer, err := core.LoadSignKey(resolvedDir, whoami, signIdentity)
+	signer, err := core.LoadSignKey(root, whoami, signIdentity)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
 	}
 
-	r.secret, err = core.BuildSecretManager(resolvedDir, identities, signer, r.keyring, auditLog, vstate)
+	r.secret, err = core.BuildSecretManager(resolvedDir, root, identities, signer, r.keyring, auditLog, vstate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build secret manager: %w", err)
 	}
 
-	r.user, err = core.BuildUserManager(resolvedDir, signer, auditLog, vstate, r.secret)
+	r.user, err = core.BuildUserManager(root, signer, auditLog, vstate, r.secret)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build user manager: %w", err)
 	}
@@ -401,10 +438,12 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	return r, nil
 }
 
-func newRepo(sesamDir string, configRepo *sesamConf.Config, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
-	sesamDirAbs, _ := filepath.Abs(sesamDir)
+func newRepo(sesamDir string, root *os.Root, configRepo *sesamConf.Config, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
+	// sesamDir is already absolute - resolveSesamDirAndGit normalizes it, the
+	// single place that resolves it against the cwd.
 	return &Repo{
-		sesamDir:      sesamDirAbs,
+		sesamDir:      sesamDir,
+		root:          root,
 		opts:          opts,
 		gitRepo:       gitRepo,
 		pluginUI:      opts.pluginUI(),
@@ -446,6 +485,12 @@ func (r *Repo) Close() error {
 			firstErr = fmt.Errorf("unlock repository: %w", err)
 		}
 		r.lock = nil
+	}
+	if r.root != nil {
+		if err := r.root.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("close repo root: %w", err)
+		}
+		r.root = nil
 	}
 	return firstErr
 }
@@ -492,7 +537,7 @@ func (r *Repo) ListSecrets(paths []string) ([]SecretInfo, error) {
 
 	// filter a bit:
 	for _, path := range paths {
-		for _, secret := range r.secretsUnder(r.toAbs(path)) {
+		for _, secret := range r.secretsUnder(path) {
 			out = append(out, SecretInfo{
 				VerifiedSecret: secret,
 				// TODO: Associate it with config here. We could add a layer in front
@@ -651,32 +696,13 @@ func (r *Repo) UserKill(user string) error {
 	return r.config.Save()
 }
 
-// toAbs resolves a caller-supplied secret path to an absolute on-disk path.
-// Relative paths are interpreted against the sesam dir, matching the revealed
-// paths the secret manager and config record.
-func (r *Repo) toAbs(p string) string {
-	if filepath.IsAbs(p) {
-		return p
-	}
-	return filepath.Join(r.sesamDir, p)
-}
-
-// toRevealed converts an absolute on-disk path to the secret manager's
-// coordinate: a path relative to the sesam dir.
-func (r *Repo) toRevealed(abs string) (string, error) {
-	rel, err := filepath.Rel(r.sesamDir, abs)
-	if err != nil {
-		return "", fmt.Errorf("secret path %q is outside the sesam dir %q: %w", abs, r.sesamDir, err)
-	}
-	return rel, nil
-}
-
 // SecretAdd adds the secret(s) at each path to the secrets known by sesam. A
 // path can be a single file, several files, or a directory (added recursively).
 // When nested is set, subdirectories get their own sesam.yml included from the
 // main file; otherwise everything is flattened into the main file.
 //
-// Re-adding files will change their groups accordingly.
+// Paths are sesam-relative (the cli layer resolves the caller's cwd before
+// handing them down). Re-adding files will change their groups accordingly.
 func (r *Repo) SecretAdd(revealedPaths, groups []string, nested bool) error {
 	if len(revealedPaths) == 0 {
 		return fmt.Errorf("missing secret path: pass at least one path")
@@ -689,30 +715,22 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string, nested bool) error {
 		return ErrClosed
 	}
 
-	// TODO: When being outside the repo something like repo/secret.txt should also work as path.
-	//       Same when being in a sub-dir and doing "add ../secret.txt" We should resolve that here.
-	//       We should only care it is inside of the sesam dir.
 	var files []string
 	for _, p := range revealedPaths {
-		expanded, err := r.expandSecretFiles(r.toAbs(p))
+		expanded, err := r.expandSecretFiles(p)
 		if err != nil {
 			return fmt.Errorf("failed to expand %q: %w", p, err)
 		}
 		files = append(files, expanded...)
 	}
 
-	for _, abs := range files {
-		rel, err := r.toRevealed(abs)
-		if err != nil {
-			return err
-		}
-
-		if err := core.IsForbiddenPath(r.sesamDir, rel); err != nil {
+	for _, rel := range files {
+		if err := core.IsForbiddenPath(rel); err != nil {
 			return err
 		}
 
 		// Config and the secret manager each self-decide add vs. change.
-		if err := r.config.SecretAdd(abs, nested, groups); err != nil {
+		if err := r.config.SecretAdd(rel, nested, groups); err != nil {
 			return fmt.Errorf("failed to add secret %q to config: %w", rel, err)
 		}
 
@@ -724,24 +742,25 @@ func (r *Repo) SecretAdd(revealedPaths, groups []string, nested bool) error {
 	return r.config.Save()
 }
 
-// expandSecretFiles resolves abs into the concrete regular files it represents.
-// A regular file yields itself; a directory is walked recursively. Only the
-// .git and .sesam metadata directories are skipped — other dotfiles (e.g.
-// .env) are valid secrets, matching core.IsForbiddenPath. Non-regular entries
-// (symlinks, sockets, devices, …) and sesam.yml are ignored. Returned paths are
-// absolute and cleaned.
-func (r *Repo) expandSecretFiles(abs string) ([]string, error) {
-	info, err := os.Stat(abs)
+// expandSecretFiles resolves a sesam-relative path into the concrete regular
+// files it represents. A regular file yields itself; a directory is walked
+// recursively. Only the .git and .sesam metadata directories are skipped —
+// other dotfiles (e.g. .env) are valid secrets, matching core.IsForbiddenPath.
+// Non-regular entries (symlinks, sockets, devices, …) and sesam.yml are
+// ignored. Returned paths are sesam-relative and cleaned.
+func (r *Repo) expandSecretFiles(rel string) ([]string, error) {
+	rel = filepath.Clean(rel)
+	info, err := r.root.Stat(rel)
 	if err != nil {
 		return nil, err
 	}
 
 	if !info.IsDir() {
-		return []string{filepath.Clean(abs)}, nil
+		return []string{rel}, nil
 	}
 
 	var files []string
-	err = filepath.WalkDir(abs, func(p string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(r.root.FS(), filepath.ToSlash(rel), func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -759,7 +778,7 @@ func (r *Repo) expandSecretFiles(abs string) ([]string, error) {
 			return nil
 		}
 
-		files = append(files, filepath.Clean(p))
+		files = append(files, filepath.Clean(filepath.FromSlash(p)))
 		return nil
 	})
 	if err != nil {
@@ -769,17 +788,17 @@ func (r *Repo) expandSecretFiles(abs string) ([]string, error) {
 	return files, nil
 }
 
-// secretsUnder returns every managed secret located at abs or beneath it,
-// enumerated from the verified state rather than the filesystem. This makes
-// remove/move work even when the plaintext is not currently revealed on disk.
-// The result is sorted by revealed path.
-func (r *Repo) secretsUnder(abs string) []core.VerifiedSecret {
-	target := filepath.Clean(abs)
+// secretsUnder returns every managed secret located at the sesam-relative path
+// rel or beneath it, enumerated from the verified state rather than the
+// filesystem. This makes remove/move work even when the plaintext is not
+// currently revealed on disk. The result is sorted by revealed path.
+func (r *Repo) secretsUnder(rel string) []core.VerifiedSecret {
+	target := filepath.Clean(rel)
 
 	var out []core.VerifiedSecret
 	for _, s := range r.vstate.Secrets {
-		secretAbs := filepath.Join(r.sesamDir, s.RevealedPath)
-		if secretAbs == target || isUnder(target, secretAbs) {
+		secretRel := filepath.Clean(s.RevealedPath)
+		if secretRel == target || isUnder(target, secretRel) {
 			out = append(out, s)
 		}
 	}
@@ -818,15 +837,17 @@ func (r *Repo) SecretRemove(revealedPaths []string) error {
 	}
 
 	for _, p := range revealedPaths {
-		targets := r.secretsUnder(r.toAbs(p))
+		targets := r.secretsUnder(p)
 		if len(targets) == 0 {
 			return fmt.Errorf("no secrets found for %q", p)
 		}
 
 		for _, secret := range targets {
 			rel := secret.RevealedPath
-			abs := filepath.Join(r.sesamDir, rel)
-			if err := r.config.SecretRemove(abs); err != nil {
+
+			// TODO: We should not assume that config actually had this secret configured.
+			//       During normal workflow this might be not in there. So not hard error at least.
+			if err := r.config.SecretRemove(rel); err != nil {
 				return fmt.Errorf("failed to remove secret %q from config: %w", rel, err)
 			}
 
@@ -904,7 +925,7 @@ func (r *Repo) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 	report := &VerifyReport{}
 
 	if opts.Integrity {
-		report.Integrity = core.VerifyIntegrity(r.sesamDir, r.vstate, r.keyring)
+		report.Integrity = core.VerifyIntegrity(r.root, r.vstate, r.keyring)
 		if report.Integrity.IsZero() {
 			report.Integrity = nil
 		}
@@ -965,32 +986,26 @@ func (r *Repo) SecretMove(oldRevealedPath, newRevealedPath string) error {
 		return ErrClosed
 	}
 
-	oldAbs := r.toAbs(oldRevealedPath)
-	newAbs := r.toAbs(newRevealedPath)
+	oldBase := filepath.Clean(oldRevealedPath)
+	newBase := filepath.Clean(newRevealedPath)
 
-	targets := r.secretsUnder(oldAbs)
+	targets := r.secretsUnder(oldBase)
 	if len(targets) == 0 {
 		return fmt.Errorf("no secrets found for %q", oldRevealedPath)
 	}
 
 	for _, secret := range targets {
-		oldRel := secret.RevealedPath
+		oldRel := filepath.Clean(secret.RevealedPath)
 		// Map each secret under the source onto the destination, preserving its
 		// path relative to the source root (the source itself maps directly).
-		oldSecretAbs := filepath.Join(r.sesamDir, oldRel)
-		sub, err := filepath.Rel(oldAbs, oldSecretAbs)
+		sub, err := filepath.Rel(oldBase, oldRel)
 		if err != nil {
 			return err
 		}
 
-		newSecretAbs := newAbs
+		newRel := newBase
 		if sub != "." {
-			newSecretAbs = filepath.Join(newAbs, sub)
-		}
-
-		newRel, err := r.toRevealed(newSecretAbs)
-		if err != nil {
-			return err
+			newRel = filepath.Join(newBase, sub)
 		}
 
 		if err := r.secret.SecretMove(oldRel, newRel); err != nil {
@@ -999,7 +1014,10 @@ func (r *Repo) SecretMove(oldRevealedPath, newRevealedPath string) error {
 
 		// TODO: preserve nested layout on move (derive from the source's owning
 		// file); for now the moved secret lands in the main file.
-		if err := r.config.SecretMove(oldSecretAbs, newSecretAbs, false); err != nil {
+		//
+		// TODO: We should not assume that config actually had this secret configured.
+		//       During normal workflow this might be not in there. So not hard error at least.
+		if err := r.config.SecretMove(oldRel, newRel, false); err != nil {
 			return fmt.Errorf("failed to move secret %q in config: %w", oldRel, err)
 		}
 	}
@@ -1214,14 +1232,13 @@ func (r *Repo) Status(opts StatusOpts) (*Status, error) {
 			continue
 		}
 
-		absPath := filepath.Join(r.sesamDir, revealedPath)
-		if !core.PathExists(absPath) {
+		if _, err := r.root.Stat(revealedPath); err != nil {
 			add(SecretStateNoRevealedPath)
 			continue
 		}
 
 		sealedPath := r.secret.SealedPath(revealedPath)
-		if !core.PathExists(sealedPath) {
+		if _, err := r.root.Stat(sealedPath); err != nil {
 			add(SecretStateNoSealedPath)
 			continue
 		}
@@ -1260,7 +1277,9 @@ func (r *Repo) Status(opts StatusOpts) (*Status, error) {
 }
 
 func (r *Repo) statusToDiffDir(status *Status) (diffDir string, err error) {
-	rootTmpDir := r.secret.TmpDir()
+	// The diff tree is consumed by an external `git diff` process, so it is
+	// built with absolute paths outside the root.
+	rootTmpDir := filepath.Join(r.sesamDir, core.SesamTmpDir())
 	tmpDir, err := os.MkdirTemp(rootTmpDir, "status-diff-")
 	if err != nil {
 		return "", fmt.Errorf("failed to make temp dir for diff: %w", err)
@@ -1297,7 +1316,7 @@ func (r *Repo) statusToDiffDir(status *Status) (diffDir string, err error) {
 				return "", fmt.Errorf("failed to open sealed file: %w", err)
 			}
 
-			if _, err := core.ShowSecret(r.sesamDir, r.identities, file.RevealedPath, sealFd); err != nil {
+			if _, err := core.ShowSecret(r.root, r.identities, file.RevealedPath, sealFd); err != nil {
 				_ = sealFd.Close()
 				return "", err
 			}

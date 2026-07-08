@@ -545,7 +545,7 @@ func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigne
 	}
 
 	// double check nobody inserted ../../ or similar into the revealed path.
-	if err := validSecretPathFormat(log.SesamDir, scd.RevealedPath); err != nil {
+	if err := validSecretPathFormat(scd.RevealedPath); err != nil {
 		return err
 	}
 
@@ -597,7 +597,7 @@ func verifySecretMove(log *AuditLog, state *VerifiedState, entry *AuditEntrySign
 		return fmt.Errorf("parse detail: %w", err)
 	}
 
-	if err := validSecretPathFormat(log.SesamDir, scr.NewRevealedPath); err != nil {
+	if err := validSecretPathFormat(scr.NewRevealedPath); err != nil {
 		return err
 	}
 
@@ -623,7 +623,7 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 	}
 
 	// double check nobody inserted ../../ or similar into the revealed path.
-	if err := validSecretPathFormat(log.SesamDir, srd.RevealedPath); err != nil {
+	if err := validSecretPathFormat(srd.RevealedPath); err != nil {
 		return err
 	}
 
@@ -663,15 +663,16 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) er
 //   - stage matches the log -> swap was pending, finish it.
 //   - neither matches -> the log committed a state nothing on disk holds.
 //     Cannot reconcile; bail and let the user investigate.
-func recoverIncompleteSeal(sesamDir string, vstate *VerifiedState) error {
-	stageDir := filepath.Join(sesamDir, ".sesam", "seal-stage")
-	objectsDir := filepath.Join(sesamDir, ".sesam", "objects")
+func recoverIncompleteSeal(root *os.Root, vstate *VerifiedState) error {
+	stageDir := filepath.Join(".sesam", "seal-stage")
+	objectsDir := filepath.Join(".sesam", "objects")
 
-	if !PathExists(stageDir) {
-		return nil
+	if _, err := root.Stat(stageDir); err != nil {
+		// No stage dir (the common case) means nothing to recover.
+		return nil //nolint:nilerr // absent stage dir => nothing to reconcile
 	}
 
-	objectSigs, err := readAllSignaturesForDir(objectsDir)
+	objectSigs, err := readAllSignaturesForDir(root, objectsDir)
 	if err != nil {
 		return err
 	}
@@ -680,15 +681,15 @@ func recoverIncompleteSeal(sesamDir string, vstate *VerifiedState) error {
 	if vstate.LastSealRootHash == "" {
 		// Crashed during the very first SealAll, before any audit entry
 		// was written. Stage holds uncommitted work; discard it.
-		return os.RemoveAll(stageDir)
+		return root.RemoveAll(stageDir)
 	}
 
 	if vstate.LastSealRootHash == objectsRootHash {
 		// Audit entry written and swap done, just stage dir not yet deleted.
-		return os.RemoveAll(stageDir)
+		return root.RemoveAll(stageDir)
 	}
 
-	stageSigs, err := readAllSignaturesForDir(stageDir)
+	stageSigs, err := readAllSignaturesForDir(root, stageDir)
 	if err != nil {
 		return err
 	}
@@ -696,11 +697,12 @@ func recoverIncompleteSeal(sesamDir string, vstate *VerifiedState) error {
 
 	if vstate.LastSealRootHash == stageRootHash {
 		// Audit entry written, but stage not yet swapped. Finish it,
-		// then reap the now-old tree that lands back in stage.
-		if err := atomicSwapDirs(stageDir, objectsDir); err != nil {
+		// then reap the now-old tree that lands back in stage. The swap is a
+		// renameat2(EXCHANGE) syscall and needs absolute paths.
+		if err := atomicSwapDirs(filepath.Join(root.Name(), stageDir), filepath.Join(root.Name(), objectsDir)); err != nil {
 			return err
 		}
-		return os.RemoveAll(stageDir)
+		return root.RemoveAll(stageDir)
 	}
 
 	// Log committed a state that exists neither in stage nor in objects.
@@ -760,13 +762,13 @@ func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, erro
 	// Reconcile disk with the log: finish a pending swap or drop a
 	// stale staging dir from a previously crashed SealAll. Runs after
 	// verify(state) so the log (and thus LastSealRootHash) is trusted.
-	if err := recoverIncompleteSeal(log.SesamDir, &state); err != nil {
+	if err := recoverIncompleteSeal(log.root, &state); err != nil {
 		return nil, err
 	}
 
 	// Verify that the latest seal's RootHash matches the signature footers on disk.
 	if state.LastSealRootHash != "" {
-		sigs, err := readAllSignatures(log.SesamDir)
+		sigs, err := readAllSignatures(log.root)
 		if err != nil {
 			return nil, fmt.Errorf("reading signatures for root hash check: %w", err)
 		}

@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"os"
@@ -87,6 +86,23 @@ func testRepo(t testing.TB) string {
 	return sesamDir
 }
 
+// testRoot opens an os.Root on sesamDir, closed on test cleanup. It is the
+// repository handle every core API takes since the path refactor.
+func testRoot(t testing.TB, sesamDir string) *os.Root {
+	t.Helper()
+	root, err := os.OpenRoot(sesamDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
+	return root
+}
+
+// testRepoRoot creates a temp repo and returns it together with an open root.
+func testRepoRoot(t testing.TB) (string, *os.Root) {
+	t.Helper()
+	sesamDir := testRepo(t)
+	return sesamDir, testRoot(t, sesamDir)
+}
+
 // testKeyring creates a keyring populated with the given users.
 func testKeyring(t *testing.T, users ...*testUser) *MemoryKeyring {
 	t.Helper()
@@ -99,12 +115,14 @@ func testKeyring(t *testing.T, users ...*testUser) *MemoryKeyring {
 	return kr
 }
 
-// initAuditLog creates a fresh audit log with the given user as admin.
+// initAuditLog creates a fresh audit log with the given user as admin. It opens
+// a repo root (closed on cleanup) the audit log uses for its lifetime.
 func initAuditLog(t testing.TB, sesamDir string, admin *testUser) *AuditLog {
 	t.Helper()
 
+	root := testRoot(t, sesamDir)
 	al, err := InitAuditLog(
-		sesamDir,
+		root,
 		admin.Signer,
 		Recipients{admin.Recipient},
 		admin.DetailUserTell([]string{"admin"}),
@@ -116,7 +134,7 @@ func initAuditLog(t testing.TB, sesamDir string, admin *testUser) *AuditLog {
 	// Real init (InitAdminUser) writes the admin's signing key to disk via
 	// GenerateSignKey; mirror that so on-disk fixtures match production and
 	// operations like UserRename (which moves the key file) can find it.
-	persistSignKey(t, sesamDir, admin)
+	persistSignKey(t, root, admin)
 
 	return al
 }
@@ -125,24 +143,13 @@ func initAuditLog(t testing.TB, sesamDir string, admin *testUser) *AuditLog {
 // .sesam/signkeys/<user>.age, encrypted to u's own recipient — the same shape
 // GenerateSignKey produces during a real init/tell. It reuses u's existing key
 // so the in-memory signer and the on-disk file stay consistent.
-func persistSignKey(t testing.TB, sesamDir string, u *testUser) {
+func persistSignKey(t testing.TB, root *os.Root, u *testUser) {
 	t.Helper()
 
 	signer, ok := u.Signer.(*ed25519Signer)
 	require.True(t, ok, "test user signer must be *ed25519Signer")
 
-	signKeyPath := filepath.Join(sesamDir, ".sesam", "signkeys", u.Name+".age")
-	require.NoError(t, os.MkdirAll(filepath.Dir(signKeyPath), 0o700))
-
-	ageBuf := &bytes.Buffer{}
-	wc, err := age.Encrypt(ageBuf, u.Recipient.Recipient)
-	require.NoError(t, err)
-
-	if _, err := wc.Write([]byte(MulticodeEncode(signer.priv[:], MhEd25519Priv))); err != nil {
-		t.Fatal(err)
-	}
-	require.NoError(t, wc.Close())
-	require.NoError(t, os.WriteFile(signKeyPath, ageBuf.Bytes(), 0o600))
+	require.NoError(t, WriteSignKey(root, u.Name, []age.Recipient{u.Recipient.Recipient}, signer.priv))
 }
 
 // loadAuditLog loads an existing audit log using the given users' identities.
@@ -154,7 +161,7 @@ func loadAuditLog(t *testing.T, sesamDir string, users ...*testUser) *AuditLog {
 		ids = append(ids, u.Identity)
 	}
 
-	al, err := LoadAuditLog(sesamDir, ids)
+	al, err := LoadAuditLog(testRoot(t, sesamDir), ids)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +169,9 @@ func loadAuditLog(t *testing.T, sesamDir string, users ...*testUser) *AuditLog {
 	return al
 }
 
-// writeSecret creates a plaintext file at revealedPath inside the repo.
+// writeSecret creates a plaintext file at revealedPath inside the repo. It is a
+// test fixture writing plaintext, so it goes straight to disk rather than
+// through the repo root.
 func writeSecret(t *testing.T, sesamDir, revealedPath, content string) {
 	t.Helper()
 	fullPath := filepath.Join(sesamDir, revealedPath)
@@ -210,7 +219,7 @@ func gitCommitAll(t *testing.T, repo *git.Repository, msg string) {
 // testSecretManagerFull creates a SecretManager backed by a full audit log and verified state.
 func testSecretManagerFull(t *testing.T) *SecretManager {
 	t.Helper()
-	sesamDir := testRepo(t)
+	sesamDir, root := testRepoRoot(t)
 	admin := newTestUser(t, "admin")
 	al := initAuditLog(t, sesamDir, admin)
 
@@ -233,6 +242,7 @@ func testSecretManagerFull(t *testing.T) *SecretManager {
 
 	mgr, err := BuildSecretManager(
 		sesamDir,
+		root,
 		Identities{admin.Identity},
 		admin.Signer,
 		kr,

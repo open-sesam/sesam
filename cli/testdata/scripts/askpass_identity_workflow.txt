@@ -1,0 +1,43 @@
+# Verify that encrypted identities can be unlocked through askpass, including
+# when git invokes sesam through the diff textconv path.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+# Initialize with the plain admin identity. The encrypted identity below wraps
+# the same key material and should map to the same admin user once askpass
+# supplies its passphrase.
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# With askpass explicitly disabled, the encrypted identity cannot be loaded in
+# this non-interactive test process.
+env SESAM_ID=$ADMIN_ENCRYPTED_KEY
+env SESAM_ASKPASS=$ASKPASS_HELPER
+env SESAM_ASKPASS_REQUIRED=never
+! exec sesam id
+stderr 'failed to read passphrase'
+
+# Force askpass and verify sesam can identify admin without terminal input.
+env SESAM_ASKPASS_REQUIRED=force
+exec sesam id
+stdout 'admin'
+
+# Modify and seal the bootstrap secret through the encrypted identity. This also
+# verifies normal repo loading uses askpass, not just the cheap `id` path.
+cp modified_readme.md README.md
+exec sesam seal
+
+# git diff invokes `sesam show` as textconv. Keep SESAM_ID pointed at the
+# encrypted identity and use the askpass helper, so the git-driven path cannot
+# rely on stdin prompting.
+exec git diff HEAD -- .sesam/objects/README.md.sesam
+stdout '# Sesam Cheatsheet'
+stdout 'askpass modified readme'
+
+-- modified_readme.md --
+# askpass modified readme
+
+This content was sealed through an askpass-unlocked identity.

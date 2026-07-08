@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -39,16 +40,11 @@ func auditLogHistory(sesamDir string, repo *git.Repository, ids Identities, from
 		return nil, fmt.Errorf("resolve revision %q: %w", fromRev, err)
 	}
 
-	wt, err := repo.Worktree()
+	prefix, err := SesamGitPrefix(repo, sesamDir)
 	if err != nil {
-		return nil, fmt.Errorf("open worktree: %w", err)
+		return nil, err
 	}
-
-	auditPathAbs := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
-	auditPathRel, err := filepath.Rel(wt.Filesystem.Root(), auditPathAbs)
-	if err != nil {
-		return nil, fmt.Errorf("compute audit log relative path: %w", err)
-	}
+	auditPathRel := path.Join(prefix, ".sesam", "audit", "log.jsonl")
 
 	// Trust anchor: .sesam/audit/init is committed exactly once (verified above)
 	// and never changes, so reading it now is equivalent to reading it at any
@@ -60,7 +56,6 @@ func auditLogHistory(sesamDir string, repo *git.Repository, ids Identities, from
 	}
 	initHash := strings.TrimSpace(string(initData))
 
-	auditPathRel = filepath.ToSlash(auditPathRel)
 	iter, err := repo.Log(&git.LogOptions{
 		From: *fromCommit,
 		PathFilter: func(path string) bool {

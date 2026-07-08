@@ -3,12 +3,31 @@ package core
 import (
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
+
+// SesamGitPrefix returns sesamDir as a forward-slash path relative to the git
+// worktree root. .sesam/ lives in sesamDir, but .git/ may be in an ancestor
+// directory, and go-git addresses index/tree/status paths relative to the
+// worktree root using forward slashes. sesamDir must be absolute.
+func SesamGitPrefix(repo *git.Repository, sesamDir string) (string, error) {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", fmt.Errorf("failed to open worktree: %w", err)
+	}
+
+	rel, err := filepath.Rel(wt.Filesystem.Root(), sesamDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to relativize sesam dir against worktree root: %w", err)
+	}
+
+	return filepath.ToSlash(rel), nil
+}
 
 // verifyInitFileUnchanged checks via git that .sesam/audit/init was never
 // modified after its initial commit. It inspects both the committed history
@@ -30,28 +49,12 @@ func verifyInitFileUnchanged(sesamDir string) (string, error) {
 }
 
 func verifyInitFileUnchangedWithRepo(sesamDir string, repo *git.Repository) (string, error) {
-	// .sesam/ lives in sesamDir, but .git/ may be in a parent directory.
-	// Git paths are relative to the worktree root, so compute accordingly.
-	wt, err := repo.Worktree()
+	prefix, err := SesamGitPrefix(repo, sesamDir)
 	if err != nil {
-		return "", fmt.Errorf("failed to open worktree: %w", err)
+		return "", err
 	}
 
-	absSesamDir, err := filepath.Abs(sesamDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve sesamDir: %w", err)
-	}
-
-	initAbs := filepath.Join(absSesamDir, ".sesam", "audit", "init")
-	initRel, err := filepath.Rel(wt.Filesystem.Root(), initAbs)
-	if err != nil {
-		return "", fmt.Errorf("failed to compute relative path: %w", err)
-	}
-
-	// go-git always reports tree/status paths with forward slashes, even on
-	// Windows where filepath.Rel returns backslashes. Normalize so the
-	// PathFilter and status lookups below match.
-	initRel = filepath.ToSlash(initRel)
+	initRel := path.Join(prefix, ".sesam", "audit", "init")
 
 	// Count how many commits touched the init file.
 	logIter, err := repo.Log(&git.LogOptions{
@@ -98,6 +101,11 @@ func verifyInitFileUnchangedWithRepo(sesamDir string, repo *git.Repository) (str
 	}
 
 	// Exactly 1 commit. Check for uncommitted changes (staged or unstaged).
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", fmt.Errorf("failed to open worktree: %w", err)
+	}
+
 	status, err := wt.Status()
 	if err != nil {
 		return "", fmt.Errorf("failed to get worktree status: %w", err)

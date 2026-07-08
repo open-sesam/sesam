@@ -14,7 +14,7 @@ import (
 
 	"github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
-	"github.com/google/renameio"
+	"github.com/google/renameio/v2"
 	"github.com/open-sesam/sesam/core"
 )
 
@@ -523,7 +523,13 @@ func repoRootRelative(worktreeRoot, sesamDir string) (string, error) {
 }
 
 func loadAuditViewFromWorktree(sesamDir string, ids core.Identities) (core.Keyring, func(user, revealedPath string) bool, error) {
-	al, err := core.LoadAuditLog(sesamDir, ids)
+	root, err := os.OpenRoot(sesamDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open repo root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	al, err := core.LoadAuditLog(root, ids)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load audit log: %w", err)
 	}
@@ -546,7 +552,7 @@ func loadAuditViewFromWorktree(sesamDir string, ids core.Identities) (core.Keyri
 // embedded RevealedPath as a side effect. Reveal failures are logged but
 // do not fail the smudge — aborting the git checkout would be worse than a
 // stale or missing revealed file.
-func RunSmudgeFilter(ctx context.Context, sesamDir string, identityPaths []string, in io.Reader, out io.Writer) error {
+func RunSmudgeFilter(ctx context.Context, sesamDir string, identityPaths []string, opts RepoOpts, in io.Reader, out io.Writer) error {
 	if len(identityPaths) == 0 {
 		return fmt.Errorf("need at least one identity")
 	}
@@ -555,8 +561,11 @@ func RunSmudgeFilter(ctx context.Context, sesamDir string, identityPaths []strin
 	if err != nil {
 		return err
 	}
-
-	ids, err := loadIdentitiesKeyringOnly(identityPaths, core.NewNonInteractivePluginUI())
+	ids, err := loadIdentitiesWith(
+		identityPaths,
+		opts.passphraseProvider,
+		core.NewNonInteractivePluginUI(),
+	)
 	if err != nil {
 		return err
 	}

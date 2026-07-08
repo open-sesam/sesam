@@ -10,13 +10,13 @@ import (
 // TestSecretMove_WithinMain renames a secret in the main file, preserving its
 // access groups.
 func TestSecretMove_WithinMain(t *testing.T) {
-	dir, main := buildConfig(t, false, "token.txt")
+	_, main := buildConfig(t, false, "token.txt")
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 	require.NoError(t, cr.SecretMove(
-		filepath.Join(dir, "token.txt"),
-		filepath.Join(dir, "renamed.txt"),
+		"token.txt",
+		"renamed.txt",
 		false,
 	))
 	require.NoError(t, cr.Save())
@@ -32,11 +32,11 @@ func TestSecretMove_OutOfSubfilePrunes(t *testing.T) {
 
 	require.True(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 	require.NoError(t, cr.SecretMove(
-		filepath.Join(dir, "sub", "api.key"),
-		filepath.Join(dir, "api.key"),
+		filepath.Join("sub", "api.key"),
+		"api.key",
 		false,
 	))
 	require.NoError(t, cr.Save())
@@ -47,13 +47,13 @@ func TestSecretMove_OutOfSubfilePrunes(t *testing.T) {
 
 // TestSecretMove_NotFound errors when no secret matches the source path.
 func TestSecretMove_NotFound(t *testing.T) {
-	dir, main := buildConfig(t, false)
+	_, main := buildConfig(t, false)
 
-	cr, err := Load(main)
+	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 	require.Error(t, cr.SecretMove(
-		filepath.Join(dir, "nope.txt"),
-		filepath.Join(dir, "renamed.txt"),
+		"nope.txt",
+		"renamed.txt",
 		false,
 	))
 }
