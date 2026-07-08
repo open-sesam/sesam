@@ -180,3 +180,70 @@ func TestStageSingleInFlight(t *testing.T) {
 
 	require.Equal(t, s1, s2)
 }
+
+// An explicitly named forbidden path must be rejected by add rather than
+// silently skipped, so the user learns their secret was never tracked.
+func TestStageSecretAddRejectsForbiddenPath(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	_, r := bootstrapRepo(t, admin)
+
+	cases := []string{
+		"sesam.yml",
+		".gitattributes",
+		".gitignore",
+		filepath.Join(".sesam", "audit", "log.jsonl"),
+	}
+
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			err := r.Update(func(s *Stage) error {
+				return s.SecretAdd([]string{path}, []string{"admin"}, false)
+			})
+			require.Error(t, err, "add %q must fail", path)
+		})
+	}
+}
+
+// A move must not be able to route a secret onto a path add would refuse:
+// otherwise a legal move can clobber sesam's own config or git filter routing.
+// The forbidden destination is rejected and the source stays tracked.
+func TestStageSecretMoveRejectsForbiddenDestination(t *testing.T) {
+	cases := []string{
+		"sesam.yml",
+		".gitattributes",
+		filepath.Join(".sesam", "stolen"),
+	}
+
+	for _, dest := range cases {
+		t.Run(dest, func(t *testing.T) {
+			admin := writeTestIdentity(t, "admin")
+			dir, r := bootstrapRepo(t, admin)
+
+			src := filepath.Join(dir, "secrets", "api.token")
+			require.NoError(t, os.MkdirAll(filepath.Dir(src), 0o700))
+			require.NoError(t, os.WriteFile(src, []byte("hunter2\n"), 0o600))
+			require.NoError(t, r.Update(func(s *Stage) error {
+				if err := s.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}, false); err != nil {
+					return err
+				}
+				return s.Seal(false)
+			}))
+
+			err := r.Update(func(s *Stage) error {
+				return s.SecretMove("secrets/api.token", dest, false)
+			})
+			require.Error(t, err, "move to %q must fail", dest)
+
+			// The rejected move must roll back cleanly: the source is still
+			// tracked and no config file was clobbered.
+			secrets, err := r.ListSecrets(nil)
+			require.NoError(t, err)
+			var paths []string
+			for _, s := range secrets {
+				paths = append(paths, s.RevealedPath)
+			}
+			require.Contains(t, paths, "secrets/api.token")
+			require.NotContains(t, paths, dest)
+		})
+	}
+}
