@@ -1,3 +1,7 @@
+// Package main is the entry point for the sesam binary.
+//
+// If you want to import sesam as library, then you should use the high-level API in repo/
+// Some types from core/ will be required too.
 package main
 
 import (
