@@ -2,7 +2,10 @@ name: Deploy docs
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      # TODO: change back before merge
+      - feat/opensesam-import
     paths:
       - "docs/**"
       - "cli/**"
