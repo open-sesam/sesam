@@ -147,6 +147,7 @@ func Main(args []string) error {
 				Name:          "rm",
 				Category:      catSecrets,
 				ArgsUsage:     "<path>",
+				Flags:         flagsRm,
 				Action:        commands.WithRepo(commands.HandleRemove),
 				ShellComplete: completeSecrets,
 				Usage:         "Remove a secret file or directory",

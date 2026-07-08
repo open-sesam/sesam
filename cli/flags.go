@@ -40,6 +40,7 @@ var flagSeal = &cli.BoolFlag{
 func userFlag(required bool, usage string) cli.Flag {
 	return &cli.StringFlag{
 		Name:     flagUser,
+		Aliases:  []string{"u"},
 		Required: required,
 		Usage:    usage,
 	}
@@ -49,6 +50,7 @@ func userFlag(required bool, usage string) cli.Flag {
 func groupFlag(required bool, usage string) cli.Flag {
 	return &cli.StringSliceFlag{
 		Name:     "group",
+		Aliases:  []string{"g"},
 		Required: required,
 		Usage:    usage,
 	}
@@ -181,6 +183,14 @@ var flagsAdd = []cli.Flag{
 	&cli.BoolFlag{
 		Name:  "nested",
 		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file",
+	},
+}
+
+var flagsRm = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "force",
+		Aliases: []string{"f"},
+		Usage:   "Also remove the revealed secrets",
 	},
 }
 

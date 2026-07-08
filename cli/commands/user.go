@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/open-sesam/sesam/core"
@@ -15,7 +16,7 @@ func guessUserNameFromForgeID(recps []string) (string, error) {
 		for _, prefix := range core.SupportedForges {
 			if strings.HasPrefix(recp, prefix+":") {
 				_, user, _ := strings.Cut(recp, ":")
-				fmt.Printf("guessed '--user %s' from %s\n", user, recp)
+				slog.Info(fmt.Sprintf("guessed '--user %s' from %s\n", user, recp))
 				return user, nil
 			}
 		}
