@@ -21,10 +21,10 @@ stderr 'failed to guess user name'
 # outcome - and that the guess itself did not error. The '.' wildcards match
 # the literal quotes around --user.
 ! exec sesam tell --recipient github:octobot-sesam-test-xyzzy --group dev
-stdout 'guessed .--user octobot-sesam-test-xyzzy. from github:octobot-sesam-test-xyzzy'
+stderr '.*guessed .--user octobot-sesam-test-xyzzy. from github:octobot-sesam-test-xyzzy'
 ! stderr 'failed to guess user name'
 
 # Positive: the first forge spec wins even when mixed with a raw recipient,
 # and the guess is generic across supported forges (gitlab here).
 ! exec sesam tell --recipient $BOB_PUBKEY --recipient gitlab:glhandle-sesam-test-xyzzy --group dev
-stdout 'guessed .--user glhandle-sesam-test-xyzzy. from gitlab:glhandle-sesam-test-xyzzy'
+stderr '.*guessed .--user glhandle-sesam-test-xyzzy. from gitlab:glhandle-sesam-test-xyzzy'
