@@ -26,7 +26,7 @@ body = """
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | split(pat=" ") | slice(start=1) | join(sep=" ") }}
 {% for commit in commits -%}
-- {% if commit.breaking %}**[breaking]** {% endif %}{{ commit.message | split(pat="\n") | first | upper_first }} ({{ commit.id | truncate(length=7, end="") }}{% if commit.remote.username %} by @{{ commit.remote.username }}{%- endif %}{% if commit.remote.pr_number %} in #{{ commit.remote.pr_number }}{%- endif %})
+- {% if commit.breaking %}**[breaking]** {% endif %}{{ commit.message | split(pat="\n") | first | upper_first }} ({{ commit.id | truncate(length=7, end="") }})
 {% endfor %}
 {% endfor %}
 """
@@ -78,9 +78,7 @@ commit_parsers = [
   { message = '.*', group = "9 Other" },
 ]
 
-# PR/author enrichment in the templates above. The token is taken from the
-# GITHUB_TOKEN environment variable (or ambient credentials); do NOT set an
-# empty `token` here - git-cliff sends it as an empty bearer and the API 401s.
-[remote.github]
-owner = "open-sesam"
-repo = "sesam"
+# No [remote.github] block and no commit.remote.* fields in the templates: that
+# keeps git-cliff fully offline. Contacting the GitHub API (for PR/author
+# enrichment) made every run depend on the network and rate-limit with a 403 -
+# fatal for git-cliff - so changelog generation is intentionally local-only.
