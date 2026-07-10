@@ -98,6 +98,36 @@ func TestValidSecretPathFormatNormalPath(t *testing.T) {
 	require.NoError(t, validSecretPathFormat("secrets/db_password"))
 }
 
+func TestValidSecretPathFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr string
+	}{
+		{name: "plain", path: "secrets/db_password"},
+		// ".." inside a filename is legitimate and must not be mistaken for
+		// path traversal (the bug this guards against).
+		{name: "dots in filename", path: "geo/countries/hong_kong_s.a.r..geojson"},
+		{name: "trailing double dot", path: "dir/weird..txt"},
+		{name: "leading double dot in name", path: "dir/..weird"},
+		{name: "empty", path: "", wantErr: "empty file path"},
+		{name: "absolute", path: "/etc/passwd", wantErr: "absolute paths"},
+		{name: "traversal segment", path: "../secret", wantErr: "'..' segment"},
+		{name: "traversal in middle", path: "a/../../etc/passwd", wantErr: "'..' segment"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validSecretPathFormat(tc.path)
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
 // sesam.yml is sesam's own config and must never be sealed as a secret,
 // regardless of which directory it lives in.
 func TestIsForbiddenPathRejectsSesamYml(t *testing.T) {
