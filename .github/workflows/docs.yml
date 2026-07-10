@@ -6,6 +6,8 @@ on:
     paths:
       - "docs/**"
       - "cli/**"
+      # docgen:cfg renders the config reference from the schema.
+      - "config/sesam_schema.json"
       - "Taskfile.yml"
       - ".github/workflows/docs.yml"
       # go.mod (module path) and the generator drive the vanity-import pages.
@@ -40,8 +42,26 @@ jobs:
       - name: Set up Go, mdBook and preprocessors
         uses: jdx/mise-action@v4
         with:
-          # go is needed by scripts/gen-vanity-imports.sh (`go list`)
-          install_args: "go mdbook cargo:mdbook-admonish cargo:mdbook-pagetoc cargo:mdbook-gitinfo"
+          # go is needed by scripts/gen-vanity-imports.sh (`go list`) and by
+          # `task docgen`; task runs the docgen targets.
+          install_args: "task go mdbook cargo:mdbook-admonish cargo:mdbook-pagetoc cargo:mdbook-gitinfo"
+
+      - name: Cache Go modules and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      # Regenerate the CLI/config reference pages from the live binary so the
+      # published docs always match the current command tree, even if the
+      # committed *_ref.md were not refreshed. Runs before the cache step so a
+      # regenerated page changes the docs/src hash and invalidates the book cache.
+      - name: Generate reference docs
+        run: task docgen
 
       - name: Cache mdbook build
         id: book-cache
