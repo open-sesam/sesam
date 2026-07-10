@@ -2,9 +2,9 @@
 # report + summary. Smoke test only: doctor covers installation, not repository
 # integrity (that is `sesam verify`).
 #
-# doctor exits non-zero here because it expects .gitattributes merge lines that
-# init does not write yet (branch-merge support is not implemented), so this
-# asserts the report is produced rather than a clean bill of health.
+# A default `sesam init` (no --install-merge) must give doctor a clean exit:
+# the .gitattributes check renders the per-repo driver suffix before diffing,
+# and the opt-in branch-merge git-config is a warning, not a blocking issue.
 
 exec git init
 exec git config user.email test@sesam.dev
@@ -14,7 +14,7 @@ exec sesam init --user admin
 exec git add -A
 exec git commit -m 'init sesam'
 
-! exec sesam doctor
+exec sesam doctor
 stdout '# sesam doctor'
 stdout '## System'
 stdout '## Git'
