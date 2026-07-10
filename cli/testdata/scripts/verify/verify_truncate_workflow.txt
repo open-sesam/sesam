@@ -1,0 +1,35 @@
+# `sesam verify --truncate` walks git history and detects a shortened audit log:
+# the log at each commit must be a prefix of the next, never shrink.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'c1'
+
+# Snapshot the c1 log. It lands outside .sesam/sesam.yml so .gitignore keeps it
+# untracked and it survives the later commits.
+cp .sesam/audit/log.jsonl log-c1.jsonl
+
+# Grow the log with a new secret and commit. History is still consistent.
+exec sesam add s.txt --group dev
+exec git add -A
+exec git commit -m 'c2'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+# Roll the log back to its (shorter) c1 content but move HEAD forward: the
+# parent commit's log is now longer than HEAD's -> truncation.
+cp log-c1.jsonl .sesam/audit/log.jsonl
+exec git add -A
+exec git commit -m 'c3'
+
+# no-disk isolates the history check from the on-disk root-hash mismatch the
+# rollback also introduces.
+! exec sesam --verify-mode no-disk verify --truncate
+stderr 'not a prefix'
+
+-- s.txt --
+top secret

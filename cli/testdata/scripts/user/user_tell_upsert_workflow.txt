@@ -49,7 +49,7 @@ stdout 'bob.*dev,ops'
 
 # Creating a brand-new user still needs a recipient (groups are optional).
 ! exec sesam tell --user newbie --group dev
-stderr 'without a --recipient'
+stderr 'without a recipient'
 
 -- some_file.txt --
 Some content
