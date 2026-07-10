@@ -7,6 +7,7 @@ sesam - Manage encrypted secrets in git repositories
 sesam
 
 ```
+[--askpass]=[value]
 [--help|-h]
 [--identity|-i]=[value]
 [--lock-timeout]=[value]
@@ -25,6 +26,8 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 ```
 
 # GLOBAL OPTIONS
+
+**--askpass**="": Askpass helper for encrypted identities
 
 **--help, -h**: show help
 
@@ -53,13 +56,25 @@ Initialize sesam in the current repository
 
 **--help, -h**: show help
 
-**--user**="": Initial admin user name (if not given, git config is used to guess)
+**--install-alias**: Make it possible to call sesam as `git sesam`
 
-## deinit
+**--install-diff**: Install diff support in repo git config
 
-Remove all traces of sesam
+**--install-hooks**: Install pre-commit and post-commit git hooks (needs git >= 2.54.0)
+
+**--install-merge**: Install merge support in repo git config
+
+**--user, -u**="": Initial admin user name (if not given, git config is used to guess)
+
+## uninstall
+
+Removes git integration and optionally all of the sesam repo
+
+**--all**: Also remove sesam.yml and .sesam/
 
 **--help, -h**: show help
+
+**--no-ask**: Do not ask for confirmation for --all
 
 ## verify
 
@@ -95,21 +110,57 @@ Check sesam installation for possible problems
 
 **--help, -h**: show help
 
+## hook
+
+Util to manage git hooks
+
+**--help, -h**: show help
+
+### pre-commit
+
+Execute the pre-commit hook - meant to be run by git!
+
+**--help, -h**: show help
+
+### post-checkout
+
+Execute the post-checkout hook - meant to be run by git!
+
+**--help, -h**: show help
+
+### install
+
+Make sure the git hooks are installed
+
+**--help, -h**: show help
+
+### uninstall
+
+Uninstall any hooks
+
+**--help, -h**: show help
+
 ## add
 
 Add a secret file or directory at `PATH`
 
-**--group**="": Group assignment for the secret (repeatable) - 'admin' is implicit
+**--group, -g**="": Group assignment for the secret (repeatable) - 'admin' is implicit
+
+**--group-add, -G**="": Add to the secret's existing groups instead of replacing them
 
 **--help, -h**: show help
 
 **--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file
 
-**--no-seal**: Do not run `sesam seal` afterwards - useful when batching
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
+
+**--seal-all**: When we seal, seal also files that did not change
 
 ## rm
 
 Remove a secret file or directory
+
+**--force, -f**: Also remove the revealed secrets
 
 **--help, -h**: show help
 
@@ -119,9 +170,11 @@ Move a secret file or directory to a new name
 
 **--help, -h**: show help
 
+**--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file
+
 ## edit
 
-Edit an secret and immeediately seal it afterwards
+Open secret in $EDITOR and immediately seal it afterwards
 
 **--help, -h**: show help
 
@@ -132,6 +185,8 @@ Encrypt and sign changed secrets
 **--clean**: Delete revealed secret files after successful seal
 
 **--help, -h**: show help
+
+**--seal-all**: When we seal, seal also files that did not change
 
 ## open, reveal
 
@@ -175,27 +230,33 @@ Plan and execute secret rotation
 
 ## tell
 
-Add a person to a group and re-encrypt affected files
+Add a person to a group and re-encrypt files
 
-**--group**="": Group assignment (repeatable)
+**--group, -g**="": Group assignment (repeatable)
+
+**--group-add, -G**="": Add to the user's existing groups instead of replacing them
 
 **--help, -h**: show help
 
-**--no-seal**: Do not run `sesam seal` afterwards - useful when batching
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
 **--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
 
-**--user**="": User name to add
+**--seal-all**: When we seal, seal also files that did not change
+
+**--user, -u**="": User name to add or update
 
 ## kill
 
-Remove a person from a group
+Remove a person from the sesam repo entirely
 
 **--help, -h**: show help
 
-**--no-seal**: Do not run `sesam seal` afterwards - useful when batching
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--user**="": User name to remove
+**--seal-all**: When we seal, seal also files that did not change
+
+**--user, -u**="": User name to remove
 
 ## user, u
 
@@ -203,7 +264,7 @@ User management commands
 
 **--help, -h**: show help
 
-### list
+### list, ls
 
 List persons, groups, and access
 
@@ -215,13 +276,17 @@ List persons, groups, and access
 
 Change the groups a user is in
 
-**--group**="": Group assignment for the secret (repeatable) - 'admin' is implicit
+**--group, -g**="": Group assignment for the user (repeatable) - 'admin' is implicit
+
+**--group-add, -G**="": Add to the user's existing groups instead of replacing them
 
 **--help, -h**: show help
 
-**--no-seal**: Do not run `sesam seal` afterwards - useful when batching
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--user**="": Which user should be changed
+**--seal-all**: When we seal, seal also files that did not change
+
+**--user, -u**="": Which user should be changed
 
 ### add-recipient, ar
 
@@ -229,11 +294,13 @@ Add a recipient to an existing user
 
 **--help, -h**: show help
 
-**--no-seal**: Do not run `sesam seal` afterwards - useful when batching
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
 **--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
 
-**--user**="": Which user receives the new recipient
+**--seal-all**: When we seal, seal also files that did not change
+
+**--user, -u**="": Which user receives the new recipient
 
 ### remove-recipient, rr
 
@@ -241,11 +308,13 @@ Remove a recipient from an existing user (may not be the last one)
 
 **--help, -h**: show help
 
-**--no-seal**: Do not run `sesam seal` afterwards - useful when batching
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
 **--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
 
-**--user**="": Which user looses the specified recipient
+**--seal-all**: When we seal, seal also files that did not change
+
+**--user, -u**="": Which user looses the specified recipient
 
 ### regen-sign-key, rsk
 
@@ -253,11 +322,17 @@ Regenerate the signing key of a specific user
 
 **--help, -h**: show help
 
-**--user**="": Regenerate the signing key for a user
+**--user, -u**="": Regenerate the signing key for a user
 
 ### rename
 
 Give a user a different name
+
+**--help, -h**: show help
+
+## apply
+
+Alias for `sesam config apply`
 
 **--help, -h**: show help
 
@@ -286,6 +361,12 @@ Get specific config keys
 **--help, -h**: show help
 
 ### set
+
+Set specific config keys
+
+**--help, -h**: show help
+
+### reset
 
 Set specific config keys
 

@@ -213,6 +213,19 @@ func deduplicate[T cmp.Ordered](s []T) []T {
 	return slices.Compact(c)
 }
 
+// unionGroups returns the deduplicated union of base and extra.
+func unionGroups(base, extra []string) []string {
+	return deduplicate(slices.Concat(base, extra))
+}
+
+// withoutAdmin drops the implicit "admin" group. Secret access lists carry it
+// only after normalization, so it must not leak into a persisted set.
+func withoutAdmin(groups []string) []string {
+	return slices.DeleteFunc(slices.Clone(groups), func(g string) bool {
+		return g == "admin"
+	})
+}
+
 func closeLogged(fd io.Closer) {
 	if err := fd.Close(); err != nil {
 		slog.Warn(

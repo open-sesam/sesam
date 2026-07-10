@@ -51,6 +51,12 @@ func (vu *VerifiedUser) IsAdmin() bool {
 	return slices.Contains(vu.Groups, "admin")
 }
 
+// DeclaredGroups returns the access groups without the implicit "admin" group -
+// the set to persist in the config, where admin membership stays implicit.
+func (vs *VerifiedSecret) DeclaredGroups() []string {
+	return withoutAdmin(vs.AccessGroups)
+}
+
 func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
 	idx := slices.IndexFunc(s.Users, func(u VerifiedUser) bool {
 		return u.Name == user

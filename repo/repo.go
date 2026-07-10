@@ -329,7 +329,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, err
 	}
 
-	if err := r.secret.SecretAdd("README.md", []string{"admin"}); err != nil {
+	if _, err := r.secret.SecretAdd("README.md", []string{"admin"}, false); err != nil {
 		return nil, fmt.Errorf("failed to bootstrap readme secret: %w", err)
 	}
 

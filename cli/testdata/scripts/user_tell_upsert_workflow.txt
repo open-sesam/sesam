@@ -1,0 +1,55 @@
+# Verify `sesam tell` upserts: creating a new user as before, but updating an
+# existing one - replacing/merging groups and adding recipients - instead of
+# failing. Creating a brand-new user still requires a recipient.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Create bob as a dev with one recipient.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec sesam user list
+stdout 'bob.*\bdev\b'
+exec sesam verify
+
+# Re-tell an existing user with --group ops and no recipient: groups are
+# replaced (dev -> ops), no user.tell entry is written for the re-tell.
+exec sesam tell --user bob --group ops
+exec sesam show .sesam/audit/log.jsonl
+stdout '"user.change_groups"'
+exec sesam user list
+stdout 'bob.*\bops\b'
+! stdout 'bob.*\bdev\b'
+exec sesam verify
+
+# --group-add merges into the current membership.
+exec sesam tell --user bob --group-add dev
+exec sesam user list
+stdout 'bob.*dev,ops'
+exec sesam verify
+
+# Recipient-only update: no --group flag, so the group set is left untouched.
+exec sesam tell --user bob --recipient $CAROL_PUBKEY
+exec sesam show .sesam/audit/log.jsonl
+stdout '"user.add_recipients"'
+grep $BOB_PUBKEY sesam.yml
+grep $CAROL_PUBKEY sesam.yml
+exec sesam user list
+stdout 'bob.*dev,ops'
+exec sesam verify
+
+# Updating an existing user with neither a group nor a recipient is a no-op.
+exec sesam tell --user bob
+exec sesam user list
+stdout 'bob.*dev,ops'
+
+# Creating a brand-new user still needs a recipient (groups are optional).
+! exec sesam tell --user newbie --group dev
+stderr 'without a --recipient'
+
+-- some_file.txt --
+Some content

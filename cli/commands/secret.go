@@ -15,8 +15,11 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return fmt.Errorf("need at least one path")
 	}
 
-	groups := cmd.StringSlice("group")
-	if len(groups) == 0 {
+	groups, additive, err := resolveGroups(cmd, false)
+	if err != nil {
+		return err
+	}
+	if len(groups) == 0 && !additive {
 		printInfo("no groups specified, assuming `--group admin` only - only admins can decrypt")
 	}
 
@@ -28,7 +31,7 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	noSeal := cmd.Bool("no-seal")
 	nested := cmd.Bool("nested")
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.SecretAdd(paths, groups, nested); err != nil {
+		if err := s.SecretAdd(paths, groups, additive, nested); err != nil {
 			return err
 		}
 		if noSeal {

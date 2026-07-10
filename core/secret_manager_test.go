@@ -10,6 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// onlyErr drops the value from an (result, error) pair so the call still fits
+// require.NoError when the test only cares about the error.
+func onlyErr[T any](_ T, err error) error { return err }
+
 func TestBuildSecretManager(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	require.Equal(t, "admin", mgr.Signer.UserName())
@@ -24,7 +28,7 @@ func TestSecretAdd(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "secrets"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "secrets", "new"), []byte("blub"), 0o600))
 
-	require.NoError(t, mgr.SecretAdd("secrets/new", []string{"admin"}))
+	require.NoError(t, onlyErr(mgr.SecretAdd("secrets/new", []string{"admin"}, false)))
 	require.Len(t, mgr.State.Secrets, 2)
 
 	_, exists := mgr.State.SecretExists("secrets/new")
@@ -35,7 +39,7 @@ func TestSecretAddDuplicate(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
 	// Adding the same path again should update recipients, not add a second entry.
-	require.NoError(t, mgr.SecretAdd("secrets/test", []string{"admin"}))
+	require.NoError(t, onlyErr(mgr.SecretAdd("secrets/test", []string{"admin"}, false)))
 	require.Len(t, mgr.State.Secrets, 1, "should not duplicate the secret in the verified state")
 }
 
@@ -108,12 +112,33 @@ func TestSecretAddEmptyGroups(t *testing.T) {
 	writeSecret(t, mgr.SesamDir, "secrets/onlyadmin", "data")
 
 	// Empty groups is valid and means "admin only" - it must not be rejected.
-	require.NoError(t, mgr.SecretAdd("secrets/onlyadmin", []string{}))
+	require.NoError(t, onlyErr(mgr.SecretAdd("secrets/onlyadmin", []string{}, false)))
 
 	vs, exists := mgr.State.SecretExists("secrets/onlyadmin")
 	require.True(t, exists)
 	require.Equal(t, []string{"admin"}, vs.AccessGroups,
 		"empty groups should resolve to admin-only access")
+}
+
+// Additive add on an already-tracked secret must union the new group into the
+// existing access list and return the resulting secret. DeclaredGroups drops
+// the implicit admin so the persisted set stays clean.
+func TestSecretAddAdditive(t *testing.T) {
+	mgr := sealedSecretManager(t) // secrets/test starts admin-only
+
+	vs, err := mgr.SecretAdd("secrets/test", []string{"dev"}, false)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"dev"}, vs.DeclaredGroups())
+
+	vs, err = mgr.SecretAdd("secrets/test", []string{"ops"}, true)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"dev", "ops"}, vs.DeclaredGroups(),
+		"additive must keep dev and must not leak the implicit admin group")
+	require.ElementsMatch(t, []string{"admin", "dev", "ops"}, vs.AccessGroups)
+
+	got, exists := mgr.State.SecretExists("secrets/test")
+	require.True(t, exists)
+	require.ElementsMatch(t, []string{"admin", "dev", "ops"}, got.AccessGroups)
 }
 
 func TestSealAndRevealAll(t *testing.T) {
@@ -220,7 +245,7 @@ func TestSealIncrementalResealsOnRecipientChange(t *testing.T) {
 
 	// A "dev" secret, sealed while only admin is a recipient.
 	writeSecret(t, mgr.SesamDir, "secrets/dev", "dev-content")
-	require.NoError(t, mgr.SecretAdd("secrets/dev", []string{"dev"}))
+	require.NoError(t, onlyErr(mgr.SecretAdd("secrets/dev", []string{"dev"}, false)))
 	require.NoError(t, mgr.Seal(false))
 
 	obj := filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/dev"))
@@ -309,7 +334,7 @@ func TestRevealAllSkipsInaccessibleSecrets(t *testing.T) {
 	// recipient). It is appended after the admin-only "secrets/test", so a
 	// naive RevealAll would hit the inaccessible secret first.
 	writeSecret(t, mgr.SesamDir, "secrets/devstuff", "dev-content")
-	require.NoError(t, mgr.SecretAdd("secrets/devstuff", []string{"dev"}))
+	require.NoError(t, onlyErr(mgr.SecretAdd("secrets/devstuff", []string{"dev"}, false)))
 	require.NoError(t, mgr.Seal(true))
 
 	bobMgr, err := BuildSecretManager(
@@ -704,7 +729,7 @@ func TestSecretRemoveThenSeal(t *testing.T) {
 
 	// Add a second secret so Seal still has work to do.
 	writeSecret(t, mgr.SesamDir, "secrets/other", "other-content")
-	require.NoError(t, mgr.SecretAdd("secrets/other", []string{"admin"}))
+	require.NoError(t, onlyErr(mgr.SecretAdd("secrets/other", []string{"admin"}, false)))
 	require.NoError(t, mgr.Seal(true))
 
 	require.NoError(t, mgr.SecretRemove("secrets/test"))

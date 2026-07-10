@@ -116,7 +116,7 @@ List of secret definitions and sub-file includes.
 |---|---|---|---|
 | `path` | `string (non-empty)` | yes | Path to the decrypted secret |
 | `access` | `array of string (non-empty)` | no | Groups or users allowed to reveal this secret. Defaults to admin only when omitted. |
-| `description` | `string (non-empty)` | no | Description of the secret |
+| `desc` | `string (non-empty)` | no | Description of the secret |
 
 ---
 

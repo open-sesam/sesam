@@ -46,13 +46,19 @@ func userFlag(required bool, usage string) cli.Flag {
 	}
 }
 
-// groupFlag builds the repeatable --group flag. Required-ness varies per command.
-func groupFlag(required bool, usage string) cli.Flag {
+func groupFlag(usage string) cli.Flag {
 	return &cli.StringSliceFlag{
-		Name:     "group",
-		Aliases:  []string{"g"},
-		Required: required,
-		Usage:    usage,
+		Name:    "group",
+		Aliases: []string{"g"},
+		Usage:   usage,
+	}
+}
+
+func groupAddFlag(usage string) cli.Flag {
+	return &cli.StringSliceFlag{
+		Name:    "group-add",
+		Aliases: []string{"G"},
+		Usage:   usage,
 	}
 }
 
@@ -177,7 +183,8 @@ var flagsReveal = []cli.Flag{}
 
 // flagsAdd contains controls for adding secrets.
 var flagsAdd = []cli.Flag{
-	groupFlag(false, "Group assignment for the secret (repeatable) - 'admin' is implicit"),
+	groupFlag("Group assignment for the secret (repeatable) - 'admin' is implicit"),
+	groupAddFlag("Add to the secret's existing groups instead of replacing them"),
 	flagNoSeal,
 	flagSeal,
 	&cli.BoolFlag{
@@ -201,11 +208,12 @@ var flagsMove = []cli.Flag{
 	},
 }
 
-// flagsTell contains controls for adding users.
+// flagsTell contains controls for adding or updating users.
 var flagsTell = []cli.Flag{
-	userFlag(false, "User name to add"),
-	recipientsFlag(true),
-	groupFlag(true, "Group assignment (repeatable)"),
+	userFlag(false, "User name to add or update"),
+	recipientsFlag(false),
+	groupFlag("Group assignment (repeatable)"),
+	groupAddFlag("Add to the user's existing groups instead of replacing them"),
 	flagNoSeal,
 	flagSeal,
 }
@@ -227,7 +235,8 @@ var flagsRenameUser = []cli.Flag{}
 
 var flagsUserChangeGroups = []cli.Flag{
 	userFlag(true, "Which user should be changed"),
-	groupFlag(true, "Group assignment for the secret (repeatable) - 'admin' is implicit"),
+	groupFlag("Group assignment for the user (repeatable) - 'admin' is implicit"),
+	groupAddFlag("Add to the user's existing groups instead of replacing them"),
 	flagNoSeal,
 	flagSeal,
 }
