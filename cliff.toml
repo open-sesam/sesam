@@ -78,7 +78,9 @@ commit_parsers = [
   { message = '.*', group = "9 Other" },
 ]
 
+# PR/author enrichment in the templates above. The token is taken from the
+# GITHUB_TOKEN environment variable (or ambient credentials); do NOT set an
+# empty `token` here - git-cliff sends it as an empty bearer and the API 401s.
 [remote.github]
 owner = "open-sesam"
 repo = "sesam"
-token = ""
