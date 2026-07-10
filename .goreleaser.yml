@@ -34,6 +34,12 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+    # Explicit file list: GoReleaser's default also bundles CHANGELOG*, which
+    # made the changelog ship as an archive file. The changelog belongs in the
+    # GitHub release body (via --release-notes), not inside the tarball.
+    files:
+      - README.md
+      - LICENSE
 
 dockers_v2:
   - images:

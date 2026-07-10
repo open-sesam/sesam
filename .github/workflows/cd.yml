@@ -51,14 +51,11 @@ jobs:
 
       # Render release notes for the pushed tag from conventional-commit
       # history; GoReleaser's own changelog is disabled in .goreleaser.yml.
-      # GITHUB_TOKEN lets git-cliff enrich commits with PR/author data via the
-      # GitHub API (see [remote.github] in cliff.toml). Write outside the repo:
-      # GoReleaser refuses to release from a dirty tree, and an untracked
-      # RELEASE_NOTES.md at the repo root would count as dirty.
+      # git-cliff is offline (see cliff.toml), so no token is needed. Write
+      # outside the repo: GoReleaser refuses to release from a dirty tree, and
+      # an untracked RELEASE_NOTES.md at the repo root would count as dirty.
       - name: Generate release notes
         run: git-cliff --latest --strip header -o "$RUNNER_TEMP/RELEASE_NOTES.md"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
