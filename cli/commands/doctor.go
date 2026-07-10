@@ -536,7 +536,7 @@ func gitConfigCheck(env doctorEnv) DoctorCheck {
 		once.Do(func() { checks, loadErr = repo.CheckGitConfig(env.sesamDir) })
 	}
 
-	entry := func(path string) DoctorCheck {
+	entry := func(path string, optional bool) DoctorCheck {
 		return &genericCheck{name: path, run: func() DoctorDiagnosis {
 			load()
 			if loadErr != nil {
@@ -549,6 +549,16 @@ func gitConfigCheck(env doctorEnv) DoctorCheck {
 				switch {
 				case c.OK:
 					return docHealthy("set as expected")
+				case optional && c.Actual == "":
+					return docWarn(
+						"not set - optional branch-merge support is not installed",
+						"run `sesam init --install-merge` to enable it",
+					)
+				case optional:
+					return docWarn(
+						fmt.Sprintf("unexpected value %q (want %q)", c.Actual, c.Expected),
+						"run `sesam init --install-merge` to reinstall it",
+					)
 				case c.Actual == "":
 					return docIssue("not set", "run `sesam init` to (re)install sesam's git integration")
 				default:
@@ -575,10 +585,10 @@ func gitConfigCheck(env doctorEnv) DoctorCheck {
 			return docHealthy("sesam git drivers (each checked below)")
 		},
 		subChecks: []DoctorCheck{
-			entry("merge.sesam-merge.name"),
-			entry("merge.sesam-merge.driver"),
-			entry("diff.sesam-diff.textconv"),
-			entry("alias.sesam"),
+			entry("merge.sesam-merge.name", true),
+			entry("merge.sesam-merge.driver", true),
+			entry("diff.sesam-diff.textconv", false),
+			entry("alias.sesam", false),
 		},
 	}
 }

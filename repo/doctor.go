@@ -99,9 +99,27 @@ func CheckGitIgnore(sesamDir string) (ManagedFileCheck, error) {
 }
 
 // CheckGitAttributes reports whether the repo's .gitattributes still contains
-// the lines `sesam init` writes.
+// the lines `sesam init` writes. The template carries a per-repo {{.Suffix}} in
+// its driver names, so it must be rendered with the repo's suffix first -
+// comparing the raw template would hunt for the literal placeholder and always
+// report a mismatch.
 func CheckGitAttributes(sesamDir string) (ManagedFileCheck, error) {
-	return checkManagedFile(sesamDir, ".gitattributes", gitattributesTemplate)
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	if err != nil {
+		return ManagedFileCheck{}, err
+	}
+
+	suffix, err := sesamSubsectionSuffix(gitRepo, resolvedDir)
+	if err != nil {
+		return ManagedFileCheck{}, err
+	}
+
+	rendered, err := renderGitAttributes(suffix)
+	if err != nil {
+		return ManagedFileCheck{}, err
+	}
+
+	return checkManagedFile(sesamDir, ".gitattributes", rendered)
 }
 
 func checkManagedFile(sesamDir, name, template string) (ManagedFileCheck, error) {
