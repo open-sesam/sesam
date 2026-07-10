@@ -180,8 +180,12 @@ func validSecretPathFormat(revealedPath string) error {
 		return fmt.Errorf("absolute paths not allowed in revealed path: %s", revealedPath)
 	}
 
-	if strings.Contains(revealedPath, "..") {
-		return fmt.Errorf("path may not include '..': %s", revealedPath)
+	// Reject path traversal, but only a real ".." path segment - the substring
+	// ".." appears legitimately inside filenames (e.g. "s.a.r..geojson").
+	for _, elem := range strings.Split(revealedPath, string(filepath.Separator)) {
+		if elem == ".." {
+			return fmt.Errorf("path may not include a '..' segment: %s", revealedPath)
+		}
 	}
 
 	return nil
