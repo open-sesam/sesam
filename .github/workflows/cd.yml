@@ -51,8 +51,12 @@ jobs:
 
       # Render release notes for the pushed tag from conventional-commit
       # history; GoReleaser's own changelog is disabled in .goreleaser.yml.
+      # GITHUB_TOKEN lets git-cliff enrich commits with PR/author data via the
+      # GitHub API (see [remote.github] in cliff.toml).
       - name: Generate release notes
         run: git-cliff --latest --strip header -o RELEASE_NOTES.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
