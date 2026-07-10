@@ -65,7 +65,13 @@ func (um *UserManager) UserTell(
 	}
 
 	if _, exists := um.state.UserExists(user); exists {
+		// Updating an existing user is orchestrated by the repo layer (change
+		// groups + add recipients); this low-level call only ever creates.
 		return fmt.Errorf("re-adding user not yet supported")
+	}
+
+	if len(pubKeySpecs) == 0 {
+		return fmt.Errorf("cannot create user %q without a recipient", user)
 	}
 
 	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, um.state.pluginUI)
@@ -169,18 +175,32 @@ func (um *UserManager) UserRename(oldName, newName string) error {
 	)
 }
 
-func (um *UserManager) UserChangeGroups(user string, groups []string) error {
+// UserChangeGroups records the user's new group set and returns it. When
+// additive, the caller-supplied groups are merged with the user's current
+// membership instead of replacing it; the returned set is what both the audit
+// log and the config must reflect.
+func (um *UserManager) UserChangeGroups(user string, groups []string, additive bool) ([]string, error) {
 	if !um.signUser.IsAdmin() {
-		return fmt.Errorf("need to be admin for changing a user groups")
+		return nil, fmt.Errorf("need to be admin for changing a user groups")
 	}
 
-	return um.state.FeedEntry(
+	if additive {
+		if vu, ok := um.state.UserExists(user); ok {
+			groups = unionGroups(vu.Groups, groups)
+		}
+	}
+
+	if err := um.state.FeedEntry(
 		um.signer,
 		newAuditEntry(um.signer.UserName(), &DetailUserChangeGroups{
 			User:      user,
 			NewGroups: groups,
 		}),
-	)
+	); err != nil {
+		return nil, err
+	}
+
+	return groups, nil
 }
 
 func (um *UserManager) UserAddRecipient(ctx context.Context, user string, pubKeySpecs []string) error {

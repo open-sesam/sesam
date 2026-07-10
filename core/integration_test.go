@@ -50,7 +50,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 
 	secretPath := "secrets/db_password"
 	writeSecret(t, sesamDir, secretPath, "hunter2")
-	require.NoError(t, sm.SecretAdd(secretPath, []string{"admin"}))
+	require.NoError(t, onlyErr(sm.SecretAdd(secretPath, []string{"admin"}, false)))
 	require.NoError(t, sm.Seal(true))
 
 	gitCommitAll(t, repo, "add secret and seal")
@@ -242,7 +242,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 
 	// 1. Add secret.
 	writeSecret(t, sesamDir, "secrets/token", "tok-abc")
-	require.NoError(t, sm.SecretAdd("secrets/token", []string{"admin"}))
+	require.NoError(t, onlyErr(sm.SecretAdd("secrets/token", []string{"admin"}, false)))
 
 	// 2. Seal.
 	require.NoError(t, sm.Seal(true))

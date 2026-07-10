@@ -42,7 +42,7 @@ func TestStageCommitPersistsUser(t *testing.T) {
 	// See-your-own-writes: ListUsers on the stage reflects the staged tell
 	// before the commit lands.
 	require.NoError(t, r.Update(func(s *Stage) error {
-		if err := s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"}); err != nil {
+		if err := s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"}, false); err != nil {
 			return err
 		}
 		require.True(t, hasUser(t, s, "bob"))
@@ -63,7 +63,7 @@ func TestStageCommitSurvivesReload(t *testing.T) {
 	dir, r := bootstrapRepo(t, admin)
 
 	require.NoError(t, r.Update(func(s *Stage) error {
-		return s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"})
+		return s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"}, false)
 	}))
 	require.NoError(t, r.Close())
 
@@ -78,7 +78,7 @@ func TestStageRollbackDiscards(t *testing.T) {
 
 	s, err := r.Stage()
 	require.NoError(t, err)
-	require.NoError(t, s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"}))
+	require.NoError(t, s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"}, false))
 	require.True(t, hasUser(t, s, "bob"))
 
 	require.NoError(t, s.Rollback())
@@ -105,7 +105,7 @@ func TestStageUpdateErrorLeavesLiveUntouched(t *testing.T) {
 	sentinel := errors.New("boom")
 	err := r.Update(func(s *Stage) error {
 		// Mutate inside the fork, then fail: nothing should reach the live tree.
-		if err := s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"}); err != nil {
+		if err := s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"}, false); err != nil {
 			return err
 		}
 		return sentinel
@@ -132,7 +132,7 @@ func TestStageConfigRollbackAndCommit(t *testing.T) {
 	// Rolled-back tell: sesam.yml must be byte-identical afterwards.
 	s, err := r.Stage()
 	require.NoError(t, err)
-	require.NoError(t, s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"}))
+	require.NoError(t, s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"}, false))
 	require.NoError(t, s.Rollback())
 
 	after, err := os.ReadFile(cfgPath)
@@ -141,7 +141,7 @@ func TestStageConfigRollbackAndCommit(t *testing.T) {
 
 	// Committed tell: sesam.yml now records bob.
 	require.NoError(t, r.Update(func(s *Stage) error {
-		return s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"})
+		return s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"}, false)
 	}))
 	committed, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
@@ -197,7 +197,7 @@ func TestStageSecretAddRejectsForbiddenPath(t *testing.T) {
 	for _, path := range cases {
 		t.Run(path, func(t *testing.T) {
 			err := r.Update(func(s *Stage) error {
-				return s.SecretAdd([]string{path}, []string{"admin"}, false)
+				return s.SecretAdd([]string{path}, []string{"admin"}, false, false)
 			})
 			require.Error(t, err, "add %q must fail", path)
 		})
@@ -223,7 +223,7 @@ func TestStageSecretMoveRejectsForbiddenDestination(t *testing.T) {
 			require.NoError(t, os.MkdirAll(filepath.Dir(src), 0o700))
 			require.NoError(t, os.WriteFile(src, []byte("hunter2\n"), 0o600))
 			require.NoError(t, r.Update(func(s *Stage) error {
-				if err := s.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}, false); err != nil {
+				if err := s.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}, false, false); err != nil {
 					return err
 				}
 				return s.Seal(false)

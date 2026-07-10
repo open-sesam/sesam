@@ -270,12 +270,39 @@ func (s *Stage) Rollback() error {
 	return s.repo.root.RemoveAll(forkSuffix)
 }
 
-// UserTell adds a new user with access to `groups`, encrypting their secrets to
-// `recipients`.
-func (s *Stage) UserTell(ctx context.Context, user string, recipients, groups []string) error {
+// UserTell adds or updates a user. For a new user it creates the account with
+// access to `groups`, encrypting their secrets to `recipients`. For an existing
+// user it changes the group membership (merging when additive) and adds any
+// given recipients - reusing the exact change-groups and add-recipient paths so
+// the behaviour matches those commands.
+func (s *Stage) UserTell(ctx context.Context, user string, recipients, groups []string, additive bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if _, exists := s.vstate.UserExists(user); exists {
+		// Both are optional when updating
+		if len(groups) == 0 && len(recipients) == 0 {
+			// no-op
+			return nil
+		}
+		if len(groups) > 0 {
+			if err := s.changeGroups(user, groups, additive); err != nil {
+				return err
+			}
+		}
+		if len(recipients) > 0 {
+			if err := s.addRecipient(ctx, user, recipients); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	return s.createUser(ctx, user, recipients, groups)
+}
+
+// createUser records a brand-new user in both the audit log and the config.
+func (s *Stage) createUser(ctx context.Context, user string, recipients, groups []string) error {
 	if err := s.user.UserTell(ctx, user, recipients, groups); err != nil {
 		return fmt.Errorf("failed to add user: %w", err)
 	}
@@ -314,7 +341,9 @@ func (s *Stage) Seal(all bool) error {
 }
 
 // SecretAdd starts tracking the secret(s) at each path. Paths are sesam-relative.
-func (s *Stage) SecretAdd(revealedPaths, groups []string, nested bool) error {
+// When additive, the groups are merged into an already-tracked secret's access
+// list instead of replacing it.
+func (s *Stage) SecretAdd(revealedPaths, groups []string, additive, nested bool) error {
 	if len(revealedPaths) == 0 {
 		return fmt.Errorf("missing secret path: pass at least one path")
 	}
@@ -344,11 +373,12 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, nested bool) error {
 			continue
 		}
 
-		if err := cfg.SecretAdd(rel, nested, groups); err != nil {
-			return fmt.Errorf("failed to add secret %q to config: %w", rel, err)
-		}
-		if err := s.secret.SecretAdd(rel, groups); err != nil {
+		vs, err := s.secret.SecretAdd(rel, groups, additive)
+		if err != nil {
 			return fmt.Errorf("failed to add secret %q: %w", rel, err)
+		}
+		if err := cfg.SecretAdd(rel, nested, vs.DeclaredGroups()); err != nil {
+			return fmt.Errorf("failed to add secret %q to config: %w", rel, err)
 		}
 	}
 
@@ -453,12 +483,22 @@ func (s *Stage) UserRename(oldName, newName string) error {
 	return cfg.UserRename(oldName, newName)
 }
 
-// UserChangeGroups sets the group membership of a user.
-func (s *Stage) UserChangeGroups(user string, groups []string) error {
+// UserChangeGroups sets the group membership of a user. When additive, the
+// groups are merged into the user's current membership instead of replacing it.
+func (s *Stage) UserChangeGroups(user string, groups []string, additive bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.user.UserChangeGroups(user, groups); err != nil {
+	return s.changeGroups(user, groups, additive)
+}
+
+// changeGroups is the lock-free body of UserChangeGroups, also reused by the
+// UserTell upsert path.
+func (s *Stage) changeGroups(user string, groups []string, additive bool) error {
+	// The audit layer resolves the additive merge and returns the final set, so
+	// the config is written from the same list that was recorded.
+	merged, err := s.user.UserChangeGroups(user, groups, additive)
+	if err != nil {
 		return err
 	}
 
@@ -467,7 +507,7 @@ func (s *Stage) UserChangeGroups(user string, groups []string) error {
 		return err
 	}
 
-	return cfg.UserChangeGroups(user, groups)
+	return cfg.UserChangeGroups(user, merged)
 }
 
 // UserAddRecipient grants additional public keys to a user.
@@ -475,6 +515,10 @@ func (s *Stage) UserAddRecipient(ctx context.Context, user string, pubKeySpecs [
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.addRecipient(ctx, user, pubKeySpecs)
+}
+
+func (s *Stage) addRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
 	if err := s.user.UserAddRecipient(ctx, user, pubKeySpecs); err != nil {
 		return err
 	}

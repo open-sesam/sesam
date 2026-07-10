@@ -28,7 +28,10 @@ func guessUserNameFromForgeID(recps []string) (string, error) {
 // HandleTell adds a user/group relation and updates access.
 func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	recipients := cmd.StringSlice("recipient")
-	groups := cmd.StringSlice("group")
+	groups, additive, err := resolveGroups(cmd, false)
+	if err != nil {
+		return err
+	}
 	user := cmd.String("user")
 	if user == "" {
 		var err error
@@ -42,7 +45,7 @@ func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 	// tell + reseal commit atomically as a single .sesam swap.
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.UserTell(ctx, user, recipients, groups); err != nil {
+		if err := s.UserTell(ctx, user, recipients, groups, additive); err != nil {
 			return err
 		}
 		if noSeal {
@@ -70,11 +73,14 @@ func HandleKill(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 func HandleUserChangeGroups(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	user := cmd.String("user")
-	groups := cmd.StringSlice("group")
+	groups, additive, err := resolveGroups(cmd, true)
+	if err != nil {
+		return err
+	}
 	noSeal := cmd.Bool("no-seal")
 
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.UserChangeGroups(user, groups); err != nil {
+		if err := s.UserChangeGroups(user, groups, additive); err != nil {
 			return err
 		}
 		if noSeal {

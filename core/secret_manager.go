@@ -105,35 +105,48 @@ func (sm *SecretManager) SealedPath(path string) string {
 	return sm.cryptPath(path)
 }
 
-// SecretAdd adds a new secret to be managed by sesam
-func (sm *SecretManager) SecretAdd(revealedPath string, groups []string) error {
-	return sm.addOrChangeSecret(revealedPath, groups)
+// SecretAdd adds a new secret to be managed by sesam. It returns the resulting
+// verified secret, or nil when nothing changed.
+func (sm *SecretManager) SecretAdd(revealedPath string, groups []string, additive bool) (*VerifiedSecret, error) {
+	return sm.addOrChangeSecret(revealedPath, groups, additive)
 }
 
 // SecretChangeGroups changes the access groups for the secret at `revealedPath`.
 func (sm *SecretManager) SecretChangeGroups(revealedPath string, groups []string) error {
-	return sm.addOrChangeSecret(revealedPath, groups)
+	if _, err := sm.addOrChangeSecret(revealedPath, groups, false); err != nil {
+		return err
+	}
+	return nil
 }
 
 // addOrChangeSecret emits a secret.add entry for a new secret and a
 // secret.change_access entry for an existing one, deciding which based on
-// whether the secret is already known.
-func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string) error {
+// whether the secret is already known. When additive and the secret exists, the
+// given groups are merged into its current access list rather than replacing
+// it. It returns the resulting verified secret.
+func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string, additive bool) (*VerifiedSecret, error) {
 	if err := validSecretPath(sm.root, revealedPath); err != nil {
-		return fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
+		return nil, fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
 	}
 
 	var auditEntry *AuditEntry
-	if _, exists := sm.State.SecretExists(revealedPath); !exists {
+	existing, exists := sm.State.SecretExists(revealedPath)
+	if !exists {
 		// Secret does not exist yet: this is an add.
 		auditEntry = newAuditEntry(sm.Signer.UserName(), &DetailSecretAdd{
 			RevealedPath: revealedPath,
 			AccessGroups: groups,
 		})
 	} else {
+		if additive {
+			// "admin" is implicit for secrets, so strip it from the current
+			// list before merging to keep it out of the persisted set.
+			groups = unionGroups(withoutAdmin(existing.AccessGroups), groups)
+		}
+
 		if len(groups) == 0 {
 			// if no groups were given, there is nothing to change.
-			return nil
+			return existing, nil
 		}
 
 		// Secret already exists: this is an access-list change.
@@ -143,7 +156,12 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 		})
 	}
 
-	return sm.State.FeedEntry(sm.Signer, auditEntry)
+	if err := sm.State.FeedEntry(sm.Signer, auditEntry); err != nil {
+		return nil, err
+	}
+
+	vs, _ := sm.State.SecretExists(revealedPath)
+	return vs, nil
 }
 
 // Seal (re-)seals the known secrets. With all=false only secrets whose plaintext

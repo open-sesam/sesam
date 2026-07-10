@@ -97,6 +97,21 @@ $ sesam tell --user peter --recipient "file://keys/peter.txt"
 $ sesam add some_password.txt --access deploy --access ops
 ```
 
+`sesam tell` also works on a user that already exists: it changes their groups
+(`--group` replaces the set, `--group-add`/`-G` adds to it) and adds any
+`--recipient` you pass. For an existing user both are optional, but you have to
+give at least one. Creating a brand-new user requires a `--recipient`; groups
+are optional there too.
+
+```bash
+# alice already exists: set her groups to just "ops"
+$ sesam tell --user alice --group ops
+# ...and additionally put her in "deploy" without dropping "ops"
+$ sesam tell --user alice --group-add deploy
+# register a second device key for her without touching her groups
+$ sesam tell --user alice --recipient "file://keys/alice-laptop.txt"
+```
+
 Files automatically get re-encrypted ("sealed") after each operation.
 If you want to work in batches then add `--no-seal` and seal explicitly once at the end.
 

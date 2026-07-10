@@ -186,7 +186,7 @@ func TestTellThenSealGivesNewRecipientAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	writeSecret(t, sesamDir, "secrets/api", "shared")
-	require.NoError(t, secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}))
+	require.NoError(t, onlyErr(secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}, false)))
 	require.NoError(t, secMgr.Seal(true)) // sealed for admin only; "dev" is empty
 
 	um, err := BuildUserManager(testRoot(t, sesamDir), admin.Signer, al, state, secMgr)
@@ -258,7 +258,7 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 	))
 
 	writeSecret(t, sesamDir, "secrets/api", "shared")
-	require.NoError(t, secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}))
+	require.NoError(t, onlyErr(secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}, false)))
 	require.NoError(t, secMgr.Seal(true))
 
 	// Sanity: bob can decrypt before kill.
@@ -375,7 +375,7 @@ func TestUserChangeGroupsSuccess(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
 
-	require.NoError(t, um.UserChangeGroups("bob", []string{"dev", "ops"}))
+	require.NoError(t, onlyErr(um.UserChangeGroups("bob", []string{"dev", "ops"}, false)))
 
 	vu, exists := um.state.UserExists("bob")
 	require.True(t, exists)
@@ -385,10 +385,31 @@ func TestUserChangeGroupsSuccess(t *testing.T) {
 	require.NotZero(t, um.state.SealRequiredSeqID, "group change must mark a seal as pending")
 }
 
+// Additive change-groups must merge into the current membership and hand back
+// the union (deduplicated), never replace it.
+func TestUserChangeGroupsAdditive(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+
+	merged, err := um.UserChangeGroups("bob", []string{"ops"}, true)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"dev", "ops"}, merged, "additive must keep the existing groups")
+
+	vu, exists := um.state.UserExists("bob")
+	require.True(t, exists)
+	require.ElementsMatch(t, []string{"dev", "ops"}, vu.Groups)
+
+	// Adding a group the user already has is a no-op union, not a duplicate.
+	merged, err = um.UserChangeGroups("bob", []string{"dev"}, true)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"dev", "ops"}, merged)
+}
+
 func TestUserChangeGroupsNonAdmin(t *testing.T) {
 	um := nonAdminUserManager(t)
 
-	err := um.UserChangeGroups("admin", []string{"dev"})
+	_, err := um.UserChangeGroups("admin", []string{"dev"}, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "admin")
 }
@@ -396,7 +417,7 @@ func TestUserChangeGroupsNonAdmin(t *testing.T) {
 func TestUserChangeGroupsUnknownUser(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 
-	err := um.UserChangeGroups("ghost", []string{"dev"})
+	_, err := um.UserChangeGroups("ghost", []string{"dev"}, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not exist")
 }
@@ -406,7 +427,7 @@ func TestUserChangeGroupsUnknownUser(t *testing.T) {
 func TestUserChangeGroupsLastAdmin(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 
-	err := um.UserChangeGroups("admin", []string{"dev"})
+	_, err := um.UserChangeGroups("admin", []string{"dev"}, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "last admin")
 }

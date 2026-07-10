@@ -1,0 +1,43 @@
+# Verify `--group-add` / `-G` on `user change-groups` extends the current
+# membership, while `--group` still replaces it, and that mixing both flags is
+# rejected.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Add bob as a dev.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec sesam user list
+stdout 'bob.*\bdev\b'
+
+# --group-add ops keeps dev and adds ops.
+exec sesam user change-groups --user bob --group-add ops
+exec sesam show .sesam/audit/log.jsonl
+stdout '"user.change_groups"'
+exec sesam log
+stdout 'set groups of bob to dev, ops'
+exec sesam verify
+exec sesam user list
+stdout 'bob.*dev,ops'
+
+# The short -G alias behaves the same; re-adding an existing group is a no-op
+# union that keeps the membership at dev, ops.
+exec sesam user change-groups --user bob -G dev
+exec sesam verify
+exec sesam user list
+stdout 'bob.*dev,ops'
+
+# --group (replace) drops ops again.
+exec sesam user change-groups --user bob --group dev
+exec sesam verify
+exec sesam user list
+! stdout '\bops\b'
+
+# Passing both --group and --group-add is a usage error.
+! exec sesam user change-groups --user bob --group dev --group-add ops
+stderr 'mutually exclusive'
