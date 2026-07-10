@@ -1,0 +1,23 @@
+# The final admin is protected: they can be neither killed nor demoted out of
+# the admin group, so a repository can never be left without an admin.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Cannot delete the sole admin.
+! exec sesam kill --user admin
+stderr 'last admin'
+
+# Cannot demote the sole admin out of the admin group.
+! exec sesam user change-groups --user admin --group dev
+stderr 'last admin'
+
+# admin is still present and still an admin.
+exec sesam user list
+stdout 'admin'
+exec sesam verify

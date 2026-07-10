@@ -1,0 +1,21 @@
+# `sesam doctor` runs the installation health checks and prints a structured
+# report + summary. Smoke test only: doctor covers installation, not repository
+# integrity (that is `sesam verify`).
+#
+# doctor exits non-zero here because it expects .gitattributes merge lines that
+# init does not write yet (branch-merge support is not implemented), so this
+# asserts the report is produced rather than a clean bill of health.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+! exec sesam doctor
+stdout '# sesam doctor'
+stdout '## System'
+stdout '## Git'
+stdout '## Summary'

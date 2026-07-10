@@ -69,7 +69,7 @@ going on.
 Check commit tree to see if the audit log in the commit before was a prefix of the current one.
 The log is completely linear, so this catches malicious truncation events.
 
-This will be run on `sesam verify --trunc`
+This will be run on `sesam verify --truncate`
 
 ### File integrity check
 
@@ -78,16 +78,31 @@ silently swapped with another one. One could still try to replace it with
 another file. Luckily, `sesam` writes a signature and hash for each file and
 thus allows catching deviations from the expected state.
 
-This will be run on `sesam verify --fsck`
+This will be run on `sesam verify --integrity`
 
 ### Forge synchronicity check
 
-When using forge user IDs like `github:sahib`, `sesam verify --forge`
+When using forge user IDs like `github:sahib`, `sesam verify --forge-check`
 re-fetches the live keys and checks them against the values recorded in the
 audit log when the user was added. A mismatch is not a security issue per-se -
 it can also mean a user has rotated their keys upstream and might have locked
 themselves out - but it is something an admin should investigate.
 
-This will be run on `sesam verify --forge`
+This will be run on `sesam verify --forge-check`
 
 It does not give `sesam verify` a non-zero exit code if keys are not in sync.
+
+### Key re-use check
+
+Each user should have their own keys. `sesam` already refuses to add a
+recipient that another user already holds, but a hand-edited or tampered audit
+log could still smuggle in a shared key. This check re-scans the resulting
+keyring and flags any public key that maps to more than one user.
+
+This will be run on `sesam verify --key-reuse`
+
+### Running everything
+
+`sesam verify --all` (also the default when no check is selected) runs all of
+the above at once. It exits non-zero if any check other than the forge
+synchronicity check fails.
