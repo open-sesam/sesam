@@ -200,26 +200,16 @@ func TestTellThenSealGivesNewRecipientAccess(t *testing.T) {
 		[]string{"dev"},
 	))
 
-	cryptPath := filepath.Join(sesamDir, ".sesam", "objects", "secrets/api.sesam")
-
 	// Before an explicit seal, the ciphertext is still admin-only: bob cannot read it.
-	fd, err := os.Open(cryptPath)
-	require.NoError(t, err)
-	ok, err := RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api", nil, nil)
-	_ = fd.Close()
-	require.NoError(t, err)
-	require.False(t, ok, "bob must not be a recipient before an explicit seal")
+	require.False(t, revealableBy(t, sesamDir, bob, kr, al, state, "secrets/api"),
+		"bob must not be a recipient before an explicit seal")
 
 	// An explicit seal re-encrypts to include the new "dev" member.
 	require.NoError(t, secMgr.Seal(true))
 
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
-	fd, err = os.Open(cryptPath)
-	require.NoError(t, err)
-	defer fd.Close()
-	ok, err = RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api", nil, nil)
-	require.NoError(t, err)
-	require.True(t, ok, "bob must be a recipient after the explicit seal")
+	require.True(t, revealableBy(t, sesamDir, bob, kr, al, state, "secrets/api"),
+		"bob must be a recipient after the explicit seal")
 
 	got, err := os.ReadFile(filepath.Join(sesamDir, "secrets/api"))
 	require.NoError(t, err)
@@ -263,25 +253,16 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 
 	// Sanity: bob can decrypt before kill.
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
-	cryptPath := filepath.Join(sesamDir, ".sesam", "objects", "secrets/api.sesam")
-	fd, err := os.Open(cryptPath)
-	require.NoError(t, err)
-	ok, err := RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api", nil, nil)
-	_ = fd.Close()
-	require.NoError(t, err)
-	require.True(t, ok, "bob should be a recipient before kill")
+	require.True(t, revealableBy(t, sesamDir, bob, kr, al, state, "secrets/api"),
+		"bob should be a recipient before kill")
 
 	// Kill does not auto-seal; an explicit seal must drop bob from the recipients.
 	require.NoError(t, um.UserKill("bob"))
 	require.NoError(t, secMgr.Seal(true))
 
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
-	fd, err = os.Open(cryptPath)
-	require.NoError(t, err)
-	defer fd.Close()
-	ok, err = RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api", nil, nil)
-	require.NoError(t, err)
-	require.False(t, ok, "killed user must not be a recipient of the resealed file")
+	require.False(t, revealableBy(t, sesamDir, bob, kr, al, state, "secrets/api"),
+		"killed user must not be a recipient of the resealed file")
 }
 
 // nonAdminUserManager returns a UserManager signed by bob (a non-admin "dev"
