@@ -316,12 +316,12 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s already exists", tell.User)
 	}
 
-	signPubKeyData, _, err := multicodeDecode(tell.SignPubKey)
+	signPubKey, err := decodeSignPubKey(tell.SignPubKey)
 	if err != nil {
-		return fmt.Errorf("bad signing key %v", tell.SignPubKey)
+		return err
 	}
 
-	if err := kr.SetSignPubKey(tell.User, signPubKeyData); err != nil {
+	if err := kr.SetSignPubKey(tell.User, signPubKey); err != nil {
 		// will trigger on duplicate keys.
 		return err
 	}
@@ -399,12 +399,12 @@ func verifyUserRegenerateSignKey(log *AuditLog, state *VerifiedState, entry *Aud
 		return err
 	}
 
-	signPubKeyData, _, err := multicodeDecode(dursk.NewSignPubKey)
+	signPubKey, err := decodeSignPubKey(dursk.NewSignPubKey)
 	if err != nil {
-		return fmt.Errorf("bad signing key %v", dursk.NewSignPubKey)
+		return err
 	}
 
-	if err := kr.SetSignPubKey(dursk.User, signPubKeyData); err != nil {
+	if err := kr.SetSignPubKey(dursk.User, signPubKey); err != nil {
 		return err
 	}
 

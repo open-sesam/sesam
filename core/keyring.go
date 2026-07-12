@@ -156,6 +156,25 @@ func (mk *MemoryKeyring) DeleteUser(user string) bool {
 	return ok
 }
 
+// decodeSignPubKey decodes a multicode-encoded ed25519 signing public key,
+// erroring out if the key is invalid (ed25519.Verify would crash on wrong length)
+func decodeSignPubKey(encoded string) (ed25519.PublicKey, error) {
+	raw, code, err := multicodeDecode(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("bad signing key %q: %w", encoded, err)
+	}
+
+	if code != MhEd25519Pub {
+		return nil, fmt.Errorf("unexpected multihash code %d for signing key, expected ed25519-pub", code)
+	}
+
+	if len(raw) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("signing key has unexpected length %d (want %d)", len(raw), ed25519.PublicKeySize)
+	}
+
+	return ed25519.PublicKey(raw), nil
+}
+
 func (mk *MemoryKeyring) verifySingle(domain SignDomain, key, data []byte, signature string) error {
 	sigData, code, err := multicodeDecode(signature)
 	if err != nil {
@@ -164,6 +183,11 @@ func (mk *MemoryKeyring) verifySingle(domain SignDomain, key, data []byte, signa
 
 	if code != MhEdDSA {
 		return fmt.Errorf("unexpected multihash code %d for signature, expected eddsa", code)
+	}
+
+	// ed25519.Verify panics on a wrong-length key
+	if len(key) != ed25519.PublicKeySize {
+		return fmt.Errorf("invalid ed25519 public key length: %d", len(key))
 	}
 
 	ok := ed25519.Verify(key, append(domain, data...), sigData)
