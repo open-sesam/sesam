@@ -8,6 +8,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestVerifyMalformedKeyNoPanic asserts a wrong-length signing key surfaces as
+// an error rather than crashing ed25519.Verify with a panic, and that the
+// validating decoder rejects malformed keys up front.
+func TestVerifyMalformedKeyNoPanic(t *testing.T) {
+	kr := EmptyKeyring()
+
+	// Store a bad-length "ed25519" pub key directly, then verify against it.
+	kr.signPubs["mallory"] = ed25519.PublicKey{1, 2, 3, 4, 5}
+
+	require.NotPanics(t, func() {
+		_, err := kr.Verify(SesamDomainSignSecretTag, []byte("data"), "z"+MulticodeEncode([]byte("sig"), MhEdDSA)[1:], "mallory")
+		require.Error(t, err)
+	})
+
+	// The decoder used by registration must reject wrong type and length.
+	_, err := decodeSignPubKey(MulticodeEncode([]byte{1, 2, 3}, MhEd25519Pub))
+	require.Error(t, err, "short ed25519 key must be rejected")
+
+	_, err = decodeSignPubKey(MulticodeEncode(make([]byte, ed25519.PublicKeySize), MhEd25519Priv))
+	require.Error(t, err, "wrong multicode type must be rejected")
+
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	got, err := decodeSignPubKey(MulticodeEncode(pub, MhEd25519Pub))
+	require.NoError(t, err)
+	require.Equal(t, pub, got)
+}
+
 func TestMemoryKeyringAddAndVerify(t *testing.T) {
 	kr := EmptyKeyring()
 	user := newTestUser(t, "alice")
