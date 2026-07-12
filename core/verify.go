@@ -553,6 +553,13 @@ func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigne
 		return err
 	}
 
+	// Reject paths that would let a reveal overwrite sesam's own state or
+	// git's (.git/, .sesam/, sesam.yml, ...). This is here to avoid hand-crafted
+	// overwrites of things like .git/config which could enable remote code execution.
+	if err := IsForbiddenPath(scd.RevealedPath); err != nil {
+		return err
+	}
+
 	scd.AccessGroups = normalizeAccessGroups(scd.AccessGroups)
 
 	_, exists := state.SecretExists(scd.RevealedPath)
@@ -602,6 +609,12 @@ func verifySecretMove(log *AuditLog, state *VerifiedState, entry *AuditEntrySign
 	}
 
 	if err := validSecretPathFormat(scr.NewRevealedPath); err != nil {
+		return err
+	}
+
+	// Same forbidden-path guard as secret.add: a move must not relocate a
+	// secret onto .git/, .sesam/, sesam.yml, ... (see verifySecretAdd).
+	if err := IsForbiddenPath(scr.NewRevealedPath); err != nil {
 		return err
 	}
 
