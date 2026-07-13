@@ -30,7 +30,37 @@ $ go install github.com/open-sesam/sesam/cli@latest
 
 # Docker
 
-TODO: Docker images can be useful for CI pipelines, we already have a Dockerfile, but don't upload the image yet.
+Every release is also available as docker image:
+
+```bash
+# Please swap `latest` with a release of your choice.
+# Mount your repo & identity anywhere you want, you should specify them with command line options:
+docker run -it -v ~/.ssh/id_rsa:/key -v .:/repo ghcr.io/open-sesam/sesam:latest -r /repo -i /key status
+```
+
+
+This can be useful for CI/CD pipelines or when you can't install `sesam` otherwise.
+
+```admonish warn
+Git integration will not be working with docker. Also storing passphrases will also not work.
+
+You will also have to mount the sesam repo and your identity into the container with the `-v` option.
+
+For real, interactive usage we very much recommend the regular version of `sesam`, the purpose of this image
+is really to have just a minimal image for automation purposes.
+```
+
+### Signatures
+
+We sign our releases with [ed25519 key](https://en.wikipedia.org/wiki/EdDSA), the private key is uploaded in encrypted form
+as `.sesam` directory inside our this very repository. The public key is [here](TODO).
+
+To verify the binary was indeed build by us, you can use your likely existing `openssl` installation:
+
+```
+```bash
+$ openssl pkeyutl -verify -pubin -inkey public.pem -rawin -in ./sesam -sigfile signature.bin
+```
 
 # Changelog
 
