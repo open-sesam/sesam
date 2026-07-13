@@ -127,7 +127,7 @@ tasks:
           # Release only from a clean tree that lives on main (goreleaser refuses
           # a dirty tree anyway). Re-enable both for real releases:
           # [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "working tree is dirty" >&2; exit 1; }
-          # git merge-base --is-ancestor "$tag^{commit}" main || { echo "$tag is not reachable from main" >&2; exit 1; }
+          git merge-base --is-ancestor "$tag^{commit}" main || { echo "$tag is not reachable from main" >&2; exit 1; }
 
           # Create the signed, changelog-annotated tag unless it already exists,
           # so a failed publish can be retried. --cleanup=verbatim keeps the '#'

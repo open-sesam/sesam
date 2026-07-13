@@ -1,1 +1,5 @@
+# Maintainers authorized to sign release TAGS (git namespace, verified by `git verify-tag`).
 sahib@online.de namespaces="git" ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQChf6YvBhcTkLDNYil0zR9ojRD22ZUPOhNv06lS/mNjB8lJaB3R0TQmibkaqkeLn5WIAipMiJKGq7P2N25VTmvbnPbwAAxuktu7Pfrglujmj9Kk3M7I+fKAXKJvWdh5/OSfNj3vM12OpbehvB0jsCi4atwpx7csN9kZ8+SmV1QppwoRoRqKaq99t0YuDWRzfHOPEH9s7PzUstTpy1oQbJM6Ih3NTaC8H74Y2oebgSV90B61fVe/yoAmNdRfJl1iZ9LvdKsRQ2fa9J6prCyh5JXVBQ9dZk+WSWdiFgFmZQ2NrKy30s/4yToGoOL4ITzdkZCCBslUH3rcQWIEv2W8Iak/ sahib@online.de
+
+# The project key that signs release ARTIFACTS (checksums.txt), sesam-release namespace.
+release@sesam namespaces="sesam-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJKc8gFIff089KMLbKhnaqPzUBN5qhm2njCLxag4jNRt sesam-release

@@ -52,15 +52,44 @@ is really to have just a minimal image for automation purposes.
 
 ### Signatures
 
-We sign our releases with [ed25519 key](https://en.wikipedia.org/wiki/EdDSA), the private key is uploaded in encrypted form
-as `.sesam` directory inside our this very repository. The public key is [here](TODO).
+We sign our releases with [ed25519 key](https://en.wikipedia.org/wiki/EdDSA),
+the private key is uploaded in encrypted form as `.sesam` directory inside our
+this very repository. Here's how you verify the validity of the signature when
+downloading:
 
-To verify the binary was indeed build by us, you can use your likely existing `openssl` installation:
+#### Grab the `allowed_signers.txt`
 
-```
+This file contains the public keys of the people that are allowed to sign git tags and artifacts:
+
 ```bash
-$ openssl pkeyutl -verify -pubin -inkey public.pem -rawin -in ./sesam -sigfile signature.bin
+$ curl -LO https://raw.githubusercontent.com/open-sesam/sesam/main/allowed_signers.txt`
 ```
+
+For this step, only the releaser key is important.
+
+
+#### Verify the signature
+
+1. Download the `checksums.txt` of that specific release.
+2. Download the `checksums.txt.sig` of that specific release.
+2. Download the right `.tar.gz` for your platform.
+
+
+```bash
+# Note: The signature is build over the list of checksums.
+ssh-keygen -Y verify -f allowed_signers.txt -I release@sesam -n sesam-release -s checksums.txt.sig < checksums.txt
+```
+
+#### Check that the checksums are actually correct
+
+Now that we know that checksums are the ones that should be.
+We just need to make sure the archives are actually correct.
+
+```bash
+sha256sum --ignore-missing -c checksums.txt
+```
+
+If that prints `OK` you're fine!
 
 # Changelog
 
