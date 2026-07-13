@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/open-sesam/sesam/core"
@@ -122,6 +123,32 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 	user := cmd.String("user")
 	recipients := cmd.StringSlice("recipient")
 	noSeal := cmd.Bool("no-seal")
+
+	if cmd.Bool("all-except") {
+		users, err := r.ListUsers()
+		if err != nil {
+			return err
+		}
+
+		if len(recipients) == 0 {
+			return fmt.Errorf("--all-except needs at least one recipient not to delete")
+		}
+
+		recipientsToDelete := []string{}
+		for _, u := range users {
+			if u.Name == user {
+				// kick away all but the one mentioned:
+				for _, r := range u.Recps {
+					if !slices.Contains(recipients, r.String()) {
+						recipientsToDelete = append(recipientsToDelete, r.String())
+					}
+				}
+
+				recipients = recipientsToDelete
+				break
+			}
+		}
+	}
 
 	return r.Update(func(s *repo.Stage) error {
 		if err := s.UserRmRecipient(ctx, user, recipients); err != nil {

@@ -253,6 +253,11 @@ var flagsUserRemoveRecipient = []cli.Flag{
 	recipientsFlag(true),
 	flagNoSeal,
 	flagSeal,
+	&cli.BoolFlag{
+		Name:    "all-except",
+		Aliases: []string{"a"},
+		Usage:   "Delete all except the recipients named by --recipient",
+	},
 }
 
 var flagsUserRegenerateSignKey = []cli.Flag{
