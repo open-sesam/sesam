@@ -1,0 +1,38 @@
+# Verify `sesam user remove-recipient --all-except` keeps only the recipients
+# named by --recipient and drops every other one in a single call, rotating the
+# audit key so the removed keys lose access while the kept key survives.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Give bob three recipients: his own key, carol's key (a real second device we
+# can test lock-out with) and an extra device key with no private half.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --recipient $CAROL_PUBKEY --recipient age1gtfhwme5a3sg9r7sp9vqu5awdzft4xd5qjesdq8lhry5wy8tfsfqw7fgt6 --group dev
+
+# All three of bob's recipients decrypt the log to start with.
+exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl
+exec sesam --identity $CAROL_KEY show .sesam/audit/log.jsonl
+
+# Keep only bob's own key; carol and the extra device are removed at once.
+exec sesam user remove-recipient --user bob --all-except --recipient $BOB_PUBKEY
+
+# The audit log records the removal of both dropped keys.
+exec sesam show .sesam/audit/log.jsonl
+stdout '"user.rm_recipients"'
+stdout '"bob"'
+
+# The kept key still decrypts, the removed key is locked out (key rotated).
+exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl
+! exec sesam --identity $CAROL_KEY show .sesam/audit/log.jsonl
+
+exec sesam verify
+
+# The short alias behaves the same and, with only the kept key left, is a no-op
+# that leaves bob's remaining recipient in place.
+exec sesam user remove-recipient --user bob -a --recipient $BOB_PUBKEY
+exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl

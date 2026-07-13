@@ -74,7 +74,7 @@ func (um *UserManager) UserTell(
 		return fmt.Errorf("cannot create user %q without a recipient", user)
 	}
 
-	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, um.state.pluginUI)
+	recps, err := ParseAndResolveRecipients(ctx, um.root, pubKeySpecs, um.state.pluginUI)
 	if err != nil {
 		return err
 	}
@@ -208,7 +208,7 @@ func (um *UserManager) UserAddRecipient(ctx context.Context, user string, pubKey
 		return fmt.Errorf("need to be admin for adding recipients an user")
 	}
 
-	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, um.state.pluginUI)
+	recps, err := ParseAndResolveRecipients(ctx, um.root, pubKeySpecs, um.state.pluginUI)
 	if err != nil {
 		return err
 	}
@@ -242,7 +242,7 @@ func (um *UserManager) UserRmRecipient(ctx context.Context, user string, pubKeyS
 		return fmt.Errorf("need to be admin for removing recipients from a user")
 	}
 
-	toDeleteRecps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, um.state.pluginUI)
+	toDeleteRecps, err := ParseAndResolveRecipients(ctx, um.root, pubKeySpecs, um.state.pluginUI)
 	if err != nil {
 		return err
 	}
@@ -314,7 +314,7 @@ func InitAdminUser(
 	root *os.Root, user string, pubKeySpecs []string,
 	pluginUI *PluginUI,
 ) (Signer, *AuditLog, error) {
-	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, pluginUI)
+	recps, err := ParseAndResolveRecipients(ctx, root, pubKeySpecs, pluginUI)
 	if err != nil {
 		return nil, nil, err
 	}

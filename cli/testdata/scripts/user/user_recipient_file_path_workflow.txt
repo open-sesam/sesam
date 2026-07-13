@@ -1,0 +1,30 @@
+# Verify a recipient can be given as a relative file:// path: the key file lives
+# inside the repository so every admin resolves the same spec. Absolute file://
+# paths are refused for exactly that reason.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# A relative file:// path is read through the repo root and recorded verbatim as
+# the key's source in the audit log.
+exec sesam tell --user peter --recipient file://keys/peter.pub --group dev
+exec sesam show .sesam/audit/log.jsonl
+stdout '"peter"'
+stdout 'file://keys/peter.pub'
+
+exec sesam verify
+
+# An absolute file:// path is refused - other admins could not read it.
+! exec sesam tell --user mallory --recipient file:///etc/hostname --group dev
+stderr 'must be relative'
+
+# A path escaping the repository via .. is confined by the repo root.
+! exec sesam tell --user mallory --recipient file://../outside.pub --group dev
+
+-- keys/peter.pub --
+age1gtfhwme5a3sg9r7sp9vqu5awdzft4xd5qjesdq8lhry5wy8tfsfqw7fgt6

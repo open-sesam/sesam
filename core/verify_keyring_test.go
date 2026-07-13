@@ -18,17 +18,13 @@ import (
 // HTTP-specific resolveLink code path is covered by recipient_test.go.
 
 // writeForgeFile writes a single age public-key string to dir/name and returns
-// the matching file:// KeySource. Overwriting the file between calls simulates
-// the upstream key set changing.
-//
-// We deliberately do not write a trailing newline: ResolveRecipient's file://
-// branch returns the file body verbatim (unlike its HTTPS branch, which calls
-// splitByLine), and age.ParseX25519Recipient rejects keys with a trailing \n.
+// the matching relative file:// KeySource (resolved through the fixture root).
+// Overwriting the file between calls simulates the upstream key set changing.
 func writeForgeFile(t *testing.T, dir, name, key string) KeySource {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	require.NoError(t, os.WriteFile(path, []byte(key), 0o600))
-	return KeySource("file://" + path)
+	return KeySource("file://" + name)
 }
 
 // recipientFromKey parses an age public-key string and tags it with src so the
@@ -45,14 +41,20 @@ func recipientFromKey(t *testing.T, key string, src KeySource) *Recipient {
 // membership, mirroring what LoadAuditLog + Verify would produce in real use.
 type forgeFixture struct {
 	Dir   string
+	Root  *os.Root
 	State *VerifiedState
 	Kr    *MemoryKeyring
 }
 
 func newForgeFixture(t *testing.T) *forgeFixture {
 	t.Helper()
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
 	return &forgeFixture{
-		Dir:   t.TempDir(),
+		Dir:   dir,
+		Root:  root,
 		State: &VerifiedState{},
 		Kr:    EmptyKeyring(),
 	}
@@ -83,7 +85,7 @@ func TestVerifyForgeIds_NoForgeUsers(t *testing.T) {
 	require.Equal(t, KeySourceManual, r.Source)
 	f.addUser(t, "alice", r)
 
-	report := VerifyForgeIds(context.Background(), f.State, f.Kr, pu)
+	report := VerifyForgeIds(context.Background(), f.Root, f.State, f.Kr, pu)
 	require.NotNil(t, report)
 	require.Empty(t, report.Added)
 	require.Empty(t, report.Deleted)
@@ -93,7 +95,7 @@ func TestVerifyForgeIds_NoForgeUsers(t *testing.T) {
 func TestVerifyForgeIds_EmptyState(t *testing.T) {
 	// Truly nothing to verify.
 	f := newForgeFixture(t)
-	report := VerifyForgeIds(context.Background(), f.State, f.Kr, NewNonInteractivePluginUI())
+	report := VerifyForgeIds(context.Background(), f.Root, f.State, f.Kr, NewNonInteractivePluginUI())
 	require.NotNil(t, report)
 	require.Empty(t, report.Added)
 	require.Empty(t, report.Deleted)
@@ -107,7 +109,7 @@ func TestVerifyForgeIds_Stable(t *testing.T) {
 	src := writeForgeFile(t, f.Dir, "alice.pub", aliceKey)
 	f.addUser(t, "alice", recipientFromKey(t, aliceKey, src))
 
-	report := VerifyForgeIds(context.Background(), f.State, f.Kr, NewNonInteractivePluginUI())
+	report := VerifyForgeIds(context.Background(), f.Root, f.State, f.Kr, NewNonInteractivePluginUI())
 	require.Empty(t, report.Added)
 	require.Empty(t, report.Deleted)
 	require.Empty(t, report.Errored)
@@ -125,7 +127,7 @@ func TestVerifyForgeIds_KeySwap(t *testing.T) {
 	src := writeForgeFile(t, f.Dir, "alice.pub", newKey)
 	f.addUser(t, "alice", recipientFromKey(t, oldKey, src))
 
-	report := VerifyForgeIds(context.Background(), f.State, f.Kr, NewNonInteractivePluginUI())
+	report := VerifyForgeIds(context.Background(), f.Root, f.State, f.Kr, NewNonInteractivePluginUI())
 	require.Len(t, report.Added, 1)
 	require.Len(t, report.Deleted, 1)
 	require.Empty(t, report.Errored)
@@ -153,7 +155,7 @@ func TestVerifyForgeIds_DeletedKey(t *testing.T) {
 		recipientFromKey(t, dropKey, src),
 	)
 
-	report := VerifyForgeIds(context.Background(), f.State, f.Kr, NewNonInteractivePluginUI())
+	report := VerifyForgeIds(context.Background(), f.Root, f.State, f.Kr, NewNonInteractivePluginUI())
 	require.Empty(t, report.Added,
 		"dedup regression: false-positive Added entry caused by duplicate (user,source) jobs")
 	require.Empty(t, report.Errored)
@@ -169,10 +171,10 @@ func TestVerifyForgeIds_ErroredOnMissingSource(t *testing.T) {
 	// errored sources out of currUserMap before the leftover pass.
 	f := newForgeFixture(t)
 	aliceKey := keyOf(t, "alice")
-	missingSrc := KeySource("file://" + filepath.Join(f.Dir, "does-not-exist.pub"))
+	missingSrc := KeySource("file://does-not-exist.pub")
 	f.addUser(t, "alice", recipientFromKey(t, aliceKey, missingSrc))
 
-	report := VerifyForgeIds(context.Background(), f.State, f.Kr, NewNonInteractivePluginUI())
+	report := VerifyForgeIds(context.Background(), f.Root, f.State, f.Kr, NewNonInteractivePluginUI())
 	require.Empty(t, report.Added)
 	require.Empty(t, report.Deleted,
 		"a fetch failure must not be conflated with the key being deleted upstream")
@@ -191,14 +193,14 @@ func TestVerifyForgeIds_PartialErrorPreservesUnaffectedSources(t *testing.T) {
 	k1 := keyOf(t, "alice-k1")
 	k2 := keyOf(t, "alice-k2")
 	s1 := writeForgeFile(t, f.Dir, "k1.pub", k1)
-	s2 := KeySource("file://" + filepath.Join(f.Dir, "k2-missing.pub"))
+	s2 := KeySource("file://k2-missing.pub")
 	f.addUser(
 		t, "alice",
 		recipientFromKey(t, k1, s1),
 		recipientFromKey(t, k2, s2),
 	)
 
-	report := VerifyForgeIds(context.Background(), f.State, f.Kr, NewNonInteractivePluginUI())
+	report := VerifyForgeIds(context.Background(), f.Root, f.State, f.Kr, NewNonInteractivePluginUI())
 	require.Empty(t, report.Added)
 	require.Empty(t, report.Deleted)
 	require.Len(t, report.Errored, 1)
@@ -224,7 +226,7 @@ func TestVerifyForgeIds_ManualKeyNeverReportedAsDeleted(t *testing.T) {
 	src := writeForgeFile(t, f.Dir, "alice.pub", otherKey)
 	f.addUser(t, "alice", manual, recipientFromKey(t, forgeKey, src))
 
-	report := VerifyForgeIds(context.Background(), f.State, f.Kr, NewNonInteractivePluginUI())
+	report := VerifyForgeIds(context.Background(), f.Root, f.State, f.Kr, NewNonInteractivePluginUI())
 
 	for _, entry := range report.Deleted {
 		require.NotEqual(t, manualKey, entry.PubKey,
@@ -257,7 +259,7 @@ func TestVerifyForgeIds_KeyringNotMutated(t *testing.T) {
 	before := slices.Clone(f.Kr.ListUsers()["alice"])
 	require.Equal(t, Recipients{r1, r2}, before)
 
-	report := VerifyForgeIds(context.Background(), f.State, f.Kr, NewNonInteractivePluginUI())
+	report := VerifyForgeIds(context.Background(), f.Root, f.State, f.Kr, NewNonInteractivePluginUI())
 	require.Len(t, report.Deleted, 1, "fixture must actually exercise the previously-mutating code path")
 
 	after := f.Kr.ListUsers()["alice"]
@@ -288,10 +290,10 @@ func TestVerifyForgeIds_MultipleUsersSorted(t *testing.T) {
 
 	// charlie: forge unreachable.
 	charlieKey := keyOf(t, "charlie")
-	charlieSrc := KeySource("file://" + filepath.Join(f.Dir, "charlie-missing.pub"))
+	charlieSrc := KeySource("file://charlie-missing.pub")
 	f.addUser(t, "charlie", recipientFromKey(t, charlieKey, charlieSrc))
 
-	report := VerifyForgeIds(context.Background(), f.State, f.Kr, NewNonInteractivePluginUI())
+	report := VerifyForgeIds(context.Background(), f.Root, f.State, f.Kr, NewNonInteractivePluginUI())
 
 	require.Len(t, report.Added, 1)
 	require.Equal(t, "bob", report.Added[0].User)
@@ -334,7 +336,7 @@ func TestVerifyForgeIds_AddedAcrossMultipleUsers(t *testing.T) {
 	bobSrc := writeForgeFile(t, f.Dir, "bob.pub", bobNew)
 	f.addUser(t, "bob", recipientFromKey(t, bobOld, bobSrc))
 
-	report := VerifyForgeIds(context.Background(), f.State, f.Kr, NewNonInteractivePluginUI())
+	report := VerifyForgeIds(context.Background(), f.Root, f.State, f.Kr, NewNonInteractivePluginUI())
 	require.Len(t, report.Added, 2)
 	require.Equal(t, "alice", report.Added[0].User)
 	require.Equal(t, "bob", report.Added[1].User)

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,7 +33,7 @@ var SupportedForges = []string{
 // Valid values are either KeySourceManual (the key was given verbatim
 // in the config) or one of the spec forms understood by
 // ResolveRecipient (e.g. "github:alice", "https://example.com/k.pub",
-// "file:///path/to/k.pub").
+// "file://keys/k.pub").
 type KeySource string
 
 // KeySourceManual marks a key that was provided directly as raw key
@@ -81,6 +82,15 @@ func (rs Recipients) UserPubKeys() []UserPubKey {
 	return upks
 }
 
+func (rs Recipients) Strings() []string {
+	strs := make([]string, 0, len(rs))
+	for _, recp := range rs {
+		strs = append(strs, recp.String())
+	}
+
+	return strs
+}
+
 func forgeIdToUser(arg string) string {
 	_, user, _ := strings.Cut(arg, ":")
 	return strings.TrimSpace(user)
@@ -98,7 +108,11 @@ const maxKeyMaterialSize = 32 * 1024
 //
 // The returned source records the spec form so that the caller can
 // store it in the audit log alongside the resolved key material.
-func ResolveRecipient(ctx context.Context, pubKeySpec string) ([]string, KeySource, error) {
+//
+// file:// paths are read through root and must be relative (i.e.
+// sesam-relative), so the key file lives inside the repository and
+// every other admin can resolve the same spec.
+func ResolveRecipient(ctx context.Context, root *os.Root, pubKeySpec string) ([]string, KeySource, error) {
 	var forgeURL string
 	switch {
 	case strings.HasPrefix(pubKeySpec, "github:"):
@@ -110,10 +124,17 @@ func ResolveRecipient(ctx context.Context, pubKeySpec string) ([]string, KeySour
 	case strings.HasPrefix(pubKeySpec, "https://"):
 		forgeURL = pubKeySpec
 	case strings.HasPrefix(pubKeySpec, "file://"):
+		// Relative so the file lives in the repo and other admins can
+		// resolve the same spec; root confines the read to the repo.
 		path := strings.TrimPrefix(pubKeySpec, "file://")
+		if filepath.IsAbs(path) {
+			return nil, "", fmt.Errorf("file:// recipient path must be relative to the repository: %s", pubKeySpec)
+		}
+		if root == nil {
+			return nil, "", fmt.Errorf("cannot resolve %s without a repository root", pubKeySpec)
+		}
 
-		//nolint:gosec
-		fd, err := os.Open(path)
+		fd, err := root.Open(path)
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to open %s: %w", pubKeySpec, err)
 		}
@@ -125,7 +146,9 @@ func ResolveRecipient(ctx context.Context, pubKeySpec string) ([]string, KeySour
 			return nil, "", fmt.Errorf("failed to read %s: %w", pubKeySpec, err)
 		}
 
-		return []string{string(data)}, KeySource(pubKeySpec), nil
+		// Like the forge/https branch: one key per line, trailing
+		// newlines trimmed (age rejects keys with a trailing '\n').
+		return splitByLine(string(data)), KeySource(pubKeySpec), nil
 	default:
 		// pass through, assume it was directly specified in the config.
 		return []string{pubKeySpec}, KeySourceManual, nil
@@ -275,10 +298,10 @@ func ParseRecipients(recps []string, pluginUI *PluginUI) (Recipients, error) {
 	return recipients, nil
 }
 
-func ParseAndResolveRecipients(ctx context.Context, pubKeySpecs []string, pluginUI *PluginUI) (Recipients, error) {
+func ParseAndResolveRecipients(ctx context.Context, root *os.Root, pubKeySpecs []string, pluginUI *PluginUI) (Recipients, error) {
 	recps := make(Recipients, 0, len(pubKeySpecs))
 	for idx, pubKeySpec := range pubKeySpecs {
-		rawPubKeys, source, err := ResolveRecipient(ctx, pubKeySpec)
+		rawPubKeys, source, err := ResolveRecipient(ctx, root, pubKeySpec)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve recipient %s (#%d): %w", pubKeySpec, idx, err)
 		}

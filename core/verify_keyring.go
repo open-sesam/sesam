@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -69,7 +70,7 @@ func (fr *ForgeReport) IsZero() bool {
 
 // VerifyForgeIds checks the public keys of all users and will re-fetch the source they were from.
 // Difference to the current state will be highlighted in the returned ForgeReport.
-func VerifyForgeIds(ctx context.Context, vstate *VerifiedState, kr Keyring, pluginUI *PluginUI) *ForgeReport {
+func VerifyForgeIds(ctx context.Context, root *os.Root, vstate *VerifiedState, kr Keyring, pluginUI *PluginUI) *ForgeReport {
 	currUserMap := make(map[string]Recipients)
 	for user, recps := range kr.ListUsers() {
 		currUserMap[user] = slices.Clone(recps)
@@ -94,7 +95,7 @@ func VerifyForgeIds(ctx context.Context, vstate *VerifiedState, kr Keyring, plug
 			defer wg.Done()
 
 			for job := range jobsCh {
-				newRecps, err := ParseAndResolveRecipients(ctx, []string{string(job.Source)}, pluginUI)
+				newRecps, err := ParseAndResolveRecipients(ctx, root, []string{string(job.Source)}, pluginUI)
 				if err != nil {
 					mapMu.Lock()
 					errMap[job.User] = append(errMap[job.User], ForgeReportError{
