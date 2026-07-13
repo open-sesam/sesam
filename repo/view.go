@@ -271,7 +271,7 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 	}
 
 	if opts.ForgeCheck {
-		report.ForgeCheckReport = core.VerifyForgeIds(ctx, v.vstate, v.keyring, v.opts.pluginUI())
+		report.ForgeCheckReport = core.VerifyForgeIds(ctx, v.root, v.vstate, v.keyring, v.opts.pluginUI())
 		if report.ForgeCheckReport.IsZero() {
 			report.ForgeCheckReport = nil
 		}

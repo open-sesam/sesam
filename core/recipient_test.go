@@ -153,7 +153,7 @@ func TestSplitByLine(t *testing.T) {
 
 func TestResolveRecipientPassthrough(t *testing.T) {
 	user := newTestUser(t, "alice")
-	got, source, err := ResolveRecipient(context.Background(), user.Recipient.String())
+	got, source, err := ResolveRecipient(context.Background(), nil, user.Recipient.String())
 	require.NoError(t, err)
 	require.Equal(t, []string{user.Recipient.String()}, got)
 	require.Equal(t, KeySourceManual, source)
@@ -161,19 +161,35 @@ func TestResolveRecipientPassthrough(t *testing.T) {
 
 func TestResolveRecipientFile(t *testing.T) {
 	dir := t.TempDir()
-	keyFile := filepath.Join(dir, "key.pub")
-	require.NoError(t, os.WriteFile(keyFile, []byte("age1testkey"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "key.pub"), []byte("age1testkey"), 0o600))
 
-	keyArg := "file://" + keyFile
-	got, source, err := ResolveRecipient(t.Context(), keyArg)
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
+
+	keyArg := "file://key.pub"
+	got, source, err := ResolveRecipient(t.Context(), root, keyArg)
 	require.NoError(t, err)
 	require.Equal(t, []string{"age1testkey"}, got)
 	require.Equal(t, KeySource(keyArg), source)
 }
 
 func TestResolveRecipientFileMissing(t *testing.T) {
-	_, _, err := ResolveRecipient(context.Background(), "file:///nonexistent/key.pub")
+	root, err := os.OpenRoot(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
+
+	_, _, err = ResolveRecipient(context.Background(), root, "file://nonexistent/key.pub")
 	require.Error(t, err, "should fail for missing file")
+}
+
+func TestResolveRecipientFileAbsoluteRejected(t *testing.T) {
+	root, err := os.OpenRoot(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
+
+	_, _, err = ResolveRecipient(context.Background(), root, "file:///etc/passwd")
+	require.ErrorContains(t, err, "must be relative")
 }
 
 func TestParseAndResolveRecipients(t *testing.T) {
@@ -182,6 +198,7 @@ func TestParseAndResolveRecipients(t *testing.T) {
 
 	recps, err := ParseAndResolveRecipients(
 		context.Background(),
+		nil,
 		[]string{alice.Recipient.String(), bob.Recipient.String()},
 		nil,
 	)
@@ -192,12 +209,12 @@ func TestParseAndResolveRecipients(t *testing.T) {
 }
 
 func TestParseAndResolveRecipientsInvalidKey(t *testing.T) {
-	_, err := ParseAndResolveRecipients(context.Background(), []string{"not-a-key"}, nil)
+	_, err := ParseAndResolveRecipients(context.Background(), nil, []string{"not-a-key"}, nil)
 	require.Error(t, err)
 }
 
 func TestParseAndResolveRecipientsEmpty(t *testing.T) {
-	recps, err := ParseAndResolveRecipients(context.Background(), []string{}, nil)
+	recps, err := ParseAndResolveRecipients(context.Background(), nil, []string{}, nil)
 	require.NoError(t, err)
 	require.Empty(t, recps)
 }
