@@ -46,7 +46,7 @@ archives:
 # smudge filter). Signing the checksum file covers every artifact it lists.
 # ssh-keygen writes the signature to <artifact>.sig. Verify with the committed
 # allowed_signers file:
-#   ssh-keygen -Y verify -f release/allowed_signers -I <signer-identity> \
+#   ssh-keygen -Y verify -f allowed_signers.txt -I <signer-identity> \
 #     -n sesam-release -s checksums.txt.sig < checksums.txt
 signs:
   - id: checksum
