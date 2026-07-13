@@ -22,6 +22,16 @@ This will:
 If you omit the ``--group`` parameter then only the `admin` group will have access to the file.
 You can change this at any point by just re-running the `add` command with any groups you want to set.
 
+
+Overall the workflow looks like this:
+
+```
+      ┌─────────────────┐   git add   ┌─────────────────┐     seal     ┌─────────────────┐
+      │  git objects    │◄────────────┤  sesam objects  │◄─────────────┤ revealed files  │
+      │  .git/objects   ├────────────►│ .sesam/objects  ├─────────────►│ in worktree     │
+      └─────────────────┘   checkout  └─────────────────┘    reveal    └─────────────────┘
+```
+
 ## Adding a secret via config (declarative)
 
 ```admonish warning
@@ -109,7 +119,8 @@ In that sense, it works a bit like `git add`.
 Running `sesam add` will work here too, similar to `git add`. By default this will also re-seal the secrets,
 except if you pass `--no-seal`.
 
-If you want to change the access groups of a user, then just pass a different set of `--group` flags.
+If you want to change the access groups of a user, then just pass a different set of `--group / -g` flags.
+Note that this will overwrite the existing groups. If you would rather like to append, then use `--group-add / -G`.
 
 ### Getting an overview
 
