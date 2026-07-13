@@ -144,17 +144,30 @@ sesam user list
 ```bash
 # Change the groups a user is in
 sesam user change-groups --user alice --group a --group b
+
+# Append, instead of overwriting:
+sesam user change-groups --user alice --group-add c
+
+# Can be also done by tell for existing users:
+sesam tell --user alice --group a --group b
+
 ```
 
 ```bash
 # Add one or more recipients to an existing user
 sesam user add-recipient --user alice -r "..." -r "..."
+
+# Can be also done by tell for existing users:
+sesam tell --user alice --recipient "..."
 ```
 
 
 ```bash
 # Remove one or more recipients from an existing user.
 sesam user remove-recipient --user alice -r "..."
+
+# Alternatively, invert it and delete all but the specified:
+sesam user remove-recipient --user alice --all-except -r "..."
 ```
 
 
@@ -168,3 +181,5 @@ sesam user regen-sign-key --user alice
 # Rename an existing user.
 sesam user rename ellisch alice
 ```
+
+
