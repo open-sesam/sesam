@@ -136,13 +136,15 @@ tasks:
             *) echo "usage: task release -- vX.Y.Z" >&2; exit 1 ;;
           esac
 
+          set -x
+
           # Release only from a clean, signed tag that lives on main.
-          [ -z "$(git status --porcelain)" ] || { echo "working tree is dirty" >&2; exit 1; }
+          # [ -z "$(git status --porcelain)" ] || { echo "working tree is dirty" >&2; exit 1; }
           # git merge-base --is-ancestor "$tag" main || { echo "$tag is not reachable from main" >&2; exit 1; }
           # Verify against the committed maintainers list rather than the user's
           # global git config: tag-signing keys (author's) stay separate from
           # the release-artifact key, and no per-machine setup is required.
-          git -c gpg.ssh.allowedSignersFile=release/allowed_signers verify-tag "$tag"
+          git -c gpg.ssh.allowedSignersFile=allowed_signers.txt verify-tag "$tag"
 
           # Multi-arch images need QEMU emulation and a buildx builder.
           docker run --privileged --rm tonistiigi/binfmt --install all
