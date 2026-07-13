@@ -182,4 +182,3 @@ sesam user regen-sign-key --user alice
 sesam user rename ellisch alice
 ```
 
-

@@ -106,3 +106,49 @@ tasks:
     desc: Preview the unreleased changelog section without writing the file
     cmds:
       - git-cliff --unreleased
+
+  tag:
+    desc: "Create a signed, changelog-annotated release tag (task tag -- vX.Y.Z)"
+    cmds:
+      - cmd: |
+          set -euo pipefail
+          tag="{{.CLI_ARGS}}"
+          case "$tag" in
+            v[0-9]*) ;;
+            *) echo "usage: task tag -- vX.Y.Z" >&2; exit 1 ;;
+          esac
+          # Render the unreleased section under the new version, then sign it
+          # into the tag message. The CD pipeline reuses this same text as the
+          # release body, so `git show <tag>` and the GitHub release match.
+          git-cliff --unreleased --tag "$tag" --strip header | git tag -s "$tag" -F -
+          echo "Created signed tag $tag. Review: git show $tag  |  Push: git push origin $tag"
+
+  release:
+    desc: "Build, sign and publish a release locally (task release -- vX.Y.Z)"
+    cmds:
+      - cmd: |
+          set -euo pipefail
+          tag="{{.CLI_ARGS}}"
+          case "$tag" in
+            v[0-9]*) ;;
+            *) echo "usage: task release -- vX.Y.Z" >&2; exit 1 ;;
+          esac
+
+          # Release only from a clean, signed tag that lives on main.
+          [ -z "$(git status --porcelain)" ] || { echo "working tree is dirty" >&2; exit 1; }
+          git merge-base --is-ancestor "$tag" main || { echo "$tag is not reachable from main" >&2; exit 1; }
+          git verify-tag "$tag"
+
+          # Multi-arch images need QEMU emulation and a buildx builder.
+          docker run --privileged --rm tonistiigi/binfmt --install all
+          docker buildx use sesam-release 2>/dev/null || docker buildx create --name sesam-release --use
+
+          # Credentials live only on this machine; nothing is stored in CI.
+          export GITHUB_TOKEN="$(gh auth token)"
+          gh auth token | docker login ghcr.io -u "$(gh api user --jq .login)" --password-stdin
+
+          # Reuse the signed tag's message as the release body (see `task tag`).
+          notes="$(mktemp)"
+          trap 'rm -f "$notes"' EXIT
+          git tag -l --format='%(contents)' "$tag" > "$notes"
+          goreleaser release --clean --release-notes "$notes"
