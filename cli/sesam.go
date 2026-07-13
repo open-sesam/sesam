@@ -334,9 +334,10 @@ func Main(args []string) error {
 
 			// --- Config: the declarative sesam.yml workflow ---
 			{
-				Name:   "apply",
-				Usage:  "Alias for `sesam config apply`",
-				Action: commands.HandleStub,
+				Name:     "apply",
+				Usage:    "Alias for `sesam config apply`",
+				Action:   commands.HandleStub,
+				Category: catConfig,
 			},
 			{
 				Name:     "config",
