@@ -118,9 +118,11 @@ tasks:
             *) echo "usage: task tag -- vX.Y.Z" >&2; exit 1 ;;
           esac
           # Render the unreleased section under the new version, then sign it
-          # into the tag message. The CD pipeline reuses this same text as the
+          # into the tag message. `task release` reuses this same text as the
           # release body, so `git show <tag>` and the GitHub release match.
-          git-cliff --unreleased --tag "$tag" --strip header | git tag -s "$tag" -F -
+          # --cleanup=verbatim: without it git drops every '#'-prefixed line as
+          # a comment, stripping the "### Features" etc. markdown headers.
+          git-cliff --unreleased --tag "$tag" --strip header | git tag -s --cleanup=verbatim "$tag" -F -
           echo "Created signed tag $tag. Review: git show $tag  |  Push: git push origin $tag"
 
   release:
@@ -137,7 +139,10 @@ tasks:
           # Release only from a clean, signed tag that lives on main.
           [ -z "$(git status --porcelain)" ] || { echo "working tree is dirty" >&2; exit 1; }
           # git merge-base --is-ancestor "$tag" main || { echo "$tag is not reachable from main" >&2; exit 1; }
-          git verify-tag "$tag"
+          # Verify against the committed maintainers list rather than the user's
+          # global git config: tag-signing keys (author's) stay separate from
+          # the release-artifact key, and no per-machine setup is required.
+          git -c gpg.ssh.allowedSignersFile=release/allowed_signers verify-tag "$tag"
 
           # Multi-arch images need QEMU emulation and a buildx builder.
           docker run --privileged --rm tonistiigi/binfmt --install all
@@ -152,3 +157,6 @@ tasks:
           trap 'rm -f "$notes"' EXIT
           git tag -l --format='%(contents)' "$tag" > "$notes"
           goreleaser release --clean --release-notes "$notes"
+
+          # Publish the tag so the GitHub release attaches to it (idempotent).
+          git push origin "$tag"
