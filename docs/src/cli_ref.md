@@ -306,6 +306,8 @@ Add a recipient to an existing user
 
 Remove a recipient from an existing user (may not be the last one)
 
+**--all-except, -a**: Delete all except the recipients named by --recipient
+
 **--help, -h**: show help
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
