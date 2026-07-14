@@ -2,10 +2,7 @@
 #
 # Verify a downloaded sesam release archive: authenticity (SSH signature over
 # the release checksums) and integrity (the archive's hash matches the signed
-# checksums). Everything except the archive is fetched from a trusted channel —
-# the checksums + signature from the GitHub release, the signing key from the
-# repo at the release tag — so a tampered archive can neither vouch for itself
-# nor swap out the key it is checked against.
+# checksums).
 #
 # Usage:
 #   scripts/verify-release.sh <path-to-sesam_X.Y.Z_os_arch.tar.gz|.zip>
@@ -17,9 +14,10 @@ REPO="open-sesam/sesam"
 IDENTITY="release@sesam"  # principal in allowed_signers.txt
 NAMESPACE="sesam-release" # ssh signature namespace used at signing time
 
-artifact="${1:?usage: scripts/verify-release.sh <path-to-archive>}"
+artifact="${1:-}"
 [ -f "$artifact" ] || {
   echo "no such file: $artifact" >&2
+  echo "usage: scripts/verify-release.sh <path-to-archive>"
   exit 1
 }
 base="$(basename "$artifact")"
