@@ -334,6 +334,10 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s may not have more than 10 public keys", tell.User)
 	}
 
+	if len(tell.Groups) == 0 {
+		return fmt.Errorf("user %s should be in at least one group", tell.User)
+	}
+
 	recps, err := resolveRecipients(tell.PubKeys, state.pluginUI)
 	if err != nil {
 		return err
@@ -420,6 +424,10 @@ func verifyUserChangeGroups(log *AuditLog, state *VerifiedState, entry *AuditEnt
 	ucg, err := parseDetail[DetailUserChangeGroups](entry)
 	if err != nil {
 		return fmt.Errorf("parse user change groups detail: %w", err)
+	}
+
+	if len(ucg.NewGroups) == 0 {
+		return fmt.Errorf("changing to zero groups is not allowed")
 	}
 
 	user, err := state.requireUser(ucg.User, "change groups", entry)

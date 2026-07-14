@@ -56,7 +56,7 @@ signs:
       - -Y
       - sign
       - -f
-      - "secrets/release_signing.key"
+      - "secret/release_signing.key"
       - -n
       - "sesam-release"
       - "${artifact}"

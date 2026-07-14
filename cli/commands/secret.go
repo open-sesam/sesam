@@ -20,7 +20,7 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 	if len(groups) == 0 && !additive {
-		printInfo("no groups specified, assuming `--group admin` only - only admins can decrypt")
+		printInfo("no groups specified, assuming `--group admin` - only admins can decrypt!")
 	}
 
 	paths, err := toRepoPaths(r.SesamDir(), cmd.Args().Slice())

@@ -33,6 +33,10 @@ func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	if err != nil {
 		return err
 	}
+
+	// The "at least one group" rule is enforced where the resulting membership
+	// is known: Stage.UserTell dispatches recipient-only/no-op updates for
+	// existing users, and core rejects a brand-new user with no groups.
 	user := cmd.String("user")
 	if user == "" {
 		var err error

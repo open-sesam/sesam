@@ -82,6 +82,24 @@ detect this by comparing against an older copy — a local clone, a CI checkout,
 colleague's repo. Compare against a known-good copy before trusting anything, and
 disable force-push at your forge (see [Initialisation](./init.md)).
 
+## I ran `sesam uninstall` and now re-`init` fails with "init file check: … has uncommitted changes"
+
+This is because the verification logic of `sesam` asserts that
+`.sesam/audit/init` always contains the very same content for the life-time of
+a `git` repository. This is designed in that way to avoid history rewrites.
+
+In practice, you cannot re-init the same repository at the same place. If this
+proves to be a problem in actual use we'd like to hear from you. There might be
+ways to relax the conditions here.
+
+For now, you can do the following:
+
+- Init the new `sesam` repo in a different (sub-)directory.
+- Rewrite the git history so that the `sesam` repo never "existed".
+- Revert to a state before you've deleted the repo.
+
+None of them is a perfect solution of course.
+
 ## How do I reveal secrets in CI/CD without a human?
 
 Give the pipeline a dedicated machine identity (its own `age`/SSH key, told into

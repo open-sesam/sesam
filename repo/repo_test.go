@@ -309,27 +309,24 @@ func TestRepo_UserTell_UpsertExisting(t *testing.T) {
 	require.Len(t, findUser("bob").Recps, 3)
 }
 
-// A brand-new user can be created without any groups (they simply have access
-// to nothing until added to a group later).
-func TestRepo_UserTell_NewUserWithoutGroups(t *testing.T) {
+// A brand-new user must be given at least one group; creating one with an
+// empty group set is rejected and leaves no trace of the user.
+func TestRepo_UserTell_NewUserWithoutGroupsRejected(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	bob := writeTestIdentity(t, "bob")
 
 	_, r := bootstrapRepo(t, admin)
 
-	require.NoError(t, r.Update(func(s *Stage) error {
+	err := r.Update(func(s *Stage) error {
 		return s.UserTell(context.Background(), "bob", []string{bob.Recipient}, nil, false)
-	}))
+	})
+	require.ErrorContains(t, err, "at least one group")
 
 	users, err := r.ListUsers()
 	require.NoError(t, err)
 	for _, u := range users {
-		if u.Name == "bob" {
-			require.Empty(t, u.Groups)
-			return
-		}
+		require.NotEqual(t, "bob", u.Name, "rejected user must not be created")
 	}
-	t.Fatal("bob not found")
 }
 
 func TestRepo_UserKill_RemovesUser(t *testing.T) {

@@ -47,9 +47,13 @@ exec sesam tell --user bob
 exec sesam user list
 stdout 'bob.*dev,ops'
 
-# Creating a brand-new user still needs a recipient (groups are optional).
+# Creating a brand-new user still needs a recipient.
 ! exec sesam tell --user newbie --group dev
 stderr 'without a recipient'
+
+# A brand-new user also needs at least one group.
+! exec sesam tell --user newbie --recipient $CAROL_PUBKEY
+stderr 'at least one group'
 
 -- some_file.txt --
 Some content
