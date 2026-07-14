@@ -51,6 +51,9 @@ jobs:
       - name: Test
         run: task test
 
+      - name: Vulncheck
+        run: task vuln
+
       # Builds the linux/amd64 + linux/arm64 binaries and the multi-arch Docker
       # image through the exact release config. --snapshot never publishes, so
       # drift in .goreleaser.yml is caught on PRs rather than at tag time.
