@@ -134,10 +134,18 @@ func testKeyring(t *testing.T, users ...*testUser) *MemoryKeyring {
 	kr := EmptyKeyring()
 	for _, u := range users {
 		require.NoError(t, kr.SetSignPubKey(u.Name, u.Signer.PublicKey()))
-		require.NoError(t, kr.AddRecipient(u.Name, u.Recipient))
+		mustAddRecipient(t, kr, u.Name, u.Recipient)
 	}
 
 	return kr
+}
+
+// mustAddRecipient adds a recipient and fails the test on error, discarding the
+// inserted flag callers that only care about success don't need.
+func mustAddRecipient(t *testing.T, kr Keyring, user string, recp *Recipient) {
+	t.Helper()
+	_, err := kr.AddRecipient(user, recp)
+	require.NoError(t, err)
 }
 
 // initAuditLog creates a fresh audit log with the given user as admin. It opens

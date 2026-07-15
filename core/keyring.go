@@ -21,11 +21,12 @@ func (e *DuplicatePubkeyError) Error() string {
 
 // Keyring is a collection of public keys (both for sign-verify and encryption)
 type Keyring interface {
-	// AddRecipient adds a recipient to `user`. It is the public part of a keypair
-	// the user can use to encrypt files. If `recp` is already linked to this ` user`
-	// it is a no-op. If `recp` is already used by any other user, then DuplicatePubkeyError
-	// is returned.
-	AddRecipient(user string, recp *Recipient) error
+	// AddRecipient adds a recipient to `user`. It is the public part of a
+	// keypair the user can use to encrypt files. `inserted` reports whether a
+	// new key was stored: If it exists for `user` already it will be a no-op
+	// (except adjusting the source). If `recp` is already used by any other
+	// user, then DuplicatePubkeyError is returned.
+	AddRecipient(user string, recp *Recipient) (inserted bool, err error)
 
 	// RemoveRecipient removes the recipient `recp` from the recipients of `user`.
 	// An error will be returned when there's only one recipient left and there's a match.
@@ -80,31 +81,35 @@ func EmptyKeyring() *MemoryKeyring {
 	}
 }
 
-func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) error {
-	var isDuplicate bool
+func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) (bool, error) {
+	existingIdx := -1
 	for existingUser, keys := range mk.recipients {
-		for _, other := range keys {
-			if other.Equal(recp) {
-				if user == existingUser {
-					// key exists, but is just a duplicate of user.
-					isDuplicate = true
-					break
-				}
+		for idx, other := range keys {
+			if !other.Equal(recp) {
+				continue
+			}
 
+			if existingUser != user {
 				// another user already is using this key.
-				return &DuplicatePubkeyError{
+				return false, &DuplicatePubkeyError{
 					user:   user,
 					pubkey: fmt.Sprintf("%v", recp),
 				}
 			}
+
+			existingIdx = idx
 		}
 	}
 
-	if !isDuplicate {
-		mk.recipients[user] = append(mk.recipients[user], recp)
+	if existingIdx >= 0 {
+		// key already linked to this user: replace the entry so its source is
+		// refreshed (e.g. manual -> github:x).
+		mk.recipients[user][existingIdx] = recp
+		return false, nil
 	}
 
-	return nil
+	mk.recipients[user] = append(mk.recipients[user], recp)
+	return true, nil
 }
 
 func (mk *MemoryKeyring) RemoveRecipient(user string, toDelete *Recipient) error {

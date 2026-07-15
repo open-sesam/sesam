@@ -343,17 +343,31 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return err
 	}
 
+	stored := make(Recipients, 0, len(recps))
 	for _, recp := range recps {
-		if err := kr.AddRecipient(tell.User, recp); err != nil {
+		inserted, err := kr.AddRecipient(tell.User, recp)
+		if err != nil {
 			// will trigger on duplicate keys.
 			return err
+		}
+
+		if inserted {
+			stored = append(stored, recp)
+			continue
+		}
+
+		// same key listed twice in one tell: keep one entry, latest source wins.
+		if idx := slices.IndexFunc(stored, func(r *Recipient) bool {
+			return r.Equal(recp)
+		}); idx >= 0 {
+			stored[idx] = recp
 		}
 	}
 
 	state.Users = append(state.Users, VerifiedUser{
 		Name:       tell.User,
 		SignPubKey: tell.SignPubKey,
-		Recps:      recps,
+		Recps:      stored,
 		Groups:     deduplicate(tell.Groups),
 	})
 
@@ -506,13 +520,28 @@ func verifyUserAddRecipients(log *AuditLog, state *VerifiedState, entry *AuditEn
 	}
 
 	for _, recp := range recps {
-		if err := kr.AddRecipient(duar.User, recp); err != nil {
+		inserted, err := kr.AddRecipient(duar.User, recp)
+		if err != nil {
 			// will trigger on duplicate keys.
 			return err
 		}
+
+		if inserted {
+			user.Recps = append(user.Recps, recp)
+			continue
+		}
+
+		// duplicate for this user: replace the entry so its source stays in sync
+		// with the keyring. Replace, don't mutate - the state slice shares
+		// *Recipient pointers with the pre-replay copy (see cloneVerifiedUsers),
+		// so an in-place change would survive a rollback.
+		if idx := slices.IndexFunc(user.Recps, func(r *Recipient) bool {
+			return r.Equal(recp)
+		}); idx >= 0 {
+			user.Recps[idx] = recp
+		}
 	}
 
-	user.Recps = append(user.Recps, recps...)
 	return nil
 }
 

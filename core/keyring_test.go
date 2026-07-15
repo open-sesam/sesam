@@ -122,7 +122,7 @@ func TestMemoryKeyringVerifyNegative(t *testing.T) {
 func TestMemoryKeyringDeleteUser(t *testing.T) {
 	kr := EmptyKeyring()
 	user := newTestUser(t, "alice")
-	require.NoError(t, kr.AddRecipient("alice", user.Recipient))
+	mustAddRecipient(t, kr, "alice", user.Recipient)
 	require.NoError(t, kr.SetSignPubKey("alice", user.Signer.PublicKey()))
 
 	require.True(t, kr.DeleteUser("alice"))
@@ -137,8 +137,8 @@ func TestMemoryKeyringRecipients(t *testing.T) {
 	kr := EmptyKeyring()
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
-	require.NoError(t, kr.AddRecipient("alice", alice.Recipient))
-	require.NoError(t, kr.AddRecipient("bob", bob.Recipient))
+	mustAddRecipient(t, kr, "alice", alice.Recipient)
+	mustAddRecipient(t, kr, "bob", bob.Recipient)
 
 	require.Len(t, kr.Recipients([]string{"alice", "bob"}), 2)
 	require.Len(t, kr.Recipients([]string{"alice"}), 1)
@@ -150,10 +150,53 @@ func TestMemoryKeyringRecipientDedup(t *testing.T) {
 	kr := EmptyKeyring()
 	user := newTestUser(t, "alice")
 
-	// Adding the same recipient twice for the same user is a no-op, not an error.
-	require.NoError(t, kr.AddRecipient("alice", user.Recipient))
-	require.NoError(t, kr.AddRecipient("alice", user.Recipient))
-	require.Len(t, kr.Recipients([]string{"alice"}), 1)
+	// First add stores the key.
+	inserted, err := kr.AddRecipient("alice", user.Recipient)
+	require.NoError(t, err)
+	require.True(t, inserted)
+
+	// Re-adding the same key for the same user is a no-op (not an error) but
+	// refreshes the stored source so it can be re-tagged (e.g. manual -> github:x).
+	reAdd := &Recipient{
+		Recipient:           user.Recipient.Recipient,
+		comparablePublicKey: user.Recipient.comparablePublicKey,
+		Source:              "github:alice",
+	}
+	inserted, err = kr.AddRecipient("alice", reAdd)
+	require.NoError(t, err)
+	require.False(t, inserted)
+
+	recps := kr.Recipients([]string{"alice"})
+	require.Len(t, recps, 1)
+	require.Equal(t, KeySource("github:alice"), recps[0].Source)
+}
+
+// A re-tagging AddRecipient must not bleed into a prior Clone snapshot: replay
+// snapshots the keyring before applying entries and restores it on error, and
+// that rollback relies on stored *Recipient values staying immutable.
+func TestMemoryKeyringReTagIsSnapshotSafe(t *testing.T) {
+	kr := EmptyKeyring()
+	user := newTestUser(t, "alice")
+	mustAddRecipient(t, kr, "alice", user.Recipient)
+	require.Equal(t, KeySourceManual, kr.Recipients([]string{"alice"})[0].Source)
+
+	snap := kr.Clone()
+
+	reAdd := &Recipient{
+		Recipient:           user.Recipient.Recipient,
+		comparablePublicKey: user.Recipient.comparablePublicKey,
+		Source:              "github:alice",
+	}
+	inserted, err := kr.AddRecipient("alice", reAdd)
+	require.NoError(t, err)
+	require.False(t, inserted)
+
+	// The snapshot still carries the pre-re-tag source, so Restore can roll back.
+	require.Equal(t, KeySource("github:alice"), kr.Recipients([]string{"alice"})[0].Source)
+	require.Equal(t, KeySourceManual, snap.Recipients([]string{"alice"})[0].Source)
+
+	kr.Restore(snap)
+	require.Equal(t, KeySourceManual, kr.Recipients([]string{"alice"})[0].Source)
 }
 
 func TestMemoryKeyringSignKeyDedup(t *testing.T) {
@@ -202,8 +245,8 @@ func TestMemoryKeyringAddRecipientAppend(t *testing.T) {
 	alice1 := newTestUser(t, "alice")
 	alice2 := newTestUser(t, "alice") // different key material
 
-	require.NoError(t, kr.AddRecipient("alice", alice1.Recipient))
-	require.NoError(t, kr.AddRecipient("alice", alice2.Recipient))
+	mustAddRecipient(t, kr, "alice", alice1.Recipient)
+	mustAddRecipient(t, kr, "alice", alice2.Recipient)
 
 	recps := kr.Recipients([]string{"alice"})
 	require.Len(t, recps, 2, "should have two different recipients for alice")
@@ -215,8 +258,8 @@ func TestMemoryKeyringRemoveRecipient(t *testing.T) {
 
 	t.Run("removes one of several", func(t *testing.T) {
 		kr := EmptyKeyring()
-		require.NoError(t, kr.AddRecipient("alice", first.Recipient))
-		require.NoError(t, kr.AddRecipient("alice", second.Recipient))
+		mustAddRecipient(t, kr, "alice", first.Recipient)
+		mustAddRecipient(t, kr, "alice", second.Recipient)
 
 		require.NoError(t, kr.RemoveRecipient("alice", first.Recipient))
 
@@ -227,7 +270,7 @@ func TestMemoryKeyringRemoveRecipient(t *testing.T) {
 
 	t.Run("refuses to remove the last recipient", func(t *testing.T) {
 		kr := EmptyKeyring()
-		require.NoError(t, kr.AddRecipient("alice", first.Recipient))
+		mustAddRecipient(t, kr, "alice", first.Recipient)
 
 		err := kr.RemoveRecipient("alice", first.Recipient)
 		require.Error(t, err)
@@ -244,7 +287,7 @@ func TestMemoryKeyringRemoveRecipient(t *testing.T) {
 
 	t.Run("recipient not held by user", func(t *testing.T) {
 		kr := EmptyKeyring()
-		require.NoError(t, kr.AddRecipient("alice", first.Recipient))
+		mustAddRecipient(t, kr, "alice", first.Recipient)
 
 		err := kr.RemoveRecipient("alice", second.Recipient)
 		require.Error(t, err)
@@ -278,8 +321,8 @@ func TestAllRecipients(t *testing.T) {
 	kr := EmptyKeyring()
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
-	require.NoError(t, kr.AddRecipient("alice", alice.Recipient))
-	require.NoError(t, kr.AddRecipient("bob", bob.Recipient))
+	mustAddRecipient(t, kr, "alice", alice.Recipient)
+	mustAddRecipient(t, kr, "bob", bob.Recipient)
 
 	recps := AllRecipients(kr)
 	require.Len(t, recps, 2)
@@ -295,9 +338,9 @@ func TestMemoryKeyringAddRecipientDuplicateAcrossUsers(t *testing.T) {
 	kr := EmptyKeyring()
 	user := newTestUser(t, "alice")
 
-	require.NoError(t, kr.AddRecipient("alice", user.Recipient))
+	mustAddRecipient(t, kr, "alice", user.Recipient)
 
-	err := kr.AddRecipient("bob", user.Recipient)
+	_, err := kr.AddRecipient("bob", user.Recipient)
 	require.Error(t, err)
 
 	var dupErr *DuplicatePubkeyError
@@ -335,8 +378,8 @@ func TestMemoryKeyringListUsers(t *testing.T) {
 	kr := EmptyKeyring()
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
-	require.NoError(t, kr.AddRecipient("alice", alice.Recipient))
-	require.NoError(t, kr.AddRecipient("bob", bob.Recipient))
+	mustAddRecipient(t, kr, "alice", alice.Recipient)
+	mustAddRecipient(t, kr, "bob", bob.Recipient)
 
 	users := kr.ListUsers()
 	require.Len(t, users, 2)

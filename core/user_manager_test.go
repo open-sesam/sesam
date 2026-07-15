@@ -458,6 +458,27 @@ func TestUserAddRecipientSuccess(t *testing.T) {
 	require.NoError(t, err, "newly added recipient must be able to decrypt and replay the log")
 }
 
+// Re-adding a key bob already holds must not diverge the keyring from the
+// verified state: both must keep exactly one entry (regression - the state
+// used to gain a phantom second entry that broke a later rm_recipients).
+func TestUserAddRecipientReAddIsConsistent(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.UserTell(
+		context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"},
+	))
+
+	require.NoError(t, um.UserAddRecipient(
+		context.Background(), "bob", []string{bob.Recipient.String()},
+	))
+
+	vu, exists := um.state.UserExists("bob")
+	require.True(t, exists)
+	require.Len(t, vu.Recps, 1, "state must not gain a phantom duplicate")
+	require.Len(t, um.state.keyring.Recipients([]string{"bob"}), 1,
+		"keyring and state must agree on the recipient count")
+}
+
 func TestUserAddRecipientNonAdmin(t *testing.T) {
 	um := nonAdminUserManager(t)
 	intruder := newTestUser(t, "intruder")

@@ -98,7 +98,7 @@ func (v *View) closeState() error {
 
 type UserInfo struct {
 	core.VerifiedUser
-	Config sesamConf.User
+	Config sesamConf.User `json:"config"`
 }
 
 // ListUsers returns the users currently in the audit log.
