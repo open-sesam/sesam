@@ -19,9 +19,10 @@ type profileState struct {
 // commands. The returned state may be nil (no CPU profile requested).
 func startProfiling(cpuPath string) (*profileState, error) {
 	if cpuPath == "" {
-		return nil, nil
+		return &profileState{}, nil
 	}
 
+	//nolint:gosec
 	f, err := os.Create(cpuPath)
 	if err != nil {
 		return nil, fmt.Errorf("create cpu profile %q: %w", cpuPath, err)
@@ -44,6 +45,7 @@ func (p *profileState) stop(memPath string) error {
 	}
 
 	if memPath != "" {
+		//nolint:gosec
 		f, err := os.Create(memPath)
 		if err != nil {
 			return fmt.Errorf("create mem profile %q: %w", memPath, err)
