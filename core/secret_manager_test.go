@@ -886,7 +886,7 @@ func TestNeedsSeal(t *testing.T) {
 		// Add a recipient to the secret's access: the plaintext is untouched,
 		// but recipientsFor now differs from the sealed footer's hash.
 		bob := newTestUser(t, "bob")
-		require.NoError(t, mgr.Keyring.AddRecipient(bob.Name, bob.Recipient))
+		mustAddRecipient(t, mgr.Keyring, bob.Name, bob.Recipient)
 		mgr.State.Users = append(mgr.State.Users, VerifiedUser{Name: bob.Name, Groups: []string{"admin"}})
 
 		needs, footer, err := mgr.NeedsSeal(path)
