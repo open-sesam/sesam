@@ -26,11 +26,18 @@ You can change this at any point by just re-running the `add` command with any g
 Overall the workflow looks like this:
 
 ```
-      ┌─────────────────┐   git add   ┌─────────────────┐     seal     ┌─────────────────┐
-      │  git objects    │◄────────────┤  sesam objects  │◄─────────────┤ revealed files  │
-      │  .git/objects   ├────────────►│ .sesam/objects  ├─────────────►│ in worktree     │
-      └─────────────────┘   checkout  └─────────────────┘    reveal    └─────────────────┘
+      ┌─────────────────┐   git add   ┌─────────────────┐    seal     ┌─────────────────┐
+      │  git objects    │◄────────────┤  sesam objects  │◄────────────┤ revealed files  │
+      │  .git/objects   ├────────────►│ .sesam/objects  ├────────────►│ in worktree     │
+      └─────────────────┘   checkout  └─────────────────┘   reveal    └─────────────────┘
 ```
+
+What this means for you:
+
+- The revealed files are ignored by git.
+- Commands like `git log` will print paths like `.sesam/objects/secret.txt` but not `secret.txt`. This is because
+  the actual revealed file is of course not tracked.
+- If you want to run `git` commands explicitly on secrets, you have to run e.g. `git log .sesam/objects/secret.txt` not `git log secret.txt` therefore.
 
 ## Adding a secret via config (declarative)
 

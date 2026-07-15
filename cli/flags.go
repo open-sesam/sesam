@@ -124,6 +124,16 @@ var flagsGeneral = []cli.Flag{
 		Usage: "Adjust how strong or weak the disk state is verified ('all', or 'no-disk')",
 		Value: "all",
 	},
+	&cli.StringFlag{
+		Name:    "cpuprofile",
+		Usage:   "Write a CPU profile of this invocation to `FILE` (pprof format)",
+		Sources: cli.EnvVars("SESAM_CPUPROFILE"),
+	},
+	&cli.StringFlag{
+		Name:    "memprofile",
+		Usage:   "Write a heap profile at exit to `FILE` (pprof format)",
+		Sources: cli.EnvVars("SESAM_MEMPROFILE"),
+	},
 }
 
 // flagsInit are specific to repository bootstrap.

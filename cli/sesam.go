@@ -425,6 +425,8 @@ func Main(args []string) error {
 		},
 	}
 
+	var activeProfile *profileState
+
 	app.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 		if cmd.Bool("no-color") {
 			// hack to make sure color is always ignored without passing it to everywhere we use termenv.
@@ -443,7 +445,19 @@ func Main(args []string) error {
 		}
 
 		slog.SetDefault(slog.New(newPrettyHandler(os.Stderr, logLevel)))
+
+		p, err := startProfiling(cmd.String("cpuprofile"))
+		if err != nil {
+			return ctx, err
+		}
+		activeProfile = p
 		return ctx, nil
+	}
+
+	// After runs like a deferred cleanup (also on a failed action), so the CPU
+	// profile is always flushed and the heap profile captured at exit.
+	app.After = func(_ context.Context, cmd *cli.Command) error {
+		return activeProfile.stop(cmd.String("memprofile"))
 	}
 
 	ctx, cancel := signal.NotifyContext(
