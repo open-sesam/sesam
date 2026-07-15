@@ -8,9 +8,11 @@ sesam
 
 ```
 [--askpass]=[value]
+[--cpuprofile]=[value]
 [--help|-h]
 [--identity|-i]=[value]
 [--lock-timeout]=[value]
+[--memprofile]=[value]
 [--no-color]
 [--quiet|-q]
 [--sesam-dir|-r|--repo]=[value]
@@ -29,11 +31,15 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 
 **--askpass**="": Askpass helper for encrypted identities
 
+**--cpuprofile**="": Write a CPU profile of this invocation to `FILE` (pprof format)
+
 **--help, -h**: show help
 
 **--identity, -i**="": Path to the age identity (can be given several times)
 
 **--lock-timeout**="": Repository lock wait timeout (e.g. 5s, 30s, 2m) (default: 5s)
+
+**--memprofile**="": Write a heap profile at exit to `FILE` (pprof format)
 
 **--no-color**: Disable color always
 
