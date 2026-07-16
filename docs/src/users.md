@@ -6,14 +6,13 @@ As mentioned during [Initialisation](/init.md) there is always at least one admi
 At the time you created your repo, you would see something like this in your config:
 
 ```yaml
-config:
-  users:
-    - name: bob
-      desc: Bob the Builder
-      pub: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
-  groups:
-    admin:
-      - bob
+users:
+  - name: bob
+    desc: Bob the Builder
+    pub: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
+groups:
+  admin:
+    - bob
 ```
 
 As you can see, `bob` is an admin. Let's assume we are building a cloud backend

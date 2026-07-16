@@ -93,24 +93,21 @@ This will create a config hierarchy of `sesam.yml` files in the config:
 
 ```yaml
 # Main sesam.yml:
-config:
-  secrets:
-    - include: dir/of/secrets
+secrets:
+  - include: dir/of/secrets
 ```
 
 ```yaml
 # dir/of/secrets sesam.yml:
-config:
-  secrets:
-    - include: sub
-    - path: some_file
+secrets:
+  - include: sub
+  - path: some_file
 ```
 
 ```yaml
 # sub sesam.yml:
-config:
-  secrets:
-    - path: another_file
+secrets:
+  - path: another_file
 ```
 
 Once done you can also add descriptions to the files in the config or do more fine-tuning with the available [config keys](/config-ref.md).
