@@ -11,8 +11,9 @@ cloning you have to install them once:
 ```bash
 # Reveal the secrets explicitly:
 $ sesam open
-# Make sure it gets done automatically on the next checkout:
-$ sesam hook install
+# Make sure it gets done automatically on the next checkout.
+# If the repo already exists, this just re-installs the git-integration.
+$ sesam init
 ```
 
 ```admonish note
@@ -153,3 +154,25 @@ $ sesam keyring clear
 ```
 
 Next run will query the password again.
+
+## My shell wants to correct `sesam` to `.sesam`
+
+i.e. you get something like this:
+
+```bash
+$ sesam ls
+ zsh: correct 'sesam' to '.sesam' [nyae]?
+```
+
+Not something we can fix on our end, but it's a buggy correction setup.
+There are a couple workarounds:
+
+**zsh**
+
+- `unsetopt correct` - disables all command corrections.
+- `export CORRECT_IGNORE_FILE='.*'`  - disable correction for all dot-files.
+- `export CORRECT_IGNORE_FILE='.sesam'`  - disable correction for `.sesam` only.
+
+All of them need to be added to your `.zshrc` to stick.
+
+If you have other shells here that act up, feel free to write us.

@@ -334,12 +334,6 @@ func Main(args []string) error {
 
 			// --- Config: the declarative sesam.yml workflow ---
 			{
-				Name:     "apply",
-				Usage:    "Alias for `sesam config apply`",
-				Action:   commands.HandleStub,
-				Category: catConfig,
-			},
-			{
 				Name:     "config",
 				Category: catConfig,
 				Usage:    "Config management commands",
@@ -366,7 +360,7 @@ func Main(args []string) error {
 					},
 					{
 						Name:   "reset",
-						Usage:  "Set specific config keys",
+						Usage:  "Derive config from audit log",
 						Action: commands.HandleStub,
 					},
 				},

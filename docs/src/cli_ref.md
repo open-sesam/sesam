@@ -66,7 +66,7 @@ Initialize sesam in the current repository
 
 **--install-diff**: Install diff support in repo git config
 
-**--install-hooks**: Install pre-commit and post-commit git hooks (needs git >= 2.54.0)
+**--install-hooks**: Install pre-commit and post-checkout git hooks (needs git >= 2.54.0)
 
 **--install-merge**: Install merge support in repo git config
 
@@ -338,12 +338,6 @@ Give a user a different name
 
 **--help, -h**: show help
 
-## apply
-
-Alias for `sesam config apply`
-
-**--help, -h**: show help
-
 ## config
 
 Config management commands
@@ -376,7 +370,7 @@ Set specific config keys
 
 ### reset
 
-Set specific config keys
+Derive config from audit log
 
 **--help, -h**: show help
 

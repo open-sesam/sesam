@@ -56,7 +56,7 @@ above command you will notice the secret was added already to the config:
 secrets:
   - path: path/to/secret
     access: [deploy]
-    description: Where it used, who owns it, Contact...
+    desc: Where it used, who owns it, Contact...
 ```
 
 If you did not run the `add` command above, then you can also add the entry manually and then run:
@@ -110,7 +110,7 @@ secrets:
   - path: another_file
 ```
 
-Once done you can also add descriptions to the files in the config or do more fine-tuning with the available [config keys](/config-ref.md).
+Once done you can also add descriptions to the files in the config or do more fine-tuning with the available [config keys](/config_ref.md).
 
 ```admonish note
 If you ever create new files in the sub directories they do not automatically get added.
@@ -131,7 +131,8 @@ Note that this will overwrite the existing groups. If you would rather like to a
 If you need to see which files were modified but not yet sealed you can use `sesam status`:
 
 ```bash
-# without --all you will only see the modified files:
+# with --all you will only see the modified files,
+# without it only those that changed in some way.
 $ sesam status --all
 .
 ├─ M README.md (admin)

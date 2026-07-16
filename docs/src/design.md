@@ -16,7 +16,7 @@ This is a *very* brief summary of what components we have.
 - **recipient:** A public key attached to a user, required fro decryption (terminology copied from `age`).
 - **identity:** The private key used by users, required for decryption (terminology copied from `age`).
 - **audit log**: A log that keeps track of what file operations were done on the repository. It is signed and append-only,
-  so that tampering would be immediately detected. By replaying the log we can defer the **verified state**.
+  so that tampering would be immediately detected. By replaying the log we can derive the **verified state**.
 - **verified state:** The state that we expect in the repository. Contains information about all users, groups and secrets.
 - **config:** The `sesam.yml` file(s) on disk. They may diverge from what the **verified state** describes. If this is the case,
   `sesam config diff` will show the differences. We call this the *desired state*.
@@ -177,11 +177,13 @@ The header contains this information encoded as a single JSON line:
 
 ```json
 {
-  "path": "README.md",
-  "hash": "FiD+6bLnYpaa8RWQpfwrQKTVDZfFz17qAmfKjxdsFxOQcA==",
-  "recipients_hash": "FiCq0k0rk9x8m1pQ0T8g8w3n1sWt8B6l3u2n0f1e6a==",
-  "signature": "7aEDQNZXqGc4p593Nnxjq4ap3eOiriXe+oB/AOs5wW9AJVP45a4QPSk/tHfeXe2xT+z0NjmBX7BCR+a4ZSD1e9Ot4Qk=",
-  "sealed_by": "alice"
+  "path": "secret.txt",
+  "cipher_text_hash": "FiB0eH3drhYns5xqSy2sXINndqwUgyShJXL2u+zOWtqouQ==",
+  "hmac_content_hash": "FiCVsGLjTYYH7ECkxR3Kou4cx1drQ+3EjDnhHQMLLU+I8g==",
+  "recipients_hash": "FiBhMoSClLQvUewkfIPU9Rl0lE1UCCxt2aHUS/uQofv21A==",
+  "signature": "7aEDQKhzZ4EDbFoMaTC0UtSaKzt8axfBEcR5UAlHbyZM+DGA/qL72oUXq5cPOvMBeQ6IyUI8sfqnVOa2F1XQx/a9jgM=",
+  "sealed_by": "user",
+  "version": 1
 }
 ```
 
@@ -192,6 +194,8 @@ The header contains this information encoded as a single JSON line:
   a user told into a group) without decrypting the object. It is folded into the
   signed payload alongside the content hashes, so a forged hash is rejected on
   verify.
+- `hmac_content_hash`: Is the content hash as HMAC using the file's age encryption key.
+- `cipher_text_hash`: Is the hash of the encrypted content.
 - On reveal, `sealed_by` is checked against the access list of `path` in the
   verified state. A signature is rejected if its sealer has no current access
   to the secret, even when the signature is cryptographically valid.

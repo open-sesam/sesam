@@ -145,7 +145,7 @@ groups:
 secrets:
   - path: README.md
   - path: secrets/api_key
-    description: Production API key for the payment service
+    desc: Production API key for the payment service
     access:
       - dev
   - include: services/sesam.yml

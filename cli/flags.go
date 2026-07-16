@@ -140,7 +140,7 @@ var flagsGeneral = []cli.Flag{
 var flagsInit = []cli.Flag{
 	&cli.BoolFlag{
 		Name:  "install-hooks",
-		Usage: "Install pre-commit and post-commit git hooks (needs git >= 2.54.0)",
+		Usage: "Install pre-commit and post-checkout git hooks (needs git >= 2.54.0)",
 	},
 	&cli.BoolFlag{
 		Name:  "install-merge",

@@ -29,7 +29,7 @@ For this step, only the releaser key is important.
 
 1. Download the `checksums.txt` of that specific release.
 2. Download the `checksums.txt.sig` of that specific release.
-2. Download the right `.tar.gz` for your platform.
+3. Download the right `.tar.gz` for your platform.
 
 
 ```bash
@@ -60,7 +60,7 @@ curl -sL https://raw.githubusercontent.com/open-sesam/sesam/main/scripts/verify-
 
 # Compiling from source
 
-We use [mise](https://mise.en.dev/) to manage our development tools. All you
+We use [mise](https://mise.jdx.dev/) to manage our development tools. All you
 have to do to have exactly the same tools in exactly the right version is to
 follow the [guide](https://mise.en.dev/getting-started.html). The TL;DR is:
 

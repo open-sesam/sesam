@@ -9,7 +9,7 @@ At the time you created your repo, you would see something like this in your con
 users:
   - name: bob
     desc: Bob the Builder
-    pub: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
+    key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
 groups:
   admin:
     - bob
@@ -23,13 +23,13 @@ deployment. We can do so by adding some more users and a new group:
    users:
      - name: bob
        desc: Bob the Builder
-       pub: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
+       key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
 +    - name: alice
 +      desc: Mrs. Wonderland
-+      pub: github:alice
++      key: github:alice
 +    - name: peter
 +      desc: Peter Lustig
-+      pub: file://keys/peter.txt
++      key: file://keys/peter.txt
    groups:
      admin:
        - bob
@@ -46,7 +46,15 @@ We've used two new ways to fetch the keys:
 likely already know the user name of your peer on your favorite forge.
 The public key will be fetched only once initially and the result is cached. Apart from the first time there is no online access required therefore.
 * Peter on the other hand might not have an forge account. Maybe he also has an awful long RSA key that you don't want to put in the config verbatim. In this case you can just create a file in the repo and add it there. We recommend adding an exception to `.gitignore` if you want to push those public keys.
-- The key of `bob` was deferred from the identity used during init. If you use the same public key for (e.g.) your GitHub account you can also write something like `github:bob` there.
+- The key of `bob` was derived from the identity used during init. If you use the same public key for (e.g.) your GitHub account you can also write something like `github:bob` there.
+
+
+```admonish warning
+The `sesam apply` feature is not yet implemented.
+Please see here to view the [plan](https://github.com/open-sesam/sesam/issues/62).
+
+The documentation here is just a preview. Use the imperative workflow for now.
+```
 
 
 Once we've changed the config we can this command, which should be familiar by now. This will then adjust the repository state accordingly:
@@ -92,8 +100,8 @@ You can have the same effect without editing configs:
 # Add users like above:
 $ sesam tell --user alice --recipient "github:alice"
 $ sesam tell --user peter --recipient "file://keys/peter.txt"
-# --access can be given several times:
-$ sesam add some_password.txt --access deploy --access ops
+# --group  can be given several times:
+$ sesam add some_password.txt --group deploy --group ops
 ```
 
 `sesam tell` also works on a user that already exists: it changes their groups
