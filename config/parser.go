@@ -130,6 +130,9 @@ func compileSchemaUncached() (*jsonschema.Schema, error) {
 		return nil, err
 	}
 
+	// NOTE: If we want better support for IDEs later, we should register a *.sesam entry
+	// to the schema catalogue here: https://github.com/SchemaStore/schemastore/blob/master/CONTRIBUTING.md
+	// It is then picked up even without the modline header in the yaml file.
 	return comp.Compile(schemaFile)
 }
 

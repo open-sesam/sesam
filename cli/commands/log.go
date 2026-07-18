@@ -29,8 +29,6 @@ type logLine struct {
 	desc  string
 }
 
-// TODO: Bug: Users should have at least one group.
-
 // shortID truncates long ids (audit root hashes, init UUIDs) to a git-style
 // prefix, unless full output was requested.
 func shortID(s string, full bool) string {
