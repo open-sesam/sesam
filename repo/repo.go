@@ -319,6 +319,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		"Waiting for the final countdown…",
 		"Checking if the cake is a lie…",
 		"Making sure another one bites the dust…",
+		"Always looking on the bright side of life...",
 	}
 
 	opts.PrintStep(eggs[rand.IntN(len(eggs))]) //nolint:gosec
