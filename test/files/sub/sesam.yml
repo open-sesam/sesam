@@ -1,6 +1,0 @@
-secrets:
-  - type: password
-    name: nested
-    path: nested.txt
-    access:
-      - group1

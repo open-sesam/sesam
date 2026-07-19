@@ -38,7 +38,7 @@ func TestSecretAdd_RelativeConfigPathSameDir(t *testing.T) {
 }
 
 func Test_readYamlFile(t *testing.T) {
-	cr, err := loadConfig(t, "../test/files/test_read_yaml_file.yaml")
+	cr, err := loadConfig(t, "testdata/test_read_yaml_file.yaml")
 	require.NoError(t, err)
 
 	users, err := cr.Users()
@@ -56,7 +56,7 @@ func Test_readYamlFile(t *testing.T) {
 // top-level secrets: key (which goccy parses as a single *ast.MappingValueNode
 // rather than an *ast.MappingNode) resolves and merges into the main file.
 func Test_resolveIncludeSecretsOnly(t *testing.T) {
-	cr, err := loadConfig(t, "../test/files/main_with_include.yaml")
+	cr, err := loadConfig(t, "testdata/main_with_include.yaml")
 	require.NoError(t, err)
 
 	secrets, err := cr.Secrets()

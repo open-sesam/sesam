@@ -7,7 +7,6 @@ groups:
     - test_user
 secrets:
   - include: sub
-  - name: top
-    path: top.txt
+  - path: top.txt
     access:
       - group1
