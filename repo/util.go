@@ -152,3 +152,13 @@ func leadingVersionCore(s string) string {
 	}
 	return s[:i]
 }
+
+// isUnder reports whether path lives at or beneath dir.
+func isUnder(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}

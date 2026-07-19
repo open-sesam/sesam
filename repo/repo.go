@@ -553,16 +553,6 @@ type SecretInfo struct {
 	Config sesamConf.Secret
 }
 
-// isUnder reports whether path lives at or beneath dir.
-func isUnder(dir, path string) bool {
-	rel, err := filepath.Rel(dir, path)
-	if err != nil {
-		return false
-	}
-
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
 // VerifyOptions selects which verification checks Verify should run.
 type VerifyOptions struct {
 	// Truncation checks if the audit log was truncated over the git history.
