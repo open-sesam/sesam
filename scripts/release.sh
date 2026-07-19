@@ -8,6 +8,7 @@
 # Usage:
 #   scripts/release.sh <vX.Y.Z>
 set -euo pipefail
+set -x
 
 tag="${1:-}"
 case "$tag" in
@@ -29,9 +30,18 @@ gh auth status 2>&1 | grep -q 'write:packages' ||
 
 # Release only from a clean tree that lives on main (goreleaser refuses a dirty
 # tree anyway). Re-enable both for real releases:
-# [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "working tree is dirty" >&2; exit 1; }
-git merge-base --is-ancestor "$tag^{commit}" main || {
-  echo "$tag is not reachable from main" >&2
+[ -z "$(git status --porcelain --untracked-files=no)" ] || {
+  echo "working tree is dirty" >&2
+  exit 1
+}
+
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+  target="$tag^{commit}"
+else
+  target="HEAD"
+fi
+git merge-base --is-ancestor "$target" main || {
+  echo "$tag ($target) is not reachable from main" >&2
   exit 1
 }
 
