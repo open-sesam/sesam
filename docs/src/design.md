@@ -367,6 +367,8 @@ to identify *which* secret changed between two commits.
 On the other side we do the following things to stay reliable in case of crashes:
 
 - We use atomic renames where possible to avoid half-written files and inconsistent state.
+  For larger operations we have a staging tree at `.sesam-tmp` where all operations need to succeed
+  before we swap it back with the main state.
 - We use file locking to avoid having several processes working on the repo.
 - The audit log can detect logic failures.
 
@@ -450,16 +452,12 @@ A very hard thing to mitigate. We don't do very well here yet.
 
 ### Possible improvements
 
-- Limit each user to at most 2 keys, to avoid losing overview.
 - Using forge-ids or links as public key input has transparency issues:
   the resolved key material is pinned into the audit log on `tell` ([TOFU](https://en.wikipedia.org/wiki/Trust_on_first_use)),
   but the *first* resolution still trusts the forge. Surface a clear
   summary of which user/public keys are about to be recorded before
   signing the audit entry, and document that side-channel exchange is
   safer when high assurance is required.
-- Make seal atomic (or at least close to) - interrupting it might
-  lead to a failed root hash check, since seal + rm of the previous
-  secret is not currently transactional.
 
 ----
 

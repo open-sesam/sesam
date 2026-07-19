@@ -67,6 +67,10 @@ const (
 	sesamSuffix    = ".sesam"
 	gitSuffix      = ".git"
 	objectsSegment = sesamSuffix + "/objects/"
+
+	// sesamLockName is the repo lock file, a sibling of .sesam at the worktree
+	// root (see acquireLock). It is sesam-internal infrastructure, not a secret.
+	sesamLockName = sesamSuffix + ".lock"
 )
 
 // errProtocol marks a violation of the pkt-line filter protocol. Reaching this

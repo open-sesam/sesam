@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -95,8 +96,25 @@ func Load(root *os.Root, path string) (*Config, error) {
 	return configRepo, nil
 }
 
-// compileSchema reads and compiles the embedded sesam JSON schema.
+var (
+	schemaOnce   sync.Once
+	cachedSchema *jsonschema.Schema
+	errSchema    error
+)
+
+// compileSchema returns the compiled sesam JSON schema. The embedded schema is
+// immutable and the compiled *jsonschema.Schema is read-only (used only for
+// Validate, which is safe for concurrent use), so it is compiled once per
+// process and shared across all Config instances.
 func compileSchema() (*jsonschema.Schema, error) {
+	schemaOnce.Do(func() {
+		cachedSchema, errSchema = compileSchemaUncached()
+	})
+	return cachedSchema, errSchema
+}
+
+// compileSchemaUncached reads and compiles the embedded sesam JSON schema.
+func compileSchemaUncached() (*jsonschema.Schema, error) {
 	data, err := schemaFS.ReadFile(schemaFile)
 	if err != nil {
 		return nil, err
@@ -142,8 +160,6 @@ func (c *Config) loadFile(path string) (*FileSource, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// fmt.Printf("FILE:\n%s\n", string(bs))
 
 	file, err := parser.ParseBytes(bs, parser.ParseComments)
 	if err != nil {

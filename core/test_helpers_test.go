@@ -149,7 +149,7 @@ func persistSignKey(t testing.TB, root *os.Root, u *testUser) {
 	signer, ok := u.Signer.(*ed25519Signer)
 	require.True(t, ok, "test user signer must be *ed25519Signer")
 
-	require.NoError(t, WriteSignKey(root, u.Name, []age.Recipient{u.Recipient.Recipient}, signer.priv))
+	require.NoError(t, writeSignKeyAt(root, "", u.Name, []age.Recipient{u.Recipient.Recipient}, signer.priv))
 }
 
 // loadAuditLog loads an existing audit log using the given users' identities.

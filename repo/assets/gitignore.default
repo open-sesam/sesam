@@ -2,7 +2,6 @@
 *
 !.sesam/
 !.sesam/**
-.sesam/lock
 !sesam.yml
 !.gitignore
 !.gitattributes

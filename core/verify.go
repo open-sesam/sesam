@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"slices"
 )
 
@@ -649,71 +647,6 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) er
 	return nil
 }
 
-// recoverIncompleteSeal finishes (or rolls back) a SealAll that crashed.
-//
-// SealAll's ordering is: stage -> audit entry -> swap -> reap old stage.
-// The audit entry is the commit point: once it lands, the new state is
-// final and recovery must reach it; before it lands, the staged work is
-// discardable.
-//
-// On the next load we hash both .sesam/seal-stage and .sesam/objects and
-// compare them against the latest seal's RootHash in the audit log:
-//
-//   - no seal entry yet or live matches the log -> stage is leftover, drop it.
-//   - stage matches the log -> swap was pending, finish it.
-//   - neither matches -> the log committed a state nothing on disk holds.
-//     Cannot reconcile; bail and let the user investigate.
-func recoverIncompleteSeal(root *os.Root, vstate *VerifiedState) error {
-	stageDir := filepath.Join(".sesam", "seal-stage")
-	objectsDir := filepath.Join(".sesam", "objects")
-
-	if _, err := root.Stat(stageDir); err != nil {
-		// No stage dir (the common case) means nothing to recover.
-		return nil //nolint:nilerr // absent stage dir => nothing to reconcile
-	}
-
-	objectSigs, err := readAllSignaturesForDir(root, objectsDir)
-	if err != nil {
-		return err
-	}
-	objectsRootHash := buildRootHash(objectSigs)
-
-	if vstate.LastSealRootHash == "" {
-		// Crashed during the very first SealAll, before any audit entry
-		// was written. Stage holds uncommitted work; discard it.
-		return root.RemoveAll(stageDir)
-	}
-
-	if vstate.LastSealRootHash == objectsRootHash {
-		// Audit entry written and swap done, just stage dir not yet deleted.
-		return root.RemoveAll(stageDir)
-	}
-
-	stageSigs, err := readAllSignaturesForDir(root, stageDir)
-	if err != nil {
-		return err
-	}
-	stageRootHash := buildRootHash(stageSigs)
-
-	if vstate.LastSealRootHash == stageRootHash {
-		// Audit entry written, but stage not yet swapped. Finish it,
-		// then reap the now-old tree that lands back in stage. The swap is a
-		// renameat2(EXCHANGE) syscall and needs absolute paths.
-		if err := atomicSwapDirs(filepath.Join(root.Name(), stageDir), filepath.Join(root.Name(), objectsDir)); err != nil {
-			return err
-		}
-		return root.RemoveAll(stageDir)
-	}
-
-	// Log committed a state that exists neither in stage nor in objects.
-	// Likely cause: the stage dir was modified out-of-band after the crash.
-	return fmt.Errorf(
-		"seal recover: root hash mismatch between stage dir (%s) and audit log (%s)",
-		stageRootHash,
-		vstate.LastSealRootHash,
-	)
-}
-
 // VerifyChain replays the audit log into a fresh VerifiedState without the
 // expensive disk-side checks done by Verify (init-file unchanged across git
 // history, root-hash of all .sesam files on disk). This is what callers
@@ -756,13 +689,6 @@ func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, erro
 	}
 
 	if err := verify(&state); err != nil {
-		return nil, err
-	}
-
-	// Reconcile disk with the log: finish a pending swap or drop a
-	// stale staging dir from a previously crashed SealAll. Runs after
-	// verify(state) so the log (and thus LastSealRootHash) is trusted.
-	if err := recoverIncompleteSeal(log.root, &state); err != nil {
 		return nil, err
 	}
 
@@ -922,6 +848,35 @@ func verify(state *VerifiedState) error {
 
 	*state = newState
 	return nil
+}
+
+// Clone returns an independent copy of the verified state bound to log and kr
+// (a stage's forked audit log and cloned keyring). The user/secret slices are
+// deep-copied so staged FeedEntry calls cannot mutate the live view.
+func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
+	users := make([]VerifiedUser, len(s.Users))
+	for i, u := range s.Users {
+		u.Groups = slices.Clone(u.Groups)
+		u.Recps = slices.Clone(u.Recps)
+		users[i] = u
+	}
+
+	secrets := make([]VerifiedSecret, len(s.Secrets))
+	for i, sec := range s.Secrets {
+		sec.AccessGroups = slices.Clone(sec.AccessGroups)
+		secrets[i] = sec
+	}
+
+	return &VerifiedState{
+		Users:             users,
+		Secrets:           secrets,
+		SealRequiredSeqID: s.SealRequiredSeqID,
+		VerifiedUntil:     s.VerifiedUntil,
+		LastSealRootHash:  s.LastSealRootHash,
+		auditLog:          log,
+		keyring:           kr,
+		pluginUI:          s.pluginUI,
+	}
 }
 
 func (s *VerifiedState) Close() error {

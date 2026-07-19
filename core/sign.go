@@ -59,7 +59,7 @@ func LoadSignKey(root *os.Root, user string, userIdentity age.Identity) (Signer,
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
 
-	signKeyPath := signKeyPath(user)
+	signKeyPath := signKeyPath("", user)
 
 	cryptedSignPrivKeyFd, err := root.Open(signKeyPath)
 	if err != nil {
@@ -99,13 +99,20 @@ func LoadSignKey(root *os.Root, user string, userIdentity age.Identity) (Signer,
 	}, nil
 }
 
-// signKeyPath returns the repo-relative path of a user's signing key.
-func signKeyPath(user string) string {
-	return filepath.Join(".sesam", "signkeys", user+".age")
+// signKeyPath returns the repo-relative path of a user's signing key. base is
+// the sesam-internal directory ("" defaults to ".sesam"); a stage passes
+// ".sesam-tmp" so the key is written into the fork instead of the live tree.
+func signKeyPath(base, user string) string {
+	return filepath.Join(sesamBase(base), "signkeys", user+".age")
 }
 
-// GenerateSignKey will generate a new ed25519 signing key only accessible to `userRecipient`
 func GenerateSignKey(root *os.Root, user string, userRecipient []age.Recipient) (Signer, error) {
+	return GenerateSignKeyAt(root, "", user, userRecipient)
+}
+
+// GenerateSignKeyAt will generate a new ed25519 signing key only accessible to
+// `userRecipient`, written to signKeyPath(base, user)
+func GenerateSignKeyAt(root *os.Root, base, user string, userRecipient []age.Recipient) (Signer, error) {
 	if err := ValidUserName(user); err != nil {
 		return nil, fmt.Errorf("invalid user name: %w", err)
 	}
@@ -115,7 +122,7 @@ func GenerateSignKey(root *os.Root, user string, userRecipient []age.Recipient) 
 		return nil, fmt.Errorf("failed to generate signing key %s: %w", user, err)
 	}
 
-	if err := WriteSignKey(root, user, userRecipient, priv); err != nil {
+	if err := writeSignKeyAt(root, base, user, userRecipient, priv); err != nil {
 		return nil, fmt.Errorf("failed to write signkey for %s: %w", user, err)
 	}
 
@@ -126,8 +133,8 @@ func GenerateSignKey(root *os.Root, user string, userRecipient []age.Recipient) 
 	}, nil
 }
 
-func WriteSignKey(root *os.Root, user string, userRecipient []age.Recipient, priv ed25519.PrivateKey) error {
-	signKeyPath := signKeyPath(user)
+func writeSignKeyAt(root *os.Root, base, user string, userRecipient []age.Recipient, priv ed25519.PrivateKey) error {
+	signKeyPath := signKeyPath(base, user)
 	if err := root.MkdirAll(filepath.Dir(signKeyPath), 0o700); err != nil {
 		return fmt.Errorf("failed to mkdir signing key dir: %w", err)
 	}
@@ -147,7 +154,7 @@ func WriteSignKey(root *os.Root, user string, userRecipient []age.Recipient, pri
 		return fmt.Errorf("failed to close encrypted writer: %w", err)
 	}
 
-	if err := renameio.WriteFile(signKeyPath, ageBuf.Bytes(), 0o600, renameio.WithRoot(root), renameio.WithTempDir(SesamTmpDir())); err != nil {
+	if err := renameio.WriteFile(signKeyPath, ageBuf.Bytes(), 0o600, renameio.WithRoot(root), renameio.WithTempDir(sesamTmpDir(base))); err != nil {
 		return fmt.Errorf("failed to write signing key %s: %w", signKeyPath, err)
 	}
 

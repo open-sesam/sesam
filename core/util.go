@@ -11,12 +11,36 @@ import (
 	"strings"
 )
 
-// SesamTmpDir is the repo-relative scratch directory. It is passed to renameio
-// as the temp dir so atomic writes stage inside .sesam/ rather than at the repo
-// root (and never in the worktree). Callers must ensure it exists; ensureSesamDirs
-// and BuildSecretManager do.
+// defaultSesamBase is the sesam-internal directory name. A stage uses a
+// sibling fork directory instead; see sesamBase.
+const defaultSesamBase = ".sesam"
+
+// sesamBase resolves the sesam-internal base directory. The empty string means
+// the live ".sesam" tree; a stage passes its fork dir (".sesam-tmp") so the
+// same path helpers write into the fork. All paths under this base are swapped
+// atomically on commit, so the temp dir (SesamTmpDir) stays in the live tree:
+// renameio renames cross-tree within the same os.Root.
+func sesamBase(base string) string {
+	if base == "" {
+		return defaultSesamBase
+	}
+	return base
+}
+
+// SesamTmpDir is the repo-relative scratch directory for the live tree. It is
+// passed to renameio as the temp dir so atomic writes stage inside .sesam/
+// rather than at the repo root (and never in the worktree). Callers must ensure
+// it exists; ensureSesamDirs and BuildSecretManager do.
 func SesamTmpDir() string {
-	return filepath.Join(".sesam", "tmp")
+	return sesamTmpDir("")
+}
+
+// sesamTmpDir is SesamTmpDir under a given base. A stage passes its fork dir so
+// renameio temps for fork operations land inside the fork and are reaped with
+// it on rollback/crash — there is then nothing stray to garbage-collect in the
+// live tree.
+func sesamTmpDir(base string) string {
+	return filepath.Join(sesamBase(base), "tmp")
 }
 
 // ValidUserName checks that a user name is safe for use in file paths and log entries.
@@ -51,6 +75,10 @@ func IsForbiddenPath(revealedPath string) error {
 
 	if filepath.Base(revealedPath) == "sesam.yml" {
 		return fmt.Errorf("you can't seal sesam.yml")
+	}
+
+	if filepath.Base(revealedPath) == defaultSesamBase+".lock" {
+		return fmt.Errorf("you can't seal the sesam lock file")
 	}
 
 	if filepath.Base(revealedPath) == ".gitattributes" {
@@ -130,20 +158,28 @@ func PathExists(p string) bool {
 	return err == nil
 }
 
-// copyFile materializes `dst` with the same contents as `src`. It tries
-// a hardlink first (zero-copy when src and dst sit on the same
-// filesystem and the FS supports it - Linux/macOS/BSD via link(2),
-// Windows on NTFS via CreateHardLinkW) and falls back to a byte-for-byte
-// copy on any error (EXDEV across mounts, EPERM on FAT/some FUSE,
-// EEXIST, ...).
+// CopyFile materializes `dst` with the same contents as `src`. When tryLink is
+// set it attempts a hardlink first (zero-copy when src and dst sit on the same
+// filesystem and the FS supports it - Linux/macOS/BSD via link(2), Windows on
+// NTFS via CreateHardLinkW) and falls back to a byte-for-byte copy on any error
+// (EXDEV across mounts, EPERM on FAT/some FUSE, EEXIST, ...). Pass tryLink=false
+// to force a copy (e.g. for a file the caller intends to mutate independently of
+// src, like the staged audit log).
 //
-// Hardlinks share the source inode, so dst inherits its mode/owner/mtime.
-// The byte copy creates a fresh inode at mode 0o600. Both call sites
-// today operate exclusively under .sesam/ (0o700 dirs, 0o600 files) so
-// no permission widening can result either way.
-func copyFile(root *os.Root, src, dst string) error {
-	if err := root.Link(src, dst); err == nil {
-		return nil
+// Hardlinks share the source inode, so dst inherits its mode/owner/mtime. The
+// byte copy creates a fresh inode at mode 0o600. The caller (the repo stage
+// fork) operates exclusively under .sesam/ (0o700 dirs, 0o600 files), so no
+// permission widening can result either way. The byte-copy path fsyncs dst; a
+// hardlink does not (its inode data is already durable, and the new directory
+// entry's durability is the caller's concern, e.g. via a directory fsync).
+func CopyFile(root *os.Root, src, dst string, tryLink bool) error {
+	// A hardlink shares src's already-durable inode, so it needs no fsync (the
+	// new directory entry's durability is the caller's concern). A byte copy
+	// creates a fresh inode whose data we fsync before returning.
+	if tryLink {
+		if err := root.Link(src, dst); err == nil {
+			return nil
+		}
 	}
 
 	srcFd, err := root.Open(src)
@@ -161,6 +197,10 @@ func copyFile(root *os.Root, src, dst string) error {
 		_ = dstFd.Close()
 		_ = root.Remove(dst)
 		return fmt.Errorf("copy %s -> %s: %w", src, dst, err)
+	}
+	if err := dstFd.Sync(); err != nil {
+		_ = dstFd.Close()
+		return fmt.Errorf("sync %s: %w", dst, err)
 	}
 	return dstFd.Close()
 }
