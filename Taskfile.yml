@@ -39,7 +39,7 @@ tasks:
   test:
     desc: Run go tests
     cmds:
-      - gotestsum --format testname -- -parallel 20 ./...
+      - gotestsum --format testname -- ./...
 
   coverage:
     desc: Run go tests with coverage report
@@ -89,7 +89,7 @@ tasks:
   vuln:
     desc: Scan dependencies and stdlib usage for known vulnerabilities (govulncheck)
     cmds:
-      - go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      - go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 -show verbose ./...
 
   docs:
     desc: Builds docs
@@ -106,3 +106,8 @@ tasks:
     desc: Preview the unreleased changelog section without writing the file
     cmds:
       - git-cliff --unreleased
+
+  release:
+    desc: "Tag, build, sign and publish a release locally (task release -- vX.Y.Z)"
+    cmds:
+      - scripts/release.sh {{.CLI_ARGS}}

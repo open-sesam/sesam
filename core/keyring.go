@@ -21,11 +21,12 @@ func (e *DuplicatePubkeyError) Error() string {
 
 // Keyring is a collection of public keys (both for sign-verify and encryption)
 type Keyring interface {
-	// AddRecipient adds a recipient to `user`. It is the public part of a keypair
-	// the user can use to encrypt files. If `recp` is already linked to this ` user`
-	// it is a no-op. If `recp` is already used by any other user, then DuplicatePubkeyError
-	// is returned.
-	AddRecipient(user string, recp *Recipient) error
+	// AddRecipient adds a recipient to `user`. It is the public part of a
+	// keypair the user can use to encrypt files. `inserted` reports whether a
+	// new key was stored: If it exists for `user` already it will be a no-op
+	// (except adjusting the source). If `recp` is already used by any other
+	// user, then DuplicatePubkeyError is returned.
+	AddRecipient(user string, recp *Recipient) (inserted bool, err error)
 
 	// RemoveRecipient removes the recipient `recp` from the recipients of `user`.
 	// An error will be returned when there's only one recipient left and there's a match.
@@ -80,31 +81,35 @@ func EmptyKeyring() *MemoryKeyring {
 	}
 }
 
-func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) error {
-	var isDuplicate bool
+func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) (bool, error) {
+	existingIdx := -1
 	for existingUser, keys := range mk.recipients {
-		for _, other := range keys {
-			if other.Equal(recp) {
-				if user == existingUser {
-					// key exists, but is just a duplicate of user.
-					isDuplicate = true
-					break
-				}
+		for idx, other := range keys {
+			if !other.Equal(recp) {
+				continue
+			}
 
+			if existingUser != user {
 				// another user already is using this key.
-				return &DuplicatePubkeyError{
+				return false, &DuplicatePubkeyError{
 					user:   user,
 					pubkey: fmt.Sprintf("%v", recp),
 				}
 			}
+
+			existingIdx = idx
 		}
 	}
 
-	if !isDuplicate {
-		mk.recipients[user] = append(mk.recipients[user], recp)
+	if existingIdx >= 0 {
+		// key already linked to this user: replace the entry so its source is
+		// refreshed (e.g. manual -> github:x).
+		mk.recipients[user][existingIdx] = recp
+		return false, nil
 	}
 
-	return nil
+	mk.recipients[user] = append(mk.recipients[user], recp)
+	return true, nil
 }
 
 func (mk *MemoryKeyring) RemoveRecipient(user string, toDelete *Recipient) error {
@@ -156,6 +161,25 @@ func (mk *MemoryKeyring) DeleteUser(user string) bool {
 	return ok
 }
 
+// decodeSignPubKey decodes a multicode-encoded ed25519 signing public key,
+// erroring out if the key is invalid (ed25519.Verify would crash on wrong length)
+func decodeSignPubKey(encoded string) (ed25519.PublicKey, error) {
+	raw, code, err := multicodeDecode(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("bad signing key %q: %w", encoded, err)
+	}
+
+	if code != MhEd25519Pub {
+		return nil, fmt.Errorf("unexpected multihash code %d for signing key, expected ed25519-pub", code)
+	}
+
+	if len(raw) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("signing key has unexpected length %d (want %d)", len(raw), ed25519.PublicKeySize)
+	}
+
+	return ed25519.PublicKey(raw), nil
+}
+
 func (mk *MemoryKeyring) verifySingle(domain SignDomain, key, data []byte, signature string) error {
 	sigData, code, err := multicodeDecode(signature)
 	if err != nil {
@@ -164,6 +188,11 @@ func (mk *MemoryKeyring) verifySingle(domain SignDomain, key, data []byte, signa
 
 	if code != MhEdDSA {
 		return fmt.Errorf("unexpected multihash code %d for signature, expected eddsa", code)
+	}
+
+	// ed25519.Verify panics on a wrong-length key
+	if len(key) != ed25519.PublicKeySize {
+		return fmt.Errorf("invalid ed25519 public key length: %d", len(key))
 	}
 
 	ok := ed25519.Verify(key, append(domain, data...), sigData)

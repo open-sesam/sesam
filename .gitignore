@@ -6,4 +6,5 @@ sesam
 /docs/book
 .idea/
 /TODO
-/demo
+/demo*
+/dist/

@@ -1,58 +1,85 @@
-@media only screen and (max-width:1439px) {
-    .sidetoc {
-        display: none;
+/* Page-TOC: a fixed rail pinned in the right gutter while the page scrolls.
+
+   Hidden by default; only revealed when the gutter beside the centred content
+   column (max --content-max-width, 1100px) is wide enough for the 200px rail.
+   A media query alone can't tell whether the sidebar is open, so we gate the
+   reveal on #sidebar-toggle-anchor (mdBook's layout source of truth, honoured
+   with or without JS): the column shifts ~308px right when the sidebar shows,
+   so the width at which the rail fits differs by sidebar state.
+     - sidebar hidden  → fits from ~1650px
+     - sidebar visible → fits from ~1900px */
+
+main {
+    position: relative;
+}
+
+.sidetoc {
+    display: none;
+    position: absolute;
+    /* Snug against the content column's right edge (100% of main) + a small gap,
+       so the rail sits in the gutter instead of overshooting it. */
+    left: calc(100% + 16px);
+}
+
+.pagetoc {
+    position: fixed;
+    width: 200px;
+    height: calc(100vh - var(--menu-bar-height) - 0.67em * 4);
+    overflow: auto;
+}
+
+.pagetoc a {
+    border-left: 1px solid var(--sidebar-bg);
+    color: var(--fg) !important;
+    display: block;
+    padding-bottom: 5px;
+    padding-top: 5px;
+    padding-left: 10px;
+    text-align: left;
+    text-decoration: none;
+}
+
+.pagetoc a:hover,
+.pagetoc a.active {
+    background: var(--sidebar-bg);
+    color: var(--sidebar-fg) !important;
+}
+
+.pagetoc .active {
+    background: var(--sidebar-bg);
+    color: var(--sidebar-fg);
+}
+
+.pagetoc .pagetoc-H2 {
+    padding-left: 20px;
+}
+
+.pagetoc .pagetoc-H3 {
+    padding-left: 40px;
+}
+
+/* Limit the page-TOC to three levels (H1–H3). */
+.pagetoc .pagetoc-H4 {
+    display: none;
+}
+
+.pagetoc .pagetoc-H5 {
+    display: none;
+}
+
+.pagetoc .pagetoc-H6 {
+    display: none;
+}
+
+/* Reveal only when the rail fits, tracking the sidebar's open/closed state. */
+@media only screen and (min-width: 1650px) {
+    #sidebar-toggle-anchor:not(:checked) ~ .page-wrapper .sidetoc {
+        display: block;
     }
 }
 
-@media only screen and (min-width:1440px) {
-    main {
-        position: relative;
-    }
-    .sidetoc {
-        margin-left: auto;
-        margin-right: auto;
-        left: calc(100% + (var(--content-max-width))/4 - 140px);
-        position: absolute;
-    }
-    .pagetoc {
-        position: fixed;
-        width: 200px;
-        height: calc(100vh - var(--menu-bar-height) - 0.67em * 4);
-        overflow: auto;
-    }
-    .pagetoc a {
-        border-left: 1px solid var(--sidebar-bg);
-        color: var(--fg) !important;
+@media only screen and (min-width: 1900px) {
+    #sidebar-toggle-anchor:checked ~ .page-wrapper .sidetoc {
         display: block;
-        padding-bottom: 5px;
-        padding-top: 5px;
-        padding-left: 10px;
-        text-align: left;
-        text-decoration: none;
-    }
-    .pagetoc a:hover,
-    .pagetoc a.active {
-        background: var(--sidebar-bg);
-        color: var(--sidebar-fg) !important;
-    }
-    .pagetoc .active {
-        background: var(--sidebar-bg);
-        color: var(--sidebar-fg);
-    }
-    .pagetoc .pagetoc-H2 {
-        padding-left: 20px;
-    }
-    .pagetoc .pagetoc-H3 {
-        padding-left: 40px;
-    }
-    /* Limit the page-TOC to three levels (H1–H3). */
-    .pagetoc .pagetoc-H4 {
-        display: none;
-    }
-    .pagetoc .pagetoc-H5 {
-        display: none;
-    }
-    .pagetoc .pagetoc-H6 {
-        display: none;
     }
 }

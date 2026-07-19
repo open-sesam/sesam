@@ -1,0 +1,37 @@
+# Verify that `sesam init --sesam-dir <subdir>` writes git-config driver
+# entries that carry the `--sesam-dir=<subdir>` flag. Git invokes those
+# drivers/aliases with cwd = worktree root, so without the flag they would
+# fail to find the nested `.sesam/` tree.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+mkdir sub
+exec sesam init --user admin --sesam-dir sub
+
+# The driver subsection is suffixed with the (encoded) relative sesam dir, so
+# multiple sesam repos in one git repo don't collide. Its command still carries
+# --sesam-dir=sub so the binary resolves the nested .sesam/ when git invokes it
+# from the worktree root.
+exec git config --local diff.sesam-diff-sub.textconv
+stdout '^sesam --sesam-dir=sub show$'
+# The unsuffixed subsection must NOT exist for a nested repo.
+! exec git config --local diff.sesam-diff.textconv
+
+# The alias is a plain convenience shim, never repo-specific.
+exec git config --local alias.sesam
+stdout '^!sesam$'
+
+exec git add -A
+exec git commit -m 'init sesam'
+
+# End-to-end: git runs its drivers/aliases with cwd = worktree root, passing the
+# baked-in --sesam-dir=sub. Invoke sesam the same way (from the worktree root
+# with that flag) and confirm it resolves the nested repo and lists the README
+# init created under sub/. We call sesam directly rather than via `git sesam` so
+# the check doesn't depend on the ambient shell's PATH resolving `sesam` (the
+# git alias path is covered by git_sesam_alias_workflow.txt).
+exec sesam --sesam-dir=sub ls
+stdout 'README\.md'
+stdout 'admin'

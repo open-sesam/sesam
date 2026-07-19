@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -95,8 +96,25 @@ func Load(root *os.Root, path string) (*Config, error) {
 	return configRepo, nil
 }
 
-// compileSchema reads and compiles the embedded sesam JSON schema.
+var (
+	schemaOnce   sync.Once
+	cachedSchema *jsonschema.Schema
+	errSchema    error
+)
+
+// compileSchema returns the compiled sesam JSON schema. The embedded schema is
+// immutable and the compiled *jsonschema.Schema is read-only (used only for
+// Validate, which is safe for concurrent use), so it is compiled once per
+// process and shared across all Config instances.
 func compileSchema() (*jsonschema.Schema, error) {
+	schemaOnce.Do(func() {
+		cachedSchema, errSchema = compileSchemaUncached()
+	})
+	return cachedSchema, errSchema
+}
+
+// compileSchemaUncached reads and compiles the embedded sesam JSON schema.
+func compileSchemaUncached() (*jsonschema.Schema, error) {
 	data, err := schemaFS.ReadFile(schemaFile)
 	if err != nil {
 		return nil, err
@@ -112,6 +130,9 @@ func compileSchema() (*jsonschema.Schema, error) {
 		return nil, err
 	}
 
+	// NOTE: If we want better support for IDEs later, we should register a *.sesam entry
+	// to the schema catalogue here: https://github.com/SchemaStore/schemastore/blob/master/CONTRIBUTING.md
+	// It is then picked up even without the modline header in the yaml file.
 	return comp.Compile(schemaFile)
 }
 
@@ -142,8 +163,6 @@ func (c *Config) loadFile(path string) (*FileSource, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// fmt.Printf("FILE:\n%s\n", string(bs))
 
 	file, err := parser.ParseBytes(bs, parser.ParseComments)
 	if err != nil {
@@ -482,6 +501,19 @@ func findMappingValue(m *ast.MappingNode, key string) *ast.MappingValueNode {
 	return nil
 }
 
+// removeMappingValue deletes the key/value pair for `key` from m, returning
+// true if it was present.
+func removeMappingValue(m *ast.MappingNode, key string) bool {
+	for i, mv := range m.Values {
+		if mv.Key.String() == key {
+			m.Values = append(m.Values[:i], m.Values[i+1:]...)
+			return true
+		}
+	}
+
+	return false
+}
+
 // findRootValue returns the top-level MappingValueNode whose key matches, or an
 // error if absent. A file whose only top-level key is e.g. `secrets:` (a
 // typical sub-file) can parse to a single *ast.MappingValueNode rather than an
@@ -513,11 +545,15 @@ func rootMappingValues(root ast.Node) []*ast.MappingValueNode {
 
 func includePath(m *ast.MappingNode) (string, bool) {
 	for _, mv := range m.Values {
-		// Key.String() is fine — scalar key with no trailing comment in
-		// practice. Value goes through GetToken() so any inline comment
-		// (`include: foo.yml # note`) doesn't bleed into the path.
 		if mv.Key.String() == "include" {
-			return mv.Value.GetToken().Value, true
+			p := mv.Value.GetToken().Value
+
+			// allow just specifying the directory itself.
+			if !strings.HasSuffix(p, "sesam.yml") {
+				p = filepath.Join(p, "sesam.yml")
+			}
+
+			return p, true
 		}
 	}
 
@@ -689,10 +725,7 @@ func marshalMapping(v any) (*ast.MappingNode, error) {
 	return m, nil
 }
 
-// marshalBody marshals v to YAML and reparses it into an AST node. Sequences
-// are emitted indented (yaml.IndentSequence) so freshly-built nodes match the
-// block style sesam files use, and parsing keeps comments on nodes for
-// consistency with loaded files.
+// marshalBody marshals v to YAML and reparses it into an AST node.
 func marshalBody(v any) (ast.Node, error) {
 	bs, err := yaml.MarshalWithOptions(v, yaml.IndentSequence(true))
 	if err != nil {

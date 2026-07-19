@@ -1,0 +1,11 @@
+users:
+  - name: test_user
+    key:
+      - key
+groups:
+  group1:
+    - test_user
+secrets:
+  - path: example.txt
+    access:
+      - group1

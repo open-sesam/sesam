@@ -13,14 +13,17 @@ import (
 )
 
 // Command categories group subcommands in `sesam --help`. urfave/cli sorts
-// categories alphabetically by name with no ordering hook, so the leading
-// ordinal pins the order (repo lifecycle first, then daily and admin groups).
+// categories lexicographically by name with no ordering hook, so each label
+// carries a numeric sort-prefix (gaps of ten leave room to insert later).
+// installHelpOrdering strips the prefix before display - see help.go.
+const catSep = "\x1f" // ASCII unit separator; never appears in a real label
+
 const (
-	catRepository = "REPOSITORY"
-	catSecrets    = "SECRETS"
-	catAccess     = "ACCESS"
-	catConfig     = "CONFIG"
-	catMeta       = "META"
+	catRepository = "10" + catSep + "REPOSITORY"
+	catSecrets    = "20" + catSep + "SECRETS"
+	catAccess     = "30" + catSep + "ACCESS"
+	catConfig     = "40" + catSep + "CONFIG"
+	catMeta       = "50" + catSep + "META"
 )
 
 // Main builds and runs the sesam CLI command tree.
@@ -29,6 +32,8 @@ const (
 // build managers, defer Close) and hand it to the handler; the wrapping
 // makes it obvious which commands need an initialized sesam repository.
 func Main(args []string) error {
+	installHelpOrdering()
+
 	cli.VersionFlag = &cli.BoolFlag{
 		Name:  "version",
 		Usage: "Print the version and exit",
@@ -56,10 +61,11 @@ func Main(args []string) error {
 				Usage:    "Initialize sesam in the current repository",
 			},
 			{
-				Name:     "deinit",
+				Name:     "uninstall",
 				Category: catRepository,
-				Action:   commands.HandleStub,
-				Usage:    "Remove all traces of sesam",
+				Flags:    flagsUninstall,
+				Action:   commands.HandleUninstall,
+				Usage:    "Removes git integration and optionally all of the sesam repo",
 			},
 			{
 				Name:     "verify",
@@ -78,8 +84,53 @@ func Main(args []string) error {
 			{
 				Name:     "doctor",
 				Category: catRepository,
-				Action:   commands.HandleStub,
+				Action:   commands.HandleDoctor,
 				Usage:    "Check sesam installation for possible problems",
+			},
+			{
+				Name:     "merge",
+				Hidden:   true,
+				Category: catRepository,
+				Usage:    "Merge driver (should be called by git)",
+				Commands: []*cli.Command{
+					{
+						Name:   "secret",
+						Usage:  "Merge secrets",
+						Action: commands.HandleStub,
+					},
+					{
+						Name:   "log",
+						Usage:  "Merge audit log",
+						Action: commands.HandleStub,
+					},
+				},
+			},
+			{
+				Name:     "hook",
+				Category: catRepository,
+				Usage:    "Util to manage git hooks",
+				Commands: []*cli.Command{
+					{
+						Name:   "pre-commit",
+						Usage:  "Execute the pre-commit hook - meant to be run by git!",
+						Action: commands.HandleHookPreCommit,
+					},
+					{
+						Name:   "post-checkout",
+						Usage:  "Execute the post-checkout hook - meant to be run by git!",
+						Action: commands.HandleHookPostCheckout,
+					},
+					{
+						Name:   "install",
+						Usage:  "Make sure the git hooks are installed",
+						Action: commands.HandleHookInstall,
+					},
+					{
+						Name:   "uninstall",
+						Usage:  "Uninstall any hooks",
+						Action: commands.HandleHookUninstall,
+					},
+				},
 			},
 
 			// --- Secrets: manage which files are secrets and their content ---
@@ -96,6 +147,7 @@ func Main(args []string) error {
 				Name:          "rm",
 				Category:      catSecrets,
 				ArgsUsage:     "<path>",
+				Flags:         flagsRm,
 				Action:        commands.WithRepo(commands.HandleRemove),
 				ShellComplete: completeSecrets,
 				Usage:         "Remove a secret file or directory",
@@ -111,11 +163,11 @@ func Main(args []string) error {
 				Arguments: []cli.Argument{
 					&cli.StringArg{
 						Name:      "oldpath",
-						UsageText: "The old revealed path to move from",
+						UsageText: "<OLD_PATH>",
 					},
 					&cli.StringArg{
 						Name:      "newpath",
-						UsageText: "The new revealed path to move to",
+						UsageText: "<NEW_PATH>",
 					},
 				},
 			},
@@ -123,7 +175,7 @@ func Main(args []string) error {
 				Name:     "edit",
 				Category: catSecrets,
 				Action:   commands.HandleStub,
-				Usage:    "Edit an secret and immeediately seal it afterwards",
+				Usage:    "Open secret in $EDITOR and immediately seal it afterwards",
 			},
 			{
 				Name:     "seal",
@@ -174,7 +226,7 @@ func Main(args []string) error {
 				Arguments: []cli.Argument{
 					&cli.StringArgs{
 						Name:      "dir",
-						UsageText: "Only show secrets in specific dirs",
+						UsageText: "[<DIR>...]",
 						Max:       255, // apparently we have to set max to something here...
 					},
 				},
@@ -211,7 +263,7 @@ func Main(args []string) error {
 				Flags:         flagsTell,
 				Action:        commands.WithRepo(commands.HandleTell),
 				ShellComplete: completeFlags,
-				Usage:         "Add a person to a group and re-encrypt affected files",
+				Usage:         "Add a person to a group and re-encrypt files",
 			},
 			{
 				Name:          "kill",
@@ -219,7 +271,7 @@ func Main(args []string) error {
 				Flags:         flagsKill,
 				Action:        commands.WithRepo(commands.HandleKill),
 				ShellComplete: completeUsers,
-				Usage:         "Remove a person from a group",
+				Usage:         "Remove a person from the sesam repo entirely",
 			},
 			{
 				Name:     "user",
@@ -228,10 +280,11 @@ func Main(args []string) error {
 				Usage:    "User management commands",
 				Commands: []*cli.Command{
 					{
-						Name:   "list",
-						Flags:  flagsListUsers,
-						Action: commands.WithRepo(commands.HandleListUsers),
-						Usage:  "List persons, groups, and access",
+						Name:    "list",
+						Aliases: []string{"ls"},
+						Flags:   flagsListUsers,
+						Action:  commands.WithRepo(commands.HandleListUsers),
+						Usage:   "List persons, groups, and access",
 					},
 					{
 						Name:   "change-groups",
@@ -268,11 +321,11 @@ func Main(args []string) error {
 						Arguments: []cli.Argument{
 							&cli.StringArg{
 								Name:      "olduser",
-								UsageText: "The old user name",
+								UsageText: "<OLD_NAME>",
 							},
 							&cli.StringArg{
 								Name:      "newuser",
-								UsageText: "The new user name",
+								UsageText: "<NEW_NAME>",
 							},
 						},
 					},
@@ -303,6 +356,11 @@ func Main(args []string) error {
 					{
 						Name:   "set",
 						Usage:  "Set specific config keys",
+						Action: commands.HandleStub,
+					},
+					{
+						Name:   "reset",
+						Usage:  "Derive config from audit log",
 						Action: commands.HandleStub,
 					},
 				},
@@ -341,14 +399,6 @@ func Main(args []string) error {
 				Action:   commands.WithRepo(commands.HandleLog),
 				Usage:    "Show the audit log of secret changes",
 			},
-
-			// --- Plumbing: invoked by git or tooling, hidden from help ---
-			{
-				Name:   "smudge",
-				Hidden: true,
-				Action: commands.HandleSmudge,
-				Usage:  "Git smudge filter: reveal a secret to its plaintext path (called by git)",
-			},
 			{
 				Name:   "docgen",
 				Hidden: true,
@@ -369,6 +419,8 @@ func Main(args []string) error {
 		},
 	}
 
+	var activeProfile *profileState
+
 	app.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 		if cmd.Bool("no-color") {
 			// hack to make sure color is always ignored without passing it to everywhere we use termenv.
@@ -387,7 +439,19 @@ func Main(args []string) error {
 		}
 
 		slog.SetDefault(slog.New(newPrettyHandler(os.Stderr, logLevel)))
+
+		p, err := startProfiling(cmd.String("cpuprofile"))
+		if err != nil {
+			return ctx, err
+		}
+		activeProfile = p
 		return ctx, nil
+	}
+
+	// After runs like a deferred cleanup (also on a failed action), so the CPU
+	// profile is always flushed and the heap profile captured at exit.
+	app.After = func(_ context.Context, cmd *cli.Command) error {
+		return activeProfile.stop(cmd.String("memprofile"))
 	}
 
 	ctx, cancel := signal.NotifyContext(

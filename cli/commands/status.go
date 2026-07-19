@@ -77,7 +77,7 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status, extraGitArgs [
 	return nil
 }
 
-const colorDim = "#808080"
+const colorDim = colorGrey
 
 // glyphFor maps a secret state to a git-style single-character marker and its
 // color. The character carries the meaning so it stays useful without color.
@@ -85,13 +85,13 @@ const colorDim = "#808080"
 func glyphFor(state repo.SecretState) (glyph, color string) {
 	switch state {
 	case repo.SecretStateNotInSync:
-		return "M", "#FFD000" // modified - needs seal
+		return "M", colorYellow // modified - needs seal
 	case repo.SecretStateNoSealedPath:
-		return "A", "#00FF00" // added - never sealed
+		return "A", colorGreen // added - never sealed
 	case repo.SecretStateNoRevealedPath:
 		return "∅", "#00AAFF" // sealed, not revealed here
 	case repo.SecretStateUserHasNoAccess:
-		return "x", "#FF5555" // not a recipient
+		return "x", colorRed // not a recipient
 	case repo.SecretStateInSync:
 		return "✓", colorDim // in sync
 	case repo.SecretStateUnmanaged:
@@ -205,7 +205,7 @@ func printStatusTree(sesamDir string, status *repo.Status, all, showUsers bool) 
 
 	if visible == 0 {
 		fmt.Println(out.String("✓ nothing to show - everything in sync").
-			Foreground(out.Color("#00FF00")).String())
+			Foreground(out.Color(colorGreen)).String())
 	} else {
 		l := list.NewWriter()
 		// Tweak the connected style so the manually printed "." root reads like

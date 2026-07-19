@@ -1,0 +1,16 @@
+# `sesam verify --forge-check` runs cleanly when no forge-backed users exist:
+# age-key users have no upstream keys to re-fetch. Detecting real upstream drift
+# needs a live forge, which is out of scope for the offline test suite.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+
+exec sesam verify --forge-check
+stderr 'Forge Check: ok'

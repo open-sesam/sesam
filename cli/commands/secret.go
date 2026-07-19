@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/repo"
@@ -14,9 +15,12 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return fmt.Errorf("need at least one path")
 	}
 
-	groups := cmd.StringSlice("group")
-	if len(groups) == 0 {
-		printInfo("no groups specified, assuming `--group admin` only - only admins can decrypt")
+	groups, additive, err := resolveGroups(cmd, false)
+	if err != nil {
+		return err
+	}
+	if len(groups) == 0 && !additive {
+		printInfo("no groups specified, assuming `--group admin` - only admins can decrypt!")
 	}
 
 	paths, err := toRepoPaths(r.SesamDir(), cmd.Args().Slice())
@@ -24,15 +28,18 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
-	if err := r.SecretAdd(paths, groups, cmd.Bool("nested")); err != nil {
-		return err
-	}
+	noSeal := cmd.Bool("no-seal")
+	nested := cmd.Bool("nested")
+	return r.Update(func(s *repo.Stage) error {
+		if err := s.SecretAdd(paths, groups, additive, nested); err != nil {
+			return err
+		}
+		if noSeal {
+			return nil
+		}
 
-	if cmd.Bool("no-seal") {
-		return nil
-	}
-
-	return r.SealAll()
+		return s.Seal(cmd.Bool("seal-all"))
+	})
 }
 
 // HandleRemove removes a secret path from sesam metadata.
@@ -47,11 +54,20 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
-	if err := r.SecretRemove(paths); err != nil {
+	if err := r.Update(func(s *repo.Stage) error {
+		if err := s.SecretRemove(paths); err != nil {
+			return err
+		}
+		return s.Seal(cmd.Bool("seal-all"))
+	}); err != nil {
 		return err
 	}
 
-	return r.SealAll()
+	if !cmd.Bool("force") {
+		return nil
+	}
+
+	return os.RemoveAll(revealedPath)
 }
 
 func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
@@ -67,10 +83,13 @@ func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
-	if err := r.SecretMove(paths[0], paths[1]); err != nil {
-		return err
-	}
+	nested := cmd.Bool("nested")
 
-	// move always needs an seal, otherwise state is pretty broken
-	return r.SealAll()
+	// move always needs a seal, otherwise state is pretty broken
+	return r.Update(func(s *repo.Stage) error {
+		if err := s.SecretMove(paths[0], paths[1], nested); err != nil {
+			return err
+		}
+		return s.Seal(cmd.Bool("seal-all"))
+	})
 }

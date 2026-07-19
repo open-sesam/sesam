@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -28,9 +27,10 @@ const (
 	sesamInitialHashSeed = "sesam.init"
 )
 
-// Repo-relative audit-log paths (relative to the sesam root).
-func auditLogPath() string  { return filepath.Join(".sesam", "audit", "log.jsonl") }
-func auditInitPath() string { return filepath.Join(".sesam", "audit", "init") }
+// Repo-relative audit-log paths (relative to the sesam root). base selects the
+// sesam-internal directory ("" = live ".sesam"); a stage passes ".sesam-tmp".
+func auditLogPath(base string) string  { return filepath.Join(sesamBase(base), "audit", "log.jsonl") }
+func auditInitPath(base string) string { return filepath.Join(sesamBase(base), "audit", "init") }
 
 // Operation specifies what Operation a specific entry describes.
 // It is unlikely you need to use this directly.
@@ -352,6 +352,11 @@ type AuditLog struct {
 	// root confines audit-log file I/O to the repository. Paths are relative.
 	root *os.Root `json:"-"`
 
+	// base is the sesam-internal directory the log/init paths live under.
+	// Empty means the live ".sesam"; a stage sets it to its fork dir so the
+	// copied log is appended to inside the fork.
+	base string `json:"-"`
+
 	// The hash from the .sesam/audit/init file.
 	// It should be the same hash as the prev_hash of the 2nd entry.
 	InitHash string `json:"-"`
@@ -476,15 +481,48 @@ func encryptAuditKey(key [32]byte, recps Recipients) ([]byte, error) {
 
 // WriteAuditKey rewrites the log with the same symmetric key but a new recipient
 // set. The update is atomic: a tmp file is written and then renamed into place.
+// SetBase points the log's paths at base (a stage's fork dir). Only affects
+// path-based reopens; an already-open fd keeps writing to its inode.
+func (al *AuditLog) SetBase(base string) { al.base = base }
+
+// Fork returns an independent copy of the log bound to base (a stage's fork
+// dir). The in-memory entries are copied (so appends on the fork never touch
+// the live slice) and a fresh append fd is opened on the already-copied log
+// file at base. The symmetric key is reused; a new AEAD is derived to avoid
+// sharing cipher state. The caller is responsible for having materialized the
+// log file at base beforehand (Repo.materializeFork byte-copies it).
+func (al *AuditLog) Fork(root *os.Root, base string) (*AuditLog, error) {
+	aead, err := chacha20poly1305.New(al.key[:])
+	if err != nil {
+		return nil, fmt.Errorf("derive aead for fork: %w", err)
+	}
+
+	fd, err := root.OpenFile(auditLogPath(base), os.O_APPEND|os.O_SYNC|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open forked audit log: %w", err)
+	}
+
+	return &AuditLog{
+		Entries:  append([]AuditEntrySigned(nil), al.Entries...),
+		SesamDir: al.SesamDir,
+		root:     root,
+		base:     base,
+		InitHash: al.InitHash,
+		fd:       fd,
+		key:      al.key,
+		aead:     aead,
+	}, nil
+}
+
 func (al *AuditLog) WriteAuditKey(recps Recipients) error {
-	logPath := auditLogPath()
+	logPath := auditLogPath(al.base)
 
 	newLine1, err := encryptAuditKey(al.key, recps)
 	if err != nil {
 		return err
 	}
 
-	tmp, err := renameio.NewPendingFile(logPath, renameio.WithRoot(al.root), renameio.WithTempDir(SesamTmpDir()), renameio.WithPermissions(0o600))
+	tmp, err := renameio.NewPendingFile(logPath, renameio.WithRoot(al.root), renameio.WithTempDir(sesamTmpDir(al.base)), renameio.WithPermissions(0o600))
 	if err != nil {
 		return fmt.Errorf("create tmp audit log: %w", err)
 	}
@@ -526,9 +564,9 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 		return fmt.Errorf("init aead with new key: %w", err)
 	}
 
-	logPath := auditLogPath()
+	logPath := auditLogPath(al.base)
 
-	tmp, err := renameio.NewPendingFile(logPath, renameio.WithRoot(al.root), renameio.WithTempDir(SesamTmpDir()), renameio.WithPermissions(0o600))
+	tmp, err := renameio.NewPendingFile(logPath, renameio.WithRoot(al.root), renameio.WithTempDir(sesamTmpDir(al.base)), renameio.WithPermissions(0o600))
 	if err != nil {
 		return fmt.Errorf("create tmp audit log: %w", err)
 	}
@@ -572,34 +610,11 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 	return nil
 }
 
-// cleanupAuditTmp removes any leftover tmp files created by renameio in a
-// previous WriteAuditKey or RotateKey run that crashed before the rename.
-// Under os.Root, renameio creates them at the repository root as
-// ".log.jsonlXXXXXX" (dot prefix + random suffix). We don't know how much was
-// written, so we just delete and let the caller retry.
-func cleanupAuditTmp(root *os.Root) {
-	tmpDir := SesamTmpDir()
-	entries, err := fs.ReadDir(root.FS(), tmpDir)
-	if err != nil {
-		return
-	}
-
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), ".log.jsonl") {
-			continue
-		}
-
-		p := filepath.Join(tmpDir, e.Name())
-		slog.Warn("removing leftover tmp audit log", slog.String("path", p))
-		_ = root.Remove(p)
-	}
-}
-
 // InitAuditLog initializes an empty audit log on repo init.
 // It creates the first init entry which also establishes the initial admin user.
 func InitAuditLog(root *os.Root, signer Signer, recps Recipients, admin DetailUserTell) (*AuditLog, error) {
-	logPath := auditLogPath()
-	initPath := auditInitPath()
+	logPath := auditLogPath("")
+	initPath := auditInitPath("")
 
 	if err := root.MkdirAll(filepath.Dir(initPath), 0o700); err != nil {
 		return nil, err
@@ -874,10 +889,15 @@ func loadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
 // LoadAuditLog reads the audit log from disk and gives you a handle to operate on it.
 // It does NOT verify the log yet. Call Verify() for that.
 func LoadAuditLog(root *os.Root, ids Identities) (*AuditLog, error) {
-	cleanupAuditTmp(root)
+	return LoadAuditLogAt(root, "", ids)
+}
 
-	logPath := auditLogPath()
-	initPath := auditInitPath()
+// LoadAuditLogAt is LoadAuditLog but reads from the sesam-internal directory
+// base ("" = live ".sesam"). A stage passes its fork dir (".sesam-tmp") so the
+// returned handle reads/appends the copied log inside the fork.
+func LoadAuditLogAt(root *os.Root, base string, ids Identities) (*AuditLog, error) {
+	logPath := auditLogPath(base)
+	initPath := auditInitPath(base)
 
 	al, err := loadAuditLogFile(root, logPath, ids)
 	if err != nil {
@@ -886,6 +906,7 @@ func LoadAuditLog(root *os.Root, ids Identities) (*AuditLog, error) {
 
 	al.SesamDir = root.Name()
 	al.root = root
+	al.base = base
 
 	initData, err := readFileLimitedRoot(root, initPath, 256)
 	if err != nil {

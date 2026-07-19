@@ -6,14 +6,13 @@ As mentioned during [Initialisation](/init.md) there is always at least one admi
 At the time you created your repo, you would see something like this in your config:
 
 ```yaml
-config:
-  users:
-    - name: bob
-      desc: Bob the Builder
-      pub: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
-  groups:
-    admin:
-      - bob
+users:
+  - name: bob
+    desc: Bob the Builder
+    key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
+groups:
+  admin:
+    - bob
 ```
 
 As you can see, `bob` is an admin. Let's assume we are building a cloud backend
@@ -24,13 +23,13 @@ deployment. We can do so by adding some more users and a new group:
    users:
      - name: bob
        desc: Bob the Builder
-       pub: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
+       key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
 +    - name: alice
 +      desc: Mrs. Wonderland
-+      pub: github:alice
++      key: github:alice
 +    - name: peter
 +      desc: Peter Lustig
-+      pub: file://keys/peter.txt
++      key: file://keys/peter.txt
    groups:
      admin:
        - bob
@@ -47,7 +46,15 @@ We've used two new ways to fetch the keys:
 likely already know the user name of your peer on your favorite forge.
 The public key will be fetched only once initially and the result is cached. Apart from the first time there is no online access required therefore.
 * Peter on the other hand might not have an forge account. Maybe he also has an awful long RSA key that you don't want to put in the config verbatim. In this case you can just create a file in the repo and add it there. We recommend adding an exception to `.gitignore` if you want to push those public keys.
-- The key of `bob` was deferred from the identity used during init. If you use the same public key for (e.g.) your GitHub account you can also write something like `github:bob` there.
+- The key of `bob` was derived from the identity used during init. If you use the same public key for (e.g.) your GitHub account you can also write something like `github:bob` there.
+
+
+```admonish warning
+The `sesam apply` feature is not yet implemented.
+Please see here to view the [plan](https://github.com/open-sesam/sesam/issues/62).
+
+The documentation here is just a preview. Use the imperative workflow for now.
+```
 
 
 Once we've changed the config we can this command, which should be familiar by now. This will then adjust the repository state accordingly:
@@ -93,8 +100,23 @@ You can have the same effect without editing configs:
 # Add users like above:
 $ sesam tell --user alice --recipient "github:alice"
 $ sesam tell --user peter --recipient "file://keys/peter.txt"
-# --access can be given several times:
-$ sesam add some_password.txt --access deploy --access ops
+# --group  can be given several times:
+$ sesam add some_password.txt --group deploy --group ops
+```
+
+`sesam tell` also works on a user that already exists: it changes their groups
+(`--group` replaces the set, `--group-add`/`-G` adds to it) and adds any
+`--recipient` you pass. For an existing user both are optional, but you have to
+give at least one. Creating a brand-new user requires a `--recipient`; groups
+are optional there too.
+
+```bash
+# alice already exists: set her groups to just "ops"
+$ sesam tell --user alice --group ops
+# ...and additionally put her in "deploy" without dropping "ops"
+$ sesam tell --user alice --group-add deploy
+# register a second device key for her without touching her groups
+$ sesam tell --user alice --recipient "file://keys/alice-laptop.txt"
 ```
 
 Files automatically get re-encrypted ("sealed") after each operation.
@@ -129,17 +151,30 @@ sesam user list
 ```bash
 # Change the groups a user is in
 sesam user change-groups --user alice --group a --group b
+
+# Append, instead of overwriting:
+sesam user change-groups --user alice --group-add c
+
+# Can be also done by tell for existing users:
+sesam tell --user alice --group a --group b
+
 ```
 
 ```bash
 # Add one or more recipients to an existing user
 sesam user add-recipient --user alice -r "..." -r "..."
+
+# Can be also done by tell for existing users:
+sesam tell --user alice --recipient "..."
 ```
 
 
 ```bash
 # Remove one or more recipients from an existing user.
 sesam user remove-recipient --user alice -r "..."
+
+# Alternatively, invert it and delete all but the specified:
+sesam user remove-recipient --user alice --all-except -r "..."
 ```
 
 
@@ -153,3 +188,4 @@ sesam user regen-sign-key --user alice
 # Rename an existing user.
 sesam user rename ellisch alice
 ```
+

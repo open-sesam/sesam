@@ -35,7 +35,7 @@ func shortID(s string, full bool) string {
 	if full || len(s) <= 8 {
 		return s
 	}
-	return s[:8]
+	return s[:12]
 }
 
 func formatLogTime(t time.Time, full bool) string {
@@ -72,7 +72,7 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 	secretColor := termenv.ANSIBrightMagenta
 	repoColor := termenv.ANSIBrightGreen
 	groupColor := termenv.ANSIBrightYellow
-	dim := out.Color("#808080")
+	dim := out.Color(colorGrey)
 
 	c := func(v any, col termenv.Color) string {
 		return out.String(fmt.Sprintf("%v", v)).Foreground(col).String()
@@ -215,7 +215,7 @@ func HandleLog(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 	full := cmd.Bool("full")
 	out := termenv.NewOutput(os.Stdout)
-	dim := out.Color("#808080")
+	dim := out.Color(colorGrey)
 	timeColor := out.Color("#008000")
 	userColor := termenv.ANSIBrightCyan
 

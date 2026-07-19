@@ -7,9 +7,60 @@ Once that will be available we will mention it here:
 
 Please check the [Releases tab](https://github.com/open-sesam/sesam/releases) for download options and release notes.
 
+### Signatures
+
+We sign our releases with an [ed25519 key](https://en.wikipedia.org/wiki/EdDSA),
+the private key is uploaded in encrypted form as `.sesam` directory inside our
+this very repository. Here's how you verify the validity of the signature when
+downloading:
+
+#### Grab the `allowed_signers.txt`
+
+This file contains the public keys of the people that are allowed to sign git tags and artifacts:
+
+```bash
+curl -LO https://raw.githubusercontent.com/open-sesam/sesam/main/allowed_signers.txt
+```
+
+For this step, only the releaser key is important.
+
+
+#### Verify the signature
+
+1. Download the `checksums.txt` of that specific release.
+2. Download the `checksums.txt.sig` of that specific release.
+3. Download the right `.tar.gz` for your platform.
+
+
+```bash
+# Note: The signature is build over the list of checksums.
+ssh-keygen -Y verify -f allowed_signers.txt -I release@sesam -n sesam-release -s checksums.txt.sig < checksums.txt
+```
+
+#### Check that the checksums are actually correct
+
+Now that we know that checksums are the ones that should be.
+We just need to make sure the archives are actually correct.
+
+```bash
+sha256sum --ignore-missing -c checksums.txt
+```
+
+If that prints `OK` you're fine!
+
+----
+
+If you understood the previous steps you can also run this command in one go:
+
+```bash
+# This is convenience for the three steps above - you should of course verify that script first.
+curl -sL https://raw.githubusercontent.com/open-sesam/sesam/main/scripts/verify-release.sh | \
+  bash -s sesam_x.y.z_os_arch.tar.gz
+```
+
 # Compiling from source
 
-We use [mise](https://mise.en.dev/) to manage our development tools. All you
+We use [mise](https://mise.jdx.dev/) to manage our development tools. All you
 have to do to have exactly the same tools in exactly the right version is to
 follow the [guide](https://mise.en.dev/getting-started.html). The TL;DR is:
 
@@ -29,9 +80,28 @@ Alternatively, if you already have `go` installed:
 $ go install opensesam.org/sesam@latest
 ```
 
+
 # Docker
 
-TODO: Docker images can be useful for CI pipelines, we already have a Dockerfile, but don't upload the image yet.
+Every release is also available as docker image:
+
+```bash
+# Please swap `latest` with a release of your choice.
+# Mount your repo & identity anywhere you want, you should specify them with command line options:
+docker run -it -v ~/.ssh/id_rsa:/key -v .:/repo ghcr.io/open-sesam/sesam:latest -r /repo -i /key status
+```
+
+
+This can be useful for CI/CD pipelines or when you can't install `sesam` otherwise.
+
+```admonish warn
+Git integration will not be working with docker. Also storing passphrases will not work.
+
+You will also have to mount the sesam repo and your identity into the container with the `-v` option.
+
+For real, interactive usage we very much recommend the regular version of `sesam`, the purpose of this image
+is really to have just a minimal image for automation purposes.
+```
 
 # Changelog
 

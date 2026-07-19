@@ -28,6 +28,8 @@ func encryptRepoIdentityForTest(t *testing.T, plaintext string, passphrase []byt
 
 	recipient, err := age.NewScryptRecipient(string(passphrase))
 	require.NoError(t, err)
+	// Tests only: drop age's ~1s default scrypt work factor (logN=18) so the
+	// fixture encrypts and decrypts near-instantly. Real identities keep it.
 	recipient.SetWorkFactor(10)
 
 	var buf bytes.Buffer
@@ -60,7 +62,7 @@ func TestExpandHomeDir(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := expandHomeDir(tc.in)
+			got, err := ExpandHomeDir(tc.in)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got)
 		})
@@ -207,65 +209,6 @@ func TestLoadIdentitiesWithEncryptedAgeIdentity(t *testing.T) {
 	require.Contains(t, provider.prompt, "sesam")
 	require.Contains(t, provider.prompt, filepath.Base(path))
 	require.Contains(t, provider.prompt, core.KeyFingerprint([]byte(key)))
-}
-
-func TestSplitObjectPath(t *testing.T) {
-	cases := []struct {
-		name     string
-		pathname string
-		wantOk   bool
-		wantDir  string
-		wantPath string
-	}{
-		{
-			name:     "worktree root",
-			pathname: ".sesam/objects/secrets/token.sesam",
-			wantOk:   true,
-			wantDir:  ".",
-			wantPath: "secrets/token",
-		},
-		{
-			name:     "nested sesam dir",
-			pathname: "subdir/.sesam/objects/secrets/token.sesam",
-			wantOk:   true,
-			wantDir:  "subdir",
-			wantPath: "secrets/token",
-		},
-		{
-			name:     "deep revealed path",
-			pathname: ".sesam/objects/a/b/c/d.sesam",
-			wantOk:   true,
-			wantDir:  ".",
-			wantPath: "a/b/c/d",
-		},
-		{
-			name:     "missing .sesam suffix",
-			pathname: ".sesam/objects/token",
-			wantOk:   false,
-		},
-		{
-			name:     "no objects segment",
-			pathname: "outside/path.txt",
-			wantOk:   false,
-		},
-		{
-			name:     "completely unrelated",
-			pathname: "",
-			wantOk:   false,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			gotDir, gotPath, ok := splitObjectPath(tc.pathname)
-			require.Equal(t, tc.wantOk, ok)
-			if !tc.wantOk {
-				return
-			}
-			require.Equal(t, tc.wantDir, gotDir)
-			require.Equal(t, tc.wantPath, gotPath)
-		})
-	}
 }
 
 func TestIsInitialized(t *testing.T) {

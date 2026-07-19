@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"golang.org/x/crypto/sha3"
 )
@@ -119,9 +120,15 @@ func verifyIntegritySingleSecret(
 		return
 	}
 
+	recipientsHashBytes, _, err := multicodeDecode(sig.RecipientsHash)
+	if err != nil {
+		report.add(vs.RevealedPath, fmt.Sprintf("failed to decode recipients hash: %v", err))
+		return
+	}
+
 	sealer, err := kr.Verify(
 		SesamDomainSignSecretTag,
-		append(cipherTextHashBytes, hmacContentHashBytes...),
+		slices.Concat(cipherTextHashBytes, hmacContentHashBytes, recipientsHashBytes),
 		sig.Signature,
 		sig.SealedBy,
 	)

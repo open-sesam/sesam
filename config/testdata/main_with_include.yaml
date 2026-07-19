@@ -1,0 +1,12 @@
+users:
+  - name: test_user
+    key:
+      - key
+groups:
+  group1:
+    - test_user
+secrets:
+  - include: sub
+  - path: top.txt
+    access:
+      - group1

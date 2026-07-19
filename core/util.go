@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,12 +12,107 @@ import (
 	"strings"
 )
 
-// SesamTmpDir is the repo-relative scratch directory. It is passed to renameio
-// as the temp dir so atomic writes stage inside .sesam/ rather than at the repo
-// root (and never in the worktree). Callers must ensure it exists; ensureSesamDirs
-// and BuildSecretManager do.
+// PruneEmptyDirs removes directories beneath dir (a root-relative path) whose
+// subtree contains no regular files, deepest first. dir itself is never
+// removed, nor is any directory whose root-relative path is in `except“ (those
+// are skipped without descending). If allow is non-nil it is called for each
+// removal candidate - return true to allow and return an error to stop
+// entirely.
+func PruneEmptyDirs(root *os.Root, dir string, except map[string]bool, allow func(rel string) (bool, error)) ([]string, error) {
+	dir = filepath.Clean(dir)
+	if _, err := root.Stat(dir); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	hasFile := map[string]bool{} // dirs with a file somewhere in their subtree
+	var candidates []string
+
+	walkErr := fs.WalkDir(root.FS(), filepath.ToSlash(dir), func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel := filepath.FromSlash(p)
+		if d.IsDir() {
+			if rel == dir {
+				return nil
+			}
+			if except[rel] {
+				return fs.SkipDir
+			}
+			candidates = append(candidates, rel)
+			return nil
+		}
+		// Mark every ancestor up to (and including) dir as non-empty.
+		for a := filepath.Dir(rel); ; a = filepath.Dir(a) {
+			hasFile[a] = true
+			if a == dir || a == "." {
+				break
+			}
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+
+	var empties []string
+	for _, c := range candidates {
+		if !hasFile[c] {
+			empties = append(empties, c)
+		}
+	}
+	// Deepest first, so a parent is only removed after its emptied children.
+	slices.SortFunc(empties, func(a, b string) int { return len(b) - len(a) })
+
+	removed := make([]string, 0, len(empties))
+	for _, e := range empties {
+		if allow != nil {
+			ok, err := allow(e)
+			if err != nil {
+				return removed, err
+			}
+			if !ok {
+				continue
+			}
+		}
+		if err := root.Remove(e); err != nil {
+			return removed, fmt.Errorf("remove empty dir %s: %w", e, err)
+		}
+		removed = append(removed, e)
+	}
+	return removed, nil
+}
+
+// defaultSesamBase is the sesam-internal directory name. A stage uses a
+// sibling fork directory instead; see sesamBase.
+const defaultSesamBase = ".sesam"
+
+// sesamBase resolves the sesam-internal base directory. The empty string means
+// the live ".sesam" tree; a stage passes its fork dir (".sesam-tmp") so the
+// same path helpers write into the fork. All paths under this base are swapped
+// atomically on commit, so the temp dir (SesamTmpDir) stays in the live tree:
+// renameio renames cross-tree within the same os.Root.
+func sesamBase(base string) string {
+	if base == "" {
+		return defaultSesamBase
+	}
+	return base
+}
+
+// SesamTmpDir is the repo-relative scratch directory for the live tree. It is
+// passed to renameio as the temp dir so atomic writes stage inside .sesam/
+// rather than at the repo root (and never in the worktree). Callers must ensure
+// it exists; ensureSesamDirs and BuildSecretManager do.
 func SesamTmpDir() string {
-	return filepath.Join(".sesam", "tmp")
+	return sesamTmpDir("")
+}
+
+// sesamTmpDir is SesamTmpDir under a given base. A stage passes its fork dir so
+// renameio temps for fork operations land inside the fork and are reaped with
+// it on rollback/crash — there is then nothing stray to garbage-collect in the
+// live tree.
+func sesamTmpDir(base string) string {
+	return filepath.Join(sesamBase(base), "tmp")
 }
 
 // ValidUserName checks that a user name is safe for use in file paths and log entries.
@@ -44,22 +140,27 @@ func ValidUserName(name string) error {
 	return nil
 }
 
+// paths that are required for sesam to work,
+// so they shouldn't be encrypted...
+var forbiddenBasenames = map[string]bool{
+	".gitignore":               true,
+	".gitattributes":           true,
+	"sesam.yml":                true,
+	defaultSesamBase + ".lock": true,
+}
+
 func IsForbiddenPath(revealedPath string) error {
-	if revealedPath == ".sesam" || strings.HasPrefix(revealedPath, ".sesam"+string(filepath.Separator)) {
-		return fmt.Errorf("secret path may not live in .sesam: %s", revealedPath)
-	}
-
-	if filepath.Base(revealedPath) == "sesam.yml" {
-		return fmt.Errorf("you can't seal sesam.yml")
-	}
-
-	if filepath.Base(revealedPath) == ".gitattributes" {
-		return fmt.Errorf("you shouldn't seal .gitattributes")
+	if b := filepath.Base(revealedPath); forbiddenBasenames[b] {
+		return fmt.Errorf("you can't seal %s", b)
 	}
 
 	for _, elem := range strings.Split(revealedPath, string(filepath.Separator)) {
 		if elem == ".sesam" {
 			return fmt.Errorf("encrypting files in .sesam/ is not allowed")
+		}
+
+		if elem == ".sesam-tmp" {
+			return fmt.Errorf("encrypting files in .sesam-tmp/ is not allowed")
 		}
 
 		if elem == ".git" {
@@ -79,8 +180,12 @@ func validSecretPathFormat(revealedPath string) error {
 		return fmt.Errorf("absolute paths not allowed in revealed path: %s", revealedPath)
 	}
 
-	if strings.Contains(revealedPath, "..") {
-		return fmt.Errorf("path may not include '..': %s", revealedPath)
+	// Reject path traversal, but only a real ".." path segment - the substring
+	// ".." appears legitimately inside filenames (e.g. "s.a.r..geojson").
+	for _, elem := range strings.Split(revealedPath, string(filepath.Separator)) {
+		if elem == ".." {
+			return fmt.Errorf("path may not include a '..' segment: %s", revealedPath)
+		}
 	}
 
 	return nil
@@ -112,6 +217,19 @@ func deduplicate[T cmp.Ordered](s []T) []T {
 	return slices.Compact(c)
 }
 
+// unionGroups returns the deduplicated union of base and extra.
+func unionGroups(base, extra []string) []string {
+	return deduplicate(slices.Concat(base, extra))
+}
+
+// withoutAdmin drops the implicit "admin" group. Secret access lists carry it
+// only after normalization, so it must not leak into a persisted set.
+func withoutAdmin(groups []string) []string {
+	return slices.DeleteFunc(slices.Clone(groups), func(g string) bool {
+		return g == "admin"
+	})
+}
+
 func closeLogged(fd io.Closer) {
 	if err := fd.Close(); err != nil {
 		slog.Warn(
@@ -130,20 +248,28 @@ func PathExists(p string) bool {
 	return err == nil
 }
 
-// copyFile materializes `dst` with the same contents as `src`. It tries
-// a hardlink first (zero-copy when src and dst sit on the same
-// filesystem and the FS supports it - Linux/macOS/BSD via link(2),
-// Windows on NTFS via CreateHardLinkW) and falls back to a byte-for-byte
-// copy on any error (EXDEV across mounts, EPERM on FAT/some FUSE,
-// EEXIST, ...).
+// CopyFile materializes `dst` with the same contents as `src`. When tryLink is
+// set it attempts a hardlink first (zero-copy when src and dst sit on the same
+// filesystem and the FS supports it - Linux/macOS/BSD via link(2), Windows on
+// NTFS via CreateHardLinkW) and falls back to a byte-for-byte copy on any error
+// (EXDEV across mounts, EPERM on FAT/some FUSE, EEXIST, ...). Pass tryLink=false
+// to force a copy (e.g. for a file the caller intends to mutate independently of
+// src, like the staged audit log).
 //
-// Hardlinks share the source inode, so dst inherits its mode/owner/mtime.
-// The byte copy creates a fresh inode at mode 0o600. Both call sites
-// today operate exclusively under .sesam/ (0o700 dirs, 0o600 files) so
-// no permission widening can result either way.
-func copyFile(root *os.Root, src, dst string) error {
-	if err := root.Link(src, dst); err == nil {
-		return nil
+// Hardlinks share the source inode, so dst inherits its mode/owner/mtime. The
+// byte copy creates a fresh inode at mode 0o600. The caller (the repo stage
+// fork) operates exclusively under .sesam/ (0o700 dirs, 0o600 files), so no
+// permission widening can result either way. The byte-copy path fsyncs dst; a
+// hardlink does not (its inode data is already durable, and the new directory
+// entry's durability is the caller's concern, e.g. via a directory fsync).
+func CopyFile(root *os.Root, src, dst string, tryLink bool) error {
+	// A hardlink shares src's already-durable inode, so it needs no fsync (the
+	// new directory entry's durability is the caller's concern). A byte copy
+	// creates a fresh inode whose data we fsync before returning.
+	if tryLink {
+		if err := root.Link(src, dst); err == nil {
+			return nil
+		}
 	}
 
 	srcFd, err := root.Open(src)
@@ -161,6 +287,10 @@ func copyFile(root *os.Root, src, dst string) error {
 		_ = dstFd.Close()
 		_ = root.Remove(dst)
 		return fmt.Errorf("copy %s -> %s: %w", src, dst, err)
+	}
+	if err := dstFd.Sync(); err != nil {
+		_ = dstFd.Close()
+		return fmt.Errorf("sync %s: %w", dst, err)
 	}
 	return dstFd.Close()
 }

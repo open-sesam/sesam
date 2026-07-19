@@ -1,4 +1,4 @@
-# $schema: https://raw.githubusercontent.com/open-sesam/sesam/refs/heads/main/config/sesam_schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/open-sesam/sesam/refs/heads/main/config/sesam_schema.json
 # See: https://github.com/redhat-developer/yaml-language-server#using-modeline
 users:
   - name: [[ yaml .InitialUser ]]

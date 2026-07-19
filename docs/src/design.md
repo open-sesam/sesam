@@ -16,7 +16,7 @@ This is a *very* brief summary of what components we have.
 - **recipient:** A public key attached to a user, required fro decryption (terminology copied from `age`).
 - **identity:** The private key used by users, required for decryption (terminology copied from `age`).
 - **audit log**: A log that keeps track of what file operations were done on the repository. It is signed and append-only,
-  so that tampering would be immediately detected. By replaying the log we can defer the **verified state**.
+  so that tampering would be immediately detected. By replaying the log we can derive the **verified state**.
 - **verified state:** The state that we expect in the repository. Contains information about all users, groups and secrets.
 - **config:** The `sesam.yml` file(s) on disk. They may diverge from what the **verified state** describes. If this is the case,
   `sesam config diff` will show the differences. We call this the *desired state*.
@@ -177,15 +177,25 @@ The header contains this information encoded as a single JSON line:
 
 ```json
 {
-  "path": "README.md",
-  "hash": "FiD+6bLnYpaa8RWQpfwrQKTVDZfFz17qAmfKjxdsFxOQcA==",
-  "signature": "7aEDQNZXqGc4p593Nnxjq4ap3eOiriXe+oB/AOs5wW9AJVP45a4QPSk/tHfeXe2xT+z0NjmBX7BCR+a4ZSD1e9Ot4Qk=",
-  "sealed_by": "alice"
+  "path": "secret.txt",
+  "cipher_text_hash": "FiB0eH3drhYns5xqSy2sXINndqwUgyShJXL2u+zOWtqouQ==",
+  "hmac_content_hash": "FiCVsGLjTYYH7ECkxR3Kou4cx1drQ+3EjDnhHQMLLU+I8g==",
+  "recipients_hash": "FiBhMoSClLQvUewkfIPU9Rl0lE1UCCxt2aHUS/uQofv21A==",
+  "signature": "7aEDQKhzZ4EDbFoMaTC0UtSaKzt8axfBEcR5UAlHbyZM+DGA/qL72oUXq5cPOvMBeQ6IyUI8sfqnVOa2F1XQx/a9jgM=",
+  "sealed_by": "user",
+  "version": 1
 }
 ```
 
 - The hash used is `sha3-256`
 - The signature used is `ed25519` using the sealer's signing key.
+- `recipients_hash` is an order-independent `sha3-256` over the recipients'
+  public keys. It lets an incremental seal detect a changed recipient set (e.g.
+  a user told into a group) without decrypting the object. It is folded into the
+  signed payload alongside the content hashes, so a forged hash is rejected on
+  verify.
+- `hmac_content_hash`: Is the content hash as HMAC using the file's age encryption key.
+- `cipher_text_hash`: Is the hash of the encrypted content.
 - On reveal, `sealed_by` is checked against the access list of `path` in the
   verified state. A signature is rejected if its sealer has no current access
   to the secret, even when the signature is cryptographically valid.
@@ -367,6 +377,8 @@ to identify *which* secret changed between two commits.
 On the other side we do the following things to stay reliable in case of crashes:
 
 - We use atomic renames where possible to avoid half-written files and inconsistent state.
+  For larger operations we have a staging tree at `.sesam-tmp` where all operations need to succeed
+  before we swap it back with the main state.
 - We use file locking to avoid having several processes working on the repo.
 - The audit log can detect logic failures.
 
@@ -450,16 +462,12 @@ A very hard thing to mitigate. We don't do very well here yet.
 
 ### Possible improvements
 
-- Limit each user to at most 2 keys, to avoid losing overview.
 - Using forge-ids or links as public key input has transparency issues:
   the resolved key material is pinned into the audit log on `tell` ([TOFU](https://en.wikipedia.org/wiki/Trust_on_first_use)),
   but the *first* resolution still trusts the forge. Surface a clear
   summary of which user/public keys are about to be recorded before
   signing the audit entry, and document that side-channel exchange is
   safer when high assurance is required.
-- Make seal atomic (or at least close to) - interrupting it might
-  lead to a failed root hash check, since seal + rm of the previous
-  secret is not currently transactional.
 
 ----
 

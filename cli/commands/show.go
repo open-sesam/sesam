@@ -44,16 +44,24 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	// A relative argument is translated into a sesam-relative path and read
-	// through the root. An absolute path comes from git's diff textconv (a
-	// blob extracted to a temp file outside the repo) and is passed through
-	// untouched - ShowSecret opens it directly.
+	// Absolute paths are an explicit exception: show decrypts any .sesam file
+	// directly (like `age -d`), and git's diff textconv also hands us an
+	// absolute temp-file path for an extracted blob. Either way it is passed
+	// through untouched - ShowSecret opens it directly.
+	//
+	// A relative argument is translated into a sesam-relative path. toRepoPath
+	// only errors when the arg escapes the sesam dir (e.g. `../outside`), so
+	// surface that rather than silently reading a bad path and ending up at the
+	// misleading user-name fallback. Plain names (no escape) resolve fine and
+	// still fall through to the user lookup when they aren't a secret.
 	showPath := object
 	if !filepath.IsAbs(object) {
 		cwd, _ := os.Getwd()
-		if rel, relErr := toRepoPath(sesamDir, cwd, object); relErr == nil {
-			showPath = rel
+		rel, relErr := toRepoPath(sesamDir, cwd, object)
+		if relErr != nil {
+			return relErr
 		}
+		showPath = rel
 	}
 
 	root, rootErr := os.OpenRoot(sesamDir)

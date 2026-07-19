@@ -38,7 +38,7 @@ func TestSecretAdd_RelativeConfigPathSameDir(t *testing.T) {
 }
 
 func Test_readYamlFile(t *testing.T) {
-	cr, err := loadConfig(t, "../test/files/test_read_yaml_file.yaml")
+	cr, err := loadConfig(t, "testdata/test_read_yaml_file.yaml")
 	require.NoError(t, err)
 
 	users, err := cr.Users()
@@ -56,7 +56,7 @@ func Test_readYamlFile(t *testing.T) {
 // top-level secrets: key (which goccy parses as a single *ast.MappingValueNode
 // rather than an *ast.MappingNode) resolves and merges into the main file.
 func Test_resolveIncludeSecretsOnly(t *testing.T) {
-	cr, err := loadConfig(t, "../test/files/main_with_include.yaml")
+	cr, err := loadConfig(t, "testdata/main_with_include.yaml")
 	require.NoError(t, err)
 
 	secrets, err := cr.Secrets()
@@ -89,8 +89,9 @@ func TestLoad_RejectsSelfInclude(t *testing.T) {
 func TestLoad_RejectsIncludeCycle(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sesam.yml")
-	require.NoError(t, os.WriteFile(main, []byte("secrets:\n  - include: a.yml\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.yml"), []byte("secrets:\n  - include: sesam.yml\n"), 0o644))
+	require.NoError(t, os.WriteFile(main, []byte("secrets:\n  - include: sub\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "sesam.yml"), []byte("secrets:\n  - include: ..\n"), 0o644))
 
 	_, err := loadConfig(t, main)
 	require.Error(t, err)

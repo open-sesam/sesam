@@ -98,6 +98,36 @@ func TestValidSecretPathFormatNormalPath(t *testing.T) {
 	require.NoError(t, validSecretPathFormat("secrets/db_password"))
 }
 
+func TestValidSecretPathFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr string
+	}{
+		{name: "plain", path: "secrets/db_password"},
+		// ".." inside a filename is legitimate and must not be mistaken for
+		// path traversal (the bug this guards against).
+		{name: "dots in filename", path: "geo/countries/hong_kong_s.a.r..geojson"},
+		{name: "trailing double dot", path: "dir/weird..txt"},
+		{name: "leading double dot in name", path: "dir/..weird"},
+		{name: "empty", path: "", wantErr: "empty file path"},
+		{name: "absolute", path: "/etc/passwd", wantErr: "absolute paths"},
+		{name: "traversal segment", path: "../secret", wantErr: "'..' segment"},
+		{name: "traversal in middle", path: "a/../../etc/passwd", wantErr: "'..' segment"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validSecretPathFormat(tc.path)
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
 // sesam.yml is sesam's own config and must never be sealed as a secret,
 // regardless of which directory it lives in.
 func TestIsForbiddenPathRejectsSesamYml(t *testing.T) {
@@ -192,7 +222,7 @@ func TestReadFileLimitedMissing(t *testing.T) {
 	require.Error(t, err)
 }
 
-// On a normal filesystem (tmpfs/ext4/...) copyFile must hardlink:
+// On a normal filesystem (tmpfs/ext4/...) CopyFile must hardlink:
 // dst should share the same inode as src. We rely on Stat().Sys() being
 // a *syscall.Stat_t on unix. The test is skipped on platforms where
 // that doesn't hold.
@@ -204,14 +234,14 @@ func TestCopyFileHardlinksWhenPossible(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = root.Close() })
 
-	require.NoError(t, copyFile(root, "src", "dst"))
+	require.NoError(t, CopyFile(root, "src", "dst", true))
 
 	srcInfo, err := os.Stat(filepath.Join(dir, "src"))
 	require.NoError(t, err)
 	dstInfo, err := os.Stat(filepath.Join(dir, "dst"))
 	require.NoError(t, err)
 	require.True(t, os.SameFile(srcInfo, dstInfo),
-		"copyFile should hardlink when src and dst sit on the same fs")
+		"CopyFile should hardlink when src and dst sit on the same fs")
 
 	// Sanity: contents match.
 	got, err := os.ReadFile(filepath.Join(dir, "dst"))
@@ -219,7 +249,7 @@ func TestCopyFileHardlinksWhenPossible(t *testing.T) {
 	require.Equal(t, []byte("payload"), got)
 }
 
-// When the hardlink fails (e.g. dst already exists), copyFile must fall
+// When the hardlink fails (e.g. dst already exists), CopyFile must fall
 // back to a byte-for-byte copy and not surface an error.
 func TestCopyFileFallsBackOnLinkFailure(t *testing.T) {
 	dir := t.TempDir()
@@ -230,7 +260,7 @@ func TestCopyFileFallsBackOnLinkFailure(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = root.Close() })
 
-	require.NoError(t, copyFile(root, "src", "dst"))
+	require.NoError(t, CopyFile(root, "src", "dst", true))
 
 	got, err := os.ReadFile(filepath.Join(dir, "dst"))
 	require.NoError(t, err)
@@ -242,4 +272,64 @@ func TestCopyFileFallsBackOnLinkFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, os.SameFile(srcInfo, dstInfo),
 		"fallback path should produce a fresh inode, not link to src")
+}
+
+func TestPruneEmptyDirs(t *testing.T) {
+	tcs := []struct {
+		Name             string
+		CreateDirs       []string
+		CreateFiles      []string
+		Except           map[string]bool
+		ExpectedToDelete []string
+	}{
+		{
+			Name:             "basic",
+			CreateDirs:       []string{"empty"},
+			ExpectedToDelete: []string{"empty"},
+		},
+		{
+			Name:             "except",
+			CreateDirs:       []string{".git"},
+			Except:           map[string]bool{".git": true},
+			ExpectedToDelete: []string{},
+		},
+		{
+			Name:       "nested",
+			CreateDirs: []string{"sub1/sub2/sub3"},
+			ExpectedToDelete: []string{
+				"sub1/sub2/sub3",
+				"sub1/sub2",
+				"sub1",
+			},
+		},
+		{
+			Name:        "nested_with_file",
+			CreateDirs:  []string{"sub1/sub2/sub3"},
+			CreateFiles: []string{"sub1/file"},
+			ExpectedToDelete: []string{
+				"sub1/sub2/sub3",
+				"sub1/sub2",
+			},
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, d := range tc.CreateDirs {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, d), 0o700))
+			}
+			for _, p := range tc.CreateFiles {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, p), nil, 0o600))
+			}
+
+			root, err := os.OpenRoot(dir)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = root.Close() })
+
+			deleted, err := PruneEmptyDirs(root, ".", tc.Except, nil)
+			require.NoError(t, err)
+			require.Equal(t, tc.ExpectedToDelete, deleted)
+		})
+	}
 }

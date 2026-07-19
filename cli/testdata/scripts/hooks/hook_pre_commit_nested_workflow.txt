@@ -1,0 +1,32 @@
+# Regression: the pre-commit hook (via GitAddDotSesam) must stage ONLY the
+# nested .sesam tree, never unrelated worktree files. go-git's Add ignores its
+# Path when All is set and would otherwise stage the whole worktree - which for
+# a nested layout means sweeping in the surrounding project.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+mkdir sub
+exec sesam init --user admin --sesam-dir sub
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Drift the nested secret so the hook has a reseal to stage, and drop an
+# unrelated file at the worktree root (outside sub/, so sub/.gitignore does not
+# cover it - a whole-worktree `git add` would pick it up).
+cp newreadme sub/README.md
+cp loose outside.txt
+
+exec sesam --sesam-dir=sub hook pre-commit
+
+# The hook staged the nested object it re-sealed…
+exec git diff --cached --name-only
+stdout 'sub/\.sesam/objects/README\.md\.sesam'
+# …but must NOT have swept in the unrelated root file.
+! stdout 'outside\.txt'
+
+-- newreadme --
+# changed readme
+-- loose --
+not a secret

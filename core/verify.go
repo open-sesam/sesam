@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"slices"
 )
 
@@ -51,6 +49,12 @@ type VerifiedState struct {
 
 func (vu *VerifiedUser) IsAdmin() bool {
 	return slices.Contains(vu.Groups, "admin")
+}
+
+// DeclaredGroups returns the access groups without the implicit "admin" group -
+// the set to persist in the config, where admin membership stays implicit.
+func (vs *VerifiedSecret) DeclaredGroups() []string {
+	return withoutAdmin(vs.AccessGroups)
 }
 
 func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
@@ -312,12 +316,12 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s already exists", tell.User)
 	}
 
-	signPubKeyData, _, err := multicodeDecode(tell.SignPubKey)
+	signPubKey, err := decodeSignPubKey(tell.SignPubKey)
 	if err != nil {
-		return fmt.Errorf("bad signing key %v", tell.SignPubKey)
+		return err
 	}
 
-	if err := kr.SetSignPubKey(tell.User, signPubKeyData); err != nil {
+	if err := kr.SetSignPubKey(tell.User, signPubKey); err != nil {
 		// will trigger on duplicate keys.
 		return err
 	}
@@ -330,22 +334,40 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s may not have more than 10 public keys", tell.User)
 	}
 
+	if len(tell.Groups) == 0 {
+		return fmt.Errorf("user %s should be in at least one group", tell.User)
+	}
+
 	recps, err := resolveRecipients(tell.PubKeys, state.pluginUI)
 	if err != nil {
 		return err
 	}
 
+	stored := make(Recipients, 0, len(recps))
 	for _, recp := range recps {
-		if err := kr.AddRecipient(tell.User, recp); err != nil {
+		inserted, err := kr.AddRecipient(tell.User, recp)
+		if err != nil {
 			// will trigger on duplicate keys.
 			return err
+		}
+
+		if inserted {
+			stored = append(stored, recp)
+			continue
+		}
+
+		// same key listed twice in one tell: keep one entry, latest source wins.
+		if idx := slices.IndexFunc(stored, func(r *Recipient) bool {
+			return r.Equal(recp)
+		}); idx >= 0 {
+			stored[idx] = recp
 		}
 	}
 
 	state.Users = append(state.Users, VerifiedUser{
 		Name:       tell.User,
 		SignPubKey: tell.SignPubKey,
-		Recps:      recps,
+		Recps:      stored,
 		Groups:     deduplicate(tell.Groups),
 	})
 
@@ -395,12 +417,12 @@ func verifyUserRegenerateSignKey(log *AuditLog, state *VerifiedState, entry *Aud
 		return err
 	}
 
-	signPubKeyData, _, err := multicodeDecode(dursk.NewSignPubKey)
+	signPubKey, err := decodeSignPubKey(dursk.NewSignPubKey)
 	if err != nil {
-		return fmt.Errorf("bad signing key %v", dursk.NewSignPubKey)
+		return err
 	}
 
-	if err := kr.SetSignPubKey(dursk.User, signPubKeyData); err != nil {
+	if err := kr.SetSignPubKey(dursk.User, signPubKey); err != nil {
 		return err
 	}
 
@@ -416,6 +438,10 @@ func verifyUserChangeGroups(log *AuditLog, state *VerifiedState, entry *AuditEnt
 	ucg, err := parseDetail[DetailUserChangeGroups](entry)
 	if err != nil {
 		return fmt.Errorf("parse user change groups detail: %w", err)
+	}
+
+	if len(ucg.NewGroups) == 0 {
+		return fmt.Errorf("changing to zero groups is not allowed")
 	}
 
 	user, err := state.requireUser(ucg.User, "change groups", entry)
@@ -494,13 +520,28 @@ func verifyUserAddRecipients(log *AuditLog, state *VerifiedState, entry *AuditEn
 	}
 
 	for _, recp := range recps {
-		if err := kr.AddRecipient(duar.User, recp); err != nil {
+		inserted, err := kr.AddRecipient(duar.User, recp)
+		if err != nil {
 			// will trigger on duplicate keys.
 			return err
 		}
+
+		if inserted {
+			user.Recps = append(user.Recps, recp)
+			continue
+		}
+
+		// duplicate for this user: replace the entry so its source stays in sync
+		// with the keyring. Replace, don't mutate - the state slice shares
+		// *Recipient pointers with the pre-replay copy (see cloneVerifiedUsers),
+		// so an in-place change would survive a rollback.
+		if idx := slices.IndexFunc(user.Recps, func(r *Recipient) bool {
+			return r.Equal(recp)
+		}); idx >= 0 {
+			user.Recps[idx] = recp
+		}
 	}
 
-	user.Recps = append(user.Recps, recps...)
 	return nil
 }
 
@@ -546,6 +587,13 @@ func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigne
 
 	// double check nobody inserted ../../ or similar into the revealed path.
 	if err := validSecretPathFormat(scd.RevealedPath); err != nil {
+		return err
+	}
+
+	// Reject paths that would let a reveal overwrite sesam's own state or
+	// git's (.git/, .sesam/, sesam.yml, ...). This is here to avoid hand-crafted
+	// overwrites of things like .git/config which could enable remote code execution.
+	if err := IsForbiddenPath(scd.RevealedPath); err != nil {
 		return err
 	}
 
@@ -601,6 +649,12 @@ func verifySecretMove(log *AuditLog, state *VerifiedState, entry *AuditEntrySign
 		return err
 	}
 
+	// Same forbidden-path guard as secret.add: a move must not relocate a
+	// secret onto .git/, .sesam/, sesam.yml, ... (see verifySecretAdd).
+	if err := IsForbiddenPath(scr.NewRevealedPath); err != nil {
+		return err
+	}
+
 	if _, exists := state.SecretExists(scr.NewRevealedPath); exists {
 		return fmt.Errorf("cannot move secret over existing secret: %q", scr.NewRevealedPath)
 	}
@@ -649,71 +703,6 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) er
 	return nil
 }
 
-// recoverIncompleteSeal finishes (or rolls back) a SealAll that crashed.
-//
-// SealAll's ordering is: stage -> audit entry -> swap -> reap old stage.
-// The audit entry is the commit point: once it lands, the new state is
-// final and recovery must reach it; before it lands, the staged work is
-// discardable.
-//
-// On the next load we hash both .sesam/seal-stage and .sesam/objects and
-// compare them against the latest seal's RootHash in the audit log:
-//
-//   - no seal entry yet or live matches the log -> stage is leftover, drop it.
-//   - stage matches the log -> swap was pending, finish it.
-//   - neither matches -> the log committed a state nothing on disk holds.
-//     Cannot reconcile; bail and let the user investigate.
-func recoverIncompleteSeal(root *os.Root, vstate *VerifiedState) error {
-	stageDir := filepath.Join(".sesam", "seal-stage")
-	objectsDir := filepath.Join(".sesam", "objects")
-
-	if _, err := root.Stat(stageDir); err != nil {
-		// No stage dir (the common case) means nothing to recover.
-		return nil //nolint:nilerr // absent stage dir => nothing to reconcile
-	}
-
-	objectSigs, err := readAllSignaturesForDir(root, objectsDir)
-	if err != nil {
-		return err
-	}
-	objectsRootHash := buildRootHash(objectSigs)
-
-	if vstate.LastSealRootHash == "" {
-		// Crashed during the very first SealAll, before any audit entry
-		// was written. Stage holds uncommitted work; discard it.
-		return root.RemoveAll(stageDir)
-	}
-
-	if vstate.LastSealRootHash == objectsRootHash {
-		// Audit entry written and swap done, just stage dir not yet deleted.
-		return root.RemoveAll(stageDir)
-	}
-
-	stageSigs, err := readAllSignaturesForDir(root, stageDir)
-	if err != nil {
-		return err
-	}
-	stageRootHash := buildRootHash(stageSigs)
-
-	if vstate.LastSealRootHash == stageRootHash {
-		// Audit entry written, but stage not yet swapped. Finish it,
-		// then reap the now-old tree that lands back in stage. The swap is a
-		// renameat2(EXCHANGE) syscall and needs absolute paths.
-		if err := atomicSwapDirs(filepath.Join(root.Name(), stageDir), filepath.Join(root.Name(), objectsDir)); err != nil {
-			return err
-		}
-		return root.RemoveAll(stageDir)
-	}
-
-	// Log committed a state that exists neither in stage nor in objects.
-	// Likely cause: the stage dir was modified out-of-band after the crash.
-	return fmt.Errorf(
-		"seal recover: root hash mismatch between stage dir (%s) and audit log (%s)",
-		stageRootHash,
-		vstate.LastSealRootHash,
-	)
-}
-
 // VerifyChain replays the audit log into a fresh VerifiedState without the
 // expensive disk-side checks done by Verify (init-file unchanged across git
 // history, root-hash of all .sesam files on disk). This is what callers
@@ -759,18 +748,11 @@ func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, erro
 		return nil, err
 	}
 
-	// Reconcile disk with the log: finish a pending swap or drop a
-	// stale staging dir from a previously crashed SealAll. Runs after
-	// verify(state) so the log (and thus LastSealRootHash) is trusted.
-	if err := recoverIncompleteSeal(log.root, &state); err != nil {
-		return nil, err
-	}
-
 	// Verify that the latest seal's RootHash matches the signature footers on disk.
 	if state.LastSealRootHash != "" {
 		sigs, err := readAllSignatures(log.root)
 		if err != nil {
-			return nil, fmt.Errorf("reading signatures for root hash check: %w", err)
+			return nil, fmt.Errorf("reading signatures for root hash check: %w (try --verify-mode no-disk)", err)
 		}
 
 		diskRootHash := buildRootHash(sigs)
@@ -825,6 +807,7 @@ func verify(state *VerifiedState) error {
 	var previousEntry *AuditEntrySigned
 	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
 		if entry.SeqID <= newState.VerifiedUntil {
+			previousEntry = entry
 			return nil
 		}
 
@@ -922,6 +905,35 @@ func verify(state *VerifiedState) error {
 
 	*state = newState
 	return nil
+}
+
+// Clone returns an independent copy of the verified state bound to log and kr
+// (a stage's forked audit log and cloned keyring). The user/secret slices are
+// deep-copied so staged FeedEntry calls cannot mutate the live view.
+func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
+	users := make([]VerifiedUser, len(s.Users))
+	for i, u := range s.Users {
+		u.Groups = slices.Clone(u.Groups)
+		u.Recps = slices.Clone(u.Recps)
+		users[i] = u
+	}
+
+	secrets := make([]VerifiedSecret, len(s.Secrets))
+	for i, sec := range s.Secrets {
+		sec.AccessGroups = slices.Clone(sec.AccessGroups)
+		secrets[i] = sec
+	}
+
+	return &VerifiedState{
+		Users:             users,
+		Secrets:           secrets,
+		SealRequiredSeqID: s.SealRequiredSeqID,
+		VerifiedUntil:     s.VerifiedUntil,
+		LastSealRootHash:  s.LastSealRootHash,
+		auditLog:          log,
+		keyring:           kr,
+		pluginUI:          s.pluginUI,
+	}
 }
 
 func (s *VerifiedState) Close() error {

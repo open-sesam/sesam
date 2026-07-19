@@ -16,7 +16,15 @@ type UserManager struct {
 	state    *VerifiedState
 	signUser *VerifiedUser
 	secMgr   *SecretManager
+
+	// base is the sesam-internal directory the signkeys live under. Empty
+	// means the live ".sesam"; a stage sets it to its fork dir so signing-key
+	// writes/removes land in the fork.
+	base string
 }
+
+// SetBase points the manager's signkey paths at base (a stage's fork dir).
+func (um *UserManager) SetBase(base string) { um.base = base }
 
 // BuildUserManager wires a UserManager. root confines all file I/O to the
 // repository.
@@ -57,10 +65,16 @@ func (um *UserManager) UserTell(
 	}
 
 	if _, exists := um.state.UserExists(user); exists {
+		// Updating an existing user is orchestrated by the repo layer (change
+		// groups + add recipients); this low-level call only ever creates.
 		return fmt.Errorf("re-adding user not yet supported")
 	}
 
-	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, um.state.pluginUI)
+	if len(pubKeySpecs) == 0 {
+		return fmt.Errorf("cannot create user %q without a recipient", user)
+	}
+
+	recps, err := ParseAndResolveRecipients(ctx, um.root, pubKeySpecs, um.state.pluginUI)
 	if err != nil {
 		return err
 	}
@@ -72,8 +86,9 @@ func (um *UserManager) UserTell(
 		return err
 	}
 
-	newUserSigner, err := GenerateSignKey(
+	newUserSigner, err := GenerateSignKeyAt(
 		um.root,
+		um.base,
 		user,
 		recps.AgeRecipients(),
 	)
@@ -126,7 +141,7 @@ func (um *UserManager) UserKill(user string) error {
 		return err
 	}
 
-	if err := um.root.RemoveAll(signKeyPath(user)); err != nil {
+	if err := um.root.RemoveAll(signKeyPath(um.base, user)); err != nil {
 		return err
 	}
 
@@ -154,25 +169,38 @@ func (um *UserManager) UserRename(oldName, newName string) error {
 		return err
 	}
 
-	// TODO: Also not exactly atomic as an operation...
 	return um.root.Rename(
-		signKeyPath(oldName),
-		signKeyPath(newName),
+		signKeyPath(um.base, oldName),
+		signKeyPath(um.base, newName),
 	)
 }
 
-func (um *UserManager) UserChangeGroups(user string, groups []string) error {
+// UserChangeGroups records the user's new group set and returns it. When
+// additive, the caller-supplied groups are merged with the user's current
+// membership instead of replacing it; the returned set is what both the audit
+// log and the config must reflect.
+func (um *UserManager) UserChangeGroups(user string, groups []string, additive bool) ([]string, error) {
 	if !um.signUser.IsAdmin() {
-		return fmt.Errorf("need to be admin for changing a user groups")
+		return nil, fmt.Errorf("need to be admin for changing a user groups")
 	}
 
-	return um.state.FeedEntry(
+	if additive {
+		if vu, ok := um.state.UserExists(user); ok {
+			groups = unionGroups(vu.Groups, groups)
+		}
+	}
+
+	if err := um.state.FeedEntry(
 		um.signer,
 		newAuditEntry(um.signer.UserName(), &DetailUserChangeGroups{
 			User:      user,
 			NewGroups: groups,
 		}),
-	)
+	); err != nil {
+		return nil, err
+	}
+
+	return groups, nil
 }
 
 func (um *UserManager) UserAddRecipient(ctx context.Context, user string, pubKeySpecs []string) error {
@@ -180,7 +208,7 @@ func (um *UserManager) UserAddRecipient(ctx context.Context, user string, pubKey
 		return fmt.Errorf("need to be admin for adding recipients an user")
 	}
 
-	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, um.state.pluginUI)
+	recps, err := ParseAndResolveRecipients(ctx, um.root, pubKeySpecs, um.state.pluginUI)
 	if err != nil {
 		return err
 	}
@@ -214,7 +242,7 @@ func (um *UserManager) UserRmRecipient(ctx context.Context, user string, pubKeyS
 		return fmt.Errorf("need to be admin for removing recipients from a user")
 	}
 
-	toDeleteRecps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, um.state.pluginUI)
+	toDeleteRecps, err := ParseAndResolveRecipients(ctx, um.root, pubKeySpecs, um.state.pluginUI)
 	if err != nil {
 		return err
 	}
@@ -253,8 +281,9 @@ func (um *UserManager) UserRegenerateSignKey(user string) error {
 	}
 
 	newRecps := um.state.keyring.Recipients([]string{user})
-	signer, err := GenerateSignKey(
+	signer, err := GenerateSignKeyAt(
 		um.root,
+		um.base,
 		user,
 		newRecps.AgeRecipients(),
 	)
@@ -285,13 +314,14 @@ func InitAdminUser(
 	root *os.Root, user string, pubKeySpecs []string,
 	pluginUI *PluginUI,
 ) (Signer, *AuditLog, error) {
-	recps, err := ParseAndResolveRecipients(ctx, pubKeySpecs, pluginUI)
+	recps, err := ParseAndResolveRecipients(ctx, root, pubKeySpecs, pluginUI)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	signer, err := GenerateSignKey(
+	signer, err := GenerateSignKeyAt(
 		root,
+		"",
 		user,
 		recps.AgeRecipients(),
 	)

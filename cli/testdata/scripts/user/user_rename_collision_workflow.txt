@@ -1,0 +1,22 @@
+# Renaming a user onto a name that already exists is rejected, leaving both
+# users intact.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+
+# Renaming bob onto the existing admin must fail.
+! exec sesam user rename bob admin
+stderr 'already exists'
+
+# Both users survived the rejected rename.
+exec sesam user list
+stdout 'bob'
+stdout 'admin'
+exec sesam verify

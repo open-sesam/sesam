@@ -91,3 +91,11 @@ func displayPathFrom(sesamDir, cwd, rel string) string {
 	}
 	return shown
 }
+
+func dashify(s string) string {
+	if len(s) == 0 {
+		return "—"
+	}
+
+	return s
+}
