@@ -5,25 +5,11 @@ All notable changes to sesam will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Conventional Commits](https://www.conventionalcommits.org/).
 
-## [0.0.3] - 2026-07-10
+## [Unreleased]
 
 
 ### Features
-- Allow tell to also update recipients and groups when user exists and allow --group-add for secrets (da5f493)
-- Make it possible to have different sesam repos per git repo (844acfa)
-- Implement sesam uninstall (53794d8)
-- Implement hooks feature (untested) (92e67ac)
-- Stub out new hooks (0f91e49)
-- Remove smudge as preparation for git hooks (75d5482)
-- Implement almost full set of doctor commands (ff08edb)
-- Add start of sesam doctor (da68845)
-- If repo is already initialized, `sesam init` should just restore the config (245d176)
-- Extremely important feature (563d9d0)
-- Use config in list secrets/users to show the description (eaf7e89)
-- Add rest of missing config ops (5d7096a)
-- Load schema lazily only when needed (6c278f5)
-- Cleanup and make config atomic too (8a2cf8c)
-- Use a global stage dir for all operations (a37edaa)
+- Rename github import to opensesam.org (67039af)
 - Support askpass for encrypted identities (#75) (d1273d0)
 - Add Docker setup, configuration, and build validation for amd64 and arm64 platforms (#52) (6db487d)
 - Load encrypted age identities (#68) (2774ed1)
@@ -85,25 +71,18 @@ and this project follows [Conventional Commits](https://www.conventionalcommits.
 
 
 ### Bug Fixes
-- Error on go-releaser due to uncommitted changes (a054fe2)
-- Cd failed because of wrong github token (5432501)
-- Docs.yml: run `task docgen` to make sure generated docs are up-to-date (1ce42a4)
-- Check for ../ was broken with paths like 'x..json' (2a3a430)
-- Doctor always reported that lines in gitattributes are missing (1097538)
-- Docs: the webp was used, not the png (60d1ecb)
-- Tests and speed them up a bit (963f5a7)
-- When adding a user that has not yet access it does not trigger a seal (correct) but warns about it (4a36980)
-- Move: do not allow moving to forbidden paths (9c3b79a)
-- Remove old deinit name (0507696)
-- Cleanup a bit and make hooks a bit safer in regards to verify (ed15350)
-- Play around and add recipients_hash to footer so we can detect recipient changes (2f2e7fd)
-- Lock was missing in gitgnore (4f7f43e)
-- Add identity-type (6630657)
-- `sesam open` failed when we had not access to all secrets (oops) (cacf7fe)
-- Make help sort in a sensible order (0fc6684)
-- Config: comments sometimes could leak into the actual string values (72132f8)
-- Config-add-recipient was a bit wrong (43e41b2)
-- Naming was wrong again (SecretAdd, not AddSecret) (60e33ac)
+- Init commit check failed on our own repo because of merge commits - relax condition a bit (84b223c)
+- Docs had no commit in the footer (d249e1b)
+- Remove this branch from docs building again (8265378)
+- Docs: somehow lost the padding fix (46e51f1)
+- Docgen: additional properties were broken (6290dde)
+- Remove this branch again from docs.yml (62be638)
+- Godoc should point to opensesam.org (b233b98)
+- Fix tag confusion (bbf3f12)
+- Get rid of replace for renameio (hard wire our own fork) (b7e0ca8)
+- Linter has special opinions about import order (31b213b)
+- Removing existing pages is actually not healthy for the website (5d04488)
+- Vanity imports were for the wrong url (6978952)
 - Docs: overwrite artifacts (7a2a379)
 - Forgot to describe the name (2f060ea)
 - Import script was missing a +x (09dbacf)
@@ -162,7 +141,7 @@ and this project follows [Conventional Commits](https://www.conventionalcommits.
 
 
 ### Documentation
-- Animate moon and soon (1935d64)
+- Make sure to show a non-empty doc string for main (579ef1d)
 - Update design docs with some more security perspective and clean it up (758764a)
 - Tiny edits (7382633)
 - Ignore build output (c554df0)
@@ -178,7 +157,6 @@ and this project follows [Conventional Commits](https://www.conventionalcommits.
 
 
 ### Tests
-- Sync docs and testscripts (each flow there should have a testscript) (9303fa4)
 - Make the bot slave work on tests (c300625)
 - Rename does not touch sealed_by in footer - add test to make sure it still works (6f0c622)
 - Make test suite work again (7ddda0c)
@@ -187,16 +165,9 @@ and this project follows [Conventional Commits](https://www.conventionalcommits.
 
 
 ### Internal
-- Tiny quality of life improvements (25e86e7)
-- Smaller cleanups (f67ff8b)
-- Tiny cleanup after self-review (68fbdfe)
-- Remove pr filter to allow stacked branches (e30f837)
-- Make sure linter shuts up (ebbfc56)
-- Cleanup of a few tiny issues (b2cdac1)
-- Slight bug fixes of minor issues (b4bee56)
-- Oh linter... (adccca9)
-- Cleanup - make tests faster, cleanup uses os.Root and smaller issues (d5450ae)
-- Do a review round (995ab1e)
+- Tmp edit - build docs from this branch (2647969)
+- Merge with main (4f7b154)
+- Fix linter once more (2bfc6c6)
 - Fix linter (ce3c485)
 - Added user recipient add/remove so I don't forget (a4a133a)
 - Not not (9385a3b)
@@ -260,6 +231,11 @@ and this project follows [Conventional Commits](https://www.conventionalcommits.
 
 
 ### Other
+- Feat/git hooks (#84) (5443bd1)
+- Feat/doctor (#82) (a7b47b2)
+- Feat/config more integration (#79) (eac4a10)
+- Feat/global swap (#78) (6674d7b)
+- Enable pages build on this branch (1b71b61)
 - Feat/docs revamp (#77) (44cd9cb)
 - Feat/yaml parsing (#59) (1b144ea)
 - Feat/user recipient add rm (#74) (39a30cc)
