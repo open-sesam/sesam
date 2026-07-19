@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-      # TODO: change back before merge
-      - feat/opensesam-import
     paths:
       - "docs/**"
       - "cli/**"
