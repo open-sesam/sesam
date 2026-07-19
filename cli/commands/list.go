@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/open-sesam/sesam/core"
-	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/core"
+	"opensesam.org/sesam/repo"
 )
 
 // HandleListSecrets prints tracked secret metadata.

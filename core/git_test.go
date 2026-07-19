@@ -4,7 +4,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,6 +66,59 @@ func TestVerifyInitFileUnchangedMultipleCommitsUnchanged(t *testing.T) {
 
 	_, err := verifyInitFileUnchanged(sesamDir)
 	require.NoError(t, err, "init was not changed across commits")
+}
+
+// A merge that re-touches init with content identical to its main-line parent
+// shows up under `git log --full-history` (which go-git's path filter mirrors),
+// but is not a modification. This is the rebase artifact seen in the wild.
+func TestVerifyInitFileUnchangedMergeSameContent(t *testing.T) {
+	sesamDir, repo := testGitRepo(t)
+	wt, err := repo.Worktree()
+	require.NoError(t, err)
+
+	sig := func() *object.Signature {
+		return &object.Signature{Name: "Test", Email: "t@t.com", When: time.Now()}
+	}
+	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
+
+	// Base commit without init.
+	writeSecret(t, sesamDir, "base.txt", "base")
+	_, err = wt.Add(".")
+	require.NoError(t, err)
+	base, err := wt.Commit("base", &git.CommitOptions{Author: sig()})
+	require.NoError(t, err)
+
+	// Main line adds init.
+	require.NoError(t, os.WriteFile(initPath, []byte("stable-hash"), 0o600))
+	_, err = wt.Add(".")
+	require.NoError(t, err)
+	mainLine, err := wt.Commit("add init", &git.CommitOptions{Author: sig()})
+	require.NoError(t, err)
+
+	// Side line off base, without init.
+	_, err = wt.Remove(filepath.Join(".sesam", "audit", "init"))
+	require.NoError(t, err)
+	writeSecret(t, sesamDir, "side.txt", "side")
+	_, err = wt.Add(".")
+	require.NoError(t, err)
+	side, err := wt.Commit("side change", &git.CommitOptions{
+		Author:  sig(),
+		Parents: []plumbing.Hash{base},
+	})
+	require.NoError(t, err)
+
+	// Merge that restores init with content identical to the main line.
+	require.NoError(t, os.WriteFile(initPath, []byte("stable-hash"), 0o600))
+	_, err = wt.Add(".")
+	require.NoError(t, err)
+	_, err = wt.Commit("chores: merge with main", &git.CommitOptions{
+		Author:  sig(),
+		Parents: []plumbing.Hash{mainLine, side},
+	})
+	require.NoError(t, err)
+
+	_, err = verifyInitFileUnchanged(sesamDir)
+	require.NoError(t, err, "merge re-touching init with identical content is not a modification")
 }
 
 func TestVerifyInitFileUnchangedNotAGitRepo(t *testing.T) {

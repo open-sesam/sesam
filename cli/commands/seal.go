@@ -3,8 +3,8 @@ package commands
 import (
 	"context"
 
-	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/repo"
 )
 
 // HandleSeal encrypts and signs tracked secrets via a staged seal commit.

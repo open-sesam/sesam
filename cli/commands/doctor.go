@@ -17,9 +17,9 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/muesli/termenv"
-	"github.com/open-sesam/sesam/core"
-	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/core"
+	"opensesam.org/sesam/repo"
 )
 
 type DoctorDiagnoseType int

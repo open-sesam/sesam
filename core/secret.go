@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/google/renameio/v2"
+	"github.com/sahib/renameio/v2"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/sha3"
 

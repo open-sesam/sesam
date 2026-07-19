@@ -10,7 +10,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/go-git/go-git/v5"
-	"github.com/open-sesam/sesam/core"
+	"opensesam.org/sesam/core"
 )
 
 // ExpandHomeDir expands "~" and "~/..." in path input.

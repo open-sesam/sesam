@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"filippo.io/age"
-	"github.com/google/renameio/v2"
 	"github.com/google/uuid"
+	"github.com/sahib/renameio/v2"
 	"golang.org/x/crypto/chacha20poly1305"
 )
 

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/repo"
 )
 
 func cleanCheck(path string, quiet, dryRun bool) (bool, error) {

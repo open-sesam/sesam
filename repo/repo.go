@@ -26,8 +26,8 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/gofrs/flock"
-	sesamConf "github.com/open-sesam/sesam/config"
-	"github.com/open-sesam/sesam/core"
+	sesamConf "opensesam.org/sesam/config"
+	"opensesam.org/sesam/core"
 )
 
 const defaultLockTimeout = 30 * time.Second

@@ -262,7 +262,9 @@ h1 {
   color: var(--emerald);
   text-transform: lowercase;
 }
-h1 .open { color: var(--gold); font-weight: 500; }
+h1 .open {
+    color: var(--gold); font-weight: 500;
+}
 h1 .fn-mark {
   font-size: 0.3em;
   font-weight: 500;
@@ -288,7 +290,14 @@ h1 .fn-mark {
   /* legibility halo where the tagline overlaps the mountain on tall viewports */
   text-shadow: 0 0 4px var(--page-bg), 0 0 8px var(--page-bg), 0 0 12px var(--page-bg);
 }
-.tagline b { font-weight: 500; color: var(--emerald-hover); }
+
+.tagline {
+  margin: 1em;
+}
+
+.tagline b {
+    font-weight: 500; color: var(--emerald-hover);
+}
 
 /* --- Terminal --- */
 .term {
@@ -796,8 +805,6 @@ h1 .fn-mark {
 </div>
 <main>
   <h1><span class="open">open</span>sesam</h1>
-  <br />
-
   <p class="tagline">Encrypted, multi-user secrets that <br /><b>live in your git repo</b>.</p>
 
   <nav class="subnav">
@@ -830,7 +837,7 @@ h1 .fn-mark {
   </div>
 
   <div class="cta">
-    <a class="btn btn-primary" href="/docs/whatis.html"><svg viewBox="0 0 24 24" width="1.1em" height="1.1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4h6a3 3 0 0 1 3 3v13a2.5 2.5 0 0 0-2.5-2.5H2z"/><path d="M22 4h-6a3 3 0 0 0-3 3v13a2.5 2.5 0 0 1 2.5-2.5H22z"/></svg>Enter the docs →</a>
+    <a class="btn btn-primary" href="/docs/whatis.html"><svg viewBox="0 0 24 24" width="1.1em" height="1.1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4h6a3 3 0 0 1 3 3v13a2.5 2.5 0 0 0-2.5-2.5H2z"/><path d="M22 4h-6a3 3 0 0 0-3 3v13a2.5 2.5 0 0 1 2.5-2.5H22z"/></svg>Documentation</a>
     <a class="btn btn-ghost" href="https://github.com/open-sesam/sesam">★ GitHub</a>
   </div>
 </main>

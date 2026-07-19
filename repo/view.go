@@ -15,9 +15,9 @@ import (
 	"sync"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/google/renameio/v2"
-	sesamConf "github.com/open-sesam/sesam/config"
-	"github.com/open-sesam/sesam/core"
+	"github.com/sahib/renameio/v2"
+	sesamConf "opensesam.org/sesam/config"
+	"opensesam.org/sesam/core"
 )
 
 // View is a consistent, read-only window onto a sesam state. It is embedded in

@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/open-sesam/sesam/core"
+	"opensesam.org/sesam/core"
 )
 
 // forkSuffix is the sibling directory that holds the staged copy of .sesam.

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/repo"
 )
 
 // HandleAdd adds a secret path to sesam metadata.

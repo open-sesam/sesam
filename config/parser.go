@@ -15,9 +15,9 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
-	"github.com/google/renameio/v2"
-	"github.com/open-sesam/sesam/core"
+	"github.com/sahib/renameio/v2"
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"opensesam.org/sesam/core"
 )
 
 //go:embed sesam_schema.json

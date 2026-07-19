@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -10,9 +11,9 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/open-sesam/sesam/config"
 	clidocs "github.com/urfave/cli-docs/v3"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/config"
 )
 
 //go:embed docgen_cfg_template.md
@@ -82,7 +83,7 @@ type cfgSchema struct {
 	Description          string                `json:"description"`
 	Type                 json.RawMessage       `json:"type"` // string or []string
 	Properties           map[string]*cfgSchema `json:"properties"`
-	AdditionalProperties *cfgSchema            `json:"additionalProperties"`
+	AdditionalProperties cfgAdditional         `json:"additionalProperties"`
 	Items                *cfgSchema            `json:"items"`
 	OneOf                []*cfgSchema          `json:"oneOf"`
 	AnyOf                []*cfgSchema          `json:"anyOf"`
@@ -94,6 +95,20 @@ type cfgSchema struct {
 	Maximum              *float64              `json:"maximum"`
 	MinLength            *int                  `json:"minLength"`
 	Order                *int                  `json:"x-order"`
+}
+
+// cfgAdditional models JSON Schema's additionalProperties, which is either a
+// boolean or a schema. Only the schema form documents anything; the boolean
+// form (e.g. additionalProperties: false) leaves Schema nil.
+type cfgAdditional struct {
+	Schema *cfgSchema
+}
+
+func (a *cfgAdditional) UnmarshalJSON(data []byte) error {
+	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil
+	}
+	return json.Unmarshal(data, &a.Schema)
 }
 
 // cfgResolveAll walks s and substitutes every $ref with the referenced $defs
@@ -127,7 +142,7 @@ func cfgResolveAll(s *cfgSchema, defs map[string]*cfgSchema) *cfgSchema {
 		}
 		result.Properties = resolved
 	}
-	result.AdditionalProperties = cfgResolveAll(result.AdditionalProperties, defs)
+	result.AdditionalProperties.Schema = cfgResolveAll(result.AdditionalProperties.Schema, defs)
 	result.Items = cfgResolveAll(result.Items, defs)
 
 	for i, v := range result.OneOf {

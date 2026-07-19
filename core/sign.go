@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"filippo.io/age"
-	"github.com/google/renameio/v2"
+	"github.com/sahib/renameio/v2"
 )
 
 type SignDomain []byte

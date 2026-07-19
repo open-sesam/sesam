@@ -10,8 +10,8 @@ import (
 	json "github.com/neilotoole/jsoncolor"
 
 	"github.com/mattn/go-colorable"
-	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/repo"
 )
 
 // RepoAction is the signature every handler that needs a live sesam Repo

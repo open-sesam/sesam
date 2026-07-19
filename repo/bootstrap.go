@@ -15,8 +15,8 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/go-git/go-git/v5"
 	gogitconfig "github.com/go-git/go-git/v5/config"
-	"github.com/google/renameio/v2"
-	"github.com/open-sesam/sesam/core"
+	"github.com/sahib/renameio/v2"
+	"opensesam.org/sesam/core"
 )
 
 //go:embed assets/gitignore.default

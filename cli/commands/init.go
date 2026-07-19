@@ -9,8 +9,8 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/muesli/termenv"
-	"github.com/open-sesam/sesam/repo"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/repo"
 )
 
 const (

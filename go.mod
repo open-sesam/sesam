@@ -1,4 +1,4 @@
-module github.com/open-sesam/sesam
+module opensesam.org/sesam
 
 go 1.26.4
 
@@ -9,7 +9,6 @@ require (
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/goccy/go-yaml v1.19.2
 	github.com/gofrs/flock v0.12.1
-	github.com/google/renameio/v2 v2.0.2
 	github.com/google/uuid v1.6.0
 	github.com/jedib0t/go-pretty/v6 v6.8.0
 	github.com/mattn/go-colorable v0.1.14
@@ -17,6 +16,7 @@ require (
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/neilotoole/jsoncolor v0.9.1
 	github.com/rogpeppe/go-internal v1.14.1
+	github.com/sahib/renameio/v2 v2.1.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli-docs/v3 v3.1.0
@@ -68,6 +68,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.1.6 // indirect
 )
-
-// Used for this patch: https://github.com/google/renameio/issues/46
-replace github.com/google/renameio/v2 => github.com/sahib/renameio/v2 v2.0.0-20260621194143-d21c25781e22
