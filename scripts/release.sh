@@ -45,31 +45,23 @@ git merge-base --is-ancestor "$target" main || {
   exit 1
 }
 
-# Create the signed, changelog-annotated tag unless it already exists, so a
-# failed publish can be retried. --cleanup=verbatim keeps the '#' markdown
-# headers git would otherwise strip as comments.
-if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-  echo "Tag $tag already exists; reusing it."
-else
-  # Tag message = changelog for this version + a contributor tally. git-cliff
-  # ignores .mailmap, so the tally comes from git shortlog, which honors it.
-  prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)"
-  {
-    git-cliff --unreleased --tag "$tag" --strip header
-    echo
-    echo "#### Contributors"
-    echo
-    git shortlog -sn --no-merges "${prev:+$prev..}HEAD" |
-      sed -E 's/^[[:space:]]*([0-9]+)[[:space:]]+(.*)$/- \2 (\1)/'
-  } | git tag -s --cleanup=verbatim "$tag" -F -
-fi
+# Build the release notes (changelog for this version + a contributor tally)
+# up front so they can be reviewed before anything is tagged or pushed. git-cliff
+# ignores .mailmap, so the tally comes from git shortlog, which honors it. Kept
+# on disk to reuse verbatim as both the tag message and the GitHub release body.
+prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)"
+notes="$(mktemp)"
+trap 'rm -f "$notes"' EXIT
+{
+  git-cliff --unreleased --tag "$tag" --strip header
+  echo
+  echo "#### Contributors"
+  echo
+  git shortlog -sn --no-merges "${prev:+$prev..}HEAD" |
+    sed -E 's/^[[:space:]]*([0-9]+)[[:space:]]+(.*)$/- \2 (\1)/'
+} >"$notes"
 
-# Verify against the committed maintainers list rather than the user's global
-# git config: the author's tag key stays separate from the release-artifact
-# key, and no per-machine setup is required.
-git -c gpg.ssh.allowedSignersFile=allowed_signers.txt verify-tag "$tag"
-
-git --no-pager show --no-patch "$tag"
+cat "$notes"
 printf 'Publish %s to GHCR + GitHub? [y/N] ' "$tag"
 read -r reply </dev/tty
 case "$reply" in [yY]*) ;; *)
@@ -77,6 +69,15 @@ case "$reply" in [yY]*) ;; *)
   exit 1
   ;;
 esac
+
+if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+  git tag -s --cleanup=verbatim "$tag" -F "$notes"
+fi
+
+# Verify against the committed maintainers list rather than the user's global
+# git config: the author's tag key stays separate from the release-artifact
+# key, and no per-machine setup is required.
+git -c gpg.ssh.allowedSignersFile=allowed_signers.txt verify-tag "$tag"
 
 # Push the tag first so the GitHub release attaches to it (idempotent).
 git push origin "$tag"
@@ -89,8 +90,4 @@ docker buildx use sesam-release 2>/dev/null || docker buildx create --name sesam
 export GITHUB_TOKEN="$(gh auth token)"
 gh auth token | docker login ghcr.io -u "$(gh api user --jq .login)" --password-stdin
 
-# Reuse the signed tag's message as the release body.
-notes="$(mktemp)"
-trap 'rm -f "$notes"' EXIT
-git tag -l --format='%(contents)' "$tag" >"$notes"
 goreleaser release --clean --release-notes "$notes"
