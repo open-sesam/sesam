@@ -187,6 +187,44 @@ secrets:
 	require.Equal(t, []string{"axolotl", "root"}, groups["admin"], "still-desired group untouched")
 }
 
+// TestUserChangeGroups_RemovesEmptiedGroupComment: when a group is dropped
+// because its last member was removed, the head comment attached to the group
+// key must go with it and not dangle onto the surviving group.
+func TestUserChangeGroups_RemovesEmptiedGroupComment(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	const body = `users:
+  - name: axolotl
+    key:
+      - keyA
+groups:
+  admin:
+    - axolotl
+    - root
+  # comment-for-solo
+  solo:
+    - axolotl
+secrets:
+  - path: existing.txt
+    access:
+      - admin
+`
+	require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserChangeGroups("axolotl", []string{"admin"}))
+	require.NoError(t, cr.Save())
+
+	out, err := os.ReadFile(main)
+	require.NoError(t, err)
+	got := string(out)
+
+	require.NotContains(t, got, "comment-for-solo",
+		"removed group's comment must be gone, not dangling on the surviving group:\n%s", got)
+	require.NotContains(t, got, "solo", "the emptied group itself must be gone:\n%s", got)
+}
+
 // TestUserChangeGroups_CreatesMissingGroup adds the user to a group that does
 // not exist yet; the group should be created with the user as a member.
 func TestUserChangeGroups_CreatesMissingGroup(t *testing.T) {
