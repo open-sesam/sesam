@@ -20,7 +20,9 @@ font-size = "0.9em"
 separator = " • "
 date-format = "%Y-%m-%d"
 time-format = "%H:%M:%S"
-branch = "main"
+# Use HEAD, not a branch name: CI checks out a detached HEAD (no local "main"
+# ref), so "main" would make gitinfo fail and render "Built unknown • commit:".
+branch = "HEAD"
 hyperlink = true         # make hash/branch clickable when possible
 
 # optional timezone handling

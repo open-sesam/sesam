@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/opensesam-import
     paths:
       - "docs/**"
       - "cli/**"
