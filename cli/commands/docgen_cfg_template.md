@@ -91,8 +91,8 @@ Read up on [YAML anchors](https://en.wikipedia.org/wiki/YAML#Advanced_components
 {{ range propOrder $prop.Items -}}{{ $f := . -}}{{ $fp := index $prop.Items.Properties $f -}}
 | `{{ $f }}` | `{{ typeStr $fp }}` | {{ if isRequired $prop.Items $f }}yes{{ else }}no{{ end }} | {{ $fp.Description }} |
 {{ end }}
-{{ else if $prop.AdditionalProperties -}}
-Each value is `{{ typeStr $prop.AdditionalProperties }}`.
+{{ else if $prop.AdditionalProperties.Schema -}}
+Each value is `{{ typeStr $prop.AdditionalProperties.Schema }}`.
 
 {{ else -}}
 | | |
