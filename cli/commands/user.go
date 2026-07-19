@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/open-sesam/sesam/core"
@@ -15,7 +17,7 @@ func guessUserNameFromForgeID(recps []string) (string, error) {
 		for _, prefix := range core.SupportedForges {
 			if strings.HasPrefix(recp, prefix+":") {
 				_, user, _ := strings.Cut(recp, ":")
-				fmt.Printf("guessed '--user %s' from %s\n", user, recp)
+				slog.Info(fmt.Sprintf("guessed '--user %s' from %s\n", user, recp))
 				return user, nil
 			}
 		}
@@ -27,7 +29,14 @@ func guessUserNameFromForgeID(recps []string) (string, error) {
 // HandleTell adds a user/group relation and updates access.
 func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	recipients := cmd.StringSlice("recipient")
-	groups := cmd.StringSlice("group")
+	groups, additive, err := resolveGroups(cmd, false)
+	if err != nil {
+		return err
+	}
+
+	// The "at least one group" rule is enforced where the resulting membership
+	// is known: Stage.UserTell dispatches recipient-only/no-op updates for
+	// existing users, and core rejects a brand-new user with no groups.
 	user := cmd.String("user")
 	if user == "" {
 		var err error
@@ -41,13 +50,13 @@ func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 	// tell + reseal commit atomically as a single .sesam swap.
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.UserTell(ctx, user, recipients, groups); err != nil {
+		if err := s.UserTell(ctx, user, recipients, groups, additive); err != nil {
 			return err
 		}
 		if noSeal {
 			return nil
 		}
-		return s.SealAll()
+		return s.Seal(cmd.Bool("seal-all"))
 	})
 }
 
@@ -63,23 +72,26 @@ func HandleKill(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if noSeal {
 			return nil
 		}
-		return s.SealAll()
+		return s.Seal(cmd.Bool("seal-all"))
 	})
 }
 
 func HandleUserChangeGroups(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	user := cmd.String("user")
-	groups := cmd.StringSlice("group")
+	groups, additive, err := resolveGroups(cmd, true)
+	if err != nil {
+		return err
+	}
 	noSeal := cmd.Bool("no-seal")
 
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.UserChangeGroups(user, groups); err != nil {
+		if err := s.UserChangeGroups(user, groups, additive); err != nil {
 			return err
 		}
 		if noSeal {
 			return nil
 		}
-		return s.SealAll()
+		return s.Seal(cmd.Bool("seal-all"))
 	})
 }
 
@@ -107,7 +119,7 @@ func HandleUserAddRecipient(ctx context.Context, cmd *cli.Command, r *repo.Repo)
 		if noSeal {
 			return nil
 		}
-		return s.SealAll()
+		return s.Seal(cmd.Bool("seal-all"))
 	})
 }
 
@@ -116,6 +128,32 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 	recipients := cmd.StringSlice("recipient")
 	noSeal := cmd.Bool("no-seal")
 
+	if cmd.Bool("all-except") {
+		users, err := r.ListUsers()
+		if err != nil {
+			return err
+		}
+
+		if len(recipients) == 0 {
+			return fmt.Errorf("--all-except needs at least one recipient not to delete")
+		}
+
+		recipientsToDelete := []string{}
+		for _, u := range users {
+			if u.Name == user {
+				// kick away all but the one mentioned:
+				for _, r := range u.Recps {
+					if !slices.Contains(recipients, r.String()) {
+						recipientsToDelete = append(recipientsToDelete, r.String())
+					}
+				}
+
+				recipients = recipientsToDelete
+				break
+			}
+		}
+	}
+
 	return r.Update(func(s *repo.Stage) error {
 		if err := s.UserRmRecipient(ctx, user, recipients); err != nil {
 			return err
@@ -123,7 +161,7 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 		if noSeal {
 			return nil
 		}
-		return s.SealAll()
+		return s.Seal(cmd.Bool("seal-all"))
 	})
 }
 

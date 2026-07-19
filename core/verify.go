@@ -51,6 +51,12 @@ func (vu *VerifiedUser) IsAdmin() bool {
 	return slices.Contains(vu.Groups, "admin")
 }
 
+// DeclaredGroups returns the access groups without the implicit "admin" group -
+// the set to persist in the config, where admin membership stays implicit.
+func (vs *VerifiedSecret) DeclaredGroups() []string {
+	return withoutAdmin(vs.AccessGroups)
+}
+
 func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
 	idx := slices.IndexFunc(s.Users, func(u VerifiedUser) bool {
 		return u.Name == user
@@ -310,12 +316,12 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s already exists", tell.User)
 	}
 
-	signPubKeyData, _, err := multicodeDecode(tell.SignPubKey)
+	signPubKey, err := decodeSignPubKey(tell.SignPubKey)
 	if err != nil {
-		return fmt.Errorf("bad signing key %v", tell.SignPubKey)
+		return err
 	}
 
-	if err := kr.SetSignPubKey(tell.User, signPubKeyData); err != nil {
+	if err := kr.SetSignPubKey(tell.User, signPubKey); err != nil {
 		// will trigger on duplicate keys.
 		return err
 	}
@@ -328,22 +334,40 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s may not have more than 10 public keys", tell.User)
 	}
 
+	if len(tell.Groups) == 0 {
+		return fmt.Errorf("user %s should be in at least one group", tell.User)
+	}
+
 	recps, err := resolveRecipients(tell.PubKeys, state.pluginUI)
 	if err != nil {
 		return err
 	}
 
+	stored := make(Recipients, 0, len(recps))
 	for _, recp := range recps {
-		if err := kr.AddRecipient(tell.User, recp); err != nil {
+		inserted, err := kr.AddRecipient(tell.User, recp)
+		if err != nil {
 			// will trigger on duplicate keys.
 			return err
+		}
+
+		if inserted {
+			stored = append(stored, recp)
+			continue
+		}
+
+		// same key listed twice in one tell: keep one entry, latest source wins.
+		if idx := slices.IndexFunc(stored, func(r *Recipient) bool {
+			return r.Equal(recp)
+		}); idx >= 0 {
+			stored[idx] = recp
 		}
 	}
 
 	state.Users = append(state.Users, VerifiedUser{
 		Name:       tell.User,
 		SignPubKey: tell.SignPubKey,
-		Recps:      recps,
+		Recps:      stored,
 		Groups:     deduplicate(tell.Groups),
 	})
 
@@ -393,12 +417,12 @@ func verifyUserRegenerateSignKey(log *AuditLog, state *VerifiedState, entry *Aud
 		return err
 	}
 
-	signPubKeyData, _, err := multicodeDecode(dursk.NewSignPubKey)
+	signPubKey, err := decodeSignPubKey(dursk.NewSignPubKey)
 	if err != nil {
-		return fmt.Errorf("bad signing key %v", dursk.NewSignPubKey)
+		return err
 	}
 
-	if err := kr.SetSignPubKey(dursk.User, signPubKeyData); err != nil {
+	if err := kr.SetSignPubKey(dursk.User, signPubKey); err != nil {
 		return err
 	}
 
@@ -414,6 +438,10 @@ func verifyUserChangeGroups(log *AuditLog, state *VerifiedState, entry *AuditEnt
 	ucg, err := parseDetail[DetailUserChangeGroups](entry)
 	if err != nil {
 		return fmt.Errorf("parse user change groups detail: %w", err)
+	}
+
+	if len(ucg.NewGroups) == 0 {
+		return fmt.Errorf("changing to zero groups is not allowed")
 	}
 
 	user, err := state.requireUser(ucg.User, "change groups", entry)
@@ -492,13 +520,28 @@ func verifyUserAddRecipients(log *AuditLog, state *VerifiedState, entry *AuditEn
 	}
 
 	for _, recp := range recps {
-		if err := kr.AddRecipient(duar.User, recp); err != nil {
+		inserted, err := kr.AddRecipient(duar.User, recp)
+		if err != nil {
 			// will trigger on duplicate keys.
 			return err
 		}
+
+		if inserted {
+			user.Recps = append(user.Recps, recp)
+			continue
+		}
+
+		// duplicate for this user: replace the entry so its source stays in sync
+		// with the keyring. Replace, don't mutate - the state slice shares
+		// *Recipient pointers with the pre-replay copy (see cloneVerifiedUsers),
+		// so an in-place change would survive a rollback.
+		if idx := slices.IndexFunc(user.Recps, func(r *Recipient) bool {
+			return r.Equal(recp)
+		}); idx >= 0 {
+			user.Recps[idx] = recp
+		}
 	}
 
-	user.Recps = append(user.Recps, recps...)
 	return nil
 }
 
@@ -544,6 +587,13 @@ func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigne
 
 	// double check nobody inserted ../../ or similar into the revealed path.
 	if err := validSecretPathFormat(scd.RevealedPath); err != nil {
+		return err
+	}
+
+	// Reject paths that would let a reveal overwrite sesam's own state or
+	// git's (.git/, .sesam/, sesam.yml, ...). This is here to avoid hand-crafted
+	// overwrites of things like .git/config which could enable remote code execution.
+	if err := IsForbiddenPath(scd.RevealedPath); err != nil {
 		return err
 	}
 
@@ -596,6 +646,12 @@ func verifySecretMove(log *AuditLog, state *VerifiedState, entry *AuditEntrySign
 	}
 
 	if err := validSecretPathFormat(scr.NewRevealedPath); err != nil {
+		return err
+	}
+
+	// Same forbidden-path guard as secret.add: a move must not relocate a
+	// secret onto .git/, .sesam/, sesam.yml, ... (see verifySecretAdd).
+	if err := IsForbiddenPath(scr.NewRevealedPath); err != nil {
 		return err
 	}
 
@@ -696,7 +752,7 @@ func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, erro
 	if state.LastSealRootHash != "" {
 		sigs, err := readAllSignatures(log.root)
 		if err != nil {
-			return nil, fmt.Errorf("reading signatures for root hash check: %w", err)
+			return nil, fmt.Errorf("reading signatures for root hash check: %w (try --verify-mode no-disk)", err)
 		}
 
 		diskRootHash := buildRootHash(sigs)

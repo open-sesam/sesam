@@ -35,7 +35,7 @@ func shortID(s string, full bool) string {
 	if full || len(s) <= 8 {
 		return s
 	}
-	return s[:8]
+	return s[:12]
 }
 
 func formatLogTime(t time.Time, full bool) string {

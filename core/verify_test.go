@@ -142,6 +142,77 @@ func TestVerifyUserTellNegative(t *testing.T) {
 
 // --- verifyUserKill tests ---
 
+// TestVerifyForbiddenSecretPath asserts that the verification layer - the trust
+// boundary for a pushed repo - rejects secret paths that a reveal could use to
+// overwrite sesam's own state or git's (.git/, .sesam/, sesam.yml, ...). The
+// CLI guards these too, but a hand-crafted log must not slip past verify.
+func TestVerifyForbiddenSecretPath(t *testing.T) {
+	forbidden := []string{
+		".git/config",
+		".git/hooks/pre-commit",
+		"sesam.yml",
+		"nested/.sesam/objects/x",
+		".gitignore",
+	}
+
+	// Creation is blocked: a non-admin in a shared group cannot FeedEntry a
+	// forbidden secret.add, even though they are authorized for the group.
+	t.Run("feed entry rejected", func(t *testing.T) {
+		for _, path := range forbidden {
+			sesamDir := testRepo(t)
+			admin := newTestUser(t, "admin")
+			al := initAuditLog(t, sesamDir, admin)
+			state := verifyState(t, al, EmptyKeyring())
+
+			eve := newTestUser(t, "eve")
+			tell := eve.DetailUserTell([]string{"dev"})
+			require.NoError(t, state.FeedEntry(admin.Signer, newAuditEntry("admin", &tell)))
+
+			err := state.FeedEntry(eve.Signer, newAuditEntry("eve", &DetailSecretAdd{
+				RevealedPath: path,
+				AccessGroups: []string{"dev"},
+			}))
+			require.Error(t, err, "verifier must reject secret.add for %q", path)
+		}
+	})
+
+	// Detection: a log that already carries a forbidden secret.add (appended
+	// with verify disabled, mimicking a hand-crafted push) fails on replay.
+	t.Run("replay alerts on crafted log", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+
+		_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+			RevealedPath: ".git/config",
+			AccessGroups: []string{"admin"},
+		}), nil)
+		require.NoError(t, err)
+
+		err = verifyStateFail(t, al, EmptyKeyring())
+		require.Error(t, err, "verify must alert on a log containing a forbidden secret path")
+	})
+
+	// A secret.move onto a forbidden path is rejected the same way.
+	t.Run("move onto forbidden path rejected", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+		state := verifyState(t, al, EmptyKeyring())
+
+		require.NoError(t, state.FeedEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+			RevealedPath: "secrets/token",
+			AccessGroups: []string{"admin"},
+		})))
+
+		err := state.FeedEntry(admin.Signer, newAuditEntry("admin", &DetailSecretMove{
+			OldRevealedPath: "secrets/token",
+			NewRevealedPath: ".git/hooks/pre-commit",
+		}))
+		require.Error(t, err, "verifier must reject secret.move onto a forbidden path")
+	})
+}
+
 // TestVerifyFeedEntryRollback asserts that a FeedEntry whose verification fails
 // part-way through leaves the keyring and state exactly as they were. The
 // keyring is shared by pointer with the repo and managers, so a failed replay

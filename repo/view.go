@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -97,7 +98,7 @@ func (v *View) closeState() error {
 
 type UserInfo struct {
 	core.VerifiedUser
-	Config sesamConf.User
+	Config sesamConf.User `json:"config"`
 }
 
 // ListUsers returns the users currently in the audit log.
@@ -270,7 +271,7 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 	}
 
 	if opts.ForgeCheck {
-		report.ForgeCheckReport = core.VerifyForgeIds(ctx, v.vstate, v.keyring, v.opts.pluginUI())
+		report.ForgeCheckReport = core.VerifyForgeIds(ctx, v.root, v.vstate, v.keyring, v.opts.pluginUI())
 		if report.ForgeCheckReport.IsZero() {
 			report.ForgeCheckReport = nil
 		}
@@ -318,6 +319,34 @@ func (v *View) Log(fn func(e *core.AuditEntrySigned) error) error {
 	}
 
 	return nil
+}
+
+// GitAddDotSesam is equivalent to `git add .sesam`
+func (v *View) GitAddDotSesam() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return ErrClosed
+	}
+
+	wt, err := v.gitRepo.Worktree()
+	if err != nil {
+		return err
+	}
+
+	// go-git addresses index paths relative to the worktree root, and .sesam may
+	// sit in a subdirectory (nested layout), so relativize against it. Adding the
+	// directory pulls in its untracked objects too.
+	prefix, err := core.SesamGitPrefix(v.gitRepo, v.sesamDir)
+	if err != nil {
+		return err
+	}
+
+	return wt.AddWithOptions(&git.AddOptions{
+		All:  false, // true would add all files and ignore the path.
+		Path: path.Join(prefix, sesamSuffix),
+	})
 }
 
 // Status computes a comparison between the revealed and sealed state.
@@ -387,15 +416,15 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 			continue
 		}
 
-		same, err := v.secret.EqualPlaintext(revealedPath, v.identities)
+		needsSeal, _, err := v.secret.NeedsSeal(revealedPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to compare %s and %s: %w", revealedPath, sealedPath, err)
 		}
 
-		if same {
-			add(SecretStateInSync)
-		} else {
+		if needsSeal {
 			add(SecretStateNotInSync)
+		} else {
+			add(SecretStateInSync)
 		}
 	}
 

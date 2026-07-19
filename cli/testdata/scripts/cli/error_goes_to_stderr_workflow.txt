@@ -1,0 +1,18 @@
+# Regression: a failing sesam command must print its error to stderr and leave
+# stdout completely untouched.
+#
+# `sesam show` is git's sesam-diff `textconv`: git reads the decrypted content
+# from sesam's stdout. A stray "✘ ..." error line on stdout corrupts that
+# stream and git aborts with `fatal: protocol error: bad line length
+# character: ✘`.
+#
+# `sesam show` with no identity fails while loading identities, before it writes
+# any content, which is the exact path that must stay clean.
+
+env SESAM_ID=
+env SESAM_IDENTITY=
+! exec sesam show secrets/token
+stderr 'at least one --identity'
+
+# Nothing at all may reach stdout on the error path.
+! stdout .

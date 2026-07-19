@@ -1,0 +1,32 @@
+# Several sesam repos can coexist in one git repo. Their git-config subsections
+# (and the .gitattributes driver names) are suffixed with the encoded relative
+# sesam dir, so a second `sesam init` does not clobber the first repo's drivers.
+# (Hooks use the same suffix, so on git >= 2.54 both repos' hooks are installed
+# side by side rather than overwriting each other.)
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+mkdir sub-a
+mkdir sub-b
+exec sesam init --user admin --sesam-dir sub-a
+exec sesam init --user admin --sesam-dir sub-b
+
+# Each repo keeps its own diff-driver subsection, carrying its own --sesam-dir.
+exec git config --local diff.sesam-diff-sub-a.textconv
+stdout '^sesam --sesam-dir=sub-a show$'
+exec git config --local diff.sesam-diff-sub-b.textconv
+stdout '^sesam --sesam-dir=sub-b show$'
+
+# The generic, unsuffixed subsection must not exist when repos are nested.
+! exec git config --local diff.sesam-diff.textconv
+
+# Each .gitattributes references only its own suffixed drivers.
+grep 'diff=sesam-diff-sub-a' sub-a/.gitattributes
+! grep 'diff=sesam-diff-sub-b' sub-a/.gitattributes
+grep 'diff=sesam-diff-sub-b' sub-b/.gitattributes
+
+# The alias is a plain shim, shared and harmless across repos.
+exec git config --local alias.sesam
+stdout '^!sesam$'

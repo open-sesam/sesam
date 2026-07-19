@@ -185,10 +185,9 @@ func TestTellThenSealGivesNewRecipientAccess(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-
 	writeSecret(t, sesamDir, "secrets/api", "shared")
-	require.NoError(t, secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}))
-	require.NoError(t, secMgr.SealAll()) // sealed for admin only; "dev" is empty
+	require.NoError(t, onlyErr(secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}, false)))
+	require.NoError(t, secMgr.Seal(true)) // sealed for admin only; "dev" is empty
 
 	um, err := BuildUserManager(testRoot(t, sesamDir), admin.Signer, al, state, secMgr)
 	require.NoError(t, err)
@@ -201,26 +200,16 @@ func TestTellThenSealGivesNewRecipientAccess(t *testing.T) {
 		[]string{"dev"},
 	))
 
-	cryptPath := filepath.Join(sesamDir, ".sesam", "objects", "secrets/api.sesam")
-
 	// Before an explicit seal, the ciphertext is still admin-only: bob cannot read it.
-	fd, err := os.Open(cryptPath)
-	require.NoError(t, err)
-	ok, err := RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api", nil, nil)
-	_ = fd.Close()
-	require.NoError(t, err)
-	require.False(t, ok, "bob must not be a recipient before an explicit seal")
+	require.False(t, revealableBy(t, sesamDir, bob, kr, al, state, "secrets/api"),
+		"bob must not be a recipient before an explicit seal")
 
 	// An explicit seal re-encrypts to include the new "dev" member.
-	require.NoError(t, secMgr.SealAll())
+	require.NoError(t, secMgr.Seal(true))
 
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
-	fd, err = os.Open(cryptPath)
-	require.NoError(t, err)
-	defer fd.Close()
-	ok, err = RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api", nil, nil)
-	require.NoError(t, err)
-	require.True(t, ok, "bob must be a recipient after the explicit seal")
+	require.True(t, revealableBy(t, sesamDir, bob, kr, al, state, "secrets/api"),
+		"bob must be a recipient after the explicit seal")
 
 	got, err := os.ReadFile(filepath.Join(sesamDir, "secrets/api"))
 	require.NoError(t, err)
@@ -247,7 +236,6 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-
 	um, err := BuildUserManager(testRoot(t, sesamDir), admin.Signer, al, state, secMgr)
 	require.NoError(t, err)
 
@@ -260,30 +248,21 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 	))
 
 	writeSecret(t, sesamDir, "secrets/api", "shared")
-	require.NoError(t, secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}))
-	require.NoError(t, secMgr.SealAll())
+	require.NoError(t, onlyErr(secMgr.SecretAdd("secrets/api", []string{"dev", "admin"}, false)))
+	require.NoError(t, secMgr.Seal(true))
 
 	// Sanity: bob can decrypt before kill.
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
-	cryptPath := filepath.Join(sesamDir, ".sesam", "objects", "secrets/api.sesam")
-	fd, err := os.Open(cryptPath)
-	require.NoError(t, err)
-	ok, err := RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api", nil, nil)
-	_ = fd.Close()
-	require.NoError(t, err)
-	require.True(t, ok, "bob should be a recipient before kill")
+	require.True(t, revealableBy(t, sesamDir, bob, kr, al, state, "secrets/api"),
+		"bob should be a recipient before kill")
 
 	// Kill does not auto-seal; an explicit seal must drop bob from the recipients.
 	require.NoError(t, um.UserKill("bob"))
-	require.NoError(t, secMgr.SealAll())
+	require.NoError(t, secMgr.Seal(true))
 
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
-	fd, err = os.Open(cryptPath)
-	require.NoError(t, err)
-	defer fd.Close()
-	ok, err = RevealBlob(sesamDir, Identities{bob.Identity}, fd, "secrets/api", nil, nil)
-	require.NoError(t, err)
-	require.False(t, ok, "killed user must not be a recipient of the resealed file")
+	require.False(t, revealableBy(t, sesamDir, bob, kr, al, state, "secrets/api"),
+		"killed user must not be a recipient of the resealed file")
 }
 
 // nonAdminUserManager returns a UserManager signed by bob (a non-admin "dev"
@@ -377,7 +356,7 @@ func TestUserChangeGroupsSuccess(t *testing.T) {
 	bob := newTestUser(t, "bob")
 	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
 
-	require.NoError(t, um.UserChangeGroups("bob", []string{"dev", "ops"}))
+	require.NoError(t, onlyErr(um.UserChangeGroups("bob", []string{"dev", "ops"}, false)))
 
 	vu, exists := um.state.UserExists("bob")
 	require.True(t, exists)
@@ -387,10 +366,31 @@ func TestUserChangeGroupsSuccess(t *testing.T) {
 	require.NotZero(t, um.state.SealRequiredSeqID, "group change must mark a seal as pending")
 }
 
+// Additive change-groups must merge into the current membership and hand back
+// the union (deduplicated), never replace it.
+func TestUserChangeGroupsAdditive(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+
+	merged, err := um.UserChangeGroups("bob", []string{"ops"}, true)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"dev", "ops"}, merged, "additive must keep the existing groups")
+
+	vu, exists := um.state.UserExists("bob")
+	require.True(t, exists)
+	require.ElementsMatch(t, []string{"dev", "ops"}, vu.Groups)
+
+	// Adding a group the user already has is a no-op union, not a duplicate.
+	merged, err = um.UserChangeGroups("bob", []string{"dev"}, true)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"dev", "ops"}, merged)
+}
+
 func TestUserChangeGroupsNonAdmin(t *testing.T) {
 	um := nonAdminUserManager(t)
 
-	err := um.UserChangeGroups("admin", []string{"dev"})
+	_, err := um.UserChangeGroups("admin", []string{"dev"}, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "admin")
 }
@@ -398,7 +398,7 @@ func TestUserChangeGroupsNonAdmin(t *testing.T) {
 func TestUserChangeGroupsUnknownUser(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 
-	err := um.UserChangeGroups("ghost", []string{"dev"})
+	_, err := um.UserChangeGroups("ghost", []string{"dev"}, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not exist")
 }
@@ -408,7 +408,7 @@ func TestUserChangeGroupsUnknownUser(t *testing.T) {
 func TestUserChangeGroupsLastAdmin(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 
-	err := um.UserChangeGroups("admin", []string{"dev"})
+	_, err := um.UserChangeGroups("admin", []string{"dev"}, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "last admin")
 }
@@ -456,6 +456,27 @@ func TestUserAddRecipientSuccess(t *testing.T) {
 	al := loadAuditLog(t, um.root.Name(), bobDevice)
 	_, err := VerifyChain(al, EmptyKeyring(), nil)
 	require.NoError(t, err, "newly added recipient must be able to decrypt and replay the log")
+}
+
+// Re-adding a key bob already holds must not diverge the keyring from the
+// verified state: both must keep exactly one entry (regression - the state
+// used to gain a phantom second entry that broke a later rm_recipients).
+func TestUserAddRecipientReAddIsConsistent(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.UserTell(
+		context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"},
+	))
+
+	require.NoError(t, um.UserAddRecipient(
+		context.Background(), "bob", []string{bob.Recipient.String()},
+	))
+
+	vu, exists := um.state.UserExists("bob")
+	require.True(t, exists)
+	require.Len(t, vu.Recps, 1, "state must not gain a phantom duplicate")
+	require.Len(t, um.state.keyring.Recipients([]string{"bob"}), 1,
+		"keyring and state must agree on the recipient count")
 }
 
 func TestUserAddRecipientNonAdmin(t *testing.T) {

@@ -33,7 +33,7 @@ Hi! In those notes we're trying to give you some background information on why t
 You probably won't loose too much required info if you don't read those boxes, but we recommend to do so.
 You may remember that using `git` got easier when you understood how it works under the hood? Anyway, let's continue:
 
-The `--idenity` option has to be passed to most `sesam` commands. Typing this out is tedious, but luckily we support
+The `--identity` option has to be passed to most `sesam` commands. Typing this out is tedious, but luckily we support
 specifying almost all command line flags as environment variable. If you place this in your `.bashrc` (or whatever you use),
 then you never need to specify the identity path again:
 

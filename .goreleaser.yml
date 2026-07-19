@@ -1,5 +1,7 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 
+version: 2
+
 project_name: "sesam"
 
 metadata:
@@ -32,10 +34,37 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+    # Explicit file list: GoReleaser's default also bundles CHANGELOG*, which
+    # made the changelog ship as an archive file. The changelog belongs in the
+    # GitHub release body (via --release-notes), not inside the tarball.
+    files:
+      - README.md
+      - LICENSE
+
+# Sign checksums.txt with the project SSH key (managed by sesam itself:
+# encrypted at rest in git, present as plaintext in the working tree via the
+# smudge filter). Signing the checksum file covers every artifact it lists.
+# ssh-keygen writes the signature to <artifact>.sig. Verify with the committed
+# allowed_signers file:
+#   ssh-keygen -Y verify -f allowed_signers.txt -I <signer-identity> \
+#     -n sesam-release -s checksums.txt.sig < checksums.txt
+signs:
+  - id: checksum
+    artifacts: checksum
+    cmd: ssh-keygen
+    args:
+      - -Y
+      - sign
+      - -f
+      - "secret/release_signing.key"
+      - -n
+      - "sesam-release"
+      - "${artifact}"
+    signature: "${artifact}.sig"
 
 dockers_v2:
   - images:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}"
+      - "ghcr.io/open-sesam/sesam"
     tags:
       - "{{ .Tag }}"
       - "{{ if not .IsNightly }}latest{{ end }}"

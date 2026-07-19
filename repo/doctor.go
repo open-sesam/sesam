@@ -1,14 +1,11 @@
 package repo
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
-	"github.com/Masterminds/semver/v3"
 	"github.com/go-git/go-git/v5"
 	gogitconfig "github.com/go-git/go-git/v5/config"
 )
@@ -28,16 +25,6 @@ type ManagedFileCheck struct {
 	Path    string // absolute path that was inspected
 	Exists  bool
 	Missing []string
-}
-
-// doctorGitConfigPaths is the subset of managed git-config entries `sesam
-// doctor` reports on. The filter driver and `filter…required` are intentionally
-// left out here; doctor focuses on the merge/diff/alias wiring.
-var doctorGitConfigPaths = map[string]bool{
-	"merge.sesam-merge.name":   true,
-	"merge.sesam-merge.driver": true,
-	"diff.sesam-diff.textconv": true,
-	"alias.sesam":              true,
 }
 
 // GitWorktreeRoot opens the git repository containing dir (searching upward for
@@ -62,45 +49,10 @@ func GitWorktreeRoot(dir string) (string, error) {
 	return wt.Filesystem.Root(), nil
 }
 
-// ReadGitVersion runs `git --version` and parses the result into a semver.
-func ReadGitVersion(ctx context.Context) (*semver.Version, error) {
-	out, err := exec.CommandContext(ctx, "git", "--version").Output()
-	if err != nil {
-		return nil, fmt.Errorf("run git --version: %w", err)
-	}
-	return parseGitVersion(string(out))
-}
-
-// parseGitVersion extracts the version from `git --version` output. The format
-// is "git version X.Y.Z", with vendor noise on some platforms - a "(Apple
-// Git-154)" suffix on macOS, a ".windows.1" suffix on Windows - so we take the
-// third field and keep only its leading numeric-dotted run before parsing.
-func parseGitVersion(raw string) (*semver.Version, error) {
-	fields := strings.Fields(raw)
-	if len(fields) < 3 {
-		return nil, fmt.Errorf("malformed git version: %q", raw)
-	}
-
-	core := strings.TrimRight(leadingVersionCore(fields[2]), ".")
-	v, err := semver.NewVersion(core)
-	if err != nil {
-		return nil, fmt.Errorf("malformed git version %q: %w", raw, err)
-	}
-	return v, nil
-}
-
-// leadingVersionCore returns the leading run of digits and dots in s, dropping
-// any vendor suffix (e.g. "2.45.1.macos.1" -> "2.45.1.").
-func leadingVersionCore(s string) string {
-	i := 0
-	for i < len(s) && (s[i] == '.' || (s[i] >= '0' && s[i] <= '9')) {
-		i++
-	}
-	return s[:i]
-}
-
-// CheckGitConfig compares the merge/diff/alias git-config entries sesam relies
-// on against what `sesam init` would install for the repo at sesamDir.
+// CheckGitConfig compares the git-config entries sesam surfaces in `sesam
+// doctor` (those flagged report in expectedGitConfig - merge/diff/alias and, on
+// git >= 2.54, the hook commands) against what `sesam init` would install for
+// the repo at sesamDir.
 func CheckGitConfig(sesamDir string) ([]GitConfigCheck, error) {
 	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
 	if err != nil {
@@ -119,7 +71,7 @@ func CheckGitConfig(sesamDir string) ([]GitConfigCheck, error) {
 
 	var checks []GitConfigCheck
 	for _, e := range entries {
-		if !doctorGitConfigPaths[e.display] {
+		if !e.report {
 			continue
 		}
 
@@ -147,9 +99,27 @@ func CheckGitIgnore(sesamDir string) (ManagedFileCheck, error) {
 }
 
 // CheckGitAttributes reports whether the repo's .gitattributes still contains
-// the lines `sesam init` writes.
+// the lines `sesam init` writes. The template carries a per-repo {{.Suffix}} in
+// its driver names, so it must be rendered with the repo's suffix first -
+// comparing the raw template would hunt for the literal placeholder and always
+// report a mismatch.
 func CheckGitAttributes(sesamDir string) (ManagedFileCheck, error) {
-	return checkManagedFile(sesamDir, ".gitattributes", gitattributesTemplate)
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	if err != nil {
+		return ManagedFileCheck{}, err
+	}
+
+	suffix, err := sesamSubsectionSuffix(gitRepo, resolvedDir)
+	if err != nil {
+		return ManagedFileCheck{}, err
+	}
+
+	rendered, err := renderGitAttributes(suffix)
+	if err != nil {
+		return ManagedFileCheck{}, err
+	}
+
+	return checkManagedFile(sesamDir, ".gitattributes", rendered)
 }
 
 func checkManagedFile(sesamDir, name, template string) (ManagedFileCheck, error) {

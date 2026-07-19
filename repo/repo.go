@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -30,6 +31,16 @@ import (
 )
 
 const defaultLockTimeout = 30 * time.Second
+
+const (
+	sesamSuffix    = ".sesam"
+	gitSuffix      = ".git"
+	objectsSegment = sesamSuffix + "/objects/"
+
+	// sesamLockName is the repo lock file, a sibling of .sesam at the worktree
+	// root (see acquireLock). It is sesam-internal infrastructure, not a secret.
+	sesamLockName = sesamSuffix + ".lock"
+)
 
 var ErrClosed = errors.New("sesam repo is closed")
 
@@ -85,6 +96,13 @@ type RepoOpts struct {
 	VerifyMode VerifyMode
 }
 
+type GitConfigOpts struct {
+	InstallHooks bool
+	InstallMerge bool
+	InstallDiff  bool
+	InstallAlias bool
+}
+
 type RepoInitOpts struct {
 	RepoOpts
 
@@ -94,6 +112,9 @@ type RepoInitOpts struct {
 
 	// InitStep receives logs whenever something interesting happens
 	InitStep func(fmt string, args ...any)
+
+	// GitConfigOpts tells init what to configure
+	GitConfigOpts GitConfigOpts
 }
 
 func (rio *RepoInitOpts) PrintStep(fmt string, args ...any) {
@@ -308,7 +329,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, err
 	}
 
-	if err := r.secret.SecretAdd("README.md", []string{"admin"}); err != nil {
+	if _, err := r.secret.SecretAdd("README.md", []string{"admin"}, false); err != nil {
 		return nil, fmt.Errorf("failed to bootstrap readme secret: %w", err)
 	}
 
@@ -323,7 +344,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 
 	opts.PrintStep(eggs[rand.IntN(len(eggs))]) //nolint:gosec
-	if err := r.secret.SealAll(); err != nil {
+	if err := r.secret.Seal(true); err != nil {
 		return nil, err
 	}
 
@@ -532,16 +553,6 @@ type SecretInfo struct {
 	Config sesamConf.Secret
 }
 
-// isUnder reports whether path lives at or beneath dir.
-func isUnder(dir, path string) bool {
-	rel, err := filepath.Rel(dir, path)
-	if err != nil {
-		return false
-	}
-
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
 // VerifyOptions selects which verification checks Verify should run.
 type VerifyOptions struct {
 	// Truncation checks if the audit log was truncated over the git history.
@@ -678,4 +689,92 @@ type StatusOpts struct {
 
 	// IgnoreUnmanaged will ignore files not managed by sesam.
 	IgnoreUnmanaged bool
+}
+
+// Uninstall removes the git integration of sesam from the git repo,
+// and if all is true it will remove also all sesam specific files.
+func Uninstall(sesamDir string, all bool) error {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve: %w", err)
+	}
+
+	if err := isInitialized(resolvedDir); err == nil {
+		// not yet initialized.
+		return nil
+	}
+
+	if err := clearGitConfig(gitRepo, resolvedDir, ""); err != nil {
+		return fmt.Errorf("failed to clear git config: %w", err)
+	}
+
+	suffix, err := sesamSubsectionSuffix(gitRepo, resolvedDir)
+	if err != nil {
+		return fmt.Errorf("failed to compute subsection suffix: %w", err)
+	}
+
+	if err := clearGitAttributes(resolvedDir, suffix); err != nil {
+		return fmt.Errorf("failed to clear .gitattributes: %w", err)
+	}
+
+	if err := clearGitIgnore(resolvedDir); err != nil {
+		return fmt.Errorf("failed to clear .gitignore: %w", err)
+	}
+
+	if !all {
+		return nil
+	}
+
+	root, err := os.OpenRoot(resolvedDir)
+	if err != nil {
+		return err
+	}
+
+	// Remove all sesam.yml files
+	if err := fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.Type().IsRegular() && filepath.Base(path) == "sesam.yml" {
+			return root.Remove(path)
+		}
+
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to remove sesam.yml files: %w", err)
+	}
+
+	// remove all of sesam:
+	return root.RemoveAll(".sesam")
+}
+
+// InstallHooks (re)installs sesam's git hooks for the repo at sesamDir. It only
+// writes git config, so it neither loads the audit log nor takes the repo lock.
+func InstallHooks(sesamDir string) error {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	if err != nil {
+		return err
+	}
+
+	if ok, err := IsInitialized(resolvedDir); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("no sesam repository at %s", resolvedDir)
+	}
+
+	return ensureGitConfig(gitRepo, resolvedDir, RepoInitOpts{
+		GitConfigOpts: GitConfigOpts{InstallHooks: true},
+	})
+}
+
+// UninstallHooks removes sesam's git hooks from the repo at sesamDir. Like
+// InstallHooks it only touches git config.
+func UninstallHooks(sesamDir string) error {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	if err != nil {
+		return err
+	}
+
+	return clearGitConfig(gitRepo, resolvedDir, "hook")
 }

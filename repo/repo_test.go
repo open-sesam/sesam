@@ -184,7 +184,7 @@ func TestRepo_SecretAdd_RejectsBadInputs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := r.Update(func(s *Stage) error { return s.SecretAdd(tc.paths, tc.groups, false) })
+			err := r.Update(func(s *Stage) error { return s.SecretAdd(tc.paths, tc.groups, false, false) })
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantErr)
 		})
@@ -199,7 +199,9 @@ func TestRepo_SecretAddRemove_RoundTrip(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(plaintext), 0o700))
 	require.NoError(t, os.WriteFile(plaintext, []byte("hunter2\n"), 0o600))
 
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}, false) }))
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}, false, false)
+	}))
 
 	secrets, err := r.ListSecrets(nil)
 	require.NoError(t, err)
@@ -235,7 +237,9 @@ func TestRepo_UserTell_AddsUserAndReSeals(t *testing.T) {
 
 	_, r := bootstrapRepo(t, admin)
 
-	err := r.Update(func(s *Stage) error { return s.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"developers"}) })
+	err := r.Update(func(s *Stage) error {
+		return s.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"developers"}, false)
+	})
 	require.NoError(t, err)
 
 	users, err := r.ListUsers()
@@ -247,13 +251,91 @@ func TestRepo_UserTell_AddsUserAndReSeals(t *testing.T) {
 	require.ElementsMatch(t, []string{"admin", "bob"}, names)
 }
 
+// Telling an existing user updates them instead of failing: --group replaces,
+// --group-add merges, and any new recipient is added to the account.
+func TestRepo_UserTell_UpsertExisting(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	bobKey2 := writeTestIdentity(t, "bob-second-device")
+
+	_, r := bootstrapRepo(t, admin)
+
+	findUser := func(name string) UserInfo {
+		users, err := r.ListUsers()
+		require.NoError(t, err)
+		for _, u := range users {
+			if u.Name == name {
+				return u
+			}
+		}
+		t.Fatalf("user %q not found", name)
+		return UserInfo{}
+	}
+
+	// Create bob as a dev with a single recipient.
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"dev"}, false)
+	}))
+	require.ElementsMatch(t, []string{"dev"}, findUser("bob").Groups)
+	require.Len(t, findUser("bob").Recps, 1)
+
+	// Re-tell with --group ops (replace) and no recipient: groups become [ops].
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.UserTell(context.Background(), "bob", nil, []string{"ops"}, false)
+	}))
+	require.ElementsMatch(t, []string{"ops"}, findUser("bob").Groups)
+	require.Len(t, findUser("bob").Recps, 1, "no recipient given must not change the key set")
+
+	// Re-tell additive with a fresh recipient: dev comes back and the key is added.
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.UserTell(context.Background(), "bob", []string{bobKey2.Recipient}, []string{"dev"}, true)
+	}))
+	require.ElementsMatch(t, []string{"ops", "dev"}, findUser("bob").Groups)
+	require.Len(t, findUser("bob").Recps, 2, "additive tell must add the new recipient")
+
+	// Recipient-only update: no group flag leaves the membership untouched.
+	bobKey3 := writeTestIdentity(t, "bob-third-device")
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.UserTell(context.Background(), "bob", []string{bobKey3.Recipient}, nil, false)
+	}))
+	require.ElementsMatch(t, []string{"ops", "dev"}, findUser("bob").Groups, "recipient-only tell must not touch groups")
+	require.Len(t, findUser("bob").Recps, 3)
+
+	// Neither groups nor recipients on an existing user is a silent no-op.
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.UserTell(context.Background(), "bob", nil, nil, false)
+	}))
+	require.ElementsMatch(t, []string{"ops", "dev"}, findUser("bob").Groups)
+	require.Len(t, findUser("bob").Recps, 3)
+}
+
+// A brand-new user must be given at least one group; creating one with an
+// empty group set is rejected and leaves no trace of the user.
+func TestRepo_UserTell_NewUserWithoutGroupsRejected(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+
+	_, r := bootstrapRepo(t, admin)
+
+	err := r.Update(func(s *Stage) error {
+		return s.UserTell(context.Background(), "bob", []string{bob.Recipient}, nil, false)
+	})
+	require.ErrorContains(t, err, "at least one group")
+
+	users, err := r.ListUsers()
+	require.NoError(t, err)
+	for _, u := range users {
+		require.NotEqual(t, "bob", u.Name, "rejected user must not be created")
+	}
+}
+
 func TestRepo_UserKill_RemovesUser(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	bob := writeTestIdentity(t, "bob")
 
 	_, r := bootstrapRepo(t, admin)
 	require.NoError(t, r.Update(func(s *Stage) error {
-		return s.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"developers"})
+		return s.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"developers"}, false)
 	}))
 
 	require.NoError(t, r.Update(func(s *Stage) error { return s.UserKill(bob.Name) }))
@@ -366,7 +448,7 @@ func TestRepo_SealReveal_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, original, got, "RevealAll restores the original plaintext")
 
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SealAll() }), "SealAll on an already-sealed tree is a no-op")
+	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }), "Seal on an already-sealed tree is a no-op")
 }
 
 // --- Clean (method dispatch) ----------------------------------------------
@@ -498,7 +580,7 @@ func TestRepoStatusStates(t *testing.T) {
 	add := func(rel, content string) {
 		t.Helper()
 		writeRepoFile(t, dir, rel, content)
-		require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{rel}, []string{"admin"}, false) }))
+		require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{rel}, []string{"admin"}, false, false) }))
 	}
 
 	add("secrets/same", "identical")
@@ -507,7 +589,7 @@ func TestRepoStatusStates(t *testing.T) {
 	add("secrets/unsealed", "seal-removed")
 
 	// Add only records the audit entry; seal writes the ciphertext objects.
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SealAll() }))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }))
 	require.NoError(t, r.Close())
 
 	// Reload so the runtime user (whoami) is resolved - Status needs it to
@@ -545,6 +627,30 @@ func TestRepoStatusStates(t *testing.T) {
 	})
 }
 
+// A recipient change (a user told into a secret's group) makes the secret
+// drift even though its plaintext is untouched: it must be re-sealed to add the
+// new recipient. Status compares the recipient set, so it must surface this as
+// not-in-sync until a re-seal happens.
+func TestRepoStatusRecipientDrift(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	dir, r := bootstrapRepo(t, admin)
+
+	writeRepoFile(t, dir, "secrets/dev", "dev-content")
+	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/dev"}, []string{"dev"}, false, false) }))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }))
+	require.Equal(t, SecretStateInSync, statusStates(t, r, StatusOpts{})["secrets/dev"])
+
+	// Tell bob into "dev" but do not seal: the recipient set now differs from
+	// the sealed object, though the plaintext is identical.
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"dev"}, false)
+	}))
+
+	require.Equal(t, SecretStateNotInSync, statusStates(t, r, StatusOpts{})["secrets/dev"],
+		"a user added to the group must show the secret out of sync until re-sealed")
+}
+
 // A user without access to a secret must see it reported as no-access, and
 // Status must not try to decrypt it (the user is not a recipient).
 func TestRepoStatusUserHasNoAccess(t *testing.T) {
@@ -554,10 +660,12 @@ func TestRepoStatusUserHasNoAccess(t *testing.T) {
 
 	// A secret in a group bob will never belong to.
 	writeRepoFile(t, dir, "secrets/ops", "ops-only")
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/ops"}, []string{"ops"}, false) }))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/ops"}, []string{"ops"}, false, false) }))
 
 	// Tell bob, but only into "dev" - he has no access to the "ops" secret.
-	require.NoError(t, r.Update(func(s *Stage) error { return s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"dev"}) }))
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"dev"}, false)
+	}))
 	require.NoError(t, r.Close())
 
 	rb := reloadSesamRepo(t, dir, bob)
@@ -573,8 +681,8 @@ func TestRepoStatusDiffDir(t *testing.T) {
 	dir, r := bootstrapRepo(t, admin)
 
 	writeRepoFile(t, dir, "secrets/diff", "v1-sealed")
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/diff"}, []string{"admin"}, false) }))
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SealAll() }))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/diff"}, []string{"admin"}, false, false) }))
+	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }))
 	require.NoError(t, r.Close())
 
 	// Reload so whoami is resolved (Init does not set it).

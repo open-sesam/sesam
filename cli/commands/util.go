@@ -71,6 +71,28 @@ func askpassRequired() string {
 	return "prefer"
 }
 
+// resolveGroups reads the mutually exclusive --group/--group-add pair. It
+// returns the requested groups and whether they extend (additive) rather than
+// replace the current set. When required is true, exactly one of the flags must
+// be given.
+func resolveGroups(cmd *cli.Command, required bool) (groups []string, additive bool, err error) {
+	setGroup := cmd.IsSet("group")
+	setAdd := cmd.IsSet("group-add")
+
+	switch {
+	case setGroup && setAdd:
+		return nil, false, fmt.Errorf("--group and --group-add are mutually exclusive")
+	case setAdd:
+		return cmd.StringSlice("group-add"), true, nil
+	case setGroup:
+		return cmd.StringSlice("group"), false, nil
+	case required:
+		return nil, false, fmt.Errorf("need --group or --group-add")
+	default:
+		return nil, false, nil
+	}
+}
+
 func printJSON(value any) error {
 	out := colorable.NewColorable(os.Stdout) // needed for Windows
 	enc := json.NewEncoder(out)

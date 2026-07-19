@@ -180,8 +180,12 @@ func validSecretPathFormat(revealedPath string) error {
 		return fmt.Errorf("absolute paths not allowed in revealed path: %s", revealedPath)
 	}
 
-	if strings.Contains(revealedPath, "..") {
-		return fmt.Errorf("path may not include '..': %s", revealedPath)
+	// Reject path traversal, but only a real ".." path segment - the substring
+	// ".." appears legitimately inside filenames (e.g. "s.a.r..geojson").
+	for _, elem := range strings.Split(revealedPath, string(filepath.Separator)) {
+		if elem == ".." {
+			return fmt.Errorf("path may not include a '..' segment: %s", revealedPath)
+		}
 	}
 
 	return nil
@@ -211,6 +215,19 @@ func deduplicate[T cmp.Ordered](s []T) []T {
 	c := slices.Clone(s)
 	slices.Sort(c)
 	return slices.Compact(c)
+}
+
+// unionGroups returns the deduplicated union of base and extra.
+func unionGroups(base, extra []string) []string {
+	return deduplicate(slices.Concat(base, extra))
+}
+
+// withoutAdmin drops the implicit "admin" group. Secret access lists carry it
+// only after normalization, so it must not leak into a persisted set.
+func withoutAdmin(groups []string) []string {
+	return slices.DeleteFunc(slices.Clone(groups), func(g string) bool {
+		return g == "admin"
+	})
 }
 
 func closeLogged(fd io.Closer) {

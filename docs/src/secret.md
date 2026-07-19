@@ -22,6 +22,23 @@ This will:
 If you omit the ``--group`` parameter then only the `admin` group will have access to the file.
 You can change this at any point by just re-running the `add` command with any groups you want to set.
 
+
+Overall the workflow looks like this:
+
+```
+      ┌─────────────────┐   git add   ┌─────────────────┐    seal     ┌─────────────────┐
+      │  git objects    │◄────────────┤  sesam objects  │◄────────────┤ revealed files  │
+      │  .git/objects   ├────────────►│ .sesam/objects  ├────────────►│ in worktree     │
+      └─────────────────┘   checkout  └─────────────────┘   reveal    └─────────────────┘
+```
+
+What this means for you:
+
+- The revealed files are ignored by git.
+- Commands like `git log` will print paths like `.sesam/objects/secret.txt` but not `secret.txt`. This is because
+  the actual revealed file is of course not tracked.
+- If you want to run `git` commands explicitly on secrets, you have to run e.g. `git log .sesam/objects/secret.txt` not `git log secret.txt` therefore.
+
 ## Adding a secret via config (declarative)
 
 ```admonish warning
@@ -39,7 +56,7 @@ above command you will notice the secret was added already to the config:
 secrets:
   - path: path/to/secret
     access: [deploy]
-    description: Where it used, who owns it, Contact...
+    desc: Where it used, who owns it, Contact...
 ```
 
 If you did not run the `add` command above, then you can also add the entry manually and then run:
@@ -76,27 +93,24 @@ This will create a config hierarchy of `sesam.yml` files in the config:
 
 ```yaml
 # Main sesam.yml:
-config:
-  secrets:
-    - include: dir/of/secrets
+secrets:
+  - include: dir/of/secrets
 ```
 
 ```yaml
 # dir/of/secrets sesam.yml:
-config:
-  secrets:
-    - include: sub
-    - path: some_file
+secrets:
+  - include: sub
+  - path: some_file
 ```
 
 ```yaml
 # sub sesam.yml:
-config:
-  secrets:
-    - path: another_file
+secrets:
+  - path: another_file
 ```
 
-Once done you can also add descriptions to the files in the config or do more fine-tuning with the available [config keys](/config-ref.md).
+Once done you can also add descriptions to the files in the config or do more fine-tuning with the available [config keys](/config_ref.md).
 
 ```admonish note
 If you ever create new files in the sub directories they do not automatically get added.
@@ -109,14 +123,16 @@ In that sense, it works a bit like `git add`.
 Running `sesam add` will work here too, similar to `git add`. By default this will also re-seal the secrets,
 except if you pass `--no-seal`.
 
-If you want to change the access groups of a user, then just pass a different set of `--group` flags.
+If you want to change the access groups of a user, then just pass a different set of `--group / -g` flags.
+Note that this will overwrite the existing groups. If you would rather like to append, then use `--group-add / -G`.
 
 ### Getting an overview
 
 If you need to see which files were modified but not yet sealed you can use `sesam status`:
 
 ```bash
-# without --all you will only see the modified files:
+# with --all you will only see the modified files,
+# without it only those that changed in some way.
 $ sesam status --all
 .
 ├─ M README.md (admin)

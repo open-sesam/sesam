@@ -1,0 +1,26 @@
+# Key re-use between users: sesam refuses to create that state in the first
+# place (the add is rejected), and `sesam verify --key-reuse` is the backstop
+# for a state that bypassed the normal path (e.g. a hand-edited/forged log).
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# A clean repo shares no keys.
+exec sesam verify --key-reuse
+stderr 'Key re-use: ok'
+
+# Add bob with his key.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+
+# Giving carol a key already registered to bob is rejected at add time.
+! exec sesam tell --user carol --recipient $BOB_PUBKEY --group dev
+stderr 'already has recipient'
+
+# So the repo stays clean under the key-reuse check.
+exec sesam verify --key-reuse
+stderr 'Key re-use: ok'

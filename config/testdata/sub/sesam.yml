@@ -1,0 +1,4 @@
+secrets:
+  - path: nested.txt
+    access:
+      - group1

@@ -1,0 +1,10 @@
+# Subcommand help must show the human-readable category, not the internal
+# numeric sort-prefix. Categories are stored as "20\x1fSECRETS" (the \x1f is
+# invisible in a terminal, so a raw render looks like "20SECRETS"); the help
+# templates must strip the prefix.
+
+exec sesam status -h
+stdout '(?m)^CATEGORY:$'
+# The line must be exactly the trimmed name - the buggy render was "   20…SECRETS".
+stdout '(?m)^   SECRETS$'
+! stdout '(?m)^   [0-9]'

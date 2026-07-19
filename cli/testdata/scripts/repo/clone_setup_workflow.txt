@@ -1,0 +1,51 @@
+# Verify `sesam init` on an already-initialized repo (a fresh clone) switches
+# to setup mode: it wires up this clone's local git integration and reveals the
+# secrets the caller can access, instead of trying to create a new repo.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+# Admin creates the repo, adds a secret, onboards bob, commits.
+exec sesam init --user admin
+cp secret.env app.env
+exec sesam add app.env --group dev
+# Bob is a non-admin dev: he can read app.env (dev) but not the admin-only
+# README init creates. Setup's reveal must skip the README and still reveal
+# app.env (RevealAll skips inaccessible secrets rather than aborting).
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'init sesam with a secret and bob'
+
+# Clone into a fresh worktree. The clone has no sesam git config: the driver
+# entries live in .git/config, which clone never copies. So nothing is revealed
+# yet.
+exec git clone . clone_bob
+cd clone_bob
+! exec git config --local diff.sesam-diff.textconv
+! exists app.env
+
+# `sesam init` detects the existing repo and runs setup: wires git and (since
+# bob is a recipient) reveals his secrets.
+exec sesam --identity $BOB_KEY init
+stdout 'Adjusting git config'
+stdout 'Revealing secrets'
+exec git config --local diff.sesam-diff.textconv
+stdout 'sesam show'
+exists app.env
+grep 'super-secret' app.env
+
+cd $WORK
+
+# A non-recipient (carol) gets git wired but no reveal - and setup still
+# succeeds, because the best-effort reveal must never fail the wiring.
+exec git clone . clone_carol
+cd clone_carol
+exec sesam --identity $CAROL_KEY init
+stdout 'wired up'
+exec git config --local diff.sesam-diff.textconv
+stdout 'sesam show'
+! exists app.env
+
+-- secret.env --
+TOKEN=super-secret

@@ -11,8 +11,9 @@ cloning you have to install them once:
 ```bash
 # Reveal the secrets explicitly:
 $ sesam open
-# Make sure it gets done automatically on the next checkout:
-$ sesam hook install
+# Make sure it gets done automatically on the next checkout.
+# If the repo already exists, this just re-installs the git-integration.
+$ sesam init
 ```
 
 ```admonish note
@@ -82,6 +83,24 @@ detect this by comparing against an older copy — a local clone, a CI checkout,
 colleague's repo. Compare against a known-good copy before trusting anything, and
 disable force-push at your forge (see [Initialisation](./init.md)).
 
+## I ran `sesam uninstall` and now re-`init` fails with "init file check: … has uncommitted changes"
+
+This is because the verification logic of `sesam` asserts that
+`.sesam/audit/init` always contains the very same content for the life-time of
+a `git` repository. This is designed in that way to avoid history rewrites.
+
+In practice, you cannot re-init the same repository at the same place. If this
+proves to be a problem in actual use we'd like to hear from you. There might be
+ways to relax the conditions here.
+
+For now, you can do the following:
+
+- Init the new `sesam` repo in a different (sub-)directory.
+- Rewrite the git history so that the `sesam` repo never "existed".
+- Revert to a state before you've deleted the repo.
+
+None of them is a perfect solution of course.
+
 ## How do I reveal secrets in CI/CD without a human?
 
 Give the pipeline a dedicated machine identity (its own `age`/SSH key, told into
@@ -135,3 +154,25 @@ $ sesam keyring clear
 ```
 
 Next run will query the password again.
+
+## My shell wants to correct `sesam` to `.sesam`
+
+i.e. you get something like this:
+
+```bash
+$ sesam ls
+ zsh: correct 'sesam' to '.sesam' [nyae]?
+```
+
+Not something we can fix on our end, but it's a buggy correction setup.
+There are a couple workarounds:
+
+**zsh**
+
+- `unsetopt correct` - disables all command corrections.
+- `export CORRECT_IGNORE_FILE='.*'`  - disable correction for all dot-files.
+- `export CORRECT_IGNORE_FILE='.sesam'`  - disable correction for `.sesam` only.
+
+All of them need to be added to your `.zshrc` to stick.
+
+If you have other shells here that act up, feel free to write us.

@@ -1,0 +1,40 @@
+# `sesam uninstall` must remove every trace of sesam's git integration: the
+# local git config entries (alias + diff driver, checked here as they install by
+# default) and the lines sesam wrote to .gitattributes / .gitignore. Without
+# --all it leaves the repository data (.sesam/, sesam.yml) in place; with --all
+# it removes those too.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+
+# Wiring is present after init.
+exec git config --local alias.sesam
+stdout '^!sesam$'
+exec git config --local diff.sesam-diff.textconv
+stdout '^sesam show$'
+exists .gitattributes
+grep 'sesam-diff' .gitattributes
+exists .gitignore
+grep '.sesam' .gitignore
+
+# Uninstall without --all strips the git integration but keeps the data.
+exec sesam uninstall
+
+# The bare alias option is a regression guard: git aliases cannot live in a
+# subsection, so removing them needs RemoveOption, not RemoveSubsection.
+! exec git config --local alias.sesam
+! exec git config --local diff.sesam-diff.textconv
+# Both managed files held only sesam's lines, so they are gone entirely.
+! exists .gitattributes
+! exists .gitignore
+# Data is untouched without --all.
+exists .sesam
+exists sesam.yml
+
+# --all also removes the repository data (--no-ask skips the confirmation).
+exec sesam uninstall --all --no-ask
+! exists .sesam
+! exists sesam.yml

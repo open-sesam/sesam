@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"filippo.io/age"
-	"github.com/google/renameio/v2"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -105,35 +103,48 @@ func (sm *SecretManager) SealedPath(path string) string {
 	return sm.cryptPath(path)
 }
 
-// SecretAdd adds a new secret to be managed by sesam
-func (sm *SecretManager) SecretAdd(revealedPath string, groups []string) error {
-	return sm.addOrChangeSecret(revealedPath, groups)
+// SecretAdd adds a new secret to be managed by sesam. It returns the resulting
+// verified secret, or nil when nothing changed.
+func (sm *SecretManager) SecretAdd(revealedPath string, groups []string, additive bool) (*VerifiedSecret, error) {
+	return sm.addOrChangeSecret(revealedPath, groups, additive)
 }
 
 // SecretChangeGroups changes the access groups for the secret at `revealedPath`.
 func (sm *SecretManager) SecretChangeGroups(revealedPath string, groups []string) error {
-	return sm.addOrChangeSecret(revealedPath, groups)
+	if _, err := sm.addOrChangeSecret(revealedPath, groups, false); err != nil {
+		return err
+	}
+	return nil
 }
 
 // addOrChangeSecret emits a secret.add entry for a new secret and a
 // secret.change_access entry for an existing one, deciding which based on
-// whether the secret is already known.
-func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string) error {
+// whether the secret is already known. When additive and the secret exists, the
+// given groups are merged into its current access list rather than replacing
+// it. It returns the resulting verified secret.
+func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string, additive bool) (*VerifiedSecret, error) {
 	if err := validSecretPath(sm.root, revealedPath); err != nil {
-		return fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
+		return nil, fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
 	}
 
 	var auditEntry *AuditEntry
-	if _, exists := sm.State.SecretExists(revealedPath); !exists {
+	existing, exists := sm.State.SecretExists(revealedPath)
+	if !exists {
 		// Secret does not exist yet: this is an add.
 		auditEntry = newAuditEntry(sm.Signer.UserName(), &DetailSecretAdd{
 			RevealedPath: revealedPath,
 			AccessGroups: groups,
 		})
 	} else {
+		if additive {
+			// "admin" is implicit for secrets, so strip it from the current
+			// list before merging to keep it out of the persisted set.
+			groups = unionGroups(withoutAdmin(existing.AccessGroups), groups)
+		}
+
 		if len(groups) == 0 {
 			// if no groups were given, there is nothing to change.
-			return nil
+			return existing, nil
 		}
 
 		// Secret already exists: this is an access-list change.
@@ -143,11 +154,20 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string)
 		})
 	}
 
-	return sm.State.FeedEntry(sm.Signer, auditEntry)
+	if err := sm.State.FeedEntry(sm.Signer, auditEntry); err != nil {
+		return nil, err
+	}
+
+	vs, _ := sm.State.SecretExists(revealedPath)
+	return vs, nil
 }
 
-// SealAll seals all known secrets.
-func (sm *SecretManager) SealAll() error {
+// Seal (re-)seals the known secrets. With all=false only secrets whose plaintext
+// or recipient set drifted are re-encrypted; unchanged ones keep their existing
+// ciphertext. When nothing was re-sealed or pruned, no audit entry is written,
+// so a no-op seal (e.g. the pre-commit hook on a commit that touched no secrets)
+// does not churn the log.
+func (sm *SecretManager) Seal(all bool) error {
 	objects := sm.objectsDir()
 	if err := sm.root.MkdirAll(objects, 0o700); err != nil {
 		return fmt.Errorf("create objects dir: %w", err)
@@ -156,7 +176,7 @@ func (sm *SecretManager) SealAll() error {
 	wanted := make(map[string]bool, len(sm.State.Secrets))
 	sigs := make([]*secretFooter, 0, len(sm.State.Secrets))
 	for _, vsecret := range sm.State.Secrets {
-		sig, err := sm.sealOrPreserve(vsecret.RevealedPath)
+		sig, err := sm.sealOrPreserve(vsecret.RevealedPath, all)
 		if err != nil {
 			return fmt.Errorf("seal %s: %w", vsecret.RevealedPath, err)
 		}
@@ -169,10 +189,21 @@ func (sm *SecretManager) SealAll() error {
 		return fmt.Errorf("prune stale objects: %w", err)
 	}
 
+	// Check if the root hash actually changed, we might be able to just skip
+	// adding the seal entry because nothing effectively happened.
+	//
+	// The exception are operations like "adding a user that has access to nothing"
+	// That will still trigger the warning that we should seal, but in this case
+	// we can just append the audit entry anyways.
+	rootHash := buildRootHash(sigs)
+	if rootHash == sm.State.LastSealRootHash && sm.State.SealRequiredSeqID == 0 {
+		return nil
+	}
+
 	return sm.State.FeedEntry(
 		sm.Signer,
 		newAuditEntry(sm.Signer.UserName(), &DetailSeal{
-			RootHash:    buildRootHash(sigs),
+			RootHash:    rootHash,
 			FilesSealed: len(sigs),
 		}),
 	)
@@ -182,7 +213,7 @@ func (sm *SecretManager) SealAll() error {
 // plaintext it re-encrypts (renameio replaces the object); otherwise it leaves
 // the existing ciphertext untouched and reads back its footer. It is an error
 // if there is neither plaintext nor an existing object.
-func (sm *SecretManager) sealOrPreserve(revealedPath string) (*secretFooter, error) {
+func (sm *SecretManager) sealOrPreserve(revealedPath string, all bool) (*secretFooter, error) {
 	dest := sm.cryptPath(revealedPath)
 	if err := sm.root.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return nil, fmt.Errorf("create objects subdir: %w", err)
@@ -192,6 +223,19 @@ func (sm *SecretManager) sealOrPreserve(revealedPath string) (*secretFooter, err
 	case err == nil:
 		sealer := sm.Signer.UserName()
 		if sm.State.SealerAuthorized(sealer, revealedPath) {
+			// Unless forced (all), skip the reseal when the existing object still
+			// matches both the plaintext and the recipient set. NeedsSeal hands
+			// back the footer it read so we can return it without a second read.
+			if !all {
+				needsSeal, footer, err := sm.NeedsSeal(revealedPath)
+				if err != nil {
+					return nil, fmt.Errorf("failed to check whether reseal is needed: %w", err)
+				}
+				if !needsSeal {
+					return footer, nil
+				}
+			}
+
 			return sealSecret(sm, revealedPath, sm.recipientsFor(revealedPath), dest, sealer)
 		}
 
@@ -218,7 +262,8 @@ func (sm *SecretManager) sealOrPreserve(revealedPath string) (*secretFooter, err
 }
 
 // pruneObjects removes object files under objects/ whose sesam-relative path is
-// not in `wanted` (the set just sealed/preserved). Empty directories are left in place.
+// not in `wanted` (the set just sealed/preserved). Empty directories are left in
+// place.
 func (sm *SecretManager) pruneObjects(wanted map[string]bool) error {
 	objects := sm.objectsDir()
 	if _, err := sm.root.Stat(objects); os.IsNotExist(err) {
@@ -351,8 +396,8 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 	}
 
 	// Materialize the moved object so it survives the cleanup above and the
-	// caller's SealAll can preserve it. No per-move seal entry is emitted: the
-	// caller runs a single SealAll after the whole move cascade, which writes
+	// caller's Seal can preserve it. No per-move seal entry is emitted: the
+	// caller runs a single Seal after the whole move cascade, which writes
 	// the one authoritative seal entry (instead of one per moved secret).
 	_, err := sealSecret(
 		sm,
@@ -406,113 +451,56 @@ func openForShow(root *os.Root, path string) (*os.File, error) {
 	return root.Open(path)
 }
 
-// RevealBlob decrypts src and writes the plaintext to sesamDir/revealedPath.
+// NeedsSeal reports whether revealedPath must be (re-)sealed: its recipient set
+// or its plaintext drifted from the sealed object, or either the sealed object
+// or the plaintext is missing. A missing file is reported as "needs seal"
+// rather than an error, so callers (Seal, `sesam status`) can probe freely
+// without pre-checking existence. When the object is read, its footer is
+// returned so the caller can reuse it instead of reading it a second time.
 //
-// revealedPath is the repo-relative plain path (e.g. "secrets/token"), derived
-// by the caller from git's %f argument so no footer read-back is needed.
-//
-// When `kr` is non-nil the footer signature is verified against the keyring,
-// and when `authorize` is also non-nil the named sealer is checked against
-// the predicate (see VerifiedState.SealerAuthorized). Both nil preserves
-// the historical "decrypt and ask no questions" behaviour, which is what
-// low-level test fixtures need when no audit log is available.
-//
-// Returns (true, nil) on success. Returns (false, nil) when the caller is not
-// a recipient - the blob is not meant for them and is silently skipped.
-//
-// On *AuthorizationError the decryption succeeded but the sealer was not in
-// the access list. The plaintext is still landed (`true` is returned) and
-// the typed error is propagated so callers can pick a policy: the smudge
-// filter logs the mismatch and treats it as success; CLI tools may prefer
-// to refuse. This split lets `git checkout` survive history written before
-// the auth check shipped while still surfacing the deviation loudly.
-func RevealBlob(
-	sesamDir string,
-	ids Identities,
-	src io.ReadSeeker,
-	revealedPath string,
-	kr Keyring,
-	authorize func(user, path string) bool,
-) (bool, error) {
-	dstPath := filepath.Join(sesamDir, revealedPath)
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
-		return false, fmt.Errorf("creating revealed dir: %w", err)
-	}
-
-	tmpDir := filepath.Join(sesamDir, ".sesam", "tmp")
-	dst, err := renameio.TempFile(tmpDir, dstPath)
-	if err != nil {
-		return false, fmt.Errorf("creating temp file: %w", err)
-	}
-	defer func() { _ = dst.Cleanup() }()
-
-	var revealErr error
-	if kr != nil {
-		revealErr = revealStreamAndVerify(src, dst, ids.AgeIdentities(), kr, authorize)
-	} else {
-		_, _, _, revealErr = revealStream(src, dst, ids.AgeIdentities())
-	}
-
-	if revealErr != nil {
-		var noMatch *age.NoIdentityMatchError
-		if errors.As(revealErr, &noMatch) {
-			// count as no error, checking out old state is a best effort.
-			return false, nil
-		}
-
-		var authErr *BadSealerError
-		if errors.As(revealErr, &authErr) {
-			// Decryption succeeded; only the policy check failed. Land
-			// the plaintext and propagate the typed error - the caller
-			// decides whether to warn or refuse.
-			_ = dst.Chmod(0o600)
-			if closeErr := dst.CloseAtomicallyReplace(); closeErr != nil {
-				return false, closeErr
-			}
-			return true, revealErr
-		}
-
-		return false, revealErr
-	}
-
-	_ = dst.Chmod(0o600)
-	return true, dst.CloseAtomicallyReplace()
-}
-
-// EqualPlaintext will check if revealedPath has the same content as the sealed
-// text. It does not need to decrypt the sealed file for that and only needs to
-// read the revealedPath once.
-func (sm *SecretManager) EqualPlaintext(revealedPath string, ids Identities) (bool, error) {
+// The recipient check works off the signed footer alone (no decryption), so it
+// holds even when the current sealer cannot read the existing object; only the
+// plaintext comparison decrypts the sealed file's age key.
+func (sm *SecretManager) NeedsSeal(revealedPath string) (bool, *secretFooter, error) {
 	sealFd, err := sm.root.Open(sm.cryptPath(revealedPath))
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil, nil
+	}
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	defer closeLogged(sealFd)
 
 	plainFd, err := sm.root.Open(revealedPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil, nil
+	}
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	defer closeLogged(plainFd)
 
-	ageKey, err := readAgeEncryptionKey(sealFd, ids.AgeIdentities())
-	if err != nil {
-		return false, err
-	}
-
 	_, footer, err := readFooter(sealFd)
 	if err != nil {
-		return false, err
+		return false, nil, err
+	}
+
+	want := MulticodeEncode(recipientsHash(sm.recipientsFor(revealedPath)), MhSHA3_256)
+	if footer.RecipientsHash != want {
+		return true, footer, nil
+	}
+
+	ageKey, err := readAgeEncryptionKey(sealFd, sm.Identities.AgeIdentities())
+	if err != nil {
+		return false, footer, err
 	}
 
 	plainContentHash := sha3.New256()
 	if _, err := io.Copy(plainContentHash, plainFd); err != nil {
-		return false, err
+		return false, footer, err
 	}
-
 	_, _ = plainContentHash.Write([]byte(revealedPath))
 
-	plainHmacContentHashBytes := keyContentHash(ageKey, plainContentHash.Sum(nil))
-	plainHmacContentHash := MulticodeEncode(plainHmacContentHashBytes, MhSHA3_256)
-	return plainHmacContentHash == footer.HMACContentHash, nil
+	plainHmacContentHash := MulticodeEncode(keyContentHash(ageKey, plainContentHash.Sum(nil)), MhSHA3_256)
+	return plainHmacContentHash != footer.HMACContentHash, footer, nil
 }

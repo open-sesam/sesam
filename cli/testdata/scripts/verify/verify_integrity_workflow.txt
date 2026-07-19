@@ -1,0 +1,31 @@
+# `sesam verify --integrity` detects a sealed object that no longer matches the
+# audit log (swapped or corrupted ciphertext on disk).
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Track a secret; it seals to an object under .sesam/objects.
+exec sesam add s.txt --group dev
+exists .sesam/objects/s.txt.sesam
+
+# A pristine repo passes the integrity check.
+exec sesam verify --integrity
+stderr 'Integrity: ok'
+
+# Corrupt the sealed object on disk.
+cp garbage .sesam/objects/s.txt.sesam
+
+# Integrity now fails. no-disk keeps the load from bailing on the same mismatch
+# first, so the verify report itself is what flags it.
+! exec sesam --verify-mode no-disk verify --integrity
+stderr 'Integrity:.*error'
+
+-- s.txt --
+top secret
+-- garbage --
+not a valid sealed object

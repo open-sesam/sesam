@@ -3,6 +3,7 @@ package core
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +14,30 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/require"
 )
+
+// revealableBy reports whether u can decrypt and reveal revealedPath from its
+// sealed object, driving the production reveal path. A "not a recipient"
+// outcome is reported as false rather than an error - the recipient-membership
+// probe the user-manager tests need.
+func revealableBy(t *testing.T, sesamDir string, u *testUser, kr Keyring, al *AuditLog, state *VerifiedState, revealedPath string) bool {
+	t.Helper()
+
+	mgr, err := BuildSecretManager(sesamDir, testRoot(t, sesamDir), Identities{u.Identity}, u.Signer, kr, al, state)
+	require.NoError(t, err)
+
+	err = revealSecret(mgr, revealedPath)
+	if err == nil {
+		return true
+	}
+
+	var noMatch *age.NoIdentityMatchError
+	if errors.As(err, &noMatch) {
+		return false
+	}
+
+	require.NoError(t, err) // any other error is a real failure
+	return false
+}
 
 // testUser holds all key material for a test user.
 type testUser struct {
@@ -109,10 +134,18 @@ func testKeyring(t *testing.T, users ...*testUser) *MemoryKeyring {
 	kr := EmptyKeyring()
 	for _, u := range users {
 		require.NoError(t, kr.SetSignPubKey(u.Name, u.Signer.PublicKey()))
-		require.NoError(t, kr.AddRecipient(u.Name, u.Recipient))
+		mustAddRecipient(t, kr, u.Name, u.Recipient)
 	}
 
 	return kr
+}
+
+// mustAddRecipient adds a recipient and fails the test on error, discarding the
+// inserted flag callers that only care about success don't need.
+func mustAddRecipient(t *testing.T, kr Keyring, user string, recp *Recipient) {
+	t.Helper()
+	_, err := kr.AddRecipient(user, recp)
+	require.NoError(t, err)
 }
 
 // initAuditLog creates a fresh audit log with the given user as admin. It opens

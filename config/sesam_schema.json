@@ -14,6 +14,7 @@
     }
   },
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "version": {
       "x-order": 0,
@@ -29,6 +30,7 @@
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": [
           "name",
           "key"
@@ -83,6 +85,7 @@
           {
             "description": "Include form — delegates to a subordinate sesam.yml in a sub-directory",
             "type": "object",
+            "additionalProperties": false,
             "required": [
               "include"
             ],
@@ -96,6 +99,7 @@
           {
             "description": "Secret form — registers a file as a managed secret",
             "type": "object",
+            "additionalProperties": false,
             "required": [
               "path"
             ],

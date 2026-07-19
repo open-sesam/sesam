@@ -29,23 +29,36 @@ var flagNoSeal = &cli.BoolFlag{
 	Usage: "Do not run 'sesam seal' afterwards - useful when batching",
 }
 
+var flagSeal = &cli.BoolFlag{
+	Name:  "seal-all",
+	Usage: "When we seal, seal also files that did not change",
+}
+
 // userFlag builds the --user flag. Required-ness and help text differ per
 // command (init guesses from git, kill needs it), so it is parametrized rather
 // than a single shared variable.
 func userFlag(required bool, usage string) cli.Flag {
 	return &cli.StringFlag{
 		Name:     flagUser,
+		Aliases:  []string{"u"},
 		Required: required,
 		Usage:    usage,
 	}
 }
 
-// groupFlag builds the repeatable --group flag. Required-ness varies per command.
-func groupFlag(required bool, usage string) cli.Flag {
+func groupFlag(usage string) cli.Flag {
 	return &cli.StringSliceFlag{
-		Name:     "group",
-		Required: required,
-		Usage:    usage,
+		Name:    "group",
+		Aliases: []string{"g"},
+		Usage:   usage,
+	}
+}
+
+func groupAddFlag(usage string) cli.Flag {
+	return &cli.StringSliceFlag{
+		Name:    "group-add",
+		Aliases: []string{"G"},
+		Usage:   usage,
 	}
 }
 
@@ -111,11 +124,48 @@ var flagsGeneral = []cli.Flag{
 		Usage: "Adjust how strong or weak the disk state is verified ('all', or 'no-disk')",
 		Value: "all",
 	},
+	&cli.StringFlag{
+		Name:    "cpuprofile",
+		Usage:   "Write a CPU profile of this invocation to `FILE` (pprof format)",
+		Sources: cli.EnvVars("SESAM_CPUPROFILE"),
+	},
+	&cli.StringFlag{
+		Name:    "memprofile",
+		Usage:   "Write a heap profile at exit to `FILE` (pprof format)",
+		Sources: cli.EnvVars("SESAM_MEMPROFILE"),
+	},
 }
 
 // flagsInit are specific to repository bootstrap.
 var flagsInit = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "install-hooks",
+		Usage: "Install pre-commit and post-checkout git hooks (needs git >= 2.54.0)",
+	},
+	&cli.BoolFlag{
+		Name:  "install-merge",
+		Usage: "Install merge support in repo git config",
+	},
+	&cli.BoolFlag{
+		Name:  "install-diff",
+		Usage: "Install diff support in repo git config",
+	},
+	&cli.BoolFlag{
+		Name:  "install-alias",
+		Usage: "Make it possible to call sesam as `git sesam`",
+	},
 	userFlag(false, "Initial admin user name (if not given, git config is used to guess)"),
+}
+
+var flagsUninstall = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "no-ask",
+		Usage: "Do not ask for confirmation for --all",
+	},
+	&cli.BoolFlag{
+		Name:  "all",
+		Usage: "Also remove sesam.yml and .sesam/",
+	},
 }
 
 // flagsSeal contains optional controls for sealing.
@@ -124,6 +174,7 @@ var flagsSeal = []cli.Flag{
 		Name:  "clean",
 		Usage: "Delete revealed secret files after successful seal",
 	},
+	flagSeal,
 }
 
 var flagsClean = []cli.Flag{
@@ -142,11 +193,21 @@ var flagsReveal = []cli.Flag{}
 
 // flagsAdd contains controls for adding secrets.
 var flagsAdd = []cli.Flag{
-	groupFlag(false, "Group assignment for the secret (repeatable) - 'admin' is implicit"),
+	groupFlag("Group assignment for the secret (repeatable) - 'admin' is implicit"),
+	groupAddFlag("Add to the secret's existing groups instead of replacing them"),
 	flagNoSeal,
+	flagSeal,
 	&cli.BoolFlag{
 		Name:  "nested",
 		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file",
+	},
+}
+
+var flagsRm = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "force",
+		Aliases: []string{"f"},
+		Usage:   "Also remove the revealed secrets",
 	},
 }
 
@@ -157,18 +218,21 @@ var flagsMove = []cli.Flag{
 	},
 }
 
-// flagsTell contains controls for adding users.
+// flagsTell contains controls for adding or updating users.
 var flagsTell = []cli.Flag{
-	userFlag(false, "User name to add"),
-	recipientsFlag(true),
-	groupFlag(true, "Group assignment (repeatable)"),
+	userFlag(false, "User name to add or update"),
+	recipientsFlag(false),
+	groupFlag("Group assignment (repeatable)"),
+	groupAddFlag("Add to the user's existing groups instead of replacing them"),
 	flagNoSeal,
+	flagSeal,
 }
 
 // flagsKill contains controls for removing users.
 var flagsKill = []cli.Flag{
 	userFlag(true, "User name to remove"),
 	flagNoSeal,
+	flagSeal,
 }
 
 // flagsListSecrets contains output controls for secret listing.
@@ -181,20 +245,29 @@ var flagsRenameUser = []cli.Flag{}
 
 var flagsUserChangeGroups = []cli.Flag{
 	userFlag(true, "Which user should be changed"),
-	groupFlag(true, "Group assignment for the secret (repeatable) - 'admin' is implicit"),
+	groupFlag("Group assignment for the user (repeatable) - 'admin' is implicit"),
+	groupAddFlag("Add to the user's existing groups instead of replacing them"),
 	flagNoSeal,
+	flagSeal,
 }
 
 var flagsUserAddRecipient = []cli.Flag{
 	userFlag(true, "Which user receives the new recipient"),
 	recipientsFlag(true),
 	flagNoSeal,
+	flagSeal,
 }
 
 var flagsUserRemoveRecipient = []cli.Flag{
 	userFlag(true, "Which user looses the specified recipient"),
 	recipientsFlag(true),
 	flagNoSeal,
+	flagSeal,
+	&cli.BoolFlag{
+		Name:    "all-except",
+		Aliases: []string{"a"},
+		Usage:   "Delete all except the recipients named by --recipient",
+	},
 }
 
 var flagsUserRegenerateSignKey = []cli.Flag{

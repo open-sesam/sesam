@@ -527,6 +527,28 @@ h1 .fn-mark {
   z-index: 4;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  /* playful nudge on hover: grow and tilt a little (see :hover below) */
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 0.35s ease;
+}
+/* The moon is an asymmetric crescent, so scale + rotate reads directly. The sun
+   is a radially-symmetric glow — rotating the disc is invisible — so its hover
+   grows and brightens the glow and spins up the rays (::before) instead. */
+.moon:hover, .moon:focus-visible {
+  transform: scale(1.18) rotate(-15deg);
+}
+.sun:hover, .sun:focus-visible {
+  transform: scale(1.22);
+  box-shadow:
+    0 0 30px 8px   color-mix(in srgb, var(--clay) 44%, transparent),
+    0 0 72px 30px  color-mix(in srgb, var(--clay) 22%, transparent),
+    0 0 140px 70px color-mix(in srgb, var(--clay) 10%, transparent);
+}
+/* wake the rays up: crisper, more defined and spinning fast while hovered, so
+   the rotation actually reads (a bloomed sun would just swallow the spokes) */
+.sun:hover::before, .sun:focus-visible::before {
+  filter: blur(0.2px) contrast(1.8) brightness(1.1);
+  animation-duration: 3s;
 }
 .sun:focus-visible, .moon:focus-visible {
   outline: 2px solid var(--gold);
@@ -567,6 +589,7 @@ h1 .fn-mark {
           mask: radial-gradient(circle closest-side, transparent 40%, #000 56%, transparent 82%);
   filter: blur(0.8px);
   animation: sun-rays 120s linear infinite;
+  transition: filter 0.35s ease;
 }
 @keyframes sun-rays { to { transform: rotate(360deg); } }
 
@@ -673,6 +696,9 @@ h1 .fn-mark {
   .scene { animation: none; }
   .spark { animation: none; opacity: 0; }
   .sun::before { animation: none; }
+  .sun, .moon { transition: none; }
+  .sun:hover, .sun:focus-visible,
+  .moon:hover, .moon:focus-visible { transform: none; }
 }
 
 /* --- Sun on the oasis pond ---
@@ -748,7 +774,7 @@ h1 .fn-mark {
 <button class="moon" type="button" aria-label="Switch to light mode"></button>
 <picture>
   <source srcset="bg.webp" type="image/webp" />
-  <img class="scene" src="bg.png" alt="" aria-hidden="true" />
+  <img class="scene" src="bg.webp" alt="" aria-hidden="true" />
 </picture>
 <div class="sparkles" aria-hidden="true">
   <span class="spark" style="left:48.5%;top:50%;animation-delay:0s;animation-duration:1.3s"></span>

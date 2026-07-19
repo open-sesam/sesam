@@ -27,9 +27,9 @@ type FileSource struct {
 // is decoded from / marshaled to the AST on demand; the AST stays
 // authoritative.
 type User struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"desc,omitempty"`
-	Key         []string `yaml:"key,omitempty"`
+	Name        string   `yaml:"name" json:"name"`
+	Description string   `yaml:"desc,omitempty" json:"desc,omitempty"`
+	Key         []string `yaml:"key,omitempty" json:"key,omitempty"`
 }
 
 ///////////////////
@@ -42,16 +42,16 @@ type User struct {
 // view over the AST, used both to decode existing entries and to marshal new
 // nodes before they are inserted.
 type Secret struct {
-	Include     string   `yaml:"include,omitempty"`
-	Name        string   `yaml:"name,omitempty"`
-	Path        string   `yaml:"path,omitempty"`
-	Access      []string `yaml:"access,omitempty"`
-	Description string   `yaml:"desc,omitempty"`
-	Rotate      []any    `yaml:"rotate,omitempty"`
-	Swap        []Swap   `yaml:"swap,omitempty"`
+	Include     string   `yaml:"include,omitempty" json:"include,omitempty"`
+	Name        string   `yaml:"name,omitempty" json:"name,omitempty"`
+	Path        string   `yaml:"path,omitempty" json:"path,omitempty"`
+	Access      []string `yaml:"access,omitempty" json:"access,omitempty"`
+	Description string   `yaml:"desc,omitempty" json:"desc,omitempty"`
+	Rotate      []any    `yaml:"rotate,omitempty" json:"rotate,omitempty"`
+	Swap        []Swap   `yaml:"swap,omitempty" json:"swap,omitempty"`
 }
 
 // Swap struct repesents the swap config of a secret. Multiple commands can be defined here
 type Swap struct {
-	Cmd string `yaml:"cmd"`
+	Cmd string `yaml:"cmd" json:"cmd"`
 }

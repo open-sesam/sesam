@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"filippo.io/age"
@@ -55,6 +56,7 @@ func (m *mockPassphraseProvider) PassphraseVerified(_ []byte, success bool) {
 }
 
 func TestAskpassProviderReadsPassphrase(t *testing.T) {
+	t.Parallel()
 	helper := writeAskpassHelper(t, "printf '%s\\n' secret")
 
 	passphrase, err := (&AskpassProvider{Program: helper}).ReadPassphrase("Prompt: ")
@@ -63,6 +65,7 @@ func TestAskpassProviderReadsPassphrase(t *testing.T) {
 }
 
 func TestAskpassProviderTrimsProgram(t *testing.T) {
+	t.Parallel()
 	helper := writeAskpassHelper(t, "printf flag")
 
 	passphrase, err := (&AskpassProvider{Program: " " + helper + " "}).ReadPassphrase("Prompt: ")
@@ -71,11 +74,13 @@ func TestAskpassProviderTrimsProgram(t *testing.T) {
 }
 
 func TestAskpassProviderUnavailable(t *testing.T) {
+	t.Parallel()
 	_, err := (&AskpassProvider{}).ReadPassphrase("Prompt: ")
 	require.ErrorIs(t, err, errAskpassUnavailable)
 }
 
 func TestAskpassProviderFallsBackWhenUnconfigured(t *testing.T) {
+	t.Parallel()
 	fallback := &mockPassphraseProvider{passphrase: []byte("fallback")}
 
 	passphrase, err := (&AskpassProvider{Fallback: fallback}).ReadPassphrase("Prompt: ")
@@ -86,6 +91,7 @@ func TestAskpassProviderFallsBackWhenUnconfigured(t *testing.T) {
 }
 
 func TestAskpassProviderDoesNotFallBackWhenHelperFails(t *testing.T) {
+	t.Parallel()
 	helper := writeAskpassHelper(t, "exit 1")
 	fallback := &mockPassphraseProvider{passphrase: []byte("fallback")}
 
@@ -139,6 +145,7 @@ func encryptIdentityForTest(t *testing.T, plaintext string, passphrase []byte, a
 }
 
 func TestParseIdentityAgeNative(t *testing.T) {
+	t.Parallel()
 	ageID, err := age.GenerateX25519Identity()
 	require.NoError(t, err)
 
@@ -148,6 +155,7 @@ func TestParseIdentityAgeNative(t *testing.T) {
 }
 
 func TestParseIdentityAgePQ(t *testing.T) {
+	t.Parallel()
 	pqID, err := age.GenerateHybridIdentity()
 	require.NoError(t, err)
 
@@ -157,6 +165,7 @@ func TestParseIdentityAgePQ(t *testing.T) {
 }
 
 func TestParseIdentitySSHEd25519Unencrypted(t *testing.T) {
+	t.Parallel()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
@@ -170,6 +179,7 @@ func TestParseIdentitySSHEd25519Unencrypted(t *testing.T) {
 }
 
 func TestParseIdentitySSHEncryptedWithPassphrase(t *testing.T) {
+	t.Parallel()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
@@ -196,6 +206,7 @@ func TestParseIdentitySSHEncryptedWithPassphrase(t *testing.T) {
 // The prompt argument to ParseIdentity must reach the PassphraseProvider so
 // users with multiple --identity flags can see whose passphrase is asked for.
 func TestParseIdentityForwardsPromptToProvider(t *testing.T) {
+	t.Parallel()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
@@ -212,6 +223,7 @@ func TestParseIdentityForwardsPromptToProvider(t *testing.T) {
 }
 
 func TestParseIdentitySSHWrongPassphrase(t *testing.T) {
+	t.Parallel()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
@@ -227,6 +239,7 @@ func TestParseIdentitySSHWrongPassphrase(t *testing.T) {
 }
 
 func TestKeyFingerprintDistinctPerKey(t *testing.T) {
+	t.Parallel()
 	a := KeyFingerprint([]byte("key-a"))
 	b := KeyFingerprint([]byte("key-b"))
 
@@ -235,9 +248,17 @@ func TestKeyFingerprintDistinctPerKey(t *testing.T) {
 	require.True(t, strings.HasPrefix(a, "sesam.identity."), "fingerprint should be namespaced")
 }
 
+// keyringGlobalMu serializes the tests that use the process-global keyring mock
+// (keyring.MockInit resets a shared provider). They still run t.Parallel() so
+// they overlap the other parallel tests instead of gating the sequential phase.
+var keyringGlobalMu sync.Mutex
+
 // A wrong passphrase must never be cached; only one that actually unlocks the
 // key gets written to the keyring.
 func TestKeyringPassphraseCachesOnlyOnSuccess(t *testing.T) {
+	t.Parallel()
+	keyringGlobalMu.Lock()
+	defer keyringGlobalMu.Unlock()
 	keyring.MockInit()
 
 	pemBytes := encryptedSSHKey(t, "correct-horse")
@@ -270,6 +291,9 @@ func TestKeyringPassphraseCachesOnlyOnSuccess(t *testing.T) {
 // A stale keyring entry whose passphrase no longer unlocks the key must be
 // evicted, so a keyring-only load can recover instead of failing forever.
 func TestKeyringPassphraseEvictsStaleEntry(t *testing.T) {
+	t.Parallel()
+	keyringGlobalMu.Lock()
+	defer keyringGlobalMu.Unlock()
 	keyring.MockInit()
 
 	pemBytes := encryptedSSHKey(t, "correct-horse")
@@ -287,6 +311,7 @@ func TestKeyringPassphraseEvictsStaleEntry(t *testing.T) {
 }
 
 func TestParseIdentityPluginRequiresPublicKeyHeader(t *testing.T) {
+	t.Parallel()
 	identity := plugin.EncodeIdentity("yubikey", []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
 
 	// Without # public key: header sesam can't match the identity to a user.
@@ -296,6 +321,7 @@ func TestParseIdentityPluginRequiresPublicKeyHeader(t *testing.T) {
 }
 
 func TestParseIdentityPluginWithPublicKeyHeader(t *testing.T) {
+	t.Parallel()
 	identity := plugin.EncodeIdentity("yubikey", []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
 	recipient := plugin.EncodeRecipient("yubikey", []byte{16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1})
 
@@ -307,6 +333,7 @@ func TestParseIdentityPluginWithPublicKeyHeader(t *testing.T) {
 }
 
 func TestParseIdentityAgeKeyWithComments(t *testing.T) {
+	t.Parallel()
 	// age-keygen output: header comments followed by the secret line.
 	ageID, err := age.GenerateX25519Identity()
 	require.NoError(t, err)
@@ -318,6 +345,7 @@ func TestParseIdentityAgeKeyWithComments(t *testing.T) {
 }
 
 func TestParseIdentityEncryptedAgeNativeWithPassphrase(t *testing.T) {
+	t.Parallel()
 	ageID, err := age.GenerateX25519Identity()
 	require.NoError(t, err)
 
@@ -335,6 +363,7 @@ func TestParseIdentityEncryptedAgeNativeWithPassphrase(t *testing.T) {
 }
 
 func TestParseIdentityEncryptedAgeArmored(t *testing.T) {
+	t.Parallel()
 	ageID, err := age.GenerateX25519Identity()
 	require.NoError(t, err)
 
@@ -350,6 +379,7 @@ func TestParseIdentityEncryptedAgeArmored(t *testing.T) {
 }
 
 func TestParseIdentityEncryptedAgeRequiresPassphraseProvider(t *testing.T) {
+	t.Parallel()
 	ageID, err := age.GenerateX25519Identity()
 	require.NoError(t, err)
 
@@ -360,6 +390,7 @@ func TestParseIdentityEncryptedAgeRequiresPassphraseProvider(t *testing.T) {
 }
 
 func TestParseIdentityEncryptedAgeWrongPassphrase(t *testing.T) {
+	t.Parallel()
 	ageID, err := age.GenerateX25519Identity()
 	require.NoError(t, err)
 
@@ -374,6 +405,7 @@ func TestParseIdentityEncryptedAgeWrongPassphrase(t *testing.T) {
 }
 
 func TestScanAgeIdentity(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		input    string
@@ -434,6 +466,7 @@ func TestScanAgeIdentity(t *testing.T) {
 }
 
 func TestParseIdentityInvalidInputs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		key  string
@@ -453,6 +486,7 @@ func TestParseIdentityInvalidInputs(t *testing.T) {
 }
 
 func TestSshKeyToIdentityTypes(t *testing.T) {
+	t.Parallel()
 	t.Run("ed25519 value", func(t *testing.T) {
 		_, priv, err := ed25519.GenerateKey(rand.Reader)
 		require.NoError(t, err)
@@ -489,6 +523,7 @@ func TestSshKeyToIdentityTypes(t *testing.T) {
 }
 
 func TestIdentityToUser(t *testing.T) {
+	t.Parallel()
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
 
@@ -528,6 +563,7 @@ func TestIdentityToUser(t *testing.T) {
 }
 
 func TestStringPubKeyEqual(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		a, b string
 		want bool
@@ -550,6 +586,7 @@ func TestStringPubKeyEqual(t *testing.T) {
 }
 
 func TestIdentityPublic(t *testing.T) {
+	t.Parallel()
 	user := newTestUser(t, "alice")
 	pub := user.Identity.Public()
 	require.NotNil(t, pub)

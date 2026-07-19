@@ -2,14 +2,17 @@ package repo
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/go-git/go-git/v5"
 	gogitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/google/renameio/v2"
@@ -178,7 +181,11 @@ func configureGitIntegration(gitRepo *git.Repository, sesamDir string, opts Repo
 	}
 
 	opts.PrintStep("Telling git when to call sesam…")
-	if err := ensureDefaultGitAttributes(sesamDir); err != nil {
+	suffix, err := sesamSubsectionSuffix(gitRepo, sesamDir)
+	if err != nil {
+		return err
+	}
+	if err := ensureDefaultGitAttributes(sesamDir, suffix); err != nil {
 		return err
 	}
 
@@ -195,15 +202,26 @@ func ensureDefaultGitIgnore(sesamDir string) error {
 	return appendMissingLines(gitignorePath, gitignoreTemplate, 0o600)
 }
 
-func ensureDefaultGitAttributes(sesamDir string) error {
-	gitAttributesPath := filepath.Join(sesamDir, ".gitattributes")
-	return appendMissingLines(gitAttributesPath, gitattributesTemplate, 0o600)
+func ensureDefaultGitAttributes(sesamDir, suffix string) error {
+	content, err := renderGitAttributes(suffix)
+	if err != nil {
+		return err
+	}
+	return appendMissingLines(filepath.Join(sesamDir, ".gitattributes"), content, 0o600)
 }
 
-// mergeDriverName is the display name git shows for sesam's audit-log merge
-// driver. Shared by ensureGitConfig (which sets it) and expectedGitConfig
-// (which `sesam doctor` checks against).
-const mergeDriverName = "merge the audit log of sesam"
+func clearGitAttributes(sesamDir, suffix string) error {
+	content, err := renderGitAttributes(suffix)
+	if err != nil {
+		return err
+	}
+	return removeManagedLines(filepath.Join(sesamDir, ".gitattributes"), content, 0o600)
+}
+
+func clearGitIgnore(sesamDir string) error {
+	gitignorePath := filepath.Join(sesamDir, ".gitignore")
+	return removeManagedLines(gitignorePath, gitignoreTemplate, 0o600)
+}
 
 // gitConfigEntry is one git-config key sesam manages, together with the value
 // `sesam init` installs for it.
@@ -213,6 +231,7 @@ type gitConfigEntry struct {
 	subsection string // empty for plain sections such as "alias"
 	option     string
 	value      string
+	report     bool
 }
 
 // expectedGitConfig returns the git-config entries `sesam init` installs for the
@@ -223,7 +242,12 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 	// Every git driver below is `sesam <subcommand>` run through the
 	// shell with cwd = worktree root; for nested layouts each one
 	// needs the same --sesam-dir treatment to find `.sesam/`.
-	mergeCmd, err := sesamCmd(r, sesamDir, "audit", "merge", "%O", "%A", "%B", "%L", "%P")
+	mergeSecretCmd, err := sesamCmd(r, sesamDir, "merge", "secret", "%O", "%A", "%B", "%L", "%P")
+	if err != nil {
+		return nil, err
+	}
+
+	mergeLogCmd, err := sesamCmd(r, sesamDir, "merge", "log", "%O", "%A", "%B", "%L", "%P")
 	if err != nil {
 		return nil, err
 	}
@@ -233,42 +257,64 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 		return nil, err
 	}
 
-	smudgeCmd, err := sesamCmd(r, sesamDir, "smudge")
+	preCommitCmd, err := sesamCmd(r, sesamDir, "hook", "pre-commit")
 	if err != nil {
 		return nil, err
 	}
 
-	aliasCmd, err := sesamCmd(r, sesamDir)
+	postCheckoutCmd, err := sesamCmd(r, sesamDir, "hook", "post-checkout")
 	if err != nil {
 		return nil, err
 	}
 
-	return []gitConfigEntry{
-		{"merge.sesam-merge.name", "merge", "sesam-merge", "name", mergeDriverName},
-		{"merge.sesam-merge.driver", "merge", "sesam-merge", "driver", mergeCmd},
-		{"diff.sesam-diff.textconv", "diff", "sesam-diff", "textconv", textconvCmd},
-		{"filter.sesam-filter.required", "filter", "sesam-filter", "required", "false"},
-		{"filter.sesam-filter.process", "filter", "sesam-filter", "process", smudgeCmd},
-		{"alias.sesam", "alias", "", "sesam", "!" + aliasCmd},
-	}, nil
+	// suffix uniquifies the subsection names per sesam repo so several sesam
+	// repos can coexist in one git repo without clobbering each other's config
+	// (and, for hooks, so all of them fire). It also lands in .gitattributes as
+	// the driver name; keep the two in sync via this one function. The display
+	// path stays unsuffixed so `sesam doctor` shows stable labels.
+	suffix, err := sesamSubsectionSuffix(r, sesamDir)
+	if err != nil {
+		return nil, err
+	}
+
+	baseEntries := []gitConfigEntry{
+		{"merge.sesam-merge.name", "merge", "sesam-merge-secret" + suffix, "name", "sesam-secret merge driver", true},
+		{"merge.sesam-merge.driver", "merge", "sesam-merge-secret" + suffix, "driver", mergeSecretCmd, true},
+		{"merge.sesam-merge.name", "merge", "sesam-merge-log" + suffix, "name", "sesam-audit-log merge driver", false},
+		{"merge.sesam-merge.driver", "merge", "sesam-merge-log" + suffix, "driver", mergeLogCmd, false},
+		{"diff.sesam-diff.textconv", "diff", "sesam-diff" + suffix, "textconv", textconvCmd, true},
+		{"alias.sesam", "alias", "", "sesam", "!sesam", true},
+	}
+
+	var gitSupportsConfigHooks bool
+	ver, err := ReadGitVersion(context.Background())
+	if err != nil {
+		slog.Warn("failed to figure out git --version", slog.Any("err", err))
+	}
+
+	// See: https://github.blog/open-source/git/highlights-from-git-2-54/#h-config-based-hooks
+	if ver.GreaterThanEqual(semver.MustParse("2.54.0")) {
+		gitSupportsConfigHooks = true
+	} else {
+		slog.Warn("not installing hooks, because git >= 2.54.0 is needed")
+	}
+
+	if gitSupportsConfigHooks {
+		baseEntries = append(baseEntries, []gitConfigEntry{
+			{"hook.sesam-precommit.event", "hook", "sesam-precommit" + suffix, "event", "pre-commit", false},
+			{"hook.sesam-precommit.command", "hook", "sesam-precommit" + suffix, "command", wrapHookCmd(preCommitCmd), true},
+			{"hook.sesam-postcheckout.event", "hook", "sesam-postcheckout" + suffix, "event", "post-checkout", false},
+			{"hook.sesam-postcheckout.command", "hook", "sesam-postcheckout" + suffix, "command", wrapHookCmd(postCheckoutCmd), true},
+		}...)
+	}
+
+	return baseEntries, nil
 }
 
 func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) error {
 	cfg, err := r.ConfigScoped(gogitconfig.LocalScope)
 	if err != nil {
 		return fmt.Errorf("read local git config: %w", err)
-	}
-
-	mergeSection := cfg.Raw.Section("merge").Subsection("sesam-merge")
-	filterSection := cfg.Raw.Section("filter").Subsection("sesam-filter")
-	aliasSection := cfg.Raw.Section("alias")
-
-	mergeConfigured := mergeSection.Option("driver") != ""
-	processConfigured := filterSection.Option("process") != ""
-	aliasConfigured := aliasSection.Option("sesam") != ""
-
-	if mergeConfigured && processConfigured && aliasConfigured {
-		return nil
 	}
 
 	entries, err := expectedGitConfig(r, sesamDir)
@@ -284,40 +330,40 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 		return ""
 	}
 
-	if !mergeConfigured {
+	if opts.GitConfigOpts.InstallMerge {
 		opts.PrintStep("  • Installing merge driver…")
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.display, "merge.") {
+				section := cfg.Raw.Section(entry.section).Subsection(entry.subsection)
+				section.SetOption(entry.option, entry.value)
+			}
+		}
+	}
 
-		mergeSection.SetOption("name", val("merge.sesam-merge.name"))
-		mergeSection.SetOption("driver", val("merge.sesam-merge.driver"))
-
+	if opts.GitConfigOpts.InstallDiff {
 		opts.PrintStep("  • installing diff driver…")
-		diffSection := cfg.Raw.Section("diff").Subsection("sesam-diff")
-		diffSection.SetOption("textconv", val("diff.sesam-diff.textconv"))
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.display, "diff.") {
+				section := cfg.Raw.Section(entry.section).Subsection(entry.subsection)
+				section.SetOption(entry.option, entry.value)
+			}
+		}
 	}
 
-	if !processConfigured {
-		opts.PrintStep("  • Installing smudge filter…")
-
-		// required=false means a smudge failure doesn't abort
-		// `git checkout`; the encrypted bytes land instead. We rely
-		// on this to keep history bisects working when the audit log
-		// is unavailable.
-		filterSection.SetOption("required", val("filter.sesam-filter.required"))
-
-		// Long-running filter process - amortises identity loading
-		// across all blobs in a single git operation AND lets the
-		// handler load the audit log once per session for the
-		// sealer-vs-access check. Requires git >= 2.11 (Dec 2016).
-		filterSection.SetOption("process", val("filter.sesam-filter.process"))
-	}
-
-	if !aliasConfigured {
-		// `!` makes git execute the value as a shell command instead of
-		// looking for `git-sesam` on PATH, so users get `git sesam ...`
-		// without any PATH plumbing. Git runs the command with cwd =
-		// worktree root, which is what sesam wants anyway.
+	if opts.GitConfigOpts.InstallAlias {
 		opts.PrintStep("  • Making sure sesam can be called as `git sesam`…")
+		aliasSection := cfg.Raw.Section("alias")
 		aliasSection.SetOption("sesam", val("alias.sesam"))
+	}
+
+	if opts.GitConfigOpts.InstallHooks {
+		opts.PrintStep("  • Installing pre-commit+post-checkout hooks…")
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.display, "hook.") {
+				section := cfg.Raw.Section(entry.section).Subsection(entry.subsection)
+				section.SetOption(entry.option, entry.value)
+			}
+		}
 	}
 
 	if err := r.SetConfig(cfg); err != nil {
@@ -325,6 +371,80 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 	}
 
 	return nil
+}
+
+func clearGitConfig(r *git.Repository, sesamDir, sectionPrefix string) error {
+	cfg, err := r.ConfigScoped(gogitconfig.LocalScope)
+	if err != nil {
+		return fmt.Errorf("read local git config: %w", err)
+	}
+
+	entries, err := expectedGitConfig(r, sesamDir)
+	if err != nil {
+		return fmt.Errorf("expected config: %w", err)
+	}
+
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.section, sectionPrefix) {
+			if entry.subsection == "" {
+				cfg.Raw.Section(entry.section).RemoveOption(entry.option)
+			} else {
+				cfg.Raw = cfg.Raw.RemoveSubsection(entry.section, entry.subsection)
+			}
+		}
+	}
+
+	if err := r.SetConfig(cfg); err != nil {
+		return fmt.Errorf("write git config: %w", err)
+	}
+
+	return nil
+}
+
+// sesamSubsectionSuffix returns the suffix appended to sesam's git-config
+// subsection names (and the driver names in .gitattributes) so several sesam
+// repos can coexist in one git repo without clobbering each other. It is empty
+// for a repo at the worktree root; otherwise it is "-" + the worktree-relative
+// sesam dir, percent-encoded (url.PathEscape) so it is a valid, whitespace-free
+// git-config subsection name and .gitattributes driver token.
+//
+// Note: the suffix pins the sesam dir at install time. Moving the sesam dir
+// (e.g. `git mv`) leaves stale names and a wrong --sesam-dir in the command;
+// re-run `sesam init` to refresh the git integration after such a move.
+func sesamSubsectionSuffix(r *git.Repository, sesamDir string) (string, error) {
+	rel, err := core.SesamGitPrefix(r, sesamDir)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." || rel == "" {
+		return "", nil
+	}
+	return "-" + url.PathEscape(rel), nil
+}
+
+// renderGitAttributes fills the .gitattributes template with the per-repo driver
+// suffix so its merge=/diff= references match the installed git-config
+// subsections (see sesamSubsectionSuffix).
+func renderGitAttributes(suffix string) (string, error) {
+	tmpl, err := template.New("gitattributes").Parse(gitattributesTemplate)
+	if err != nil {
+		return "", fmt.Errorf("parse gitattributes template: %w", err)
+	}
+
+	var out bytes.Buffer
+	if err := tmpl.Execute(&out, struct{ Suffix string }{Suffix: suffix}); err != nil {
+		return "", fmt.Errorf("render gitattributes template: %w", err)
+	}
+	return out.String(), nil
+}
+
+// wrapHookCmd makes a config-based hook a no-op when sesam is not on PATH,
+// instead of aborting the commit/checkout with "command not found". git runs the
+// value as `sh -c '<value> "$@"' … <hook-args>`, so the sesam invocation must
+// stay last for the appended "$@" to reach it. When sesam is present its exit
+// status is honored, so pre-commit can still block a bad commit.
+func wrapHookCmd(sesamHookCmd string) string {
+	return "command -v sesam >/dev/null 2>&1 || exit 0; exec " + sesamHookCmd
 }
 
 // sesamCmd builds a shell-safe `sesam ...` invocation suitable for git
@@ -416,6 +536,49 @@ func appendMissingLines(path, content string, mode os.FileMode) error {
 		return fmt.Errorf("failed to update %s: %w", path, err)
 	}
 
+	return nil
+}
+
+// removeManagedLines strips every line sesam appended (the non-blank lines of
+// content, matched after trimming, as appendMissingLines writes them) from the
+// file at path, keeping any lines the user added. If nothing sesam-managed is
+// left the file is removed, since sesam created it. A missing file is a no-op.
+func removeManagedLines(path, content string, mode os.FileMode) error {
+	data, err := os.ReadFile(path) //nolint:gosec
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to access %s: %w", path, err)
+	}
+
+	managed := make(map[string]bool)
+	for line := range strings.SplitSeq(content, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			managed[line] = true
+		}
+	}
+
+	kept := make([]string, 0)
+	for _, line := range strings.Split(string(data), "\n") {
+		if managed[strings.TrimSpace(line)] {
+			continue
+		}
+		kept = append(kept, line)
+	}
+
+	remaining := strings.Join(kept, "\n")
+	if strings.TrimSpace(remaining) == "" {
+		// Only sesam's lines were in the file: drop the file sesam created.
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove %s: %w", path, err)
+		}
+		return nil
+	}
+
+	if err := renameio.WriteFile(path, []byte(remaining), mode); err != nil {
+		return fmt.Errorf("failed to update %s: %w", path, err)
+	}
 	return nil
 }
 
