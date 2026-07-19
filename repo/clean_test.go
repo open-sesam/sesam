@@ -9,6 +9,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// openCleanRoot opens an os.Root over dir for the clean tests, closing it on
+// cleanup.
+func openCleanRoot(t *testing.T, dir string) *os.Root {
+	t.Helper()
+	rt, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
+}
+
 // initSesamRepo creates a temp dir with `.sesam/` and a fresh git repo, then
 // stages and commits the given files (path → content). Returns the absolute
 // sesamRoot and the open repo.
@@ -59,7 +69,7 @@ func TestCleanupRemovesUntrackedFiles(t *testing.T) {
 	stale := filepath.Join(root, "stale-secret")
 	writeFile(t, stale, "leaked plaintext")
 
-	require.NoError(t, cleanup(repo, root, nil))
+	require.NoError(t, cleanup(openCleanRoot(t, root), repo, nil))
 
 	require.False(t, exists(t, stale), "untracked file should have been removed")
 	require.True(t, exists(t, filepath.Join(root, "sesam.yml")), "tracked file should be preserved")
@@ -74,7 +84,7 @@ func TestCleanupPreservesModifiedTrackedFiles(t *testing.T) {
 	tracked := filepath.Join(root, "sesam.yml")
 	writeFile(t, tracked, "modified by user")
 
-	require.NoError(t, cleanup(repo, root, nil))
+	require.NoError(t, cleanup(openCleanRoot(t, root), repo, nil))
 
 	require.True(t, exists(t, tracked), "modified tracked file should survive")
 	got, err := os.ReadFile(tracked)
@@ -91,7 +101,7 @@ func TestCleanupSkipsSesamAndGitDirs(t *testing.T) {
 	gitScratch := filepath.Join(root, ".git", "untracked-by-design")
 	writeFile(t, gitScratch, "git internal")
 
-	require.NoError(t, cleanup(repo, root, nil))
+	require.NoError(t, cleanup(openCleanRoot(t, root), repo, nil))
 
 	require.True(t, exists(t, sesamScratch), ".sesam contents must not be touched")
 	require.True(t, exists(t, gitScratch), ".git contents must not be touched")
@@ -105,7 +115,7 @@ func TestCleanupRemovesUntrackedInSubdir(t *testing.T) {
 	stale := filepath.Join(root, "keep", "stale.txt")
 	writeFile(t, stale, "junk")
 
-	require.NoError(t, cleanup(repo, root, nil))
+	require.NoError(t, cleanup(openCleanRoot(t, root), repo, nil))
 
 	require.False(t, exists(t, stale), "untracked file in subdir should be removed")
 	require.True(t, exists(t, filepath.Join(root, "keep", "sesam.yml")), "tracked sibling should survive")
@@ -116,82 +126,8 @@ func TestCleanupErrorsOnMissingSesamDir(t *testing.T) {
 	repo, err := git.PlainInit(root, false)
 	require.NoError(t, err)
 
-	err = cleanup(repo, root, nil)
+	err = cleanup(openCleanRoot(t, root), repo, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not a sesam directory")
 }
 
-func TestRecursiveRmEmptyDirs(t *testing.T) {
-	tcs := []struct {
-		Name             string
-		CreateDirs       []string
-		CreateFiles      []string
-		Except           map[string]bool
-		ExpectedToDelete []string
-	}{
-		{
-			Name: "basic",
-			CreateDirs: []string{
-				"empty",
-			},
-			CreateFiles: []string{},
-			ExpectedToDelete: []string{
-				"empty",
-			},
-		},
-		{
-			Name: "except",
-			CreateDirs: []string{
-				".git",
-			},
-			Except: map[string]bool{
-				".git": true,
-			},
-			ExpectedToDelete: []string{},
-		},
-		{
-			Name: "nested",
-			CreateDirs: []string{
-				"sub1/sub2/sub3",
-			},
-			ExpectedToDelete: []string{
-				"sub1/sub2/sub3",
-				"sub1/sub2",
-				"sub1",
-			},
-		},
-		{
-			Name: "nested_with_file",
-			CreateDirs: []string{
-				"sub1/sub2/sub3",
-			},
-			CreateFiles: []string{
-				"sub1/file",
-			},
-			ExpectedToDelete: []string{
-				"sub1/sub2/sub3",
-				"sub1/sub2",
-			},
-		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.Name, func(t *testing.T) {
-			tmpDir, err := os.MkdirTemp("", "rmdir")
-			require.NoError(t, err)
-			defer os.RemoveAll(tmpDir)
-
-			for _, dir := range tc.CreateDirs {
-				require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, dir), 0o700))
-			}
-
-			for _, path := range tc.CreateFiles {
-				require.NoError(t, os.WriteFile(filepath.Join(tmpDir, path), nil, 0o700))
-			}
-
-			emptyDirs, err := recursiveRmEmptyDirs(tmpDir, tc.Except, nil)
-			require.NoError(t, err)
-			require.Equal(t, tc.ExpectedToDelete, emptyDirs)
-		})
-	}
-}

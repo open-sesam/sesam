@@ -751,6 +751,7 @@ func verify(state *VerifiedState) error {
 	var previousEntry *AuditEntrySigned
 	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
 		if entry.SeqID <= newState.VerifiedUntil {
+			previousEntry = entry
 			return nil
 		}
 

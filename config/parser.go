@@ -498,6 +498,19 @@ func findMappingValue(m *ast.MappingNode, key string) *ast.MappingValueNode {
 	return nil
 }
 
+// removeMappingValue deletes the key/value pair for `key` from m, returning
+// true if it was present.
+func removeMappingValue(m *ast.MappingNode, key string) bool {
+	for i, mv := range m.Values {
+		if mv.Key.String() == key {
+			m.Values = append(m.Values[:i], m.Values[i+1:]...)
+			return true
+		}
+	}
+
+	return false
+}
+
 // findRootValue returns the top-level MappingValueNode whose key matches, or an
 // error if absent. A file whose only top-level key is e.g. `secrets:` (a
 // typical sub-file) can parse to a single *ast.MappingValueNode rather than an
@@ -529,11 +542,15 @@ func rootMappingValues(root ast.Node) []*ast.MappingValueNode {
 
 func includePath(m *ast.MappingNode) (string, bool) {
 	for _, mv := range m.Values {
-		// Key.String() is fine — scalar key with no trailing comment in
-		// practice. Value goes through GetToken() so any inline comment
-		// (`include: foo.yml # note`) doesn't bleed into the path.
 		if mv.Key.String() == "include" {
-			return mv.Value.GetToken().Value, true
+			p := mv.Value.GetToken().Value
+
+			// allow just specifying the directory itself.
+			if !strings.HasSuffix(p, "sesam.yml") {
+				p = filepath.Join(p, "sesam.yml")
+			}
+
+			return p, true
 		}
 	}
 
@@ -705,10 +722,7 @@ func marshalMapping(v any) (*ast.MappingNode, error) {
 	return m, nil
 }
 
-// marshalBody marshals v to YAML and reparses it into an AST node. Sequences
-// are emitted indented (yaml.IndentSequence) so freshly-built nodes match the
-// block style sesam files use, and parsing keeps comments on nodes for
-// consistency with loaded files.
+// marshalBody marshals v to YAML and reparses it into an AST node.
 func marshalBody(v any) (ast.Node, error) {
 	bs, err := yaml.MarshalWithOptions(v, yaml.IndentSequence(true))
 	if err != nil {

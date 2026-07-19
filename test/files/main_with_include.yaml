@@ -6,7 +6,7 @@ groups:
   group1:
     - test_user
 secrets:
-  - include: sub_secrets_only.yaml
+  - include: sub
   - name: top
     path: top.txt
     access:

@@ -22,7 +22,10 @@ aa    ]8I  "8b,   ,aa  aa    ]8I  88,    ,88  88      88      88
 `
 )
 
-// HandleInit bootstraps sesam metadata in a git repository.
+// HandleInit bootstraps sesam in a git repository. In a fresh repo it creates
+// the sesam state (repo.Init); in an already-initialized one - typically a
+// fresh clone - it only wires up local git integration and
+// reveals the caller's secrets (repo.Setup).
 func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 	output := termenv.NewOutput(os.Stdout)
 	opts := repo.RepoInitOpts{
@@ -34,19 +37,26 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 			LockTimeout:     cmd.Duration("lock-timeout"),
 		},
 		InitStep: func(format string, args ...any) {
-			prefix := output.String(" ✓ ").Foreground(output.Color("#008000")).String()
+			prefix := output.String("✓ ").Foreground(output.Color("#008000")).String()
 			format = prefix + format + "\n"
 			fmt.Printf(format, args...)
 		},
 	}
 
 	ids := cmd.StringSlice("identity")
-	r, err := repo.Init(
-		ctx,
-		cmd.String("sesam-dir"),
-		ids,
-		opts,
-	)
+	sesamDir := cmd.String("sesam-dir")
+
+	initialized, err := repo.IsInitialized(sesamDir)
+	if err != nil {
+		return err
+	}
+
+	if initialized {
+		printInfo("sesam seems to be already initialized - re-running setup…")
+		return repo.Setup(sesamDir, ids, opts)
+	}
+
+	r, err := repo.Init(ctx, sesamDir, ids, opts)
 	if err != nil {
 		return err
 	}
@@ -63,6 +73,10 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 	}()
 
 	fmt.Print(output.String(asciiLogo).Foreground(termenv.ANSIBrightGreen))
+
+	if len(ids) == 0 {
+		return nil
+	}
 
 	out := termenv.NewOutput(os.Stdout)
 	export := out.String("export SESAM_ID=\""+ids[0]).Foreground(termenv.ANSIBrightBlue).String() + "\""
