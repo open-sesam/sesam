@@ -53,6 +53,10 @@ func TestToRepoPath(t *testing.T) {
 		{name: "rel dotdot escapes", cwd: "/repo/sub", arg: "../../etc", wantErr: true},
 		{name: "cwd outside treats arg as repo-relative", cwd: "/outside", arg: "sub/local", want: "sub/local"},
 		{name: "cwd outside single segment", cwd: "/outside", arg: "local", want: "local"},
+		// git runs `show` as a diff textconv from the worktree root (an ancestor
+		// of sesamDir) and passes a worktree-relative path; it must resolve back
+		// to a sesam-relative one.
+		{name: "cwd ancestor, worktree-relative arg", cwd: "/", arg: "repo/.sesam/objects/x.sesam", want: ".sesam/objects/x.sesam"},
 	}
 
 	for _, tc := range tests {

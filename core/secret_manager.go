@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"strings"
 
-	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -570,7 +569,12 @@ func (sm *SecretManager) NeedsSeal(revealedPath string) (bool, *secretFooter, er
 		return false, nil, err
 	}
 
-	want := MulticodeEncode(recipientsHash(sm.recipientsFor(revealedPath)), MhSHA3_256)
+	newHash, hashCode, err := hasherForStored(footer.CipherTextHash)
+	if err != nil {
+		return false, footer, err
+	}
+
+	want := MulticodeEncode(recipientsHash(newHash, sm.recipientsFor(revealedPath)), hashCode)
 	if footer.RecipientsHash != want {
 		return true, footer, nil
 	}
@@ -580,13 +584,13 @@ func (sm *SecretManager) NeedsSeal(revealedPath string) (bool, *secretFooter, er
 		return false, footer, err
 	}
 
-	plainContentHash := sha3.New256()
+	plainContentHash := newHash()
 	if _, err := io.Copy(plainContentHash, plainFd); err != nil {
 		return false, footer, err
 	}
 	_, _ = plainContentHash.Write([]byte(revealedPath))
 
-	plainHmacContentHash := MulticodeEncode(keyContentHash(ageKey, plainContentHash.Sum(nil)), MhSHA3_256)
+	plainHmacContentHash := MulticodeEncode(keyContentHash(newHash, ageKey, plainContentHash.Sum(nil)), hashCode)
 	return plainHmacContentHash != footer.HMACContentHash, footer, nil
 }
 
@@ -614,7 +618,12 @@ func (sm *SecretManager) NeedsReveal(revealedPath string) (bool, *secretFooter, 
 		return false, nil, err
 	}
 
-	want := MulticodeEncode(recipientsHash(sm.recipientsFor(revealedPath)), MhSHA3_256)
+	newHash, hashCode, err := hasherForStored(footer.CipherTextHash)
+	if err != nil {
+		return false, footer, err
+	}
+
+	want := MulticodeEncode(recipientsHash(newHash, sm.recipientsFor(revealedPath)), hashCode)
 	if footer.RecipientsHash != want {
 		return true, footer, nil
 	}
@@ -624,12 +633,12 @@ func (sm *SecretManager) NeedsReveal(revealedPath string) (bool, *secretFooter, 
 		return false, footer, err
 	}
 
-	plainContentHash := sha3.New256()
+	plainContentHash := newHash()
 	if _, err := io.Copy(plainContentHash, plainFd); err != nil {
 		return false, footer, err
 	}
 	_, _ = plainContentHash.Write([]byte(revealedPath))
 
-	plainHmacContentHash := MulticodeEncode(keyContentHash(ageKey, plainContentHash.Sum(nil)), MhSHA3_256)
+	plainHmacContentHash := MulticodeEncode(keyContentHash(newHash, ageKey, plainContentHash.Sum(nil)), hashCode)
 	return plainHmacContentHash != footer.HMACContentHash, footer, nil
 }

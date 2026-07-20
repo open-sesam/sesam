@@ -1,7 +1,6 @@
 package core
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -266,8 +265,12 @@ func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr
 		return fmt.Errorf("init at wrong seq_id: %d (!= 1)", entry.SeqID)
 	}
 
-	if eh := entry.Hash(); eh != log.InitHash {
-		return fmt.Errorf("audit log has been possibly truncated: %s != %s", eh, log.InitHash)
+	ok, err := entry.HashMatches(log.InitHash)
+	if err != nil {
+		return fmt.Errorf("checking init hash: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("audit log has been possibly truncated: init hash %s does not match", log.InitHash)
 	}
 
 	initDetail, err := parseDetail[DetailInit](entry)
@@ -755,12 +758,14 @@ func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, erro
 			return nil, fmt.Errorf("reading signatures for root hash check: %w (try --verify-mode no-disk)", err)
 		}
 
-		diskRootHash := buildRootHash(sigs)
-		if diskRootHash != state.LastSealRootHash {
+		ok, err := hashedDataEqual(state.LastSealRootHash, rootHashInput(sigs))
+		if err != nil {
+			return nil, fmt.Errorf("checking root hash: %w (try --verify-mode no-disk)", err)
+		}
+		if !ok {
 			return nil, fmt.Errorf(
-				"root hash mismatch: log says %s, disk says %s (try --verify-mode no-disk)",
+				"root hash mismatch: log says %s does not match disk (try --verify-mode no-disk)",
 				state.LastSealRootHash,
-				diskRootHash,
 			)
 		}
 	}
@@ -875,17 +880,14 @@ func verify(state *VerifiedState) error {
 		}
 
 		if previousEntry != nil {
-			prevJSON, err := json.Marshal(previousEntry)
+			ok, err := previousEntry.HashMatches(entry.PreviousHash)
 			if err != nil {
-				return fmt.Errorf("marshal previous entry: %w", err)
+				return fmt.Errorf("checking chain at idx %d: %w", idx, err)
 			}
-
-			expectedHash := hashData(prevJSON)
-			if expectedHash != entry.PreviousHash {
+			if !ok {
 				return fmt.Errorf(
-					"broken chain at idx %d: %s != %s",
+					"broken chain at idx %d: %s does not match previous entry",
 					idx,
-					expectedHash,
 					entry.PreviousHash,
 				)
 			}

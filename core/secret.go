@@ -5,13 +5,13 @@ import (
 	"crypto/hmac"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"io"
 	"path/filepath"
 	"slices"
 
 	"github.com/sahib/renameio/v2"
 	"golang.org/x/crypto/hkdf"
-	"golang.org/x/crypto/sha3"
 
 	"filippo.io/age"
 )
@@ -29,18 +29,23 @@ type secretFooter struct {
 	Version         int    `json:"version"`
 }
 
+// footerFormatVersion is written to every new footer. It versions the footer
+// layout only; the hash algorithm is self-describing via the multihash prefix
+// on each stored hash (see hasherForStored), not tied to this number.
+const footerFormatVersion = 1
+
 // recipientsHash digests the recipients' public keys, order-independent, so
 // Seal can detect a changed recipient set (e.g. a user told into a group)
 // without decrypting the object. It is folded into the footer signature, so a
 // forged hash is caught by verification.
-func recipientsHash(recipients Recipients) []byte {
+func recipientsHash(newHash func() hash.Hash, recipients Recipients) []byte {
 	keys := make([]string, 0, len(recipients))
 	for _, r := range recipients {
 		keys = append(keys, r.String())
 	}
 	slices.Sort(keys)
 
-	h := sha3.New256()
+	h := newHash()
 	for _, k := range keys {
 		_, _ = h.Write([]byte(k))
 		_, _ = h.Write([]byte{0}) // separate entries so a||b != ab
@@ -62,15 +67,15 @@ func readAgeEncryptionKey(r io.Reader, ageIds []age.Identity) ([]byte, error) {
 	return ageKey, nil
 }
 
-func keyContentHash(ageKey, contentHash []byte) []byte {
+func keyContentHash(newHash func() hash.Hash, ageKey, contentHash []byte) []byte {
 	const info = "sesam.contenthash.v1"
 
 	// derive actual key from the age encryption key:
 	finalKey := make([]byte, 32)
-	keyReader := hkdf.New(sha3.New256, ageKey, nil, []byte(info))
+	keyReader := hkdf.New(newHash, ageKey, nil, []byte(info))
 
 	_, _ = io.ReadFull(keyReader, finalKey)
-	hm := hmac.New(sha3.New256, finalKey)
+	hm := hmac.New(newHash, finalKey)
 	_, _ = hm.Write(contentHash)
 	hmacContentHash := hm.Sum(nil)
 	return hmacContentHash
@@ -80,7 +85,7 @@ func keyContentHash(ageKey, contentHash []byte) []byte {
 // repo-relative) for `recipients`, recording `sealedByUser` in the footer. The
 // destination directory is created if missing; the write goes through a
 // renameio temp file confined to the root so the final destination is replaced
-// atomically.
+// atomically. Hashes are written with the default algorithm.
 func sealSecret(
 	sm *SecretManager,
 	revealedPath string,
@@ -106,9 +111,14 @@ func sealSecret(
 		_ = wc.Cleanup()
 	}()
 
+	newHash, err := newHasher(defaultHashCode)
+	if err != nil {
+		return nil, err
+	}
+
 	// use the stream to compute the hash, what is written to wc, is also written to the hash:
-	ciphertextHash := sha3.New256()
-	contentHash := sha3.New256()
+	ciphertextHash := newHash()
+	contentHash := newHash()
 	mw := io.MultiWriter(wc, ciphertextHash)
 
 	encW, err := age.Encrypt(mw, recipients.AgeRecipients()...)
@@ -138,9 +148,9 @@ func sealSecret(
 		return nil, fmt.Errorf("failed to read age key: %w", err)
 	}
 
-	hmacContentHash := keyContentHash(ageKey, contentHash.Sum(nil))
+	hmacContentHash := keyContentHash(newHash, ageKey, contentHash.Sum(nil))
 	ciphertextHashBytes := ciphertextHash.Sum(nil)
-	recipientsHashBytes := recipientsHash(recipients)
+	recipientsHashBytes := recipientsHash(newHash, recipients)
 	sig, err := sm.Signer.Sign(
 		SesamDomainSignSecretTag,
 		slices.Concat(ciphertextHashBytes, hmacContentHash, recipientsHashBytes),
@@ -151,12 +161,12 @@ func sealSecret(
 
 	ss := secretFooter{
 		RevealedPath:    revealedPath,
-		CipherTextHash:  MulticodeEncode(ciphertextHashBytes, MhSHA3_256),
+		CipherTextHash:  MulticodeEncode(ciphertextHashBytes, defaultHashCode),
 		Signature:       sig,
 		SealedBy:        sealedByUser,
-		HMACContentHash: MulticodeEncode(hmacContentHash, MhSHA3_256),
-		RecipientsHash:  MulticodeEncode(recipientsHashBytes, MhSHA3_256),
-		Version:         1,
+		HMACContentHash: MulticodeEncode(hmacContentHash, defaultHashCode),
+		RecipientsHash:  MulticodeEncode(recipientsHashBytes, defaultHashCode),
+		Version:         footerFormatVersion,
 	}
 
 	if _, err := wc.Seek(0, io.SeekEnd); err != nil {
@@ -321,9 +331,17 @@ func revealStreamAndVerify(
 	}
 
 	// Verify the signature, but check before if hashes are the same at all as quick check:
-	computedhash := MulticodeEncode(cipherTextHash, MhSHA3_256)
-	if computedhash != footer.CipherTextHash {
-		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", computedhash, footer.CipherTextHash)
+	_, hashCode, err := hasherForStored(footer.CipherTextHash)
+	if err != nil {
+		return fmt.Errorf("bad footer for %s: %w", footer.RevealedPath, err)
+	}
+
+	ok, err := hashEqual(footer.CipherTextHash, hashCode, cipherTextHash)
+	if err != nil {
+		return fmt.Errorf("failed to check ciphertext hash for %s: %w", footer.RevealedPath, err)
+	}
+	if !ok {
+		return fmt.Errorf("encrypted file changed for %s", footer.RevealedPath)
 	}
 
 	recipientsHashBytes, _, err := multicodeDecode(footer.RecipientsHash)
@@ -364,8 +382,14 @@ func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) (
 		return nil, nil, nil, fmt.Errorf("seek to start failed: %w", err)
 	}
 
+	// The stored hash prefix tells us which algorithm the secret was sealed with.
+	newHash, _, err := hasherForStored(sigDesc.CipherTextHash)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("bad footer for %s: %w", sigDesc.RevealedPath, err)
+	}
+
 	// Setup hashing parallel to decrypting:
-	cipherTextHash := sha3.New256()
+	cipherTextHash := newHash()
 	tr := io.TeeReader(ageRd, cipherTextHash)
 
 	encR, err := age.Decrypt(tr, ageIds...)
@@ -373,7 +397,7 @@ func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) (
 		return nil, nil, nil, fmt.Errorf("failed to decrypt %s: %w", sigDesc.RevealedPath, err)
 	}
 
-	contentHash := sha3.New256()
+	contentHash := newHash()
 
 	// Kick-off the decrypting and hashing:
 	_, err = io.Copy(dstFd, io.TeeReader(encR, contentHash))
@@ -385,6 +409,6 @@ func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) (
 	_, _ = cipherTextHash.Write([]byte(sigDesc.RevealedPath))
 	_, _ = contentHash.Write([]byte(sigDesc.RevealedPath))
 
-	hmacContentHash := keyContentHash(ageKey, contentHash.Sum(nil))
+	hmacContentHash := keyContentHash(newHash, ageKey, contentHash.Sum(nil))
 	return cipherTextHash.Sum(nil), hmacContentHash, sigDesc, nil
 }

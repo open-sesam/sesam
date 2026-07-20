@@ -446,6 +446,13 @@ func (aes *AuditEntrySigned) Hash() string {
 	return hashData(sigJSON)
 }
 
+// HashMatches reports whether this entry hashes to `stored`, using whichever
+// algorithm `stored` declares.
+func (aes *AuditEntrySigned) HashMatches(stored string) (bool, error) {
+	sigJSON, _ := json.Marshal(aes)
+	return hashedDataEqual(stored, sigJSON)
+}
+
 func (aes *AuditEntrySigned) String() string {
 	sigJSON, _ := json.MarshalIndent(aes, "", "  ")
 	return string(sigJSON)
@@ -928,6 +935,10 @@ func LoadAuditLogAt(root *os.Root, base string, ids Identities) (*AuditLog, erro
 //
 // Side effect: This will sort `sigs`
 func buildRootHash(sigs []*secretFooter) string {
+	return hashData(rootHashInput(sigs))
+}
+
+func rootHashInput(sigs []*secretFooter) []byte {
 	sort.Slice(sigs, func(i, j int) bool {
 		return sigs[i].RevealedPath < sigs[j].RevealedPath
 	})
@@ -938,15 +949,14 @@ func buildRootHash(sigs []*secretFooter) string {
 		b.WriteByte('\n')
 	}
 
-	return hashData(b.Bytes())
+	return b.Bytes()
 }
 
 // ShowAuditLog decrypts the audit log at path and writes it as JSON to w.
-// path may be an arbitrary file path (e.g. a git temp-file blob) - sesamDir
-// is not used for key lookup.
-func ShowAuditLog(ids Identities, path string, w io.Writer) (bool, error) {
-	//nolint:gosec
-	fd, err := os.Open(path)
+// In-repo paths are read through root; an absolute path (e.g. git's extracted
+// blob temp file) is opened directly. sesamDir is not used for key lookup.
+func ShowAuditLog(root *os.Root, ids Identities, path string, w io.Writer) (bool, error) {
+	fd, err := openForShow(root, path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil

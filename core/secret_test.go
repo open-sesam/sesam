@@ -3,13 +3,13 @@ package core
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 )
 
 func testSecretManager(t *testing.T) *SecretManager {
@@ -72,6 +72,50 @@ func TestSealAndReveal(t *testing.T) {
 
 	got, _ := os.ReadFile(plainPath)
 	require.Equal(t, "super-secret-password-123", string(got))
+}
+
+// TestSealWritesBlake3Footer pins that new seals use BLAKE3 and the current
+// footer format version, and that the algorithm lives in the multihash prefix.
+func TestSealWritesBlake3Footer(t *testing.T) {
+	mgr := testSecretManager(t)
+	path := testSecret(t, mgr, "secrets/pw", "super-secret-value")
+
+	sig, err := sealSecret(mgr, path, mgr.recipientsFor(path), mgr.cryptPath(path), "testuser")
+	require.NoError(t, err)
+	require.Equal(t, footerFormatVersion, sig.Version)
+
+	for _, stored := range []string{sig.CipherTextHash, sig.HMACContentHash, sig.RecipientsHash} {
+		_, code, err := multicodeDecode(stored)
+		require.NoError(t, err)
+		require.Equal(t, uint64(MhBlake3), code)
+	}
+}
+
+// TestVerifyLegacySHA3Object proves an object sealed with the pre-BLAKE3
+// SHA3-256 format still verifies: the read path picks the algorithm from the
+// stored hash prefix, so no re-sealing is required. The fixture is a generic
+// object produced by the old SHA3-256 sealing code; its ciphertext hash is
+// checked without decryption.
+func TestVerifyLegacySHA3Object(t *testing.T) {
+	fd, err := os.Open(filepath.Join("testdata", "legacy_sha3_object.sesam"))
+	require.NoError(t, err)
+	defer func() { _ = fd.Close() }()
+
+	ageRd, footer, err := readFooter(fd)
+	require.NoError(t, err)
+
+	newHash, code, err := hasherForStored(footer.CipherTextHash)
+	require.NoError(t, err)
+	require.Equal(t, uint64(MhSHA3_256), code, "fixture must be a SHA3-256 object")
+
+	h := newHash()
+	_, err = io.Copy(h, ageRd)
+	require.NoError(t, err)
+	_, _ = h.Write([]byte(footer.RevealedPath))
+
+	ok, err := hashEqual(footer.CipherTextHash, code, h.Sum(nil))
+	require.NoError(t, err)
+	require.True(t, ok, "legacy SHA3-256 ciphertext hash must still verify")
 }
 
 func TestSealRevealTableDriven(t *testing.T) {
@@ -442,12 +486,15 @@ func recomputeContentHash(t *testing.T, mgr *SecretManager, path, plaintext stri
 	ageKey, err := readAgeEncryptionKey(fd, mgr.Identities.AgeIdentities())
 	require.NoError(t, err)
 
-	h := sha3.New256()
+	newHash, err := newHasher(defaultHashCode)
+	require.NoError(t, err)
+
+	h := newHash()
 	_, _ = h.Write([]byte(plaintext))
 	_, _ = h.Write([]byte(path))
 
-	mac := keyContentHash(ageKey, h.Sum(nil))
-	return MulticodeEncode(mac, MhSHA3_256)
+	mac := keyContentHash(newHash, ageKey, h.Sum(nil))
+	return MulticodeEncode(mac, defaultHashCode)
 }
 
 // TestContentHashStableForUnchangedContent pins the property `status` relies
