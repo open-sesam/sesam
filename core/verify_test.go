@@ -434,7 +434,7 @@ func TestVerifySecretChangeUpdate(t *testing.T) {
 // Regression: the verify layer must reject any RevealedPath that contains
 // path-traversal components. Previously only the high-level API validated
 // the path, so a hand-crafted entry could seed state.Secrets with
-// "../../.ssh/authorized_keys", causing RevealAll to write outside the repo.
+// "../../.ssh/authorized_keys", causing Reveal to write outside the repo.
 func TestVerifySecretChangeRejectsPathTraversal(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")

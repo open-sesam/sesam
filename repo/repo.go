@@ -412,7 +412,7 @@ func Setup(sesamDir string, idPaths []string, opts RepoInitOpts) error {
 
 	who, _ := r.Whoami()
 	opts.PrintStep("Revealing secrets available to »%s«…", who)
-	if err := r.RevealAll(); err != nil {
+	if err := r.Reveal(true); err != nil {
 		opts.PrintStep("Could not reveal yet (%v) - run `sesam reveal` once your access is set up.", err)
 	}
 

@@ -367,8 +367,8 @@ func (sm *SecretManager) readSecretFooter(path string) (*secretFooter, error) {
 	return footer, nil
 }
 
-// RevealAll reveals all known secrets.
-func (sm *SecretManager) RevealAll() error {
+// Reveal reveals all known secrets.
+func (sm *SecretManager) Reveal(all bool) error {
 	g := new(errgroup.Group)
 
 	// parallelJobs := 2 * runtime.GOMAXPROCS(0)
@@ -391,13 +391,15 @@ func (sm *SecretManager) RevealAll() error {
 				return nil
 			}
 
-			needsReveal, _, err := sm.NeedsReveal(vsecret.RevealedPath)
-			if err != nil {
-				return err
-			}
+			if !all {
+				needsReveal, _, err := sm.NeedsReveal(vsecret.RevealedPath)
+				if err != nil {
+					return err
+				}
 
-			if !needsReveal {
-				return nil
+				if !needsReveal {
+					return nil
+				}
 			}
 
 			if err := revealSecret(sm, vsecret.RevealedPath); err != nil {
