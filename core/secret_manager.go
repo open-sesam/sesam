@@ -372,8 +372,7 @@ func (sm *SecretManager) readSecretFooter(path string) (*secretFooter, error) {
 func (sm *SecretManager) Reveal(all bool) error {
 	g := new(errgroup.Group)
 
-	// parallelJobs := 2 * runtime.GOMAXPROCS(0)
-	parallelJobs := 1000
+	parallelJobs := 4 * runtime.GOMAXPROCS(0)
 	tokenCh := make(chan bool, parallelJobs)
 	for range cap(tokenCh) {
 		tokenCh <- true
@@ -393,7 +392,7 @@ func (sm *SecretManager) Reveal(all bool) error {
 			}
 
 			if !all {
-				needsReveal, _, err := sm.NeedsReveal(vsecret.RevealedPath)
+				needsReveal, _, err := sm.NeedsSeal(vsecret.RevealedPath)
 				if err != nil {
 					return err
 				}
@@ -546,55 +545,6 @@ func openForShow(root *os.Root, path string) (*os.File, error) {
 // plaintext comparison decrypts the sealed file's age key.
 func (sm *SecretManager) NeedsSeal(revealedPath string) (bool, *secretFooter, error) {
 	// TODO: During seal we can get the file key directly without re-reading, should be a parameter here.
-	sealFd, err := sm.root.Open(sm.cryptPath(revealedPath))
-	if errors.Is(err, os.ErrNotExist) {
-		return true, nil, nil
-	}
-	if err != nil {
-		return false, nil, err
-	}
-	defer closeLogged(sealFd)
-
-	plainFd, err := sm.root.Open(revealedPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return true, nil, nil
-	}
-	if err != nil {
-		return false, nil, err
-	}
-	defer closeLogged(plainFd)
-
-	_, footer, err := readFooter(sealFd)
-	if err != nil {
-		return false, nil, err
-	}
-
-	newHash, hashCode, err := hasherForStored(footer.CipherTextHash)
-	if err != nil {
-		return false, footer, err
-	}
-
-	want := MulticodeEncode(recipientsHash(newHash, sm.recipientsFor(revealedPath)), hashCode)
-	if footer.RecipientsHash != want {
-		return true, footer, nil
-	}
-
-	ageKey, err := readAgeEncryptionKey(sealFd, sm.Identities.AgeIdentities())
-	if err != nil {
-		return false, footer, err
-	}
-
-	plainContentHash := newHash()
-	if _, err := io.Copy(plainContentHash, plainFd); err != nil {
-		return false, footer, err
-	}
-	_, _ = plainContentHash.Write([]byte(revealedPath))
-
-	plainHmacContentHash := MulticodeEncode(keyContentHash(newHash, ageKey, plainContentHash.Sum(nil)), hashCode)
-	return plainHmacContentHash != footer.HMACContentHash, footer, nil
-}
-
-func (sm *SecretManager) NeedsReveal(revealedPath string) (bool, *secretFooter, error) {
 	sealFd, err := sm.root.Open(sm.cryptPath(revealedPath))
 	if errors.Is(err, os.ErrNotExist) {
 		return true, nil, nil

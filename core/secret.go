@@ -92,6 +92,11 @@ func sealSecret(
 	recipients Recipients,
 	destPath, sealedByUser string,
 ) (*secretFooter, error) {
+	rcps := recipients.AgeRecipients()
+	if len(rcps) == 0 {
+		return nil, fmt.Errorf("empty recipients not allowed")
+	}
+
 	rd, err := sm.root.Open(revealedPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secret: %w", err)
@@ -121,7 +126,7 @@ func sealSecret(
 	contentHash := newHash()
 	mw := io.MultiWriter(wc, ciphertextHash)
 
-	encW, err := age.Encrypt(mw, recipients.AgeRecipients()...)
+	encW, err := age.Encrypt(mw, rcps...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initiate encryption: %w", err)
 	}
@@ -143,9 +148,18 @@ func sealSecret(
 		return nil, fmt.Errorf("failed to seek back to crypt file: %w", err)
 	}
 
-	ageKey, err := readAgeEncryptionKey(wc.File, sm.Identities.AgeIdentities())
-	if err != nil {
-		return nil, fmt.Errorf("failed to read age key: %w", err)
+	// when using AgeRecipients() it's wrapped in FileKeyWrapper automatically.
+	// this allows us to read the file key, even if it's not
+	fkw, ok := rcps[0].(*FileKeyWrapper)
+	var ageKey []byte
+	if !ok {
+		// that's more of a programmer error, but fall back to reading it from file.
+		ageKey, err = readAgeEncryptionKey(wc.File, sm.Identities.AgeIdentities())
+		if err != nil {
+			return nil, fmt.Errorf("failed to read age key: %w", err)
+		}
+	} else {
+		ageKey = fkw.ReadKey()
 	}
 
 	hmacContentHash := keyContentHash(newHash, ageKey, contentHash.Sum(nil))
