@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -8,9 +9,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sync/errgroup"
 )
 
 // SecretManager is the high level API to manage secrets,
@@ -173,15 +176,64 @@ func (sm *SecretManager) Seal(all bool) error {
 		return fmt.Errorf("create objects dir: %w", err)
 	}
 
+	type result struct {
+		err  error
+		sig  *secretFooter
+		path string
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	resultCh := make(chan result, len(sm.State.Secrets))
+
+	// jobs are partly I/O bound, so allow more than we have cores.
+	parallelJobs := 2 * runtime.GOMAXPROCS(0)
+	tokenCh := make(chan bool, parallelJobs)
+	for range cap(tokenCh) {
+		tokenCh <- true
+	}
+
+	for _, vsecret := range sm.State.Secrets {
+		go func() {
+			select {
+			case <-tokenCh:
+				// our turn to run
+				defer func() {
+					// signal others
+					tokenCh <- true
+				}()
+			case <-ctx.Done():
+				resultCh <- result{
+					err: ctx.Err(),
+				}
+				return
+			}
+
+			sig, err := sm.sealOrPreserve(vsecret.RevealedPath, all)
+			if err != nil {
+				resultCh <- result{
+					err: fmt.Errorf("seal %s: %w", vsecret.RevealedPath, err),
+				}
+				return
+			}
+
+			resultCh <- result{
+				sig:  sig,
+				path: vsecret.RevealedPath,
+			}
+		}()
+	}
+
 	wanted := make(map[string]bool, len(sm.State.Secrets))
 	sigs := make([]*secretFooter, 0, len(sm.State.Secrets))
-	for _, vsecret := range sm.State.Secrets {
-		sig, err := sm.sealOrPreserve(vsecret.RevealedPath, all)
-		if err != nil {
-			return fmt.Errorf("seal %s: %w", vsecret.RevealedPath, err)
+	for range len(sm.State.Secrets) {
+		r := <-resultCh
+		if r.err != nil {
+			cancel()
+			return r.err
 		}
-		sigs = append(sigs, sig)
-		wanted[sm.cryptPath(vsecret.RevealedPath)] = true
+
+		wanted[sm.cryptPath(r.path)] = true
+		sigs = append(sigs, r.sig)
 	}
 
 	// safety net: remove left over files or anything that was manually created.
@@ -317,17 +369,45 @@ func (sm *SecretManager) readSecretFooter(path string) (*secretFooter, error) {
 
 // RevealAll reveals all known secrets.
 func (sm *SecretManager) RevealAll() error {
-	for _, vsecret := range sm.State.Secrets {
-		if !sm.State.UserHasAccess(sm.Signer.UserName(), vsecret.AccessGroups) {
-			// ignore files we can't decrypt:
-			continue
-		}
+	g := new(errgroup.Group)
 
-		if err := revealSecret(sm, vsecret.RevealedPath); err != nil {
-			return fmt.Errorf("failed to reveal %s: %w", vsecret.RevealedPath, err)
-		}
+	// parallelJobs := 2 * runtime.GOMAXPROCS(0)
+	parallelJobs := 1000
+	tokenCh := make(chan bool, parallelJobs)
+	for range cap(tokenCh) {
+		tokenCh <- true
 	}
-	return nil
+
+	for _, vsecret := range sm.State.Secrets {
+		g.Go(func() error {
+			<-tokenCh
+			defer func() {
+				// signal others
+				tokenCh <- true
+			}()
+
+			if !sm.State.UserHasAccess(sm.Signer.UserName(), vsecret.AccessGroups) {
+				// ignore files we can't decrypt:
+				return nil
+			}
+
+			needsReveal, _, err := sm.NeedsReveal(vsecret.RevealedPath)
+			if err != nil {
+				return err
+			}
+
+			if !needsReveal {
+				return nil
+			}
+
+			if err := revealSecret(sm, vsecret.RevealedPath); err != nil {
+				return fmt.Errorf("failed to reveal %s: %w", vsecret.RevealedPath, err)
+			}
+
+			return nil
+		})
+	}
+	return g.Wait()
 }
 
 // SecretRemove removes a secret from sesam's management.
@@ -462,6 +542,51 @@ func openForShow(root *os.Root, path string) (*os.File, error) {
 // holds even when the current sealer cannot read the existing object; only the
 // plaintext comparison decrypts the sealed file's age key.
 func (sm *SecretManager) NeedsSeal(revealedPath string) (bool, *secretFooter, error) {
+	// TODO: During seal we can get the file key directly without re-reading, should be a parameter here.
+	sealFd, err := sm.root.Open(sm.cryptPath(revealedPath))
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil, nil
+	}
+	if err != nil {
+		return false, nil, err
+	}
+	defer closeLogged(sealFd)
+
+	plainFd, err := sm.root.Open(revealedPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil, nil
+	}
+	if err != nil {
+		return false, nil, err
+	}
+	defer closeLogged(plainFd)
+
+	_, footer, err := readFooter(sealFd)
+	if err != nil {
+		return false, nil, err
+	}
+
+	want := MulticodeEncode(recipientsHash(sm.recipientsFor(revealedPath)), MhSHA3_256)
+	if footer.RecipientsHash != want {
+		return true, footer, nil
+	}
+
+	ageKey, err := readAgeEncryptionKey(sealFd, sm.Identities.AgeIdentities())
+	if err != nil {
+		return false, footer, err
+	}
+
+	plainContentHash := sha3.New256()
+	if _, err := io.Copy(plainContentHash, plainFd); err != nil {
+		return false, footer, err
+	}
+	_, _ = plainContentHash.Write([]byte(revealedPath))
+
+	plainHmacContentHash := MulticodeEncode(keyContentHash(ageKey, plainContentHash.Sum(nil)), MhSHA3_256)
+	return plainHmacContentHash != footer.HMACContentHash, footer, nil
+}
+
+func (sm *SecretManager) NeedsReveal(revealedPath string) (bool, *secretFooter, error) {
 	sealFd, err := sm.root.Open(sm.cryptPath(revealedPath))
 	if errors.Is(err, os.ErrNotExist) {
 		return true, nil, nil
