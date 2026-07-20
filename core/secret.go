@@ -148,8 +148,10 @@ func sealSecret(
 		return nil, fmt.Errorf("failed to seek back to crypt file: %w", err)
 	}
 
-	// when using AgeRecipients() it's wrapped in FileKeyWrapper automatically.
-	// this allows us to read the file key, even if it's not
+	// AgeRecipients() wraps recipients in a FileKeyWrapper, which captures the
+	// age file key during encryption so we can read it back here without
+	// decrypting the ciphertext again. Any other recipient type falls back to
+	// reading the key from the encrypted file below.
 	fkw, ok := rcps[0].(*FileKeyWrapper)
 	var ageKey []byte
 	if !ok {
@@ -345,12 +347,7 @@ func revealStreamAndVerify(
 	}
 
 	// Verify the signature, but check before if hashes are the same at all as quick check:
-	_, hashCode, err := hasherForStored(footer.CipherTextHash)
-	if err != nil {
-		return fmt.Errorf("bad footer for %s: %w", footer.RevealedPath, err)
-	}
-
-	ok, err := hashEqual(footer.CipherTextHash, hashCode, cipherTextHash)
+	ok, err := hashEqual(footer.CipherTextHash, cipherTextHash)
 	if err != nil {
 		return fmt.Errorf("failed to check ciphertext hash for %s: %w", footer.RevealedPath, err)
 	}

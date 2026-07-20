@@ -39,7 +39,7 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 	showPath := object
 	if !filepath.IsAbs(object) {
 		cwd, _ := os.Getwd()
-		rel, relErr := toRepoPath(sesamDir, cwd, object)
+		rel, relErr := toShowPath(sesamDir, cwd, object)
 		if relErr != nil {
 			return relErr
 		}

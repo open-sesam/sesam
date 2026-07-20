@@ -99,7 +99,7 @@ func hashData(data []byte) string {
 // hashedDataEqual reports whether data hashes to the stored multicode digest, using
 // whichever algorithm the stored value declares.
 func hashedDataEqual(stored string, data []byte) (bool, error) {
-	_, code, err := multicodeDecode(stored)
+	want, code, err := multicodeDecode(stored)
 	if err != nil {
 		return false, err
 	}
@@ -111,19 +111,15 @@ func hashedDataEqual(stored string, data []byte) (bool, error) {
 
 	h := newHash()
 	_, _ = h.Write(data)
-	return hashEqual(stored, code, h.Sum(nil))
+	return subtle.ConstantTimeCompare(h.Sum(nil), want) == 1, nil
 }
 
 // hashEqual compares an already-computed digest against a stored multicode
-// value, requiring the stored value to use `code`.
-func hashEqual(stored string, code uint64, digest []byte) (bool, error) {
-	want, gotCode, err := multicodeDecode(stored)
+// value. A codec (and thus digest-length) mismatch simply compares unequal.
+func hashEqual(stored string, digest []byte) (bool, error) {
+	want, _, err := multicodeDecode(stored)
 	if err != nil {
 		return false, err
-	}
-
-	if gotCode != code {
-		return false, fmt.Errorf("hash codec mismatch: want 0x%x, got 0x%x", code, gotCode)
 	}
 
 	return subtle.ConstantTimeCompare(digest, want) == 1, nil

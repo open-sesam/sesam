@@ -113,7 +113,7 @@ func TestVerifyLegacySHA3Object(t *testing.T) {
 	require.NoError(t, err)
 	_, _ = h.Write([]byte(footer.RevealedPath))
 
-	ok, err := hashEqual(footer.CipherTextHash, code, h.Sum(nil))
+	ok, err := hashEqual(footer.CipherTextHash, h.Sum(nil))
 	require.NoError(t, err)
 	require.True(t, ok, "legacy SHA3-256 ciphertext hash must still verify")
 }

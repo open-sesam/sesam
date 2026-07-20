@@ -90,7 +90,7 @@ func verifyIntegritySingleSecret(
 		return
 	}
 
-	newHash, hashCode, err := hasherForStored(sig.CipherTextHash)
+	newHash, _, err := hasherForStored(sig.CipherTextHash)
 	if err != nil {
 		report.add(vs.RevealedPath, fmt.Sprintf("bad footer: %v", err))
 		return
@@ -104,7 +104,7 @@ func verifyIntegritySingleSecret(
 
 	_, _ = h.Write([]byte(vs.RevealedPath))
 
-	ok, err := hashEqual(sig.CipherTextHash, hashCode, h.Sum(nil))
+	ok, err := hashEqual(sig.CipherTextHash, h.Sum(nil))
 	if err != nil {
 		report.add(vs.RevealedPath, fmt.Sprintf("failed to check ciphertext hash: %v", err))
 		return

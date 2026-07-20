@@ -153,16 +153,21 @@ func TestHashDigestEqual(t *testing.T) {
 
 	stored := MulticodeEncode(digest, MhBlake3)
 
-	ok, err := hashEqual(stored, MhBlake3, digest)
+	ok, err := hashEqual(stored, digest)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	ok, err = hashEqual(stored, MhBlake3, []byte("wrong-digest"))
+	ok, err = hashEqual(stored, []byte("wrong-digest"))
 	require.NoError(t, err)
 	require.False(t, ok)
 
-	// Declaring a different codec than the stored value is an error, not a
-	// silent mismatch: it guards against footer-version / prefix disagreement.
-	_, err = hashEqual(stored, MhSHA3_256, digest)
-	require.Error(t, err)
+	// A digest from a different algorithm just compares unequal; hashEqual
+	// takes the codec from the stored value and does not enforce a caller code.
+	sha3Hash, err := newHasher(MhSHA3_256)
+	require.NoError(t, err)
+	sh := sha3Hash()
+	_, _ = sh.Write(data)
+	ok, err = hashEqual(stored, sh.Sum(nil))
+	require.NoError(t, err)
+	require.False(t, ok)
 }

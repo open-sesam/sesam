@@ -23,11 +23,8 @@ func escapesRoot(rel string) bool {
 //   - An absolute path is relativized against sesamDir directly.
 //   - When the cwd is inside the sesam subtree, a relative path is resolved
 //     against the cwd (so `add ./local` from sub/ becomes sub/local).
-//   - When the cwd is outside the subtree, the path is resolved against the cwd
-//     if that lands back inside sesamDir (git runs `show` as a diff textconv
-//     from the worktree root, an ancestor of sesamDir, passing a worktree-
-//     relative path). Otherwise it is treated as already sesam-relative (the
-//     user passed --sesam-dir from above the repo).
+//   - When the cwd is outside the subtree, the path is treated as already
+//     sesam-relative (the user passed --sesam-dir from above the repo).
 func toRepoPath(sesamDir, cwd, arg string) (string, error) {
 	if filepath.IsAbs(arg) {
 		rel, err := filepath.Rel(sesamDir, filepath.Clean(arg))
@@ -39,13 +36,8 @@ func toRepoPath(sesamDir, cwd, arg string) (string, error) {
 
 	cwdRel, err := filepath.Rel(sesamDir, cwd)
 	if err != nil || escapesRoot(cwdRel) {
-		// cwd is outside the subtree. If the arg resolves against cwd back into
-		// sesamDir, use that (worktree-relative path from git's textconv);
-		// otherwise the arg is already sesam-relative.
-		if rel, relErr := filepath.Rel(sesamDir, filepath.Join(cwd, arg)); relErr == nil && !escapesRoot(rel) {
-			return rel, nil
-		}
-
+		// cwd is outside the subtree, so the arg is already sesam-relative.
+		//nolint:nilerr
 		return filepath.Clean(arg), nil
 	}
 
@@ -54,6 +46,24 @@ func toRepoPath(sesamDir, cwd, arg string) (string, error) {
 		return "", fmt.Errorf("path %q escapes the sesam dir %q", arg, sesamDir)
 	}
 	return rel, nil
+}
+
+// toShowPath translates a path for the `show` textconv, which git invokes from
+// the worktree root — an ancestor of sesamDir — passing a worktree-relative
+// path. When the cwd is outside the subtree but the arg resolves against it
+// back into sesamDir, honour that; otherwise fall back to toRepoPath. This
+// reinterpretation is intentionally confined to show: applying it to add/rm/mv
+// would silently retarget a sesam-relative arg to the wrong object.
+func toShowPath(sesamDir, cwd, arg string) (string, error) {
+	if !filepath.IsAbs(arg) {
+		if cwdRel, err := filepath.Rel(sesamDir, cwd); err != nil || escapesRoot(cwdRel) {
+			if rel, relErr := filepath.Rel(sesamDir, filepath.Join(cwd, arg)); relErr == nil && !escapesRoot(rel) {
+				return rel, nil
+			}
+		}
+	}
+
+	return toRepoPath(sesamDir, cwd, arg)
 }
 
 // toRepoPaths translates a batch of user-supplied paths (see toRepoPath).
