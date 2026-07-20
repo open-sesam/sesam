@@ -183,6 +183,8 @@ func (sm *SecretManager) Seal(all bool) error {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	resultCh := make(chan result, len(sm.State.Secrets))
 
 	// jobs are partly I/O bound, so allow more than we have cores.
