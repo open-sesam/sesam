@@ -66,39 +66,46 @@ func (vs *VerifiedSecret) DeclaredGroups() []string {
 	return withoutAdmin(vs.AccessGroups)
 }
 
-func (s *VerifiedState) userIndex() map[string]int {
-	if len(s.userIdx) != len(s.Users) {
-		s.userIdx = make(map[string]int, len(s.Users))
-		for i := range s.Users {
-			s.userIdx[s.Users[i].Name] = i
-		}
+// rebuildUserIndex rebuilds userIdx from Users. Called after verify and after a
+// modification that shifts positions (a user removal).
+func (s *VerifiedState) rebuildUserIndex() {
+	s.userIdx = make(map[string]int, len(s.Users))
+	for i := range s.Users {
+		s.userIdx[s.Users[i].Name] = i
 	}
-	return s.userIdx
 }
 
-func (s *VerifiedState) secretIndex() map[string]int {
-	if len(s.secretIdx) != len(s.Secrets) {
-		s.secretIdx = make(map[string]int, len(s.Secrets))
-		for i := range s.Secrets {
-			s.secretIdx[s.Secrets[i].RevealedPath] = i
-		}
+// rebuildSecretIndex rebuilds secretIdx from Secrets. Called after verify and
+// after a modification that shifts positions (a secret removal).
+func (s *VerifiedState) rebuildSecretIndex() {
+	s.secretIdx = make(map[string]int, len(s.Secrets))
+	for i := range s.Secrets {
+		s.secretIdx[s.Secrets[i].RevealedPath] = i
 	}
-	return s.secretIdx
 }
 
-// addUser appends u and keeps userIdx in sync when it is already built.
+// buildIndexes (re)builds both lookup indexes from Users and Secrets. verify
+// calls it after replay, and every later modification keeps the indexes in sync
+// incrementally, so the read accessors (UserExists, SecretExists, ...) never
+// write and are safe to call concurrently on an unchanging state. Code that
+// constructs a VerifiedState by hand must call this before reading it.
+// It is not safe against concurrent modification; that would need a mutex.
+func (s *VerifiedState) buildIndexes() {
+	s.rebuildUserIndex()
+	s.rebuildSecretIndex()
+}
+
+// addUser appends u and records its position in userIdx. The index must already
+// be built (verify builds it before any modification runs).
 func (s *VerifiedState) addUser(u VerifiedUser) {
-	if s.userIdx != nil {
-		s.userIdx[u.Name] = len(s.Users)
-	}
+	s.userIdx[u.Name] = len(s.Users)
 	s.Users = append(s.Users, u)
 }
 
-// addSecret appends sec and keeps secretIdx in sync when it is already built.
+// addSecret appends sec and records its position in secretIdx. The index must
+// already be built (verify builds it before any modification runs).
 func (s *VerifiedState) addSecret(sec VerifiedSecret) {
-	if s.secretIdx != nil {
-		s.secretIdx[sec.RevealedPath] = len(s.Secrets)
-	}
+	s.secretIdx[sec.RevealedPath] = len(s.Secrets)
 	s.Secrets = append(s.Secrets, sec)
 }
 
@@ -106,7 +113,7 @@ func (s *VerifiedState) addSecret(sec VerifiedSecret) {
 // unchanged, so only the index key moves. oldName must exist and newName must
 // not (callers check both).
 func (s *VerifiedState) renameUser(oldName, newName string) {
-	idx, ok := s.userIndex()[oldName]
+	idx, ok := s.userIdx[oldName]
 	if !ok {
 		return
 	}
@@ -119,7 +126,7 @@ func (s *VerifiedState) renameUser(oldName, newName string) {
 // unchanged, so only the index key moves. oldPath must exist and newPath must
 // not (callers check both).
 func (s *VerifiedState) renameSecret(oldPath, newPath string) {
-	idx, ok := s.secretIndex()[oldPath]
+	idx, ok := s.secretIdx[oldPath]
 	if !ok {
 		return
 	}
@@ -129,7 +136,7 @@ func (s *VerifiedState) renameSecret(oldPath, newPath string) {
 }
 
 func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
-	idx, ok := s.userIndex()[user]
+	idx, ok := s.userIdx[user]
 	if !ok {
 		return nil, false
 	}
@@ -138,7 +145,7 @@ func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
 }
 
 func (s *VerifiedState) SecretExists(revealedPath string) (*VerifiedSecret, bool) {
-	idx, ok := s.secretIndex()[revealedPath]
+	idx, ok := s.secretIdx[revealedPath]
 	if !ok {
 		return nil, false
 	}
@@ -148,7 +155,7 @@ func (s *VerifiedState) SecretExists(revealedPath string) (*VerifiedSecret, bool
 
 // UserHasAccess checks if `user` is in one of `grous` and has therefore access.
 func (s *VerifiedState) UserHasAccess(user string, groups []string) bool {
-	idx, ok := s.userIndex()[user]
+	idx, ok := s.userIdx[user]
 	if !ok {
 		return false
 	}
@@ -164,7 +171,7 @@ func (s *VerifiedState) UserHasAccess(user string, groups []string) bool {
 }
 
 func (s *VerifiedState) UsersForSecret(revealedPath string) []string {
-	idx, ok := s.secretIndex()[revealedPath]
+	idx, ok := s.secretIdx[revealedPath]
 	if !ok {
 		return nil
 	}
@@ -558,7 +565,7 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 	state.Users = slices.DeleteFunc(state.Users, func(vu VerifiedUser) bool {
 		return vu.Name == killDetails.User
 	})
-	state.userIdx = nil // positions shifted; rebuild lazily
+	state.rebuildUserIndex() // positions shifted
 
 	return nil
 }
@@ -751,7 +758,7 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 	state.Secrets = slices.DeleteFunc(state.Secrets, func(s VerifiedSecret) bool {
 		return s.RevealedPath == srd.RevealedPath
 	})
-	state.secretIdx = nil // positions shifted; rebuild lazily
+	state.rebuildSecretIndex() // positions shifted
 
 	return nil
 }
@@ -945,10 +952,7 @@ func replay(state *VerifiedState, batched bool) error {
 	newState := *state
 	newState.Users = cloneVerifiedUsers(state.Users)
 	newState.Secrets = cloneVerifiedSecrets(state.Secrets)
-	// The struct copy aliased state's index maps; drop them so newState builds
-	// its own against the cloned slices and cannot corrupt the caller's state.
-	newState.userIdx = nil
-	newState.secretIdx = nil
+	newState.buildIndexes()
 
 	var previousEntry *AuditEntrySigned
 	var checks []SigCheck
@@ -1080,7 +1084,7 @@ func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 		secrets[i] = sec
 	}
 
-	return &VerifiedState{
+	cloned := &VerifiedState{
 		Users:             users,
 		Secrets:           secrets,
 		SealRequiredSeqID: s.SealRequiredSeqID,
@@ -1090,6 +1094,8 @@ func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 		keyring:           kr,
 		pluginUI:          s.pluginUI,
 	}
+	cloned.buildIndexes()
+	return cloned
 }
 
 func (s *VerifiedState) Close() error {

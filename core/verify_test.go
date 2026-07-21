@@ -699,6 +699,7 @@ func TestUserExists(t *testing.T) {
 	state := &VerifiedState{
 		Users: []VerifiedUser{{Name: "alice"}, {Name: "bob"}},
 	}
+	state.buildIndexes()
 
 	u, ok := state.UserExists("alice")
 	require.True(t, ok)
@@ -712,6 +713,7 @@ func TestSecretExists(t *testing.T) {
 	state := &VerifiedState{
 		Secrets: []VerifiedSecret{{RevealedPath: "secrets/a"}},
 	}
+	state.buildIndexes()
 
 	s, ok := state.SecretExists("secrets/a")
 	require.True(t, ok)
@@ -728,6 +730,7 @@ func TestUserHasAccess(t *testing.T) {
 			{Name: "bob", Groups: []string{"dev"}},
 		},
 	}
+	state.buildIndexes()
 
 	require.True(t, state.UserHasAccess("alice", []string{"ops"}), "admin has implicit access")
 	require.False(t, state.UserHasAccess("bob", []string{"ops"}), "bob not in ops")
@@ -745,6 +748,7 @@ func TestUsersForSecret(t *testing.T) {
 			{RevealedPath: "secrets/db", AccessGroups: []string{"dev"}},
 		},
 	}
+	state.buildIndexes()
 
 	users := state.UsersForSecret("secrets/db")
 	require.Len(t, users, 2) // alice (admin) + bob (dev)
@@ -771,6 +775,7 @@ func TestRequireAdmin(t *testing.T) {
 			{Name: "bob", Groups: []string{"dev"}},
 		},
 	}
+	state.buildIndexes()
 
 	entry := &AuditEntrySigned{AuditEntry: AuditEntry{ChangedBy: "alice", SeqID: 1}}
 	u, err := state.RequireAdmin(entry)

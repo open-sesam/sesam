@@ -18,18 +18,21 @@ func testSecretManager(t *testing.T) *SecretManager {
 	user := newTestUser(t, "testuser")
 	kr := testKeyring(t, user)
 
+	state := &VerifiedState{
+		Users: []VerifiedUser{{
+			Name:   user.Name,
+			Groups: []string{"admin"},
+		}},
+	}
+	state.buildIndexes()
+
 	return &SecretManager{
 		SesamDir:   sesamDir,
 		root:       testRoot(t, sesamDir),
 		Identities: Identities{user.Identity},
 		Signer:     user.Signer,
 		Keyring:    kr,
-		State: &VerifiedState{
-			Users: []VerifiedUser{{
-				Name:   user.Name,
-				Groups: []string{"admin"},
-			}},
-		},
+		State:      state,
 	}
 }
 
@@ -41,7 +44,7 @@ func testSecret(t *testing.T, mgr *SecretManager, path, content string) string {
 	writeSecret(t, mgr.SesamDir, path, content)
 
 	if mgr.State != nil {
-		mgr.State.Secrets = append(mgr.State.Secrets, VerifiedSecret{
+		mgr.State.addSecret(VerifiedSecret{
 			RevealedPath: path,
 			AccessGroups: []string{"admin"},
 		})
@@ -385,6 +388,7 @@ func TestRevealRejectsUnauthorizedSealer(t *testing.T) {
 			{RevealedPath: "secrets/admin-only", AccessGroups: []string{"admin"}},
 		},
 	}
+	state.buildIndexes()
 
 	adminMgr := &SecretManager{
 		SesamDir:   sesamDir,
