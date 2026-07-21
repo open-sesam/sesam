@@ -187,7 +187,7 @@ func (sm *SecretManager) Seal(all bool) error {
 	resultCh := make(chan result, len(sm.State.Secrets))
 
 	// jobs are partly I/O bound, so allow more than we have cores.
-	parallelJobs := 2 * runtime.GOMAXPROCS(0)
+	parallelJobs := 4 * runtime.GOMAXPROCS(0)
 	tokenCh := make(chan bool, parallelJobs)
 	for range cap(tokenCh) {
 		tokenCh <- true

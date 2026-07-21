@@ -10,6 +10,7 @@ require (
 	github.com/goccy/go-yaml v1.19.2
 	github.com/gofrs/flock v0.12.1
 	github.com/google/uuid v1.6.0
+	github.com/hdevalence/ed25519consensus v0.2.0
 	github.com/jedib0t/go-pretty/v6 v6.8.0
 	github.com/mattn/go-colorable v0.1.14
 	github.com/muesli/termenv v0.16.0

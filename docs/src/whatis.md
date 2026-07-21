@@ -36,7 +36,7 @@ while a secret manager is focused on sharing some of those secrets with other us
 In short, `sesam` fits well the [GitOps model](https://about.gitlab.com/topics/gitops/) of infrastructure.
 
 <small>
-¹ <i>somewhat fast</i> is the new <i>blazingly fast</i> - benchmarks will follow later.
+¹ <i>somewhat fast</i> is the new <i>🚀 blazingly fast 🚀</i> - benchmarks will follow later.
 </small>
 
 ## Learning

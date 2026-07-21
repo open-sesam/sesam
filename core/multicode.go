@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"hash"
+	"sync"
 
 	mh "github.com/multiformats/go-multihash"
 	"golang.org/x/crypto/sha3"
@@ -41,6 +42,37 @@ func newHasher(code uint64) (func() hash.Hash, error) {
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported hash multicodec 0x%x", code)
+	}
+}
+
+// hasherPools holds one sync.Pool of hash.Hash per multicodec. Constructing a
+// BLAKE3 hasher allocates a sizeable buffer, and audit-log verification hashes
+// once per entry, so reusing hashers removes the dominant allocation on that
+// path. Callers must return the hasher via putHasher after Sum.
+var hasherPools sync.Map // uint64 code -> *sync.Pool
+
+// getHasher returns a reset hasher for code, reusing a pooled one when possible.
+func getHasher(code uint64) (hash.Hash, error) {
+	pool, ok := hasherPools.Load(code)
+	if !ok {
+		newHash, err := newHasher(code)
+		if err != nil {
+			return nil, err
+		}
+		pool, _ = hasherPools.LoadOrStore(code, &sync.Pool{
+			New: func() any { return newHash() },
+		})
+	}
+
+	h := pool.(*sync.Pool).Get().(hash.Hash)
+	h.Reset()
+	return h, nil
+}
+
+// putHasher returns h to the pool for code. h must not be used afterwards.
+func putHasher(code uint64, h hash.Hash) {
+	if pool, ok := hasherPools.Load(code); ok {
+		pool.(*sync.Pool).Put(h)
 	}
 }
 
@@ -85,13 +117,13 @@ func multicodeDecode(s string) (digest []byte, code uint64, err error) {
 
 // hashData hashes data with the default algorithm and returns a multicode string.
 func hashData(data []byte) string {
-	newHash, err := newHasher(defaultHashCode)
+	h, err := getHasher(defaultHashCode)
 	if err != nil {
 		// defaultHashCode is a constant we always support.
 		panic(fmt.Sprintf("default hash code unsupported: %v", err))
 	}
+	defer putHasher(defaultHashCode, h)
 
-	h := newHash()
 	_, _ = h.Write(data)
 	return MulticodeEncode(h.Sum(nil), defaultHashCode)
 }
@@ -104,12 +136,12 @@ func hashedDataEqual(stored string, data []byte) (bool, error) {
 		return false, err
 	}
 
-	newHash, err := newHasher(code)
+	h, err := getHasher(code)
 	if err != nil {
 		return false, err
 	}
+	defer putHasher(code, h)
 
-	h := newHash()
 	_, _ = h.Write(data)
 	return subtle.ConstantTimeCompare(h.Sum(nil), want) == 1, nil
 }

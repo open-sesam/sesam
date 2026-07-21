@@ -1,9 +1,14 @@
 package core
 
 import (
+	"crypto/ed25519"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
+
+	"github.com/hdevalence/ed25519consensus"
 )
 
 // VerifiedUser is a user that has been verified by the audit log.
@@ -41,6 +46,11 @@ type VerifiedState struct {
 	// Compared against disk after replay to detect file substitution.
 	LastSealRootHash string
 
+	// userIdx / secretIdx map a Name / RevealedPath to its position in Users /
+	// Secrets. They exist as optimization only and are lazily loaded.
+	userIdx   map[string]int
+	secretIdx map[string]int
+
 	auditLog *AuditLog
 	keyring  Keyring
 	pluginUI *PluginUI
@@ -56,12 +66,71 @@ func (vs *VerifiedSecret) DeclaredGroups() []string {
 	return withoutAdmin(vs.AccessGroups)
 }
 
-func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
-	idx := slices.IndexFunc(s.Users, func(u VerifiedUser) bool {
-		return u.Name == user
-	})
+func (s *VerifiedState) userIndex() map[string]int {
+	if len(s.userIdx) != len(s.Users) {
+		s.userIdx = make(map[string]int, len(s.Users))
+		for i := range s.Users {
+			s.userIdx[s.Users[i].Name] = i
+		}
+	}
+	return s.userIdx
+}
 
-	if idx < 0 {
+func (s *VerifiedState) secretIndex() map[string]int {
+	if len(s.secretIdx) != len(s.Secrets) {
+		s.secretIdx = make(map[string]int, len(s.Secrets))
+		for i := range s.Secrets {
+			s.secretIdx[s.Secrets[i].RevealedPath] = i
+		}
+	}
+	return s.secretIdx
+}
+
+// addUser appends u and keeps userIdx in sync when it is already built.
+func (s *VerifiedState) addUser(u VerifiedUser) {
+	if s.userIdx != nil {
+		s.userIdx[u.Name] = len(s.Users)
+	}
+	s.Users = append(s.Users, u)
+}
+
+// addSecret appends sec and keeps secretIdx in sync when it is already built.
+func (s *VerifiedState) addSecret(sec VerifiedSecret) {
+	if s.secretIdx != nil {
+		s.secretIdx[sec.RevealedPath] = len(s.Secrets)
+	}
+	s.Secrets = append(s.Secrets, sec)
+}
+
+// renameUser renames the user at oldName to newName. The slice position is
+// unchanged, so only the index key moves. oldName must exist and newName must
+// not (callers check both).
+func (s *VerifiedState) renameUser(oldName, newName string) {
+	idx, ok := s.userIndex()[oldName]
+	if !ok {
+		return
+	}
+	s.Users[idx].Name = newName
+	delete(s.userIdx, oldName)
+	s.userIdx[newName] = idx
+}
+
+// renameSecret repoints the secret at oldPath to newPath. The slice position is
+// unchanged, so only the index key moves. oldPath must exist and newPath must
+// not (callers check both).
+func (s *VerifiedState) renameSecret(oldPath, newPath string) {
+	idx, ok := s.secretIndex()[oldPath]
+	if !ok {
+		return
+	}
+	s.Secrets[idx].RevealedPath = newPath
+	delete(s.secretIdx, oldPath)
+	s.secretIdx[newPath] = idx
+}
+
+func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
+	idx, ok := s.userIndex()[user]
+	if !ok {
 		return nil, false
 	}
 
@@ -69,11 +138,8 @@ func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
 }
 
 func (s *VerifiedState) SecretExists(revealedPath string) (*VerifiedSecret, bool) {
-	idx := slices.IndexFunc(s.Secrets, func(vs VerifiedSecret) bool {
-		return vs.RevealedPath == revealedPath
-	})
-
-	if idx < 0 {
+	idx, ok := s.secretIndex()[revealedPath]
+	if !ok {
 		return nil, false
 	}
 
@@ -82,11 +148,8 @@ func (s *VerifiedState) SecretExists(revealedPath string) (*VerifiedSecret, bool
 
 // UserHasAccess checks if `user` is in one of `grous` and has therefore access.
 func (s *VerifiedState) UserHasAccess(user string, groups []string) bool {
-	idx := slices.IndexFunc(s.Users, func(u VerifiedUser) bool {
-		return u.Name == user
-	})
-
-	if idx < 0 {
+	idx, ok := s.userIndex()[user]
+	if !ok {
 		return false
 	}
 
@@ -101,10 +164,8 @@ func (s *VerifiedState) UserHasAccess(user string, groups []string) bool {
 }
 
 func (s *VerifiedState) UsersForSecret(revealedPath string) []string {
-	idx := slices.IndexFunc(s.Secrets, func(vs VerifiedSecret) bool {
-		return vs.RevealedPath == revealedPath
-	})
-	if idx < 0 {
+	idx, ok := s.secretIndex()[revealedPath]
+	if !ok {
 		return nil
 	}
 
@@ -367,7 +428,7 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		}
 	}
 
-	state.Users = append(state.Users, VerifiedUser{
+	state.addUser(VerifiedUser{
 		Name:       tell.User,
 		SignPubKey: tell.SignPubKey,
 		Recps:      stored,
@@ -395,13 +456,12 @@ func verifyUserRename(log *AuditLog, state *VerifiedState, entry *AuditEntrySign
 		return fmt.Errorf("new user already exists: %s", renameDetails.NewName)
 	}
 
-	user, err := state.requireUser(renameDetails.OldName, "rename", entry)
-	if err != nil {
+	if _, err := state.requireUser(renameDetails.OldName, "rename", entry); err != nil {
 		return err
 	}
 
 	kr.RenameUser(renameDetails.OldName, renameDetails.NewName)
-	user.Name = renameDetails.NewName
+	state.renameUser(renameDetails.OldName, renameDetails.NewName)
 	return nil
 }
 
@@ -498,6 +558,7 @@ func verifyUserKill(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 	state.Users = slices.DeleteFunc(state.Users, func(vu VerifiedUser) bool {
 		return vu.Name == killDetails.User
 	})
+	state.userIdx = nil // positions shifted; rebuild lazily
 
 	return nil
 }
@@ -617,7 +678,7 @@ func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigne
 	}
 
 	// secret does not exist
-	state.Secrets = append(state.Secrets, VerifiedSecret{
+	state.addSecret(VerifiedSecret{
 		RevealedPath: scd.RevealedPath,
 		AccessGroups: scd.AccessGroups,
 	})
@@ -662,13 +723,12 @@ func verifySecretMove(log *AuditLog, state *VerifiedState, entry *AuditEntrySign
 		return fmt.Errorf("cannot move secret over existing secret: %q", scr.NewRevealedPath)
 	}
 
-	existingSecret, err := state.requireSecretAccess(scr.OldRevealedPath, "move", entry)
-	if err != nil {
+	if _, err := state.requireSecretAccess(scr.OldRevealedPath, "move", entry); err != nil {
 		return err
 	}
 
 	// change in state to new name:
-	existingSecret.RevealedPath = scr.NewRevealedPath
+	state.renameSecret(scr.OldRevealedPath, scr.NewRevealedPath)
 	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
@@ -691,6 +751,7 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 	state.Secrets = slices.DeleteFunc(state.Secrets, func(s VerifiedSecret) bool {
 		return s.RevealedPath == srd.RevealedPath
 	})
+	state.secretIdx = nil // positions shifted; rebuild lazily
 
 	return nil
 }
@@ -794,7 +855,83 @@ func cloneVerifiedSecrets(secrets []VerifiedSecret) []VerifiedSecret {
 	return out
 }
 
+// SigCheck stores the required data for a batched signature check
+type SigCheck struct {
+	PubKey    ed25519.PublicKey
+	Message   []byte
+	Signature []byte
+}
+
+// errBatchSignatureRejected signals that batched signature verification failed.
+// verify() re-runs the replay serially on this error to pinpoint and describe
+// the offending entry.
+var errBatchSignatureRejected = errors.New("batched signature verification rejected the audit log")
+
+// verifyBatch verifies all checks in a single batch. Verification is
+// all-or-nothing: it reports only whether every signature is valid, not which
+// one failed. ed25519consensus uses ZIP-215 rules, a superset of the signatures
+// crypto/ed25519 produces, so any batch of our own signatures that is valid
+// serially is also valid here.
+func verifyBatch(checks []SigCheck) bool {
+	// ed25519consensus reports an empty batch as invalid; treat it as vacuously
+	// valid to match the serial path.
+	if len(checks) == 0 {
+		return true
+	}
+
+	v := ed25519consensus.NewPreallocatedBatchVerifier(len(checks))
+	for _, c := range checks {
+		// Add slices the signature into R/s, so a malformed length would panic;
+		// reject such a batch instead (the caller falls back to serial).
+		if len(c.PubKey) != ed25519.PublicKeySize || len(c.Signature) != ed25519.SignatureSize {
+			return false
+		}
+		v.Add(c.PubKey, c.Message, c.Signature)
+	}
+	return v.Verify()
+}
+
+// entrySigCheck builds the batch-verification input for entry, resolving the
+// expected signer's key via the keyring. Any malformed input (bad signature
+// codec, unknown signer) yields a zero-valued key or signature, which
+// verifyBatch rejects; the serial fallback then reports the precise reason.
+func entrySigCheck(entry *AuditEntrySigned, kr Keyring) SigCheck {
+	pub, _ := kr.SignPubKey(entry.ChangedBy)
+
+	wholeEntryJSON, err := json.Marshal(entry.AuditEntry)
+	if err != nil {
+		return SigCheck{PubKey: pub}
+	}
+
+	sigRaw, code, err := multicodeDecode(entry.Signature)
+	if err != nil || code != MhEdDSA {
+		return SigCheck{PubKey: pub, Message: wholeEntryJSON}
+	}
+
+	return SigCheck{
+		PubKey:    pub,
+		Message:   slices.Concat([]byte(SesamDomainSignAuditTag), wholeEntryJSON),
+		Signature: sigRaw,
+	}
+}
+
+// verify checks the audit-log chain. It first tries the batched signature path
+// (one ed25519 batch over all entries) and falls back to serial per-entry
+// verification only to name the failing entry when the batch is rejected.
 func verify(state *VerifiedState) error {
+	if err := replay(state, true); err == nil || !errors.Is(err, errBatchSignatureRejected) {
+		return err
+	}
+
+	// The batch rejected the log; re-run serially to name the offending entry.
+	return replay(state, false)
+}
+
+// replay verifies the audit-log chain. When batched is true, per-entry
+// signatures are collected and checked in a single batch after the replay (fast
+// path). When false, each signature is verified inline so the failing entry can
+// be named (serial path and batch fallback).
+func replay(state *VerifiedState, batched bool) error {
 	log := state.auditLog
 	kr := state.keyring
 
@@ -808,8 +945,13 @@ func verify(state *VerifiedState) error {
 	newState := *state
 	newState.Users = cloneVerifiedUsers(state.Users)
 	newState.Secrets = cloneVerifiedSecrets(state.Secrets)
+	// The struct copy aliased state's index maps; drop them so newState builds
+	// its own against the cloned slices and cannot corrupt the caller's state.
+	newState.userIdx = nil
+	newState.secretIdx = nil
 
 	var previousEntry *AuditEntrySigned
+	var checks []SigCheck
 	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
 		if entry.SeqID <= newState.VerifiedUntil {
 			previousEntry = entry
@@ -853,14 +995,19 @@ func verify(state *VerifiedState) error {
 			return err
 		}
 
-		// check the signature
-		signatureUser, err := entry.Verify(kr)
-		if err != nil {
-			return fmt.Errorf("failed to verify signature on entry %d: %w", entry.SeqID, err)
-		}
+		// check the signature: batch mode defers the crypto and records the
+		// expected signer's key; serial mode verifies inline for precise errors.
+		if batched {
+			checks = append(checks, entrySigCheck(entry, kr))
+		} else {
+			signatureUser, err := entry.Verify(kr)
+			if err != nil {
+				return fmt.Errorf("failed to verify signature on entry %d: %w", entry.SeqID, err)
+			}
 
-		if signatureUser != entry.ChangedBy {
-			return fmt.Errorf("signature was made by %s, not %s (seq_id=%d)", signatureUser, entry.ChangedBy, entry.SeqID)
+			if signatureUser != entry.ChangedBy {
+				return fmt.Errorf("signature was made by %s, not %s (seq_id=%d)", signatureUser, entry.ChangedBy, entry.SeqID)
+			}
 		}
 
 		// we verify operations there that need to carry out their keyring changes after verify.
@@ -903,6 +1050,13 @@ func verify(state *VerifiedState) error {
 		// discarded, leaving the caller's state untouched.
 		kr.Restore(snap)
 		return err
+	}
+
+	// Batch-verify the collected signatures. On rejection, roll back and signal
+	// verify() to re-run serially so the failing entry can be named.
+	if batched && !verifyBatch(checks) {
+		kr.Restore(snap)
+		return errBatchSignatureRejected
 	}
 
 	*state = newState
