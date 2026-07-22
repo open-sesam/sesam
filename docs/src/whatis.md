@@ -39,6 +39,13 @@ In short, `sesam` fits well the [GitOps model](https://about.gitlab.com/topics/g
 ¹ <i>somewhat fast</i> is the new <i>🚀 blazingly fast 🚀</i> - benchmarks will follow later.
 </small>
 
+## Who is it for?
+
+- Open source developers wanting to store secrets in their repos and give only their co-developers access.
+- Small to mid-sized teams wanting to have different access levels in their secrets.
+- Individuals wanting to store secrets in their git repos, even if it's just a single user.
+- Machine users that need a scriptable tool.
+
 ## Learning
 
 How to use this manual:
