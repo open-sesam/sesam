@@ -197,8 +197,8 @@ func (v *View) ListSecrets(paths []string) ([]SecretInfo, error) {
 	return out, nil
 }
 
-// RevealAll reveals all secrets to the worktree.
-func (v *View) RevealAll() error {
+// Reveal reveals all secrets to the worktree.
+func (v *View) Reveal(all bool) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -206,7 +206,7 @@ func (v *View) RevealAll() error {
 		return ErrClosed
 	}
 
-	if err := v.secret.RevealAll(); err != nil {
+	if err := v.secret.Reveal(all); err != nil {
 		return fmt.Errorf("failed to reveal secrets: %w", err)
 	}
 	return nil

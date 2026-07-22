@@ -46,6 +46,9 @@ type Keyring interface {
 	// The user that matched the signature is returned or an error.
 	Verify(domain SignDomain, data []byte, signature, userHint string) (string, error)
 
+	// SignPubKey returns the signing public key registered for `user`, if any.
+	SignPubKey(user string) (ed25519.PublicKey, bool)
+
 	// Recipients returns all recipients for a specific set of users.
 	Recipients(users []string) Recipients
 
@@ -134,6 +137,11 @@ func (mk *MemoryKeyring) RemoveRecipient(user string, toDelete *Recipient) error
 
 	mk.recipients[user] = slices.Delete(recps, idx, idx+1)
 	return nil
+}
+
+func (mk *MemoryKeyring) SignPubKey(user string) (ed25519.PublicKey, bool) {
+	key, ok := mk.signPubs[user]
+	return key, ok
 }
 
 func (mk *MemoryKeyring) SetSignPubKey(user string, newKey ed25519.PublicKey) error {

@@ -1,6 +1,8 @@
 package core
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -434,7 +436,7 @@ func TestVerifySecretChangeUpdate(t *testing.T) {
 // Regression: the verify layer must reject any RevealedPath that contains
 // path-traversal components. Previously only the high-level API validated
 // the path, so a hand-crafted entry could seed state.Secrets with
-// "../../.ssh/authorized_keys", causing RevealAll to write outside the repo.
+// "../../.ssh/authorized_keys", causing Reveal to write outside the repo.
 func TestVerifySecretChangeRejectsPathTraversal(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")
@@ -568,6 +570,28 @@ func TestVerifySignatureNegative(t *testing.T) {
 		al.Entries[0].Signature = "bogus"
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
+
+	// A corrupted signature makes the batch path reject the whole log; verify()
+	// must then fall back to serial verification and surface the precise
+	// per-entry error, not leak the internal errBatchSignatureRejected sentinel.
+	t.Run("batch rejection falls back to precise error", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+
+		bob := newTestUser(t, "bob")
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+			User: "bob", Groups: []string{"dev"},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
+		}), nil)
+
+		al.Entries[1].Signature = "bogus"
+
+		err := verifyStateFail(t, al, EmptyKeyring())
+		require.Error(t, err)
+		require.NotErrorIs(t, err, errBatchSignatureRejected)
+		require.Contains(t, err.Error(), "failed to verify signature on entry")
+	})
 }
 
 // --- Chain integrity tests ---
@@ -675,6 +699,7 @@ func TestUserExists(t *testing.T) {
 	state := &VerifiedState{
 		Users: []VerifiedUser{{Name: "alice"}, {Name: "bob"}},
 	}
+	state.buildIndexes()
 
 	u, ok := state.UserExists("alice")
 	require.True(t, ok)
@@ -688,6 +713,7 @@ func TestSecretExists(t *testing.T) {
 	state := &VerifiedState{
 		Secrets: []VerifiedSecret{{RevealedPath: "secrets/a"}},
 	}
+	state.buildIndexes()
 
 	s, ok := state.SecretExists("secrets/a")
 	require.True(t, ok)
@@ -704,6 +730,7 @@ func TestUserHasAccess(t *testing.T) {
 			{Name: "bob", Groups: []string{"dev"}},
 		},
 	}
+	state.buildIndexes()
 
 	require.True(t, state.UserHasAccess("alice", []string{"ops"}), "admin has implicit access")
 	require.False(t, state.UserHasAccess("bob", []string{"ops"}), "bob not in ops")
@@ -721,6 +748,7 @@ func TestUsersForSecret(t *testing.T) {
 			{RevealedPath: "secrets/db", AccessGroups: []string{"dev"}},
 		},
 	}
+	state.buildIndexes()
 
 	users := state.UsersForSecret("secrets/db")
 	require.Len(t, users, 2) // alice (admin) + bob (dev)
@@ -747,6 +775,7 @@ func TestRequireAdmin(t *testing.T) {
 			{Name: "bob", Groups: []string{"dev"}},
 		},
 	}
+	state.buildIndexes()
 
 	entry := &AuditEntrySigned{AuditEntry: AuditEntry{ChangedBy: "alice", SeqID: 1}}
 	u, err := state.RequireAdmin(entry)
@@ -1264,4 +1293,108 @@ func TestVerifySecretRenameRequiresAccess(t *testing.T) {
 	}), nil)
 
 	require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+}
+
+// buildCorpus signs numMsgs messages of msgSize bytes, spread round-robin over
+// numSigners keys, and returns the checks plus the signer keys (so tests can
+// corrupt individual entries).
+func buildCorpus(t testing.TB, numSigners, numMsgs, msgSize int) []SigCheck {
+	t.Helper()
+
+	pubs := make([]ed25519.PublicKey, numSigners)
+	privs := make([]ed25519.PrivateKey, numSigners)
+	for i := range numSigners {
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		require.NoError(t, err)
+		pubs[i], privs[i] = pub, priv
+	}
+
+	checks := make([]SigCheck, numMsgs)
+	for i := range numMsgs {
+		msg := make([]byte, msgSize)
+		_, err := rand.Read(msg)
+		require.NoError(t, err)
+
+		signer := i % numSigners
+		checks[i] = SigCheck{
+			PubKey:    pubs[signer],
+			Message:   msg,
+			Signature: ed25519.Sign(privs[signer], msg),
+		}
+	}
+	return checks
+}
+
+// verifySerial verifies every check one at a time with crypto/ed25519. It is
+// the reference the batch path is tested and benchmarked against.
+func verifySerial(checks []SigCheck) bool {
+	for _, c := range checks {
+		if len(c.PubKey) != ed25519.PublicKeySize {
+			return false
+		}
+		if !ed25519.Verify(c.PubKey, c.Message, c.Signature) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestVerifyBatchMatchesSerial(t *testing.T) {
+	tests := []struct {
+		name       string
+		numSigners int
+		numMsgs    int
+	}{
+		{name: "single signer", numSigners: 1, numMsgs: 64},
+		{name: "many signers", numSigners: 8, numMsgs: 200},
+		{name: "empty batch", numSigners: 1, numMsgs: 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			checks := buildCorpus(t, max(tc.numSigners, 1), tc.numMsgs, 256)
+
+			require.True(t, verifySerial(checks), "serial must accept a valid corpus")
+			require.True(t, verifyBatch(checks), "batch must accept the same corpus")
+
+			if len(checks) == 0 {
+				return
+			}
+
+			// A single corrupted signature must be rejected by both paths.
+			bad := make([]SigCheck, len(checks))
+			copy(bad, checks)
+			tampered := make([]byte, len(bad[len(bad)/2].Signature))
+			copy(tampered, bad[len(bad)/2].Signature)
+			tampered[0] ^= 0xff
+			bad[len(bad)/2].Signature = tampered
+
+			require.False(t, verifySerial(bad), "serial must reject a tampered signature")
+			require.False(t, verifyBatch(bad), "batch must reject a tampered signature")
+		})
+	}
+}
+
+// benchCorpusSize mirrors the demo repo's rough signature count (≈800 audit
+// entries plus ≈250 object footers) so the numbers are representative.
+const benchCorpusSize = 1024
+
+func BenchmarkVerifySerial(b *testing.B) {
+	checks := buildCorpus(b, 4, benchCorpusSize, 256)
+	b.ResetTimer()
+	for range b.N {
+		if !verifySerial(checks) {
+			b.Fatal("corpus should verify")
+		}
+	}
+}
+
+func BenchmarkVerifyBatch(b *testing.B) {
+	checks := buildCorpus(b, 4, benchCorpusSize, 256)
+	b.ResetTimer()
+	for range b.N {
+		if !verifyBatch(checks) {
+			b.Fatal("corpus should verify")
+		}
+	}
 }

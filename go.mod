@@ -10,6 +10,7 @@ require (
 	github.com/goccy/go-yaml v1.19.2
 	github.com/gofrs/flock v0.12.1
 	github.com/google/uuid v1.6.0
+	github.com/hdevalence/ed25519consensus v0.2.0
 	github.com/jedib0t/go-pretty/v6 v6.8.0
 	github.com/mattn/go-colorable v0.1.14
 	github.com/muesli/termenv v0.16.0
@@ -23,8 +24,10 @@ require (
 	github.com/urfave/cli/v3 v3.8.0
 	github.com/zalando/go-keyring v0.2.7
 	golang.org/x/crypto v0.52.0
+	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.45.0
 	golang.org/x/term v0.43.0
+	lukechampine.com/blake3 v1.1.6
 )
 
 require (
@@ -66,5 +69,4 @@ require (
 	golang.org/x/tools v0.44.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	lukechampine.com/blake3 v1.1.6 // indirect
 )

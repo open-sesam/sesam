@@ -7,7 +7,6 @@ import (
 	"opensesam.org/sesam/repo"
 )
 
-// HandleOpen decrypts and verifies tracked secrets via Repo.RevealAll.
-func HandleOpen(_ context.Context, _ *cli.Command, r *repo.Repo) error {
-	return r.RevealAll()
+func HandleOpen(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+	return r.Reveal(cmd.Bool("all"))
 }
