@@ -24,7 +24,7 @@ func printError(msg string) {
 
 func main() {
 	if err := cli.Main(os.Args); err != nil {
-		exitErr := new(commands.ExitCodeErr)
+		exitErr := new(commands.ExitCodeError)
 		if errors.As(err, &exitErr) {
 			if exitErr.Print() {
 				printError(err.Error())

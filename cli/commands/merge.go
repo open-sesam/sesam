@@ -12,13 +12,13 @@ import (
 	"opensesam.org/sesam/repo"
 )
 
-type ExitCodeErr struct {
+type ExitCodeError struct {
 	err   error
 	code  int
 	print bool
 }
 
-func (e *ExitCodeErr) Error() string {
+func (e *ExitCodeError) Error() string {
 	if e.err == nil {
 		return fmt.Sprintf("exit %d (no error)", e.code)
 	}
@@ -26,11 +26,11 @@ func (e *ExitCodeErr) Error() string {
 	return fmt.Sprintf("exit %d: %s", e.code, e.err)
 }
 
-func (e *ExitCodeErr) Print() bool {
+func (e *ExitCodeError) Print() bool {
 	return e.print
 }
 
-func (e *ExitCodeErr) Code() int {
+func (e *ExitCodeError) Code() int {
 	return e.code
 }
 
@@ -93,7 +93,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 		return rootErr
 	}
 
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	originPath := cmd.StringArg("origin")
 	ourPath := cmd.StringArg("our-path")
@@ -101,6 +101,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 	conflictMarkerSize := cmd.IntArg("conflict-marker-size")
 
 	conflicts, err := repo.MergeSecret(
+		ctx,
 		root,
 		ids,
 		revealedPath,
@@ -110,7 +111,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 		conflictMarkerSize,
 	)
 	if err != nil {
-		return &ExitCodeErr{
+		return &ExitCodeError{
 			err:   err,
 			code:  129,
 			print: true,
@@ -124,7 +125,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 	)
 
 	if conflicts > 0 {
-		return &ExitCodeErr{
+		return &ExitCodeError{
 			err:   nil,
 			print: false,
 			code:  (conflicts % 127) + 1,

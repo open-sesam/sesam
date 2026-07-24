@@ -2,6 +2,7 @@ package repo
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -22,8 +23,10 @@ import (
 // sesam-relative paths would not resolve. conflictStyle and diff algorithm are
 // read by git merge-file from the inherited repo config; only the per-path
 // marker size (git's %L) has to be forwarded explicitly.
-func runGitMerge(revealedPath, ourPath, theirPath, originPath string, conflictMarkerSize int) (io.Reader, int, error) {
-	cmd := exec.Command(
+func runGitMerge(ctx context.Context, revealedPath, ourPath, theirPath, originPath string, conflictMarkerSize int) (io.Reader, int, error) {
+	//nolint:gosec // fixed git subcommand; the path args are sesam-controlled tmp files.
+	cmd := exec.CommandContext(
+		ctx,
 		"git",
 		"merge-file",
 		"--stdout",
@@ -65,12 +68,13 @@ func decryptSecretToBuf(path string, ids []age.Identity) (*bytes.Buffer, error) 
 	var buf bytes.Buffer
 
 	// we're opening git paths here, so regular ShowSecret won't work.
+	//nolint:gosec // git hands us the O/A/B blob temp paths to read.
 	fd, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 
-	defer fd.Close()
+	defer func() { _ = fd.Close() }()
 
 	if _, _, _, err := core.RevealStream(fd, &buf, ids); err != nil {
 		return nil, fmt.Errorf("decrypt %s: %w", path, err)
@@ -94,7 +98,7 @@ func writeSecretTmpBuf(root *os.Root, buf *bytes.Buffer, revealedPath, tag strin
 		tmpPath,
 		renameio.WithRoot(root),
 		renameio.WithTempDir(".sesam/tmp"),
-		renameio.WithPermissions(0600),
+		renameio.WithPermissions(0o600),
 	)
 	if err != nil {
 		return "", fmt.Errorf("create pending file %s: %w", tmpPath, err)
@@ -112,7 +116,7 @@ func writeSecretTmpBuf(root *os.Root, buf *bytes.Buffer, revealedPath, tag strin
 	return tmpPath, nil
 }
 
-func MergeSecret(root *os.Root, ids core.Identities, revealedPath, ourPath, theirPath, originPath string, conflictMarkerSize int) (int, error) {
+func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, revealedPath, ourPath, theirPath, originPath string, conflictMarkerSize int) (int, error) {
 	ageIds := ids.AgeIdentities()
 
 	// stage decrypts one side to a tmp file under .sesam/tmp and returns both
@@ -156,6 +160,7 @@ func MergeSecret(root *os.Root, ids core.Identities, revealedPath, ourPath, thei
 	}()
 
 	mergedReader, conflicts, err := runGitMerge(
+		ctx,
 		revealedPath,
 		ourAbs,
 		theirAbs,
@@ -170,7 +175,7 @@ func MergeSecret(root *os.Root, ids core.Identities, revealedPath, ourPath, thei
 		revealedPath,
 		renameio.WithRoot(root),
 		renameio.WithTempDir(".sesam/tmp"),
-		renameio.WithPermissions(0600),
+		renameio.WithPermissions(0o600),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("create pending file %s: %w", revealedPath, err)

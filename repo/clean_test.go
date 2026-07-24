@@ -121,6 +121,54 @@ func TestCleanupRemovesUntrackedInSubdir(t *testing.T) {
 	require.True(t, exists(t, filepath.Join(root, "keep", "sesam.yml")), "tracked sibling should survive")
 }
 
+// initNestedSesamRepo creates a git repo whose sesam dir lives in subdir (not at
+// the worktree root), commits the given worktree-relative files, and returns the
+// worktree root, the absolute sesam dir, and the open repo.
+func initNestedSesamRepo(t *testing.T, subdir string, tracked map[string]string) (string, string, *git.Repository) {
+	t.Helper()
+	root := t.TempDir()
+	sesamRoot := filepath.Join(root, subdir)
+	require.NoError(t, os.MkdirAll(filepath.Join(sesamRoot, ".sesam"), 0o700))
+
+	repo, err := git.PlainInit(root, false)
+	require.NoError(t, err)
+
+	wt, err := repo.Worktree()
+	require.NoError(t, err)
+
+	for rel, content := range tracked {
+		full := filepath.Join(root, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o700))
+		require.NoError(t, os.WriteFile(full, []byte(content), 0o600))
+		_, err := wt.Add(rel)
+		require.NoError(t, err)
+	}
+
+	return root, sesamRoot, repo
+}
+
+// A nested sesam dir must not lose its tracked files: index entries are
+// worktree-relative (sub/sesam.yml) while the walk is sesam-relative
+// (sesam.yml), so cleanup must reconcile the prefix before deciding what is
+// untracked.
+func TestCleanupPreservesTrackedFilesInNestedSesamDir(t *testing.T) {
+	_, sesamRoot, repo := initNestedSesamRepo(t, "sub", map[string]string{
+		"sub/sesam.yml":      "config\n",
+		"sub/.gitignore":     "*\n",
+		"sub/.gitattributes": "attrs\n",
+	})
+
+	stale := filepath.Join(sesamRoot, "secret.txt")
+	writeFile(t, stale, "leaked plaintext")
+
+	require.NoError(t, cleanup(openCleanRoot(t, sesamRoot), repo, nil))
+
+	require.False(t, exists(t, stale), "untracked plaintext should be removed")
+	require.True(t, exists(t, filepath.Join(sesamRoot, "sesam.yml")), "tracked sesam.yml must survive")
+	require.True(t, exists(t, filepath.Join(sesamRoot, ".gitignore")), "tracked .gitignore must survive")
+	require.True(t, exists(t, filepath.Join(sesamRoot, ".gitattributes")), "tracked .gitattributes must survive")
+}
+
 func TestCleanupErrorsOnMissingSesamDir(t *testing.T) {
 	root := t.TempDir()
 	repo, err := git.PlainInit(root, false)

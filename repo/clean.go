@@ -99,6 +99,25 @@ func cleanup(
 		tracked[filepath.FromSlash(e.Name)] = struct{}{}
 	}
 
+	// Index entries are worktree-relative, but the walk below yields
+	// sesam-relative paths. For a nested sesam dir they differ by the
+	// worktree->sesamDir prefix; without prepending it every tracked lookup
+	// would miss and clean would delete tracked files (.gitignore, sesam.yml, …).
+	// root.Name() may be relative (e.g. `sesam clean` with a default sesam-dir),
+	// so make it absolute for the worktree-relative computation.
+	absSesamDir, err := filepath.Abs(root.Name())
+	if err != nil {
+		return fmt.Errorf("resolve sesam dir: %w", err)
+	}
+	prefix, err := core.SesamGitPrefix(gitRepo, absSesamDir)
+	if err != nil {
+		return fmt.Errorf("resolve sesam dir within worktree: %w", err)
+	}
+	prefix = filepath.FromSlash(prefix)
+	if prefix == "." {
+		prefix = ""
+	}
+
 	if err := fs.WalkDir(root.FS(), ".", func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -121,7 +140,11 @@ func cleanup(
 		if d.Name() == sesamLockName {
 			return nil
 		}
-		if _, ok := tracked[rel]; ok {
+		trackedKey := rel
+		if prefix != "" {
+			trackedKey = filepath.Join(prefix, rel)
+		}
+		if _, ok := tracked[trackedKey]; ok {
 			return nil
 		}
 		if excluded[rel] {
