@@ -5,11 +5,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/muesli/termenv"
 	"opensesam.org/sesam/cli"
+	"opensesam.org/sesam/cli/commands"
 )
 
 func printError(msg string) {
@@ -22,6 +24,17 @@ func printError(msg string) {
 
 func main() {
 	if err := cli.Main(os.Args); err != nil {
+		exitErr := new(commands.ExitCodeErr)
+		if errors.As(err, &exitErr) {
+			if exitErr.Print() {
+				printError(err.Error())
+			}
+
+			os.Exit(exitErr.Code())
+			return
+		}
+
+		// generic case:
 		printError(err.Error())
 		os.Exit(1)
 	}

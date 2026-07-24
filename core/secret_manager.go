@@ -429,13 +429,14 @@ func ShowSecret(root *os.Root, ids Identities, path string, dst io.Writer) (bool
 
 	srcFd, err := openForShow(root, path)
 	if err != nil {
+		fmt.Println("CANT SHOW", err)
 		// assume it's not something we can "show"
 		return false, nil
 	}
 
 	defer closeLogged(srcFd)
 
-	_, _, _, err = revealStream(srcFd, dst, ids.AgeIdentities())
+	_, _, _, err = RevealStream(srcFd, dst, ids.AgeIdentities())
 	return true, err
 }
 

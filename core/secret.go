@@ -315,7 +315,7 @@ func revealStreamAndVerify(
 	kr Keyring,
 	authorize func(user, path string) bool,
 ) error {
-	cipherTextHash, contentHashBytes, footer, err := revealStream(srcFd, dstFd, ageIds)
+	cipherTextHash, contentHashBytes, footer, err := RevealStream(srcFd, dstFd, ageIds)
 	if err != nil {
 		return err
 	}
@@ -348,7 +348,7 @@ func revealStreamAndVerify(
 	return nil
 }
 
-func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) ([]byte, []byte, *secretFooter, error) {
+func RevealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) ([]byte, []byte, *secretFooter, error) {
 	ageRd, sigDesc, err := readFooter(srcFd)
 	if err != nil {
 		return nil, nil, nil, err
