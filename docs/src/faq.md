@@ -10,10 +10,10 @@ cloning you have to install them once:
 
 ```bash
 # Reveal the secrets explicitly:
-$ sesam open
+sesam open
 # Make sure it gets done automatically on the next checkout.
 # If the repo already exists, this just re-installs the git-integration.
-$ sesam init
+sesam init
 ```
 
 ```admonish note
@@ -40,7 +40,7 @@ never write the state at once. If you see a lock error, another `sesam` command 
 Wait for it, or raise the timeout:
 
 ```bash
-$ sesam --lock-timeout 30s open
+sesam --lock-timeout 30s open
 ```
 
 If a process was killed hard and left the lock behind, remove `.sesam.lock`
@@ -108,8 +108,8 @@ the groups it needs) and point `sesam` at it explicitly so nothing prompts on a
 missing TTY:
 
 ```bash
-$ sesam --identity /secure/ci-key.age verify --all
-$ sesam --identity /secure/ci-key.age open
+sesam --identity /secure/ci-key.age verify --all
+sesam --identity /secure/ci-key.age open
 ```
 
 Run `sesam verify --all` **before** you deploy and let a non-zero exit stop the
@@ -139,7 +139,7 @@ If you are sure that everything is fine (i.e. nobody swapped secrets when you we
 then you can run:
 
 ```bash
-$ sesam --verify-mode no-disk seal
+sesam --verify-mode no-disk seal
 ```
 
 This will re-seal existing revealed paths and add a new root hash to the audit log.
@@ -150,17 +150,31 @@ If it still is not fixed, an admin might have to run the same command (as you ca
 You can clear the cached passphrase in the system keyring:
 
 ```bash
-$ sesam keyring clear
+sesam keyring clear
 ```
 
 Next run will query the password again.
+
+## `sesam` says the keyring is unavailable
+
+On Linux, cached passphrases use the desktop Secret Service API. If no provider
+is running, you may see errors from the system keyring such as `The name is not
+activatable`. This does not mean the identity failed to unlock; it only means
+`sesam` could not cache the passphrase for later.
+
+Install or start a Secret Service provider such as GNOME Keyring, KWallet, or
+another compatible daemon if you want passphrase caching. Otherwise you can
+ignore it and enter the passphrase when asked.
+
+`keychain` is different: it manages `ssh-agent` and SSH key loading, but it is
+not the OS keyring used for `sesam`'s passphrase cache.
 
 ## My shell wants to correct `sesam` to `.sesam`
 
 i.e. you get something like this:
 
 ```bash
-$ sesam ls
+sesam ls
  zsh: correct 'sesam' to '.sesam' [nyae]?
 ```
 
