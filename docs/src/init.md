@@ -105,9 +105,7 @@ be done either:
 The OS keyring is only used as a convenience cache. On Linux this means a
 Secret Service provider such as GNOME Keyring, KWallet, or another compatible
 daemon must be running. If no compatible keyring is available, `sesam` still
-works; it will just ask for the passphrase again next time. Tools such as
-`keychain` manage `ssh-agent` and are useful for SSH workflows, but they are
-not a Secret Service keyring and do not provide this cache.
+works; it will just ask for the passphrase again next time.
 
 For option 3 you need a compatible program installed and have set any of those variables to the name of the program, so `sesam` knows what to call:
 

@@ -166,9 +166,6 @@ Install or start a Secret Service provider such as GNOME Keyring, KWallet, or
 another compatible daemon if you want passphrase caching. Otherwise you can
 ignore it and enter the passphrase when asked.
 
-`keychain` is different: it manages `ssh-agent` and SSH key loading, but it is
-not the OS keyring used for `sesam`'s passphrase cache.
-
 ## My shell wants to correct `sesam` to `.sesam`
 
 i.e. you get something like this:
