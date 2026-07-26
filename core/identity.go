@@ -521,7 +521,7 @@ func (kpp *KeyringPassphraseProvider) PassphraseVerified(passphrase []byte, succ
 	if success {
 		// Non-fatal if this fails (e.g. no keyring daemon).
 		if err := keyring.Set(keyringService, kpp.KeyFingerprint, string(passphrase)); err != nil {
-			slog.Warn("failed to cache passphrase in keyring", slog.Any("err", err))
+			slog.Debug("passphrase cache unavailable", slog.Any("err", err))
 		}
 	}
 }

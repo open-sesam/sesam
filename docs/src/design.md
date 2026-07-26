@@ -11,9 +11,9 @@ should have been read and ideally the reader also tried `sesam`.
 This is a *very* brief summary of what components we have.
 
 - **secret:** A single age-encrypted file with a footer that can be decrypted by all configured recipients.
-- **footer**: Each file has a footer, storing the revealed content's path, it's encrypted and decrypted hash (here as HMAC) and a signature.
-- **repo:** The place where `sesam` stores all of it's state (i.e. `.sesam/`). That's the main part you want to commit.
-- **recipient:** A public key attached to a user, required fro decryption (terminology copied from `age`).
+- **footer:** Each sealed file has a footer storing the revealed path, ciphertext hash, HMAC content hash, recipients hash, sealer, and signature.
+- **repo:** The place where `sesam` stores its state (i.e. `.sesam/`). That's the main part you want to commit.
+- **recipient:** A public key attached to a user, required for decryption (terminology copied from `age`).
 - **identity:** The private key used by users, required for decryption (terminology copied from `age`).
 - **audit log**: A log that keeps track of what file operations were done on the repository. It is signed and append-only,
   so that tampering would be immediately detected. By replaying the log we can derive the **verified state**.
@@ -22,7 +22,7 @@ This is a *very* brief summary of what components we have.
   `sesam config diff` will show the differences. We call this the *desired state*.
 - **keyring:** When rebuilding the application from the audit-log we collect all public keys of all users in this structure.
 - **signkey:** Each user has a private signature key only he can read. We store those age-encrypted in the repo.
-- **user:** Users are user IDs that have a signkey, one or more identities, one or more recipients an that are in one or more groups.
+- **user:** Users are user IDs that have a signkey, one or more identities, one or more recipients, and membership in one or more groups.
 
 <div style="text-align: center;">
   <img class="arch-diagram arch-light" src="architecture_overview_light.svg" width="900" alt="Architecture overview" />
@@ -42,7 +42,7 @@ Those are a couple of rough directions we try to adhere when modifying `sesam`.
 - The revealed files are a subset of the files that are sealed. Not all users can reveal all files. Keep that in mind.
 - Private key handling should be in the control of the user. There are so many ways to provide a key, we just need to optimize
   for the most common ones.
-- `sesam` should support several .sesam dirs per git repo, `.git` and `.sesam` don't need to be in the same folder.
+- `sesam` should support several `.sesam` dirs per git repo, `.git` and `.sesam` don't need to be in the same folder.
 - We use [multicode](https://github.com/sj14/multicode) to encode hashes, priv/pub keys and signatures in a self-describing way.
 
 ### Why `age` and `ssh`?
@@ -85,7 +85,7 @@ don't do this. sesam keeps the ciphertext as a real file under
   actually running. A fresh clone without sesam configured, or a filter that
   breaks silently could commit plaintext without the user realizing.
 
-- **Leveled users doesn't fit the filter model:** Not every user can decrypt
+- **Leveled access does not fit the filter model:** Not every user can decrypt
   every secret. With separate ciphertext/plaintext files this is trivial: a
   user reveals only what they can, and the rest stay as ciphertext objects with
   no plaintext pendant. A smudge filter would have to pass undecryptable
@@ -127,7 +127,7 @@ state is treated as a request, never as truth. This is what makes the
 ## Persistence
 
 `sesam` will store all its data inside the `.sesam` directory. This directory may be in the
-same directory as a `.git` folder or inside a sub-folder of a `git` repository.
+same directory as a `.git` folder or inside a subdirectory of a `git` repository.
 
 ```text
 sesam.yml
@@ -149,7 +149,7 @@ sesam.yml
 
 ## `sesam.yml`
 
-The config file describing the should-be state.
+The config file describing the desired state.
 Read more on the [Config](config_ref.md) page.
 
 ## `.gitignore`
@@ -170,7 +170,7 @@ The `.sesam` format is [age](https://github.com/C2SP/C2SP/blob/main/age.md) but 
 The footer is limited to 4KB and is delimited by a newline. This makes obtaining an `age` compatible file easy:
 
 ```bash
-$ head -n -1 .sesam/objects/secret.sesam > secret.age
+head -n -1 .sesam/objects/secret.sesam > secret.age
 ```
 
 The header contains this information encoded as a single JSON line:
@@ -317,13 +317,12 @@ secret store - not unique to `sesam`.
 Both the audit log and the actual secret files have signatures attached to them.
 
 The audit log's signatures are verified on most commands (seal, tell, kill, ...) but not all
-(`sesam show` and `sesam smudge` for git integration and UI/UX purposes).
+(`sesam show` for git diff textconv is intentionally lightweight for UI/UX purposes).
 
 Full integrity check is being done on revealing the secrets or when doing `sesam verify --all`.
 This includes checking that the user named in `sealed_by` has access to the secret
 according to the verified state. `sesam show` (git diff textconv) skips this check
-by design; the smudge filter applies a softer variant (warn-and-decrypt instead of
-refuse). Run `sesam verify --all` for the authoritative result before trusting a
+by design. Run `sesam verify --all` for the authoritative result before trusting a
 value.
 
 #### Availability - data/systems are accessible when needed
@@ -426,11 +425,11 @@ Alternatively, one could truncate the audit log to a state that is more favorabl
 
 There are two mechanisms that can detect such:
 
-- The first entry of the log has a UUID which is stored separately in `.sesam/audit/init`.
-  This file should never change over git history. We can verify this by asking git in how many
-  commits it was modified - if it was more than one this gets flagged. During verify we compare the `init`
-  UUID to the one stored in the audit log. If it differs it gets flagged as well.
-  This test will only trigger if the complete log was substituted.
+- The first entry of the log has a hash which is stored separately in `.sesam/audit/init`.
+  This file should never change over git history. We verify that git history contains only
+  one committed content for it and that the on-disk file matches that committed content.
+  During verification we compare this stored hash to the hash of the first audit-log entry.
+  This test catches complete log substitution.
 - A more thorough test is to check if the audit log is only growing. Since it's append only we would notice
   truncations by going back in history and seeing if each commit contains an audit log that is an prefix to
   the audit log in the commit afterwards. This test is too expensive to be run all the time but will also notice
@@ -457,8 +456,7 @@ A very hard thing to mitigate. We don't do very well here yet.
 
 - We try to use only few, trusted and well established libraries.
 - We use `govulncheck` to stay informed about know vulns.
-- [In the future](https://github.com/open-sesam/sesam/issues/32) we also want to sign our binaries to at least
-  avoid binary based supply chain attacks.
+- Release checksums are signed to at least avoid binary based supply chain attacks.
 
 ### Possible improvements
 
@@ -519,4 +517,3 @@ through `user.change_groups`. Admin status is determined by membership in the
 ```admonish note
 The set of operations may still grow as sesam gains features.
 ```
-
