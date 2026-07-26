@@ -20,9 +20,7 @@ while a secret manager is focused on sharing selected secrets with other users i
 ## Features
 
 - Signed, hash-chained and encrypted audit log.
-- Per-secret integrity checks with root-hash verification.
 - Support for SSH keys, age keys and age plugin identities.
-- Hardware-backed identities via age plugins (e.g. YubiKey-style workflows).
 - Forge recipient shortcuts for GitHub, GitLab and Codeberg.
 - Both declarative (config) and imperative (CLI) workflows possible.
 - Different access levels through user groups.
@@ -32,11 +30,11 @@ while a secret manager is focused on sharing selected secrets with other users i
 - Versioned - by wrapping git.
 - Decentralized & offline ready.
 - Safe to use (hard to accidentally push unencrypted secrets)
-- Optional pre-commit and post-checkout hooks.
 - Scriptable via CLI interface.
 - Fast encryption and decryption.
 - Almost zero dependencies.
 - Support for rotation and exchange of secrets.
+- Per-secret integrity checks with root-hash verification.
 
 In short, `sesam` fits well the [GitOps model](https://about.gitlab.com/topics/gitops/) of infrastructure.
 

@@ -36,7 +36,7 @@ managers](https://opensesam.org/docs/alternatives.html).
 ## Features
 
 - Modern, multi-user cryptography with [age](https://github.com/FiloSottile/age).
-- Hardware-backed identities via age plugins (e.g. YubiKey-style workflows).
+- Support for SSH keys, age keys and age plugin identities.
 - Allows giving layered access to secrets.
 - Signed, hash chained, encrypted audit log for user, access and secret changes.
 - Well integrated with `git` (diffs and checkout).
