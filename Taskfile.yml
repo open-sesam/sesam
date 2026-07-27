@@ -28,13 +28,21 @@ tasks:
           GOARCH: arm64
 
   build-amd64:
-    aliases:
-      - build
     cmds:
       - task: _build
         vars:
           GOOS: linux
           GOARCH: amd64
+
+  build:
+    aliases:
+      - build
+    cmds:
+      - task: _build
+        # empty, so go chooses itself.
+        vars:
+          GOOS: ""
+          GOARCH: ""
 
   test:
     desc: Run go tests
