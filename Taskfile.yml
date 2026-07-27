@@ -3,7 +3,7 @@ version: "3"
 
 tasks:
   default:
-    deps: [build-amd64]
+    deps: [build]
 
   _build:
     desc: "Build the sesam binary"
