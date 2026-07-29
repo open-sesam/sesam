@@ -9,6 +9,13 @@ For now use the release binaries from GitHub, Docker image, go install or build 
 Please check the [Releases tab](https://github.com/open-sesam/sesam/releases) for download options and release notes.
 We currently publish archives for Linux and macOS on amd64 and arm64.
 
+
+```admonish note
+You should then copy the `sesam` binary manually to a directory listed in your PATH (e.g. `/usr/local/bin` or `~/bin/`).
+
+This is required so that `git` can find `sesam` - it will call `sesam` as subprocess.
+```
+
 ### Signatures
 
 We sign our releases with an [ed25519 key](https://en.wikipedia.org/wiki/EdDSA),
@@ -73,6 +80,7 @@ cd sesam
 mise trust
 mise install
 task # builds the default release-style Linux amd64 binary in the top-level dir.
+cp sesam /usr/local/bin/  # or wherever you want to install it.
 ```
 
 This is also the best way to start working on `sesam` if you want to open a PR.
