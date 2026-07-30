@@ -55,7 +55,7 @@ Please see here to view the [plan](https://github.com/open-sesam/sesam/issues/62
 The documentation here is just a preview. Use the imperative workflow for now.
 ```
 
-Once we've changed the config we can this command, which should be familiar by now. This will then adjust the repository state accordingly:
+Once we've changed the config we can use this command, which should be familiar by now. This will then adjust the repository state accordingly:
 
 ```bash
 sesam apply
