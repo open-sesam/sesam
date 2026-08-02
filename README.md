@@ -1,4 +1,4 @@
-# sesam: A clever git secrets manager 
+# sesam: A clever git secrets manager
 
 [![CI](https://github.com/open-sesam/sesam/actions/workflows/ci.yml/badge.svg)](https://github.com/open-sesam/sesam/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-mdBook-blue)](https://opensesam.org/docs/)
@@ -35,9 +35,11 @@ managers](https://opensesam.org/docs/alternatives.html).
 
 ## Features
 
-- Modern, multi-user cryptography with [age](https://github.com/FiloSottile/age)
+- Modern, multi-user cryptography with [age](https://github.com/FiloSottile/age).
+- Support for SSH keys, age keys and age plugin identities.
 - Allows giving layered access to secrets.
-- Well integrated with `git` (diff, checkout)
+- Signed, hash chained, encrypted audit log for user, access and secret changes.
+- Well integrated with `git` (diffs and checkout).
 - Decentralized like `git` - you get versioning and hosting for free.
 - Wide range of verifications thanks to audit log.
 - Integration with popular forges like GitHub.
@@ -48,9 +50,10 @@ managers](https://opensesam.org/docs/alternatives.html).
 
 ## Planned features
 
+- Declarative `sesam apply` workflow.
 - Rotation and exchange of secrets.
 - Better support for env-file based workflows.
-- allow merging of git branches with secrets in them.
+- Allow merging of git branches with secrets in them.
 - Possibly also a TUI.
 
 # Quickstart Links
@@ -69,15 +72,14 @@ managers](https://opensesam.org/docs/alternatives.html).
 Those are weird times for software developers, therefore we feel obliged to note down how `sesam` is being developed.
 We use AI-based assistants so far for:
 
-  - Reviewing / Auditing.
-  - Ideation / Design feedback.
-  - Building test suites.
-  - Writing HTML/CSS.
-  - Occasional clearly scoped code change.
+- Reviewing / Auditing.
+- Ideation / Design feedback.
+- Building test suites.
+- Writing HTML/CSS.
+- Occasional clearly scoped code change.
 
 The majority of the code is still hand-written to make sure we don't lose touch
 to what we build. To be clear: **This is not a vibe-coded project.** The design
 was done by an experienced software engineer the old-fashioned way. If you want
 to read more about our stance regarding AI-usage in software development you can read
-some [slides](https://sahib.github.io/misc/the-vibes-that-i-summoned/slides.pdf) here ([with notes](https://sahib.github.io/misc/the-vibes-that-i-summoned/slides-with-notes.pdf))
-
+some [slides](https://sahib.github.io/misc/the-vibes-that-i-summoned/slides.pdf) here ([with notes](https://sahib.github.io/misc/the-vibes-that-i-summoned/slides-with-notes.pdf)).

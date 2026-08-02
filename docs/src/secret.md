@@ -11,7 +11,7 @@ Attempts to do so will error out.
 If you have a secret at `path/to/secret`, then having it managed by `sesam` is only a matter of this command:
 
 ```bash
-$ sesam add path/to/secret --group deploy
+sesam add path/to/secret --group deploy
 ```
 
 This will:
@@ -19,9 +19,8 @@ This will:
 1. Record that this file is now managed by `sesam` by adding it to the audit log.
 2. Encrypt the file and place it in `.sesam/objects`. This is what is being pushed in the end.
 
-If you omit the ``--group`` parameter then only the `admin` group will have access to the file.
+If you omit the `--group` parameter then only the `admin` group will have access to the file.
 You can change this at any point by just re-running the `add` command with any groups you want to set.
-
 
 Overall the workflow looks like this:
 
@@ -62,7 +61,7 @@ secrets:
 If you did not run the `add` command above, then you can also add the entry manually and then run:
 
 ```bash
-$ sesam apply
+sesam apply
 ```
 
 This will automatically check what the state is in the repo and how it differs
@@ -74,13 +73,13 @@ secrets or adding/removing users.
 You can also add whole directories, if you need to:
 
 ```bash
-$ tree dir/of/secrets
+tree dir/of/secrets
 .
 ├── some_file
 └── sub
     └── another_file
-$ sesam add dir/of/secrets
-$ tree dir/of/secrets
+sesam add --nested dir/of/secrets
+tree dir/of/secrets
 .
 ├── sesam.yml
 ├── some_file
@@ -110,7 +109,7 @@ secrets:
   - path: another_file
 ```
 
-Once done you can also add descriptions to the files in the config or do more fine-tuning with the available [config keys](/config_ref.md).
+Once done you can also add descriptions to the files in the config or do more fine-tuning with the available [config keys](./config_ref.md).
 
 ```admonish note
 If you ever create new files in the sub directories they do not automatically get added.
@@ -133,7 +132,7 @@ If you need to see which files were modified but not yet sealed you can use `ses
 ```bash
 # with --all you will only see the modified files,
 # without it only those that changed in some way.
-$ sesam status --all
+sesam status --all
 .
 ├─ M README.md (admin)
 ├─ ✓ bg.png (admin)
@@ -151,7 +150,7 @@ This will show you files you edited directly without calling `sesam add` on them
 If you have deleted files you can run this:
 
 ```bash
-$ sesam rm files/ dir/
+sesam rm files/ dir/
 ```
 
 ```admonish warning
@@ -159,15 +158,13 @@ Please do not delete secrets just with `rm`. This will just remove the revealed 
 sealed file in `.sesam/` will still exist. On the next `sesam open` it will suddenly be back.
 ```
 
-
 ## Moving secrets
 
 Probably not very surprising by now, but we have a `mv` command as well:
 
 ```bash
-$ sesam mv old_name new_name
+sesam mv old_name new_name
 ```
-
 
 ```admonish warning
 The same warning as with `sesam rm` applies: Please do not just move the file
@@ -179,7 +176,7 @@ be back with the old path.
 ## Listing secrets
 
 ```bash
-$ sesam ls
+sesam ls
 ├── README.sesam
 └── dir
     └── of
