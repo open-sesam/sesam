@@ -91,6 +91,30 @@ func (rs Recipients) Strings() []string {
 	return strs
 }
 
+// Equal reports whether rs and o hold the same recipients, ignoring order. Keys
+// are unique per user, so set equality is the right notion.
+func (rs Recipients) Equal(o Recipients) bool {
+	if len(rs) != len(o) {
+		return false
+	}
+
+	for _, a := range rs {
+		found := false
+		for _, b := range o {
+			if a.Equal(b) {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			return false
+		}
+	}
+
+	return true
+}
+
 func forgeIdToUser(arg string) string {
 	_, user, _ := strings.Cut(arg, ":")
 	return strings.TrimSpace(user)

@@ -692,6 +692,21 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 	return nil
 }
 
+// verifyMerge validates the informational OpMerge entry. It records a merge's
+// provenance and per-entry resolutions but carries no state of its own; the
+// only requirement is that it was authored by an admin (the merging user).
+func verifyMerge(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
+	if _, err := state.RequireAdmin(entry); err != nil {
+		return err
+	}
+
+	if _, err := parseDetail[DetailMerge](entry); err != nil {
+		return fmt.Errorf("parse merge detail: %w", err)
+	}
+
+	return nil
+}
+
 func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
 	sealDetails, err := parseDetail[DetailSeal](entry)
 	if err != nil {
@@ -828,6 +843,8 @@ func verify(state *VerifiedState) error {
 			err = verifyUserRmRecipients(log, &newState, entry, kr)
 		case OpSeal:
 			err = verifySeal(log, &newState, entry)
+		case OpMerge:
+			err = verifyMerge(log, &newState, entry)
 		case OpSecretAdd:
 			err = verifySecretAdd(log, &newState, entry)
 		case OpSecretRemove:

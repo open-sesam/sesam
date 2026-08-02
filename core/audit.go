@@ -43,6 +43,7 @@ const (
 	OpSecretAdd    = Operation("secret.add")
 	OpSecretRemove = Operation("secret.remove")
 	OpSeal         = Operation("seal")
+	OpMerge        = Operation("merge")
 
 	// Update operations:
 	OpUserRename            = Operation("user.rename")
@@ -68,7 +69,8 @@ type AuditDetail interface {
 		DetailUserChangeGroups |
 		DetailUserAddRecipients |
 		DetailUserRmRecipients |
-		DetailUserRegenerateSignKey
+		DetailUserRegenerateSignKey |
+		DetailMerge
 }
 
 type AuditEntry struct {
@@ -78,6 +80,12 @@ type AuditEntry struct {
 
 	// ChangedBy is the user that executed the operation.
 	ChangedBy string `json:"changed_by"`
+
+	// ChangedByBeforeMerge records the original author of an entry that was
+	// rebased during a merge and re-signed by the merging admin (ChangedBy).
+	// Empty for normal, non-merged entries (omitted from JSON so existing
+	// entry hashes stay stable).
+	ChangedByBeforeMerge string `json:"changed_by_before_merge,omitempty"`
 
 	// Detail are operation specific details.
 	Detail            json.RawMessage `json:"detail"`
@@ -306,6 +314,42 @@ type DetailSeal struct {
 	FilesSealed int `json:"files_sealed"`
 }
 
+// MergeAction records what a merge did with one of theirs' entries, or the kind
+// of a post-merge advisory.
+type MergeAction string
+
+const (
+	MergeApplied   = MergeAction("applied")   // kept as-is (only re-attributed to the merger)
+	MergeRewritten = MergeAction("rewritten") // applied with a modified detail (delta merge)
+	MergeDropped   = MergeAction("dropped")   // discarded (revocation/collision/dedupe)
+	MergeFlagged   = MergeAction("flagged")   // post-merge advisory about the end state (e.g. R1)
+)
+
+// ConflictResolutionEntry is the user-facing record of a single merge decision:
+// what happened to one of theirs' entries, or a post-merge advisory. The
+// material subset is persisted inside DetailMerge so `sesam log` can show it.
+type ConflictResolutionEntry struct {
+	Operation            Operation   `json:"operation,omitempty"` // empty for advisories not tied to an op
+	Target               string      `json:"target,omitempty"`    // user name, revealed path or group
+	Action               MergeAction `json:"action"`
+	Reason               string      `json:"reason,omitempty"`
+	ChangedByBeforeMerge string      `json:"changed_by_before_merge,omitempty"`
+}
+
+// DetailMerge is the informational OpMerge entry appended at the end of a merge.
+// It captures provenance (the three tips), applied/dropped counts and only the
+// material conflict decisions - routine applies/dedupes and derivable advisories
+// stay out of the append-only log. It carries no state; verifyMerge only checks
+// the author is an admin.
+type DetailMerge struct {
+	BaseSeqID     uint64                    `json:"base_seq_id"`
+	OurTipSeqID   uint64                    `json:"our_tip_seq_id"`
+	TheirTipSeqID uint64                    `json:"their_tip_seq_id"`
+	Applied       int                       `json:"applied"`
+	Dropped       int                       `json:"dropped"`
+	Resolutions   []ConflictResolutionEntry `json:"resolutions,omitempty"`
+}
+
 // AuditLog records all operations that change the state of the sesam repo.
 // It is an append-only log that cannot be rewritten.
 //
@@ -400,6 +444,8 @@ func operationFor(detail any) Operation {
 		return OpUserRmRecipients
 	case *DetailUserRegenerateSignKey:
 		return OpUserRegenerateSignKey
+	case *DetailMerge:
+		return OpMerge
 	default:
 		panic(fmt.Sprintf("unknown detail type: %T", detail))
 	}
@@ -477,6 +523,40 @@ func encryptAuditKey(key [32]byte, recps Recipients) ([]byte, error) {
 	}
 	encoded := base64.RawStdEncoding.EncodeToString(buf.Bytes())
 	return []byte(encoded + "\n"), nil
+}
+
+// writeEncryptedLog writes a complete audit log to w.
+func writeEncryptedLog(w io.Writer, key [32]byte, recps Recipients, entries []AuditEntrySigned) error {
+	line1, err := encryptAuditKey(key, recps)
+	if err != nil {
+		return fmt.Errorf("encrypt audit key: %w", err)
+	}
+	if _, err := w.Write(line1); err != nil {
+		return fmt.Errorf("write key line: %w", err)
+	}
+
+	aead, err := chacha20poly1305.New(key[:])
+	if err != nil {
+		return fmt.Errorf("init aead: %w", err)
+	}
+
+	for idx := range entries {
+		b64EntryData, err := entries[idx].Encrypt(aead)
+		if err != nil {
+			return fmt.Errorf("encrypt entry %d: %w", idx, err)
+		}
+		if _, err := w.Write(b64EntryData); err != nil {
+			return fmt.Errorf("write entry %d: %w", idx, err)
+		}
+	}
+
+	return nil
+}
+
+// WriteEncrypted serializes the whole log to w as an encrypted .jsonl (key line
+// for recps + encrypted entries), reusing the log's current symmetric key.
+func (al *AuditLog) WriteEncrypted(w io.Writer, recps Recipients) error {
+	return writeEncryptedLog(w, al.key, recps, al.Entries)
 }
 
 // WriteAuditKey rewrites the log with the same symmetric key but a new recipient
@@ -574,22 +654,8 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 		_ = tmp.Cleanup()
 	}()
 
-	line1, err := encryptAuditKey(newKey, recps)
-	if err != nil {
-		return fmt.Errorf("encrypt new audit key: %w", err)
-	}
-	if _, err := tmp.Write(line1); err != nil {
-		return fmt.Errorf("write key line to tmp: %w", err)
-	}
-
-	for idx := range al.Entries {
-		b64EntryData, err := al.Entries[idx].Encrypt(newAead)
-		if err != nil {
-			return fmt.Errorf("re-encrypt entry %d: %w", idx, err)
-		}
-		if _, err := tmp.Write(b64EntryData); err != nil {
-			return fmt.Errorf("write entry %d to tmp log: %w", idx, err)
-		}
+	if err := writeEncryptedLog(tmp, newKey, recps, al.Entries); err != nil {
+		return err
 	}
 
 	if err := tmp.CloseAtomicallyReplace(); err != nil {
@@ -730,6 +796,14 @@ func (al *AuditLog) AddEntry(signer Signer, e *AuditEntry, verify func() error) 
 		}
 	}
 
+	// In-memory logs (no fd) - e.g. the merge planning log - keep entries only
+	// in al.Entries; encryption and persistence are the caller's responsibility.
+	// This lets merge reuse the sign/verify/rechain machinery without writing to
+	// disk mid-plan.
+	if al.fd == nil {
+		return aes, nil
+	}
+
 	b64EntryData, err := aes.Encrypt(al.aead)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt entry: %w", err)
@@ -785,6 +859,29 @@ func loadAuditKey(data []byte, ids Identities) ([]byte, error) {
 	return key, nil
 }
 
+// LoadAuditLogFromPath opens an audit log file at `logPath` with `ids`.
+//
+// It does not protect against path traversal!
+// Avoid using this function, it's only there to allow git integration (where paths are in some random tmp folder we don't control).
+//
+// Note that this does not load the init hash file as it assuems that it's not accessible.
+func LoadAuditLogFromPath(logPath string, ids Identities) (*AuditLog, error) {
+	//nolint:gosec // see comment
+	fd, err := os.Open(logPath)
+	if err != nil {
+		return nil, err
+	}
+
+	al, err := loadAuditLogFromFd(fd, ids)
+	if err != nil {
+		closeLogged(fd)
+		return nil, err
+	}
+
+	al.fd = fd
+	return al, nil
+}
+
 // loadAuditLogFile parses a log.jsonl file and returns the populated AuditLog.
 // The returned struct has fd=nil; callers that need to append must open their own fd.
 func loadAuditLogFile(root *os.Root, logPath string, ids Identities) (*AuditLog, error) {
@@ -795,6 +892,10 @@ func loadAuditLogFile(root *os.Root, logPath string, ids Identities) (*AuditLog,
 
 	defer closeLogged(fd)
 
+	return loadAuditLogFromFd(fd, ids)
+}
+
+func loadAuditLogFromFd(fd *os.File, ids Identities) (*AuditLog, error) {
 	info, err := fd.Stat()
 	if err != nil {
 		return nil, err
@@ -806,16 +907,6 @@ func loadAuditLogFile(root *os.Root, logPath string, ids Identities) (*AuditLog,
 	}
 
 	return loadAuditLogFromReader(fd, ids)
-}
-
-// LoadAuditLogFromReader parses a log.jsonl byte stream into an AuditLog.
-// Used by the git smudge filter, which reads the log from the git index
-// (via `git cat-file`) rather than the working tree to stay consistent with
-// the file being smudged. Callers are responsible for any size-bound checks
-// before invoking. The returned AuditLog has fd=nil; callers that need to
-// append must open their own fd.
-func LoadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
-	return loadAuditLogFromReader(rd, ids)
 }
 
 func loadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
@@ -945,30 +1036,13 @@ func buildRootHash(sigs []*secretFooter) string {
 // path may be an arbitrary file path (e.g. a git temp-file blob) - sesamDir
 // is not used for key lookup.
 func ShowAuditLog(ids Identities, path string, w io.Writer) (bool, error) {
-	//nolint:gosec
-	fd, err := os.Open(path)
+	auditLog, err := LoadAuditLogFromPath(path, ids)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
 		return true, err
 	}
-	defer closeLogged(fd)
 
-	info, err := fd.Stat()
-	if err != nil {
-		return true, err
-	}
-
-	// Reject audit logs bigger than 512M.
-	if info.Size() > 512*1024*1024 {
-		return true, fmt.Errorf("audit log too big (> 512M). Please consider opening a bug report")
-	}
-
-	al, err := loadAuditLogFromReader(fd, ids)
-	if err != nil {
-		return true, err
-	}
-
-	return true, al.AsJSON(w)
+	return true, auditLog.AsJSON(w)
 }

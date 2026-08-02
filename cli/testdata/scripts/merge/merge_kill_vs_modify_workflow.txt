@@ -1,0 +1,39 @@
+# Delete-vs-modify: ours changes bob's groups, theirs kills bob. Revocation
+# wins - bob is gone from the merged state (and the drop is flagged for review).
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Base: bob is a dev, shared by both branches.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'add bob'
+
+# OURS: extend bob's groups.
+exec git checkout -b ours
+exec sesam user change-groups --user bob --group-add ops
+exec git add -A
+exec git commit -m 'ours: bob += ops'
+
+# THEIRS: kill bob.
+exec git checkout -b theirs ours~1
+exec sesam kill --user bob
+exec git add -A
+exec git commit -m 'theirs: kill bob'
+
+# Merge: the driver rebases the kill onto ours and reports a conflict (exit 1) so
+# git stops before committing. (sesam.yml also conflicts - accepted for now.)
+exec git checkout ours
+! exec git merge theirs
+stdout 'merged it automatically'
+
+# The merged log verifies and contains the kill (revocation won over ours' modify).
+exec sesam verify --verify-mode no-disk
+exec sesam show .sesam/audit/log.jsonl
+stdout '"operation": "user.kill"'
+stdout '"operation": "merge"'

@@ -1,0 +1,41 @@
+# Concurrent change-groups on the same user delta-merge: each side adds a
+# different group and both additions survive on top of the shared base group.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Base: bob in dev.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'add bob'
+
+# OURS: bob gains ops.
+exec git checkout -b ours
+exec sesam user change-groups --user bob --group-add ops
+exec git add -A
+exec git commit -m 'ours: bob += ops'
+
+# THEIRS: bob gains sec.
+exec git checkout -b theirs ours~1
+exec sesam user change-groups --user bob --group-add sec
+exec git add -A
+exec git commit -m 'theirs: bob += sec'
+
+# Merge: the driver merges the log and reports a conflict (exit 1) so git stops.
+# (sesam.yml also conflicts - accepted for now.)
+exec git checkout ours
+! exec git merge theirs
+stdout 'merged it automatically'
+
+# The merged log verifies and carries both group additions (ops from ours, sec
+# from theirs' delta-merged entry).
+exec sesam verify --verify-mode no-disk
+exec sesam show .sesam/audit/log.jsonl
+stdout 'ops'
+stdout 'sec'
+stdout '"operation": "merge"'

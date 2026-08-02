@@ -192,3 +192,91 @@ func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, reveal
 
 	return conflicts, nil
 }
+
+// resolveMergeSigner finds which of the caller's identities is the merging user
+// and loads its signing key so AuditMerge can re-sign the rebased entries. The
+// user is derived by replaying ours' log into a keyring; the sign key is read
+// from the live .sesam (checked out during the merge).
+func resolveMergeSigner(root *os.Root, ids core.Identities, ourLog *core.AuditLog) (core.Signer, error) {
+	// VerifyChain needs a non-empty InitHash, which LoadAuditLogFromPath does not
+	// set. The driver trusts the git-provided blob; seed it from the first entry
+	// (AuditMerge re-checks M1 across all three logs afterwards).
+	if len(ourLog.Entries) > 0 {
+		ourLog.InitHash = ourLog.Entries[0].Hash()
+	}
+
+	kr := core.EmptyKeyring()
+	if _, err := core.VerifyChain(ourLog, kr, nil); err != nil {
+		return nil, fmt.Errorf("verify ours for merger resolution: %w", err)
+	}
+
+	users := kr.ListUsers()
+	for _, id := range ids {
+		user, err := core.IdentityToUser(id, users)
+		if err != nil {
+			continue
+		}
+
+		return core.LoadSignKey(root, user, id.Identity)
+	}
+
+	return nil, fmt.Errorf("none of the supplied identities maps to a known user; cannot merge")
+}
+
+func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourPath, theirPath, originPath string, conflictMarkerSize int) (int, error) {
+	ourAuditLog, err := core.LoadAuditLogFromPath(ourPath, ids)
+	if err != nil {
+		return 0, err
+	}
+
+	defer func() { _ = ourAuditLog.Close() }()
+
+	theirAuditLog, err := core.LoadAuditLogFromPath(theirPath, ids)
+	if err != nil {
+		return 0, err
+	}
+
+	defer func() { _ = theirAuditLog.Close() }()
+
+	originAuditLog, err := core.LoadAuditLogFromPath(originPath, ids)
+	if err != nil {
+		return 0, err
+	}
+
+	defer func() { _ = originAuditLog.Close() }()
+
+	// The merging admin re-signs the rebased entries, so we need their signing
+	// key: resolve which identity is us against ours' state, then load its key.
+	signer, err := resolveMergeSigner(root, ids, ourAuditLog)
+	if err != nil {
+		return 0, err
+	}
+
+	mergedAuditLog, cr, err := core.AuditMerge(
+		ourAuditLog,
+		theirAuditLog,
+		originAuditLog,
+		signer,
+		nil, // no interactive plugin UI inside the merge driver (no TTY)
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	// verify the log is correct before writing it back.
+	kr := core.EmptyKeyring()
+	if _, err := core.VerifyChain(mergedAuditLog, kr, nil); err != nil {
+		return 0, fmt.Errorf("verify merged audit log: %w", err)
+	}
+
+	var mergedBuf bytes.Buffer
+	if err := mergedAuditLog.WriteEncrypted(&mergedBuf, core.AllRecipients(kr)); err != nil {
+		return 0, fmt.Errorf("serialize merged audit log: %w", err)
+	}
+
+	// TODO: We'd also need to adjust sesam.yml accordingly, otherwise we'd have a diff.
+	//       `sesam config reset` basically needs to be set once that feature has been build.
+
+	// merge driver should write back to %A (i.e. ourPath)
+	return cr.Conflicts, renameio.WriteFile(ourPath, mergedBuf.Bytes(), 0o600)
+}

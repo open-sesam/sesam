@@ -124,6 +124,28 @@ func Main(args []string) error {
 						Name:   "log",
 						Usage:  "Merge audit log",
 						Action: commands.HandleMergeAuditLog,
+						Arguments: []cli.Argument{
+							&cli.StringArg{
+								Name:      "origin",
+								UsageText: "%O",
+							},
+							&cli.StringArg{
+								Name:      "our-path",
+								UsageText: "%A",
+							},
+							&cli.StringArg{
+								Name:      "their-path",
+								UsageText: "%B",
+							},
+							&cli.IntArg{
+								Name:      "conflict-marker-size",
+								UsageText: "%L",
+							},
+							&cli.StringArg{
+								Name:      "path",
+								UsageText: "%P",
+							},
+						},
 					},
 				},
 			},

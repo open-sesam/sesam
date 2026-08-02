@@ -162,5 +162,86 @@ func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
 	// # Crux: If we allow the clean merge with exit 0, then we can't really hook in the seal.
 	// # We could of course scream loudly "RUN SESAM SEAL AND COMMIT AGAIN", but not ideal either.
 	// exit 1
-	return nil
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+	if err != nil {
+		return err
+	}
+
+	// %P is worktree-root-relative; git runs the driver from the worktree root,
+	// so join it onto cwd to get an absolute path toRepoPath can rebase.
+	pathArg := cmd.StringArg("path")
+	if !filepath.IsAbs(pathArg) {
+		pathArg = filepath.Join(cwd, pathArg)
+	}
+
+	auditLogPath, err := toRepoPath(sesamDir, cwd, pathArg)
+	if err != nil {
+		return err
+	}
+
+	if !strings.HasSuffix(auditLogPath, ".sesam/audit/log.jsonl") {
+		return fmt.Errorf("%%P needs to be the audit log path but is %s %v - gitattributes wrongly configured?", pathArg, os.Args)
+	}
+
+	identityPaths := cmd.StringSlice("identity")
+	ids, err := repo.LoadIdentities(identityPaths, repo.RepoOpts{
+		AskpassProgram:  cmd.String("askpass"),
+		AskpassRequired: askpassRequired(),
+	})
+	if err != nil {
+		return err
+	}
+
+	root, rootErr := os.OpenRoot(sesamDir)
+	if rootErr != nil {
+		return rootErr
+	}
+
+	defer func() { _ = root.Close() }()
+
+	originPath := cmd.StringArg("origin")
+	ourPath := cmd.StringArg("our-path")
+	theirPath := cmd.StringArg("their-path")
+	conflictMarkerSize := cmd.IntArg("conflict-marker-size")
+
+	conflicts, err := repo.MergeAuditLog(
+		ctx,
+		root,
+		ids,
+		ourPath,
+		theirPath,
+		originPath,
+		conflictMarkerSize,
+	)
+	if err != nil {
+		return &ExitCodeError{
+			err:   err,
+			code:  128,
+			print: true,
+		}
+	}
+
+	// TODO: Print here that merge driver was called and that the user should
+	// We should visualize the added merge entry though.
+
+	if conflicts == 0 {
+		fmt.Println("sesam: both sides changed the audit log and we merged it automatically.")
+		fmt.Println("sesam: please proceed to run `git commit` as you would normally do.")
+	} else {
+		fmt.Println("sesam: both sides changed the audit log and we merged it automatically.")
+		fmt.Println("sesam: there were some cases you might want to review before committing.")
+		fmt.Println("sesam: when you are happy with the changes then please run `git commit`")
+	}
+
+	return &ExitCodeError{
+		err:   err,
+		code:  1, // we always need to tell the user that there were conflicts, even if there were none.
+		print: false,
+	}
 }
