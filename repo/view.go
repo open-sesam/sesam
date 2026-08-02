@@ -198,6 +198,8 @@ func (v *View) ListSecrets(paths []string) ([]SecretInfo, error) {
 }
 
 // Reveal reveals all secrets to the worktree.
+// If `all` is false we will check the hmac of each file
+// before starting to decrypt as an optimization.
 func (v *View) Reveal(all bool) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()

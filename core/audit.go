@@ -449,7 +449,11 @@ func (aes *AuditEntrySigned) Hash() string {
 // HashMatches reports whether this entry hashes to `stored`, using whichever
 // algorithm `stored` declares.
 func (aes *AuditEntrySigned) HashMatches(stored string) (bool, error) {
-	sigJSON, _ := json.Marshal(aes)
+	sigJSON, err := json.Marshal(aes)
+	if err != nil {
+		return false, err
+	}
+
 	return hashedDataEqual(stored, sigJSON)
 }
 
