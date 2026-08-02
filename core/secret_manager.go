@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -175,66 +175,32 @@ func (sm *SecretManager) Seal(all bool) error {
 		return fmt.Errorf("create objects dir: %w", err)
 	}
 
-	type result struct {
-		err  error
-		sig  *secretFooter
-		path string
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	resultCh := make(chan result, len(sm.State.Secrets))
-
 	// jobs are partly I/O bound, so allow more than we have cores.
 	parallelJobs := 4 * runtime.GOMAXPROCS(0)
-	tokenCh := make(chan bool, parallelJobs)
-	for range cap(tokenCh) {
-		tokenCh <- true
-	}
+	errg := &errgroup.Group{}
+	errg.SetLimit(parallelJobs)
 
-	for _, vsecret := range sm.State.Secrets {
-		go func() {
-			select {
-			case <-tokenCh:
-				// our turn to run
-				defer func() {
-					// signal others
-					tokenCh <- true
-				}()
-			case <-ctx.Done():
-				resultCh <- result{
-					err: ctx.Err(),
-				}
-				return
-			}
-
-			sig, err := sm.sealOrPreserve(vsecret.RevealedPath, all)
-			if err != nil {
-				resultCh <- result{
-					err: fmt.Errorf("seal %s: %w", vsecret.RevealedPath, err),
-				}
-				return
-			}
-
-			resultCh <- result{
-				sig:  sig,
-				path: vsecret.RevealedPath,
-			}
-		}()
-	}
-
+	mu := sync.Mutex{}
 	wanted := make(map[string]bool, len(sm.State.Secrets))
 	sigs := make([]*secretFooter, 0, len(sm.State.Secrets))
-	for range len(sm.State.Secrets) {
-		r := <-resultCh
-		if r.err != nil {
-			cancel()
-			return r.err
-		}
 
-		wanted[sm.cryptPath(r.path)] = true
-		sigs = append(sigs, r.sig)
+	for _, vsecret := range sm.State.Secrets {
+		errg.Go(func() error {
+			sig, err := sm.sealOrPreserve(vsecret.RevealedPath, all)
+			if err != nil {
+				return fmt.Errorf("seal %s: %w", vsecret.RevealedPath, err)
+			}
+
+			mu.Lock()
+			wanted[sm.cryptPath(vsecret.RevealedPath)] = true
+			sigs = append(sigs, sig)
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	if err := errg.Wait(); err != nil {
+		return err
 	}
 
 	// safety net: remove left over files or anything that was manually created.
@@ -370,22 +336,12 @@ func (sm *SecretManager) readSecretFooter(path string) (*secretFooter, error) {
 
 // Reveal reveals all known secrets.
 func (sm *SecretManager) Reveal(all bool) error {
-	g := new(errgroup.Group)
-
 	parallelJobs := 4 * runtime.GOMAXPROCS(0)
-	tokenCh := make(chan bool, parallelJobs)
-	for range cap(tokenCh) {
-		tokenCh <- true
-	}
+	g := new(errgroup.Group)
+	g.SetLimit(parallelJobs)
 
 	for _, vsecret := range sm.State.Secrets {
 		g.Go(func() error {
-			<-tokenCh
-			defer func() {
-				// signal others
-				tokenCh <- true
-			}()
-
 			if !sm.State.UserHasAccess(sm.Signer.UserName(), vsecret.AccessGroups) {
 				// ignore files we can't decrypt:
 				return nil
@@ -409,6 +365,7 @@ func (sm *SecretManager) Reveal(all bool) error {
 			return nil
 		})
 	}
+
 	return g.Wait()
 }
 
