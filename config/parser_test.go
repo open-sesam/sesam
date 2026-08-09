@@ -72,6 +72,150 @@ func Test_resolveIncludeSecretsOnly(t *testing.T) {
 	require.Equal(t, []string{"nested.txt", "top.txt"}, paths)
 }
 
+// TestSchema_MatchesStructs guards the agreement between sesam_schema.json and
+// the structs in config.go, in both directions: a document the schema accepts
+// must decode into User/Secret, and any field those structs do not model must
+// be rejected. Accepted cases therefore assert on the decode too — a schema
+// that allows something the decoder chokes on is exactly the mismatch this
+// catches.
+func TestSchema_MatchesStructs(t *testing.T) {
+	tests := []struct {
+		name  string
+		yaml  string
+		valid bool
+	}{
+		// User.Key is []string, so the single-scalar form must not validate.
+		{"scalar key", "users:\n  - name: a\n    key: k\nsecrets: []\n", false},
+		{"list key", "users:\n  - name: a\n    key:\n      - k\nsecrets: []\n", true},
+		{"user without key", "users:\n  - name: a\nsecrets: []\n", false},
+		{"empty user name", "users:\n  - name: \"\"\n    key:\n      - k\nsecrets: []\n", false},
+		{"unknown user field", "users:\n  - name: a\n    key:\n      - k\n    bogus: 1\nsecrets: []\n", false},
+
+		// Secret fields, including the ones reserved for rotation.
+		{"secret name", "secrets:\n  - path: a\n    name: foo\n", true},
+		{"secret rotate", "secrets:\n  - path: a\n    rotate:\n      - anything\n", true},
+		{"secret swap", "secrets:\n  - path: a\n    swap:\n      - cmd: ssh-copy-id\n", true},
+		{"swap unknown field", "secrets:\n  - path: a\n    swap:\n      - cmd: x\n        bogus: y\n", false},
+		{"swap without cmd", "secrets:\n  - path: a\n    swap:\n      - {}\n", false},
+		{"unknown secret field", "secrets:\n  - path: a\n    bogus: 1\n", false},
+
+		// Include entries are their own form and take nothing else.
+		{"include with extra field", "secrets:\n  - include: sub\n    desc: hi\n", false},
+
+		// Only the root tolerates x- keys, so anchors have somewhere to live.
+		{"toplevel x- key", "x-anchors:\n  access:\n    - g1\nsecrets:\n  - path: a\n", true},
+		{"x- key inside secret", "secrets:\n  - path: a\n    x-foo: 1\n", false},
+		{"unknown toplevel key", "bogus: 1\nsecrets: []\n", false},
+
+		// Anchors defined outside the secret they are used in — the whole point
+		// of the x- escape hatch. See TestAnchors_ResolveAcrossDocument.
+		{"merge key from x- anchor", "x-a: &a\n  access:\n    - g1\nsecrets:\n  - path: p\n    <<: *a\n", true},
+		{"alias from sibling secret", "secrets:\n  - path: a\n    access: &d\n      - g1\n  - path: b\n    access: *d\n", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			main := filepath.Join(dir, "sesam.yml")
+			require.NoError(t, os.WriteFile(main, []byte(tt.yaml), 0o644))
+
+			cr, err := loadConfig(t, main)
+			if !tt.valid {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "failed to validate")
+				return
+			}
+			require.NoError(t, err)
+
+			// Whatever the schema let through must survive the struct decode.
+			_, err = cr.Users()
+			require.NoError(t, err)
+			_, err = cr.Secrets()
+			require.NoError(t, err)
+		})
+	}
+}
+
+// TestAnchors_ResolveAcrossDocument checks that an alias resolves against an
+// anchor declared elsewhere in the same file. Secrets, users and groups are
+// each decoded from an isolated sub-node, so without a document-primed decoder
+// the anchor is invisible and the decode fails.
+func TestAnchors_ResolveAcrossDocument(t *testing.T) {
+	const src = `x-shared: &shared
+  access:
+    - devs
+x-keys: &keys
+  - ssh-ed25519 AAAA
+x-devs: &devs
+  - alice
+
+users:
+  - name: alice
+    key: *keys
+
+groups:
+  devs: *devs
+
+secrets:
+  - path: a.txt
+    <<: *shared
+  - path: b.txt
+    access: *devs
+`
+
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	require.NoError(t, os.WriteFile(main, []byte(src), 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+
+	secrets, err := cr.Secrets()
+	require.NoError(t, err)
+	require.Len(t, secrets, 2)
+	require.Equal(t, []string{"devs"}, secrets[0].Access, "merge key from a top-level anchor")
+	require.Equal(t, []string{"alice"}, secrets[1].Access, "plain alias to a top-level anchor")
+
+	users, err := cr.Users()
+	require.NoError(t, err)
+	require.Equal(t, []string{"ssh-ed25519 AAAA"}, users[0].Key)
+
+	groups, err := cr.Groups()
+	require.NoError(t, err)
+	require.Equal(t, map[string][]string{"devs": {"alice"}}, groups)
+}
+
+// TestAnchors_SurviveSave pins the constraint that makes anchors usable at all:
+// resolving them must not expand them on disk. The AST stays authoritative and
+// Save re-renders it verbatim, so a decoded alias is a read-time view only.
+func TestAnchors_SurviveSave(t *testing.T) {
+	const src = `x-shared: &shared
+  access:
+    - devs
+
+secrets:
+  - path: a.txt
+    <<: *shared
+`
+
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	require.NoError(t, os.WriteFile(main, []byte(src), 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+
+	// Force a decode, then write the file back out.
+	_, err = cr.Secrets()
+	require.NoError(t, err)
+	require.NoError(t, cr.Save())
+
+	out, err := os.ReadFile(main)
+	require.NoError(t, err)
+	require.Contains(t, string(out), "&shared", "anchor definition must survive Save")
+	require.Contains(t, string(out), "<<: *shared", "alias must not be expanded on Save")
+}
+
 // TestLoad_RejectsSelfInclude: a file that includes itself must be rejected
 // rather than recursing forever.
 func TestLoad_RejectsSelfInclude(t *testing.T) {

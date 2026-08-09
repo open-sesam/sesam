@@ -4,13 +4,17 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 )
 
 func (c *Config) UserAddRecipient(user string, pubKeySpecs []string) error {
 	src := c.MainFile
 	userSeq, err := usersNode(src.RootNode)
+	if err != nil {
+		return err
+	}
+
+	dec, err := primedDecoder(src)
 	if err != nil {
 		return err
 	}
@@ -41,7 +45,7 @@ func (c *Config) UserAddRecipient(user string, pubKeySpecs []string) error {
 		// latter folds an inline comment into the value and would bake it into
 		// the rewritten key.
 		var existingKeys []string
-		if err := yaml.NodeToValue(keySeq, &existingKeys); err != nil {
+		if err := dec.DecodeFromNode(keySeq, &existingKeys); err != nil {
 			return fmt.Errorf("%s: decode keys of user %q: %w", src.Path, user, err)
 		}
 
@@ -71,6 +75,11 @@ func (c *Config) UserRmRecipient(user string, pubKeySpecs []string) error {
 		return err
 	}
 
+	dec, err := primedDecoder(src)
+	if err != nil {
+		return err
+	}
+
 	for i, item := range seq.Values {
 		userNode, ok := item.(*ast.MappingNode)
 		if !ok {
@@ -94,7 +103,7 @@ func (c *Config) UserRmRecipient(user string, pubKeySpecs []string) error {
 		}
 
 		var existingKeys []string
-		if err := yaml.NodeToValue(keySeq, &existingKeys); err != nil {
+		if err := dec.DecodeFromNode(keySeq, &existingKeys); err != nil {
 			return fmt.Errorf("%s: decode keys of user %q: %w", src.Path, user, err)
 		}
 

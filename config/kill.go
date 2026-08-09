@@ -1,7 +1,6 @@
 package config
 
 import (
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 )
 
@@ -14,12 +13,17 @@ import (
 func (c *Config) UserKill(name string) error {
 	src := c.MainFile
 
+	dec, err := primedDecoder(src)
+	if err != nil {
+		return err
+	}
+
 	if seq, err := usersNode(src.RootNode); err == nil {
 		for i := 0; i < len(seq.Values); {
 			m, ok := seq.Values[i].(*ast.MappingNode)
 			if ok {
 				var u User
-				if yaml.NodeToValue(m, &u) == nil && u.Name == name {
+				if dec.DecodeFromNode(m, &u) == nil && u.Name == name {
 					removeSeqValue(seq, i)
 					continue // a value shifted into slot i
 				}

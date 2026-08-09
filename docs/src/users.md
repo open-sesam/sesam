@@ -9,7 +9,8 @@ At the time you created your repo, you would see something like this in your con
 users:
   - name: bob
     desc: Bob the Builder
-    key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
 groups:
   admin:
     - bob
@@ -23,13 +24,16 @@ deployment. We can do so by adding some more users and a new group:
    users:
      - name: bob
        desc: Bob the Builder
-       key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
+       key:
+         - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
 +    - name: alice
 +      desc: Mrs. Wonderland
-+      key: github:alice
++      key:
++        - github:alice
 +    - name: peter
 +      desc: Peter Lustig
-+      key: file://keys/peter.txt
++      key:
++        - file://keys/peter.txt
    groups:
      admin:
        - bob
