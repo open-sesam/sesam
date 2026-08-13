@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 
 	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/repo"
@@ -58,7 +60,33 @@ func silentWithRepo(verifyMode repo.VerifyMode, action RepoAction) cli.ActionFun
 // load and block the commit without a way to self-heal.
 func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 	return silentWithRepo(repo.VerifyModeNoDisk, func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+		// If a merge is being finalized, reconcile the derived tree (signkeys,
+		// objects) with the merged log before sealing, pruning orphans left by
+		// git's tree merge. Guarded on MERGE_HEAD so ordinary commits are untouched.
+		merging := repo.InMerge(cmd.String("sesam-dir"))
+
+		// Refuse to seal revealed secrets that still hold conflict markers - the
+		// seal would bake them into the ciphertext, and git can't see them
+		// (revealed files are gitignored). Only meaningful mid-merge.
+		if merging {
+			conflicted, err := r.ConflictedSecrets()
+			if err != nil {
+				return err
+			}
+			if len(conflicted) > 0 {
+				return fmt.Errorf(
+					"unresolved merge conflict markers in: %s\nresolve them in the revealed file(s), then run `git commit` again",
+					strings.Join(conflicted, ", "),
+				)
+			}
+		}
+
 		if err := r.Update(func(s *repo.Stage) error {
+			if merging {
+				if err := s.ReconcileToState(); err != nil {
+					return err
+				}
+			}
 			return s.Seal(false)
 		}); err != nil {
 			return err
@@ -124,6 +152,37 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 
 		return nil
 	})(ctx, cmd)
+}
+
+// HandleHookPreMergeCommit runs when git is about to auto-commit a clean merge.
+// If the merge changed sesam state it exits non-zero so git stops WITHOUT
+// committing, leaving a fully resolved index. The user then runs `git commit`,
+// whose pre-commit reseals + reconciles - so a merge finalizes with no `git add`.
+// A merge that never touched sesam auto-commits like any other.
+func HandleHookPreMergeCommit(_ context.Context, cmd *cli.Command) error {
+	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+	if err != nil {
+		//nolint:nilerr // never block a merge on our own resolution error
+		return nil
+	}
+
+	exists, err := repo.IsInitialized(sesamDir)
+	if err != nil || !exists {
+		//nolint:nilerr // not a sesam repo (or unreadable) => let git auto-commit
+		return nil
+	}
+
+	changed, err := repo.MergeTouchedSesam(sesamDir)
+	if err != nil {
+		slog.Warn("pre-merge-commit: sesam-change check failed; forcing manual finalize", slog.Any("err", err))
+		changed = true // fail safe: never auto-commit an unsealed sesam merge
+	}
+	if !changed {
+		return nil
+	}
+
+	fmt.Fprintln(os.Stderr, "sesam: merge changed the vault - run `git commit` to finalize (seal + reconcile + verify).")
+	return &ExitCodeError{code: 1, print: false}
 }
 
 // HandleHookInstall (re)installs the git hooks. It only touches git config, so

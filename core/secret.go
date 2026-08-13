@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/sahib/renameio/v2"
 	"golang.org/x/crypto/hkdf"
@@ -387,4 +390,37 @@ func RevealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) (
 
 	hmacContentHash := keyContentHash(ageKey, contentHash.Sum(nil))
 	return cipherTextHash.Sum(nil), hmacContentHash, sigDesc, nil
+}
+
+// PruneOrphanObjects removes sealed object files under base whose revealed path
+// is not in `keep`, returning the pruned revealed paths. Used by merge finalize
+// to drop objects for secrets removed on the merged branch.
+func PruneOrphanObjects(root *os.Root, base string, keep map[string]bool) ([]string, error) {
+	dir := filepath.ToSlash(filepath.Join(sesamBase(base), "objects"))
+
+	var pruned []string
+	err := fs.WalkDir(root.FS(), dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(p, ".sesam") {
+			return nil
+		}
+
+		revealed := strings.TrimSuffix(strings.TrimPrefix(filepath.ToSlash(p), dir+"/"), ".sesam")
+		if keep[revealed] {
+			return nil
+		}
+
+		if err := root.Remove(p); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove orphan object %s: %w", p, err)
+		}
+		pruned = append(pruned, revealed)
+		return nil
+	})
+
+	return pruned, err
 }

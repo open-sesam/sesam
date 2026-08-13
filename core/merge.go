@@ -142,10 +142,6 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		return nil, nil, err
 	}
 
-	if _, err := findCommonBase(ours, origin); err != nil {
-		return nil, nil, fmt.Errorf("ours: %w", err)
-	}
-
 	theirsIdx, err := findCommonBase(theirs, origin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("theirs: %w", err)

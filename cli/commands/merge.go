@@ -227,21 +227,15 @@ func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	// TODO: Print here that merge driver was called and that the user should
-	// We should visualize the added merge entry though.
-
-	if conflicts == 0 {
-		fmt.Println("sesam: both sides changed the audit log and we merged it automatically.")
-		fmt.Println("sesam: please proceed to run `git commit` as you would normally do.")
-	} else {
-		fmt.Println("sesam: both sides changed the audit log and we merged it automatically.")
-		fmt.Println("sesam: there were some cases you might want to review before committing.")
-		fmt.Println("sesam: when you are happy with the changes then please run `git commit`")
+	// Exit 0: the merged log is written to %A, so git treats this path as
+	// resolved (no `git add` needed).
+	//
+	// Even though we exit without error here (which git would normally take as "continue with merge commit")
+	// we rely on the pre-merge-commit hook to fail. This allows the user to handle conflicts he/she would have
+	// resolved differently.
+	if conflicts > 0 {
+		fmt.Fprintln(os.Stderr, "sesam: merged the audit log; some decisions may be worth reviewing (see the merge entry).")
 	}
 
-	return &ExitCodeError{
-		err:   err,
-		code:  1, // we always need to tell the user that there were conflicts, even if there were none.
-		print: false,
-	}
+	return nil
 }

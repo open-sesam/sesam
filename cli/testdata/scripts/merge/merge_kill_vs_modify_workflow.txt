@@ -30,7 +30,6 @@ exec git commit -m 'theirs: kill bob'
 # git stops before committing. (sesam.yml also conflicts - accepted for now.)
 exec git checkout ours
 ! exec git merge theirs
-stdout 'merged it automatically'
 
 # The merged log verifies and contains the kill (revocation won over ours' modify).
 exec sesam verify --verify-mode no-disk

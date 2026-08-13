@@ -223,6 +223,66 @@ func resolveMergeSigner(root *os.Root, ids core.Identities, ourLog *core.AuditLo
 	return nil, fmt.Errorf("none of the supplied identities maps to a known user; cannot merge")
 }
 
+// InMerge reports whether a merge is in progress (MERGE_HEAD exists). The
+// pre-commit hook uses it to run the merge reconciliation only when finalizing a
+// merge, not on ordinary commits.
+func InMerge(sesamDir string) bool {
+	worktreeRoot, err := GitWorktreeRoot(sesamDir)
+	if err != nil {
+		return false
+	}
+
+	cmd := exec.CommandContext(context.Background(), "git", "rev-parse", "-q", "--verify", "MERGE_HEAD")
+	cmd.Dir = worktreeRoot
+	return cmd.Run() == nil // exit 0 => MERGE_HEAD present
+}
+
+// MergeTouchedSesam reports whether an in-progress merge changed anything under
+// the sesam dir (staged index vs HEAD).
+func MergeTouchedSesam(sesamDir string) (bool, error) {
+	worktreeRoot, err := GitWorktreeRoot(sesamDir)
+	if err != nil {
+		return false, fmt.Errorf("locate worktree root: %w", err)
+	}
+
+	absSesam, err := filepath.Abs(sesamDir)
+	if err != nil {
+		return false, err
+	}
+
+	prefix, err := filepath.Rel(worktreeRoot, absSesam)
+	if err != nil {
+		return false, err
+	}
+
+	// `git diff --cached --quiet` exits 0 for no change, 1 for a change.
+	//nolint:gosec // fixed git subcommand; pathspec is derived from the repo layout.
+	cmd := exec.CommandContext(
+		context.Background(),
+		"git",
+		"diff",
+		"--cached",
+		"--quiet",
+		"HEAD",
+		"--",
+		filepath.Join(prefix, ".sesam"),
+	)
+	cmd.Dir = worktreeRoot
+	cmd.Stderr = os.Stderr
+
+	err = cmd.Run()
+	if err == nil {
+		return false, nil
+	}
+
+	exitErr := new(exec.ExitError)
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return true, nil
+	}
+
+	return false, fmt.Errorf("git diff for merge check: %w", err)
+}
+
 func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourPath, theirPath, originPath string, conflictMarkerSize int) (int, error) {
 	ourAuditLog, err := core.LoadAuditLogFromPath(ourPath, ids)
 	if err != nil {

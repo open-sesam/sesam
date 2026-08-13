@@ -321,6 +321,22 @@ func (v *View) Log(fn func(e *core.AuditEntrySigned) error) error {
 	return nil
 }
 
+// ConflictedSecrets returns revealed secret files that still carry git conflict
+// markers (left by the secret merge driver when both sides changed the same
+// region). Sealing them would encrypt the markers into the object, so the merge
+// finalize must stop until they are resolved. git cannot catch this itself:
+// revealed files are gitignored and the tracked object is ciphertext.
+func (v *View) ConflictedSecrets() ([]string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return nil, ErrClosed
+	}
+
+	return core.ConflictedSecrets(v.root, v.vstate.Secrets)
+}
+
 // GitAddDotSesam is equivalent to `git add .sesam`
 func (v *View) GitAddDotSesam() error {
 	v.mu.Lock()

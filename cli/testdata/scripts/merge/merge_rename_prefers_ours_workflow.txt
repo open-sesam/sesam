@@ -32,7 +32,6 @@ exec git commit -m 'theirs: bob -> erin'
 # log is still open.
 exec git checkout ours
 ! exec git merge theirs
-stdout 'merged it automatically'
 
 # ours' rename to dave is applied; theirs' rename is dropped and the merge entry
 # records that decision (so "erin" appears only in the drop record, not as a

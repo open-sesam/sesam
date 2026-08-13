@@ -161,6 +161,39 @@ func (r *Repo) buildStage() (*Stage, error) {
 	return &Stage{View: fork, repo: r}, nil
 }
 
+// PruneUnusedAfterMerge removes secrets and signkeys that are not present in the vstate anymore.
+func (s *Stage) PruneUnusedAfterMerge() error {
+	users := make(map[string]bool, len(s.vstate.Users))
+	for _, u := range s.vstate.Users {
+		users[u.Name] = true
+	}
+
+	secrets := make(map[string]bool, len(s.vstate.Secrets))
+	for _, sec := range s.vstate.Secrets {
+		secrets[sec.RevealedPath] = true
+	}
+
+	prunedKeys, err := core.PruneOrphanSignKeys(s.root, forkSuffix, users)
+	if err != nil {
+		return fmt.Errorf("reconcile signkeys: %w", err)
+	}
+
+	prunedObjs, err := core.PruneOrphanObjects(s.root, forkSuffix, secrets)
+	if err != nil {
+		return fmt.Errorf("reconcile objects: %w", err)
+	}
+
+	if len(prunedKeys) > 0 || len(prunedObjs) > 0 {
+		slog.Info(
+			"merge reconcile: pruned derived files to match the merged log",
+			slog.Any("signkeys", prunedKeys),
+			slog.Any("objects", prunedObjs),
+		)
+	}
+
+	return nil
+}
+
 // materializeFork builds .sesam-tmp as a hardlink mirror of .sesam. The
 // append-mutated audit log is byte-copied (a hardlink would let staged appends
 // touch the live inode, defeating Rollback); everything else is hard-linked

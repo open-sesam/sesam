@@ -161,6 +161,41 @@ func writeSignKeyAt(root *os.Root, base, user string, userRecipient []age.Recipi
 	return nil
 }
 
+// PruneOrphanSignKeys removes signing-key files under base whose user is not in
+// `keep`, returning the pruned user names. Used by merge finalize to align the
+// signkey tree with the merged audit log (dropping a renamed-away or killed
+// user's key). It never creates keys - a missing key for a kept user is left
+// for the caller to surface.
+func PruneOrphanSignKeys(root *os.Root, base string, keep map[string]bool) ([]string, error) {
+	dir := filepath.Join(sesamBase(base), "signkeys")
+
+	var pruned []string
+	err := fs.WalkDir(root.FS(), filepath.ToSlash(dir), func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(p, ".age") {
+			return nil
+		}
+
+		user := strings.TrimSuffix(filepath.Base(p), ".age")
+		if keep[user] {
+			return nil
+		}
+
+		if err := root.Remove(p); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove orphan signkey %s: %w", p, err)
+		}
+		pruned = append(pruned, user)
+		return nil
+	})
+
+	return pruned, err
+}
+
 // readAllSignatures finds all .sesam files under .sesam/objects/ and parses their signature footers.
 func readAllSignatures(root *os.Root) ([]*secretFooter, error) {
 	return readAllSignaturesForDir(root, filepath.Join(".sesam", "objects"))

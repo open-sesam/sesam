@@ -28,7 +28,6 @@ exec git commit -m 'theirs: add carol'
 # known, accepted gap for now.)
 exec git checkout ours
 ! exec git merge theirs
-stdout 'merged it automatically'
 
 # The merged audit log is in the worktree: it chain-verifies, and holds both
 # user.tell entries plus a merge entry. (State is asserted via the log, not

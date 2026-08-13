@@ -30,7 +30,6 @@ exec git commit -m 'theirs: bob += sec'
 # (sesam.yml also conflicts - accepted for now.)
 exec git checkout ours
 ! exec git merge theirs
-stdout 'merged it automatically'
 
 # The merged log verifies and carries both group additions (ops from ours, sec
 # from theirs' delta-merged entry).

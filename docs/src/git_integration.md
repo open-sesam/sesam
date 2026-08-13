@@ -71,3 +71,29 @@ you can then continue to work out the conflicts like you are used from `git`. Th
 hook that will in turn make sure that all secrets are conflict marker free and sealed.
 
 This is set-up for you via `.gitattributes` and the `sesam-merge-*` entries in your repo's `.git/config`.
+
+
+
+
+```
+
+
+                                                                                                                                                                                   
+                                                                                                                                                                                   
+                                                                                                                                                                                   
+                                                                                                                                                                                   
+                                       ┌────────────────────────┐   write conflict                                                                                                 
+                                  ┌────► sesam merge secret     ├──►if required   ─────┐                                                                                           
+                                  │    └────────────────────────┘                      │                                                                                           
+                                  │                                                    │                                                                                           
+        ┌─────────────────────┐   │    ┌────────────────────────┐   semantic merge     │ ┌──────────────────┐                     ┌────────────────┐      ┌────────────────┐       
+        │ git merge <theirs>  ┼───┼────► sesam merge audit      ├──►without user   ────┼►│pre-merge-commit  ├───►merge review────►│ git commit[...]├─────►│ pre-commit-hook│       
+        └─────────────────────┘   │    └────────────────────────┘                      │ └──────────────────┘    by user          └────────────────┘      └────────────────┘       
+                                  │                                                    │  (fail on purpose)                                                                        
+                                  │    ┌────────────────────────┐                      │                                                                                           
+                                  └────► (take <ours> signkeys) ├──►signkeys are ──────┘                                                                                           
+                                       └────────────────────────┘   merged later                                                                                                   
+                                                                                                                                                                                   
+                                                                                                                                                                                   
+
+```
