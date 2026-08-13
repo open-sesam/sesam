@@ -1,0 +1,59 @@
+# Criss-cross: two branches each merge the other, then get merged together - so
+# git finds TWO merge bases and builds a synthetic virtual base. Base detection by
+# signature can't cope with that (the shared history is re-signed on both sides);
+# the content set-difference does. Both sides' changes must survive and the result
+# must verify.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'base: bob'
+
+# X changes bob's groups; Y adds carol. (Tags pin the pre-merge tips so we can
+# build the criss-cross without capturing hashes.)
+exec git checkout -b X
+exec sesam user change-groups --user bob --group-add opsx
+exec git add -A
+exec git commit -m 'x1'
+exec git tag x1
+
+exec git checkout -b Y X~1
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'y1'
+exec git tag y1
+
+# X merges y1 (finalize by hand-resolving sesam.yml, config-regen is separate).
+exec git checkout X
+! exec git merge y1
+exec git checkout --theirs sesam.yml
+exec git add -A
+exec git commit --no-edit
+
+# Y merges x1 - now both branches contain a merge of the other (the criss-cross).
+exec git checkout Y
+! exec git merge x1
+exec git checkout --theirs sesam.yml
+exec git add -A
+exec git commit --no-edit
+
+# Merge Y into X: two merge bases -> synthetic virtual base. Used to fail with
+# "failed to find common origin"; now resolves via the content diff.
+exec git checkout X
+! exec git merge Y
+exec git checkout --theirs sesam.yml
+exec git add -A
+exec git commit --no-edit
+
+# The doubly-merged log verifies, and both sides' changes are present.
+exec sesam verify
+exec sesam show .sesam/audit/log.jsonl
+stdout 'opsx'
+stdout '"user": "carol"'

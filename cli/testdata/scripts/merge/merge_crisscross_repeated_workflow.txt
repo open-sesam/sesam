@@ -1,0 +1,115 @@
+# Sustained criss-cross: two branches commit and merge each other round after
+# round, so history stacks synthetic virtual bases and re-signs the shared
+# history repeatedly. Every round's merge (after the first) has 2+ merge bases.
+# The content set-difference must keep locating "what's new" through all of it -
+# no change may be lost, and each finalize (pre-commit verify) must pass.
+#
+# Each round: X and Y each add a distinct group to bob, tag their tip, then X
+# merges Y's tip and Y merges X's tip. bob accumulates every group.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'base: bob'
+
+exec git checkout -b X
+exec git checkout -b Y X~0
+
+# ── round 1 ──────────────────────────────────────────────────────────────────
+exec git checkout X
+exec sesam user change-groups --user bob --group-add gx1
+exec git add -A
+exec git commit -m 'x1'
+exec git tag t-x1
+
+exec git checkout Y
+exec sesam user change-groups --user bob --group-add gy1
+exec git add -A
+exec git commit -m 'y1'
+exec git tag t-y1
+
+exec git checkout X
+! exec git merge t-y1
+exec git checkout --theirs sesam.yml
+exec git add -A
+exec git commit --no-edit
+
+exec git checkout Y
+! exec git merge t-x1
+exec git checkout --theirs sesam.yml
+exec git add -A
+exec git commit --no-edit
+
+# ── round 2 (now a criss-cross: X and Y each already merged the other) ────────
+exec git checkout X
+exec sesam user change-groups --user bob --group-add gx2
+exec git add -A
+exec git commit -m 'x2'
+exec git tag t-x2
+
+exec git checkout Y
+exec sesam user change-groups --user bob --group-add gy2
+exec git add -A
+exec git commit -m 'y2'
+exec git tag t-y2
+
+exec git checkout X
+! exec git merge t-y2
+exec git checkout --theirs sesam.yml
+exec git add -A
+exec git commit --no-edit
+
+exec git checkout Y
+! exec git merge t-x2
+exec git checkout --theirs sesam.yml
+exec git add -A
+exec git commit --no-edit
+
+# ── round 3 ──────────────────────────────────────────────────────────────────
+exec git checkout X
+exec sesam user change-groups --user bob --group-add gx3
+exec git add -A
+exec git commit -m 'x3'
+exec git tag t-x3
+
+exec git checkout Y
+exec sesam user change-groups --user bob --group-add gy3
+exec git add -A
+exec git commit -m 'y3'
+exec git tag t-y3
+
+exec git checkout X
+! exec git merge t-y3
+exec git checkout --theirs sesam.yml
+exec git add -A
+exec git commit --no-edit
+
+exec git checkout Y
+! exec git merge t-x3
+exec git checkout --theirs sesam.yml
+exec git add -A
+exec git commit --no-edit
+
+# ── final integration ────────────────────────────────────────────────────────
+exec git checkout X
+! exec git merge Y
+exec git checkout --theirs sesam.yml
+exec git add -A
+exec git commit --no-edit
+
+# The whole tangle verifies, and every round's change survived in the log.
+exec sesam verify
+exec sesam show .sesam/audit/log.jsonl
+stdout 'gx1'
+stdout 'gy1'
+stdout 'gx2'
+stdout 'gy2'
+stdout 'gx3'
+stdout 'gy3'

@@ -82,23 +82,10 @@ func dropWith(reason string, conflict bool) resolution {
 	return resolution{ConflictResolutionEntry: ConflictResolutionEntry{Action: MergeDropped, Reason: reason}, conflict: conflict}
 }
 
-// findCommonBase returns the index in `a.Entries` of the tip of `b` (the merge
-// base): the last entry the two share. `b` is expected to be an ancestor of
-// `a`, so a's entries after that index are a's divergent work. Not finding the
-// base tip's signature in `a` is an error.
-func findCommonBase(a, b *AuditLog) (int, error) {
-	if len(b.Entries) == 0 {
-		return 0, errors.New("empty base log")
-	}
-
-	bSig := b.Entries[len(b.Entries)-1].Signature
-	for aIdx := len(a.Entries) - 1; aIdx >= 0; aIdx-- {
-		if a.Entries[aIdx].Signature == bSig {
-			return aIdx, nil
-		}
-	}
-
-	return 0, errors.New("failed to find common origin")
+// entryContentKey identifies an entry by WHAT it does, independent of who signed
+// it or where it sits in the chain.
+func entryContentKey(e *AuditEntry) string {
+	return string(e.Operation) + "\x00" + string(e.Detail)
 }
 
 // requireSameInit requires the base/init entry to be byte-identical on every
@@ -142,13 +129,19 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		return nil, nil, err
 	}
 
-	theirsIdx, err := findCommonBase(theirs, origin)
-	if err != nil {
-		return nil, nil, fmt.Errorf("theirs: %w", err)
+	// Identify theirs' NEW entries by content. Comparing by signature will not work
+	// as rebasing will rewrite signatures.
+	oursContent := make(map[string]bool, len(ours.Entries))
+	for i := range ours.Entries {
+		oursContent[entryContentKey(&ours.Entries[i].AuditEntry)] = true
 	}
 
-	// Everything after the shared merge base is entries added by 'theirs'.
-	theirsNew := theirs.Entries[theirsIdx+1:]
+	var theirsNew []AuditEntrySigned
+	for i := range theirs.Entries {
+		if !oursContent[entryContentKey(&theirs.Entries[i].AuditEntry)] {
+			theirsNew = append(theirsNew, theirs.Entries[i])
+		}
+	}
 
 	originState, err := VerifyChain(origin, EmptyKeyring(), pluginUI)
 	if err != nil {
@@ -288,6 +281,8 @@ func resolveTheirs(their *AuditEntrySigned, merged, base *VerifiedState) resolut
 	case OpInit:
 		// The init check guarantees this never happens; guard anyway.
 		return dropWith("unexpected init among new entries", true)
+	case OpMerge:
+		return dropWith("theirs' merge entry is not replayed", false)
 	case OpUserTell:
 		return resolveUserTell(their, merged)
 	case OpUserKill:

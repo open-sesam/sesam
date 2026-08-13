@@ -83,7 +83,7 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 
 		if err := r.Update(func(s *repo.Stage) error {
 			if merging {
-				if err := s.ReconcileToState(); err != nil {
+				if err := s.PruneUnusedAfterMerge(); err != nil {
 					return err
 				}
 			}
