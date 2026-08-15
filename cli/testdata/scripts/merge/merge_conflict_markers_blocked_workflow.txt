@@ -34,9 +34,11 @@ exec sesam seal
 exec git add -A
 exec git commit -m 'theirs'
 
-# Merge: content conflict -> markers land in the revealed db.txt.
+# Merge: content conflict -> markers land in the revealed db.txt, and the driver
+# reports the conflict count on stderr.
 exec git checkout ours
 ! exec git merge theirs
+stderr 'automatically merging revealed file db.txt; 1 conflict - please fix manually'
 grep '^<<<<<<< ' db.txt
 grep '^>>>>>>> ' db.txt
 

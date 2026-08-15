@@ -125,7 +125,10 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 	)
 
 	if conflicts > 0 {
-		fmt.Fprintf(os.Stderr, "sesam: secret %s was changed on both sides, conflicting state in revealed path.\n", revealedPath)
+		fmt.Fprintf(os.Stderr,
+			"sesam: automatically merging revealed file %s; %d %s - please fix manually.\n",
+			revealedPath, conflicts, pluralize("conflict", conflicts),
+		)
 		return &ExitCodeError{
 			err:   nil,
 			print: false,
@@ -133,7 +136,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "sesam: secret %s was changed on both sides, merged state in revealed path.\n", revealedPath)
+	fmt.Fprintf(os.Stderr, "sesam: automatically merging revealed file %s; no conflicts\n", revealedPath)
 	return nil
 }
 
