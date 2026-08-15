@@ -31,8 +31,18 @@ exec git commit -m 'theirs: kill bob'
 exec git checkout ours
 ! exec git merge theirs
 
+# The live merge driver explains the semantic merge and how to finalize.
+stderr 'both sides changed the audit log - doing a semantic merge'
+stderr 'modified on our side but killed on theirs; kill wins'
+stderr 'then just run .git commit'
+
 # The merged log verifies and contains the kill (revocation won over ours' modify).
 exec sesam verify --verify-mode no-disk
 exec sesam show .sesam/audit/log.jsonl
 stdout '"operation": "user.kill"'
 stdout '"operation": "merge"'
+
+# `sesam log` renders the same decision beneath the merge entry.
+exec sesam log
+stdout 'merged audit log'
+stdout 'modified on our side but killed on theirs; kill wins'

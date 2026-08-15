@@ -30,26 +30,20 @@ exec git add -A
 exec git commit -m 'y1'
 exec git tag y1
 
-# X merges y1 (finalize by hand-resolving sesam.yml, config-regen is separate).
+# X merges y1 (sesam.yml takes ours via the merge driver, config-regen is separate).
 exec git checkout X
 ! exec git merge y1
-exec git checkout --theirs sesam.yml
-exec git add -A
 exec git commit --no-edit
 
 # Y merges x1 - now both branches contain a merge of the other (the criss-cross).
 exec git checkout Y
 ! exec git merge x1
-exec git checkout --theirs sesam.yml
-exec git add -A
 exec git commit --no-edit
 
 # Merge Y into X: two merge bases -> synthetic virtual base. Used to fail with
 # "failed to find common origin"; now resolves via the content diff.
 exec git checkout X
 ! exec git merge Y
-exec git checkout --theirs sesam.yml
-exec git add -A
 exec git commit --no-edit
 
 # The doubly-merged log verifies, and both sides' changes are present.

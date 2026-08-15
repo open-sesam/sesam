@@ -37,14 +37,10 @@ exec git tag t-y1
 
 exec git checkout X
 ! exec git merge t-y1
-exec git checkout --theirs sesam.yml
-exec git add -A
 exec git commit --no-edit
 
 exec git checkout Y
 ! exec git merge t-x1
-exec git checkout --theirs sesam.yml
-exec git add -A
 exec git commit --no-edit
 
 # ── round 2 (now a criss-cross: X and Y each already merged the other) ────────
@@ -62,14 +58,10 @@ exec git tag t-y2
 
 exec git checkout X
 ! exec git merge t-y2
-exec git checkout --theirs sesam.yml
-exec git add -A
 exec git commit --no-edit
 
 exec git checkout Y
 ! exec git merge t-x2
-exec git checkout --theirs sesam.yml
-exec git add -A
 exec git commit --no-edit
 
 # ── round 3 ──────────────────────────────────────────────────────────────────
@@ -87,21 +79,15 @@ exec git tag t-y3
 
 exec git checkout X
 ! exec git merge t-y3
-exec git checkout --theirs sesam.yml
-exec git add -A
 exec git commit --no-edit
 
 exec git checkout Y
 ! exec git merge t-x3
-exec git checkout --theirs sesam.yml
-exec git add -A
 exec git commit --no-edit
 
 # ── final integration ────────────────────────────────────────────────────────
 exec git checkout X
 ! exec git merge Y
-exec git checkout --theirs sesam.yml
-exec git add -A
 exec git commit --no-edit
 
 # The whole tangle verifies, and every round's change survived in the log.

@@ -139,6 +139,15 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 			return nil
 		}
 
+		// If we're in mid merge we would automatically re-reveal all secrets,
+		// even if they have merged content that was just not sealed yet.
+		// As a safety measure we disable the post-checkout in this case.
+		// Checking out secrets (or other files) will still work on normal git-level,
+		// but it's probably not something that is being done all the time.
+		if repo.InMerge(cmd.String("sesam-dir")) {
+			return nil
+		}
+
 		// File checkout (git checkout -- path): a single sealed object may have
 		// been restored without its audit log, leaving the on-disk root hash
 		// stale. Reveal from the checked-out object, then seal to record it in the

@@ -74,14 +74,7 @@ This is set-up for you via `.gitattributes` and the `sesam-merge-*` entries in y
 
 
 
-
 ```
-
-
-                                                                                                                                                                                   
-                                                                                                                                                                                   
-                                                                                                                                                                                   
-                                                                                                                                                                                   
                                        ┌────────────────────────┐   write conflict                                                                                                 
                                   ┌────► sesam merge secret     ├──►if required   ─────┐                                                                                           
                                   │    └────────────────────────┘                      │                                                                                           

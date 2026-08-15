@@ -118,13 +118,14 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	slog.Info(
+	slog.Debug(
 		"merged successfully",
 		slog.Int("conflicts", conflicts),
 		slog.String("path", revealedPath),
 	)
 
 	if conflicts > 0 {
+		fmt.Fprintf(os.Stderr, "sesam: secret %s was changed on both sides, conflicting state in revealed path.\n", revealedPath)
 		return &ExitCodeError{
 			err:   nil,
 			print: false,
@@ -132,6 +133,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
+	fmt.Fprintf(os.Stderr, "sesam: secret %s was changed on both sides, merged state in revealed path.\n", revealedPath)
 	return nil
 }
 
@@ -210,7 +212,7 @@ func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
 	theirPath := cmd.StringArg("their-path")
 	conflictMarkerSize := cmd.IntArg("conflict-marker-size")
 
-	conflicts, err := repo.MergeAuditLog(
+	cr, err := repo.MergeAuditLog(
 		ctx,
 		root,
 		ids,
@@ -233,9 +235,7 @@ func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
 	// Even though we exit without error here (which git would normally take as "continue with merge commit")
 	// we rely on the pre-merge-commit hook to fail. This allows the user to handle conflicts he/she would have
 	// resolved differently.
-	if conflicts > 0 {
-		fmt.Fprintln(os.Stderr, "sesam: merged the audit log; some decisions may be worth reviewing (see the merge entry).")
-	}
+	fmt.Fprint(os.Stderr, mergeDriverSummary(cr.Resolutions))
 
 	return nil
 }
