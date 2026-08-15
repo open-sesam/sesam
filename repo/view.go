@@ -349,6 +349,37 @@ func (v *View) ConflictedSecrets() ([]string, error) {
 	return core.ConflictedSecrets(v.root, v.vstate.Secrets)
 }
 
+// noGitIntegrationWarningFile is the opt-out sentinel: if present under the
+// sesam dir, the "git integration not installed" nudge is suppressed.
+const noGitIntegrationWarningFile = ".sesam/no-git-integration-warning"
+
+// GitIntegrationInstalled reports whether `sesam init` has wired this checkout's
+// git integration at least once - i.e. any sesam-managed git-config entry is
+// present. A fresh clone that never ran init has none; that is the case the
+// load-time nudge targets (the integration lives in .git/config, which is not
+// cloned).
+func (v *View) GitIntegrationInstalled() (bool, error) {
+	checks, err := CheckGitConfig(v.sesamDir)
+	if err != nil {
+		return false, err
+	}
+
+	for _, c := range checks {
+		if c.Actual != "" {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// GitIntegrationNudgeSuppressed reports whether the user opted out of the
+// missing-integration nudge via the noGitIntegrationWarningFile sentinel.
+func (v *View) GitIntegrationNudgeSuppressed() bool {
+	_, err := v.root.Stat(noGitIntegrationWarningFile)
+	return err == nil
+}
+
 // GitAddDotSesam is equivalent to `git add .sesam`
 func (v *View) GitAddDotSesam() error {
 	v.mu.Lock()

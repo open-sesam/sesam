@@ -57,8 +57,34 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 			}
 			slog.Warn("close repo failed", slog.Any("error", closeErr))
 		}()
+
+		nudgeMissingGitIntegration(r)
+
 		return action(ctx, cmd, r)
 	}
+}
+
+// nudgeMissingGitIntegration prints a gentle hint when a repo is loaded whose
+// git integration was never wired up (the typical "cloned and forgot `sesam
+// init`" case). Best-effort: any check failure is logged, never fatal, so it can
+// never block a command.
+func nudgeMissingGitIntegration(r *repo.Repo) {
+	if r.GitIntegrationNudgeSuppressed() {
+		return
+	}
+
+	installed, err := r.GitIntegrationInstalled()
+	if err != nil {
+		slog.Debug("could not determine git integration status", slog.Any("err", err))
+		return
+	}
+	if installed {
+		return
+	}
+
+	slog.Info("git-integration is not installed - run `sesam init` to make sure it is available.")
+	slog.Info("if you prefer to run without then run `touch .sesam/no-git-integration-warning` to disable this warning.")
+	slog.Info("more info on this when you run `sesam doctor`.")
 }
 
 func askpassRequired() string {
