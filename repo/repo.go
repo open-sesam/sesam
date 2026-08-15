@@ -626,6 +626,11 @@ const (
 	SecretStateInSync
 	SecretStateNotInSync
 	SecretStateUnmanaged
+
+	// SecretStateConflicted marks a revealed secret whose plaintext still holds
+	// git conflict markers from a merge. git can't see it (the tracked object is
+	// ciphertext, the plaintext is gitignored), so sesam surfaces it here.
+	SecretStateConflicted
 )
 
 func (s SecretState) String() string {
@@ -643,6 +648,8 @@ func (s SecretState) String() string {
 		desc = "out_of_sync"
 	case SecretStateUnmanaged:
 		desc = "unmanaged"
+	case SecretStateConflicted:
+		desc = "conflicted"
 	default:
 		desc = "undefined"
 	}

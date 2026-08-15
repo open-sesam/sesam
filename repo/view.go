@@ -393,6 +393,17 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 		secretMap[v.vstate.Secrets[idx].RevealedPath] = &v.vstate.Secrets[idx]
 	}
 
+	// A revealed secret may carry unresolved merge markers - git can't see them,
+	// so flag them here (shown even without --all).
+	conflictedPaths, err := core.ConflictedSecrets(v.root, v.vstate.Secrets)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan for conflict markers: %w", err)
+	}
+	conflicted := make(map[string]bool, len(conflictedPaths))
+	for _, p := range conflictedPaths {
+		conflicted[p] = true
+	}
+
 	if !opts.IgnoreUnmanaged {
 		allPaths, err := v.cleanablePaths()
 		if err != nil {
@@ -435,6 +446,11 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 
 		if _, err := v.root.Stat(revealedPath); err != nil {
 			add(SecretStateNoRevealedPath)
+			continue
+		}
+
+		if conflicted[revealedPath] {
+			add(SecretStateConflicted)
 			continue
 		}
 

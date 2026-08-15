@@ -84,6 +84,8 @@ const colorDim = colorGrey
 // Glyphs are single-width on purpose so the tree's leading column stays aligned.
 func glyphFor(state repo.SecretState) (glyph, color string) {
 	switch state {
+	case repo.SecretStateConflicted:
+		return "U", colorRed // unmerged - conflict markers present
 	case repo.SecretStateNotInSync:
 		return "M", colorYellow // modified - needs seal
 	case repo.SecretStateNoSealedPath:
@@ -103,6 +105,7 @@ func glyphFor(state repo.SecretState) (glyph, color string) {
 
 // footerOrder fixes the order states appear in the summary line.
 var footerOrder = []repo.SecretState{
+	repo.SecretStateConflicted,
 	repo.SecretStateNotInSync,
 	repo.SecretStateNoSealedPath,
 	repo.SecretStateNoRevealedPath,

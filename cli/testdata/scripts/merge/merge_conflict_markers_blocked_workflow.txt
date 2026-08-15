@@ -42,6 +42,11 @@ stderr 'automatically merging revealed file db.txt; 1 conflict - please fix manu
 grep '^<<<<<<< ' db.txt
 grep '^>>>>>>> ' db.txt
 
+# `sesam status` surfaces the conflict even without --all (git cannot see it).
+exec sesam status
+stdout 'db.txt'
+stdout 'conflicted'
+
 # Finalizing without resolving the markers is refused - the seal would bake them
 # into the ciphertext, and git itself can't catch it.
 exec git add -A
