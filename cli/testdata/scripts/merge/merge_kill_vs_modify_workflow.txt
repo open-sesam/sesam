@@ -32,12 +32,15 @@ exec git checkout ours
 ! exec git merge theirs
 
 # The live merge driver explains the semantic merge and how to finalize.
-stderr 'both sides changed the audit log - doing a semantic merge'
+stderr 'both sides of the merge changed the audit log'
 stderr 'modified on our side but killed on theirs; kill wins'
-stderr 'then just run .git commit'
+stderr 'then run .git commit'
 
-# The merged log verifies and contains the kill (revocation won over ours' modify).
-exec sesam verify --verify-mode no-disk
+# Mid-merge, sesam assumes --verify-mode no-disk (the on-disk state is unsealed
+# until finalize) and stays quiet about the deferred seal, so a plain `sesam
+# verify` succeeds without the flag and without nagging.
+exec sesam verify
+! stderr 'seal is pending'
 exec sesam show .sesam/audit/log.jsonl
 stdout '"operation": "user.kill"'
 stdout '"operation": "merge"'

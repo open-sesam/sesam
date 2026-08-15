@@ -467,8 +467,11 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	}
 	r.auditLog = auditLog
 
+	// Disable a couple checks if we're mid-merge.
+	r.merging = InMerge(resolvedDir)
+
 	verifyFn := core.Verify
-	if opts.VerifyMode == VerifyModeNoDisk {
+	if opts.VerifyMode == VerifyModeNoDisk || r.merging {
 		verifyFn = core.VerifyChain
 	}
 

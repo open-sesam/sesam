@@ -44,9 +44,10 @@ func TestMergeDriverSummary(t *testing.T) {
 		{Action: core.MergeDropped, Reason: "user bob killed on theirs; kill wins"},
 	})
 
-	require.Contains(t, out, "sesam: both sides changed the audit log - doing a semantic merge:")
+	require.Contains(t, out, "sesam: both sides of the merge changed the audit log.")
+	require.Contains(t, out, "sesam: a list of automated decisions you might want to review follows:")
 	require.Contains(t, out, "sesam: - user bob killed on theirs; kill wins")
-	require.Contains(t, out, "sesam: If you are fine with the changes, then just run `git commit`.")
+	require.Contains(t, out, "then run `git commit`")
 	// Every line carries the sesam: prefix so it is distinguishable from git's.
 	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		require.True(t, strings.HasPrefix(line, "sesam:"), "line without prefix: %q", line)
@@ -54,5 +55,9 @@ func TestMergeDriverSummary(t *testing.T) {
 }
 
 func TestMergeDriverSummaryNoDecisions(t *testing.T) {
-	require.Contains(t, mergeDriverSummary(nil), "no conflicting decisions")
+	out := mergeDriverSummary(nil)
+	// The header still explains the semantic merge, but with nothing to review
+	// the decision list is omitted entirely.
+	require.Contains(t, out, "sesam: both sides of the merge changed the audit log.")
+	require.NotContains(t, out, "automated decisions you might want to review")
 }

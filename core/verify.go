@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"slices"
 )
 
@@ -951,17 +950,4 @@ func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 		keyring:           kr,
 		pluginUI:          s.pluginUI,
 	}
-}
-
-func (s *VerifiedState) Close() error {
-	// NOTE: Not a hard error for now, there might be valid reasons this happened.
-	// Could be that sesam was legit interrupted during operation.
-	if srs := s.SealRequiredSeqID; srs > 0 {
-		slog.Warn(
-			"verify: a seal is pending - please run `sesam seal` before committing!",
-			slog.Uint64("seq_id", srs),
-		)
-	}
-
-	return nil
 }

@@ -53,6 +53,6 @@ func mergeDriverSummary(resolutions []core.ConflictResolutionEntry) string {
 	b.WriteString("sesam:\n")
 	b.WriteString("sesam: please continue to resolve any conflicts mentioned above (if any) and then run `git commit`\n")
 	b.WriteString("sesam: in case you don't have the git integration installed run `sesam hook pre-commit` directly.\n")
-
+	b.WriteString("sesam: if you're unsure what this means, you can also abort the merge with `git merge --abort`.\n")
 	return b.String()
 }

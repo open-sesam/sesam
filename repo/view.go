@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -55,6 +56,11 @@ type View struct {
 	secret   *core.SecretManager
 	user     *core.UserManager
 
+	// merging records whether a git merge was in progress at load time. During a
+	// merge the on-disk state is intentionally unsealed until the finalize commit,
+	// so we verify no-disk and suppress the pending-seal nudge.
+	merging bool
+
 	config *sesamConf.Config
 }
 
@@ -88,8 +94,14 @@ func (v *View) closeState() error {
 		v.auditLog = nil
 	}
 	if v.vstate != nil {
-		if err := v.vstate.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close vstate: %w", err))
+		// A pending seal means unsealed changes sit on disk; nudge the user to
+		// seal before committing. Suppressed mid-merge, where the seal is
+		// intentionally deferred to the finalize pre-commit.
+		if srs := v.vstate.SealRequiredSeqID; srs > 0 && !v.merging {
+			slog.Warn(
+				"a seal is pending - please run `sesam seal` before committing!",
+				slog.Uint64("seq_id", srs),
+			)
 		}
 		v.vstate = nil
 	}
