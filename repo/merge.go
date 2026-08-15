@@ -283,24 +283,24 @@ func MergeTouchedSesam(sesamDir string) (bool, error) {
 	return false, fmt.Errorf("git diff for merge check: %w", err)
 }
 
-func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourPath, theirPath, originPath string, conflictMarkerSize int) (int, error) {
+func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourPath, theirPath, originPath string, conflictMarkerSize int) (*core.ConflictResolution, error) {
 	ourAuditLog, err := core.LoadAuditLogFromPath(ourPath, ids)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	defer func() { _ = ourAuditLog.Close() }()
 
 	theirAuditLog, err := core.LoadAuditLogFromPath(theirPath, ids)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	defer func() { _ = theirAuditLog.Close() }()
 
 	originAuditLog, err := core.LoadAuditLogFromPath(originPath, ids)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	defer func() { _ = originAuditLog.Close() }()
@@ -309,7 +309,7 @@ func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourP
 	// key: resolve which identity is us against ours' state, then load its key.
 	signer, err := resolveMergeSigner(root, ids, ourAuditLog)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	mergedAuditLog, cr, err := core.AuditMerge(
@@ -320,23 +320,27 @@ func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourP
 		nil, // no interactive plugin UI inside the merge driver (no TTY)
 	)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	// verify the log is correct before writing it back.
 	kr := core.EmptyKeyring()
 	if _, err := core.VerifyChain(mergedAuditLog, kr, nil); err != nil {
-		return 0, fmt.Errorf("verify merged audit log: %w", err)
+		return nil, fmt.Errorf("verify merged audit log: %w", err)
 	}
 
 	var mergedBuf bytes.Buffer
 	if err := mergedAuditLog.WriteEncrypted(&mergedBuf, core.AllRecipients(kr)); err != nil {
-		return 0, fmt.Errorf("serialize merged audit log: %w", err)
+		return nil, fmt.Errorf("serialize merged audit log: %w", err)
 	}
 
 	// TODO: We'd also need to adjust sesam.yml accordingly, otherwise we'd have a diff.
 	//       `sesam config reset` basically needs to be set once that feature has been build.
 
 	// merge driver should write back to %A (i.e. ourPath)
-	return cr.Conflicts, renameio.WriteFile(ourPath, mergedBuf.Bytes(), 0o600)
+	if err := renameio.WriteFile(ourPath, mergedBuf.Bytes(), 0o600); err != nil {
+		return nil, err
+	}
+
+	return cr, nil
 }

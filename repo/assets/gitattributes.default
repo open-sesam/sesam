@@ -2,3 +2,4 @@
 .sesam/objects/**/*.sesam  -text -merge merge=sesam-merge-secret{{.Suffix}} diff=sesam-diff{{.Suffix}}
 .sesam/audit/log.jsonl     -text -merge merge=sesam-merge-log{{.Suffix}}    diff=sesam-diff{{.Suffix}}
 .sesam/signkeys/**/*.age    binary merge=sesam-ours
+sesam.yml                          merge=sesam-ours
