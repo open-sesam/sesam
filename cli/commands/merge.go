@@ -113,7 +113,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 	)
 
 	if binary {
-		fmt.Fprintf(os.Stderr, "sesam: binary secret %s changed on both sides - cannot auto-merge; wrote %s.ours and %s.theirs.\n"+revealedPath, revealedPath, revealedPath)
+		fmt.Fprintf(os.Stderr, "sesam: binary secret %s changed on both sides - cannot auto-merge; wrote %s.ours and %s.theirs.\n", revealedPath, revealedPath, revealedPath)
 		fmt.Fprintf(os.Stderr, "sesam: copy the one you want over %s (and delete the .ours/.theirs), then commit.\n", revealedPath)
 		return &ExitCodeError{err: nil, print: false, code: 1}
 	}

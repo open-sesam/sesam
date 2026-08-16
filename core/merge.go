@@ -126,16 +126,19 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		return nil, nil, err
 	}
 
-	originContent := make(map[string]bool, len(origin.Entries))
+	originCounts := make(map[string]int, len(origin.Entries))
 	for i := range origin.Entries {
-		originContent[entryContentKey(&origin.Entries[i].AuditEntry)] = true
+		originCounts[entryContentKey(&origin.Entries[i].AuditEntry)]++
 	}
 
 	var theirsNew []AuditEntrySigned
 	for i := range theirs.Entries {
-		if !originContent[entryContentKey(&theirs.Entries[i].AuditEntry)] {
-			theirsNew = append(theirsNew, theirs.Entries[i])
+		key := entryContentKey(&theirs.Entries[i].AuditEntry)
+		if originCounts[key] > 0 {
+			originCounts[key]-- // absorbed by the base
+			continue
 		}
+		theirsNew = append(theirsNew, theirs.Entries[i])
 	}
 
 	originState, err := VerifyChain(origin, EmptyKeyring(), pluginUI)
@@ -296,6 +299,10 @@ func isMergeAdminKill(their *AuditEntrySigned, merger string) string {
 	case OpUserRegenerateSignKey:
 		if d, err := parseDetail[DetailUserRegenerateSignKey](their); err == nil && d.User == merger {
 			return "would re-key the merging admin " + merger + " mid-merge; kept ours"
+		}
+	case OpUserRename:
+		if d, err := parseDetail[DetailUserRename](their); err == nil && d.OldName == merger {
+			return "would rename the merging admin " + merger + " mid-merge; kept ours"
 		}
 	}
 
@@ -606,11 +613,21 @@ func resolveUserRmRecipients(their *AuditEntrySigned, merged *VerifiedState) (r 
 	}
 	defer func() { r.Target = d.User }()
 
-	if _, ok := merged.UserExists(d.User); !ok {
+	cur, ok := merged.UserExists(d.User)
+	if !ok {
 		return dropWith("user "+d.User+" gone; removal already satisfied", false)
 	}
 
-	return applyAs(their)
+	// If none of the keys are still present (e.g. our side already removed the same
+	// ones), the removal is a satisfied no-op - a dedupe, not a conflict.
+	present := stringSet(cur.Recps.Strings())
+	for _, pk := range d.PubKeys {
+		if present[pk.Key] {
+			return applyAs(their)
+		}
+	}
+
+	return dropWith("recipients of "+d.User+" already removed", false)
 }
 
 // resolveSecretAdd: an add of the same path dedupes; differing access is a
@@ -834,19 +851,32 @@ func isMarkerLine(line []byte, c byte) bool {
 	return n == len(line) || line[n] == ' '
 }
 
-// ConflictedSecrets returns the revealed paths whose plaintext still carries git
-// conflict markers left by the secret merge driver. Sealing such a file would
-// encrypt the markers into the object - and revealed files are gitignored, so git
-// itself never flags them - so the merge finalize must refuse until they are
-// resolved.
-func ConflictedSecrets(root *os.Root, secrets []VerifiedSecret) ([]string, error) {
-	var conflicted []string
+// ConflictedSecret is a revealed secret a merge left unresolved: Binary means the
+// two sides were written out as .ours/.theirs side files (no in-file markers to
+// scan); otherwise the revealed plaintext still carries git conflict markers.
+type ConflictedSecret struct {
+	Path   string
+	Binary bool
+}
+
+// ConflictedSecrets returns the secrets a merge left unresolved. git can't flag
+// either kind (revealed files are gitignored, the object is ciphertext), so the
+// finalize must refuse until they are resolved - sealing a marker'd file, or one
+// with side files still present, would bake the conflict into the object.
+func ConflictedSecrets(root *os.Root, secrets []VerifiedSecret) ([]ConflictedSecret, error) {
+	var conflicted []ConflictedSecret
 	for _, s := range secrets {
+		// A binary conflict has no markers; the driver leaves .ours/.theirs beside
+		// the revealed file for manual resolution.
+		if hasSideFile(root, s.RevealedPath+".ours") && hasSideFile(root, s.RevealedPath+".theirs") {
+			conflicted = append(conflicted, ConflictedSecret{Path: s.RevealedPath, Binary: true})
+			continue
+		}
+
 		fd, err := root.Open(s.RevealedPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				// Not revealed on disk - nothing to seal, nothing to check.
-				continue
+				continue // not revealed on disk - nothing to seal, nothing to check
 			}
 			return nil, fmt.Errorf("open revealed %s: %w", s.RevealedPath, err)
 		}
@@ -858,9 +888,14 @@ func ConflictedSecrets(root *os.Root, secrets []VerifiedSecret) ([]string, error
 		}
 
 		if has {
-			conflicted = append(conflicted, s.RevealedPath)
+			conflicted = append(conflicted, ConflictedSecret{Path: s.RevealedPath})
 		}
 	}
 
 	return conflicted, nil
+}
+
+func hasSideFile(root *os.Root, path string) bool {
+	_, err := root.Stat(path)
+	return err == nil
 }

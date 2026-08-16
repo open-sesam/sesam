@@ -272,11 +272,18 @@ func TestResolveTheirs(t *testing.T) {
 			wantAction: MergeDropped,
 		},
 		{
-			name:       "rm-recipients from a live user applies",
-			their:      signed("admin", &DetailUserRmRecipients{User: "bob"}),
-			merged:     userState(VerifiedUser{Name: "bob"}),
+			name:       "rm-recipients of a present key applies",
+			their:      signed("admin", &DetailUserRmRecipients{User: "bob", PubKeys: []UserPubKey{{Key: alice.Recipient.String()}}}),
+			merged:     userState(VerifiedUser{Name: "bob", Recps: Recipients{alice.Recipient}}),
 			base:       userState(),
 			wantAction: MergeApplied,
+		},
+		{
+			name:       "rm-recipients of an already-gone key is a no-op",
+			their:      signed("admin", &DetailUserRmRecipients{User: "bob", PubKeys: []UserPubKey{{Key: alice.Recipient.String()}}}),
+			merged:     userState(VerifiedUser{Name: "bob"}),
+			base:       userState(),
+			wantAction: MergeDropped,
 		},
 		{
 			name:       "rm-recipients from a gone user is a satisfied no-op",
@@ -694,6 +701,59 @@ func TestAuditMergeDroppedRenameOrphansDependents(t *testing.T) {
 	require.ElementsMatch(t, []string{"dev"}, u.Groups, "theirs' change-groups must not hit our unrelated bob")
 
 	rec, ok := findResolution(cr, OpUserChangeGroups)
+	require.True(t, ok)
+	require.Equal(t, MergeDropped, rec.Action)
+}
+
+// TestAuditMergeReissuedKillNotDropped pins Finding 1: the base-diff must be a
+// multiset. origin killed then re-added zoe (so a "kill zoe" already exists in the
+// base history); theirs re-issues "kill zoe" as a genuine new revocation, which
+// must NOT be absorbed by the base occurrence.
+func TestAuditMergeReissuedKillNotDropped(t *testing.T) {
+	base, admin, _ := mergeBase(t)
+	zoe := newTestUser(t, "zoe")
+	tell1 := zoe.DetailUserTell([]string{"dev"})
+	feed(t, base, admin.Signer, "admin", &tell1)
+	feed(t, base, admin.Signer, "admin", &DetailUserKill{User: "zoe"})
+	tell2 := zoe.DetailUserTell([]string{"dev"})
+	feed(t, base, admin.Signer, "admin", &tell2) // zoe present at origin tip
+
+	ours := cloneLog(base)
+	feed(t, ours, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+
+	theirs := cloneLog(base)
+	feed(t, theirs, admin.Signer, "admin", &DetailUserKill{User: "zoe"}) // genuine new revocation
+
+	merged, _, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
+	require.NoError(t, err)
+	state, err := VerifyChain(merged, EmptyKeyring(), nil)
+	require.NoError(t, err)
+	_, ok := state.UserExists("zoe")
+	require.False(t, ok, "theirs' re-issued kill of zoe must survive the base-diff")
+}
+
+// TestAuditMergePreservesMergerRename pins Finding 2: theirs renaming the merging
+// admin must be dropped, not applied - applying it would strand the terminal merge
+// entry (authored under the old name) and abort the whole merge.
+func TestAuditMergePreservesMergerRename(t *testing.T) {
+	base, admin, _ := mergeBase(t)
+
+	ours := cloneLog(base)
+	feed(t, ours, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+
+	theirs := cloneLog(base)
+	feed(t, theirs, admin.Signer, "admin", &DetailUserRename{OldName: "admin", NewName: "root"})
+
+	merged, cr, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
+	require.NoError(t, err, "renaming the merger must not abort the merge")
+
+	state, err := VerifyChain(merged, EmptyKeyring(), nil)
+	require.NoError(t, err)
+	u, ok := state.UserExists("admin")
+	require.True(t, ok, "the merging admin must survive")
+	require.True(t, u.IsAdmin())
+
+	rec, ok := findResolution(cr, OpUserRename)
 	require.True(t, ok)
 	require.Equal(t, MergeDropped, rec.Action)
 }

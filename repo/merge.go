@@ -47,9 +47,20 @@ func runGitMerge(ctx context.Context, revealedPath, ourPath, theirPath, originPa
 		return nil, 0, fmt.Errorf("run git merge-file: %w", err)
 	}
 
-	// exits with 0 (no conflicts), <0 (error) or 1-128 (number of conflicts)
-	// or >128 (some other error, most likely due to an unmergeable binary file)
-	switch code := cmd.ProcessState.ExitCode(); {
+	// A cancelled or signal-killed process is a hard error, not a merge result -
+	// don't let its -1 exit fall through and read as a "binary" refusal.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, 0, fmt.Errorf("git merge-file: %w", ctxErr)
+	}
+	ps := cmd.ProcessState
+	if ps == nil || !ps.Exited() {
+		return nil, 0, fmt.Errorf("git merge-file did not exit normally: %w: %s", err, strings.TrimSpace(errBuf.String()))
+	}
+
+	// git merge-file exits 0 (clean) or a small conflict count (git caps it below
+	// 128). Anything else on the valid temp files we pass is its "Cannot merge
+	// binary files" refusal - defer to git's own decision.
+	switch code := ps.ExitCode(); {
 	case code == 0:
 		return bytes.NewReader(buf.Bytes()), 0, nil
 	case code > 0 && code < 128:

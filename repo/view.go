@@ -333,12 +333,11 @@ func (v *View) Log(fn func(e *core.AuditEntrySigned) error) error {
 	return nil
 }
 
-// ConflictedSecrets returns revealed secret files that still carry git conflict
-// markers (left by the secret merge driver when both sides changed the same
-// region). Sealing them would encrypt the markers into the object, so the merge
-// finalize must stop until they are resolved. git cannot catch this itself:
-// revealed files are gitignored and the tracked object is ciphertext.
-func (v *View) ConflictedSecrets() ([]string, error) {
+// ConflictedSecrets returns the secrets a merge left unresolved - text (in-file
+// conflict markers) and binary (.ours/.theirs side files) alike, each tagged via
+// ConflictedSecret.Binary. git cannot catch either (revealed files are gitignored,
+// the object is ciphertext), so the finalize must stop until they are resolved.
+func (v *View) ConflictedSecrets() ([]core.ConflictedSecret, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -347,19 +346,6 @@ func (v *View) ConflictedSecrets() ([]string, error) {
 	}
 
 	return core.ConflictedSecrets(v.root, v.vstate.Secrets)
-}
-
-// hasBinaryConflictSides reports whether both .ours and .theirs side files exist
-// for a revealed secret - the marker a binary merge conflict leaves behind (it
-// has no in-file conflict markers to scan for).
-func (v *View) hasBinaryConflictSides(revealedPath string) bool {
-	if _, err := v.root.Stat(revealedPath + ".ours"); err != nil {
-		return false
-	}
-	if _, err := v.root.Stat(revealedPath + ".theirs"); err != nil {
-		return false
-	}
-	return true
 }
 
 // noGitIntegrationWarningFile is the opt-out sentinel: if present under the
@@ -437,26 +423,19 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 		secretMap[v.vstate.Secrets[idx].RevealedPath] = &v.vstate.Secrets[idx]
 	}
 
-	// A revealed secret may carry unresolved merge markers - git can't see them,
-	// so flag them here (shown even without --all).
-	conflictedPaths, err := core.ConflictedSecrets(v.root, v.vstate.Secrets)
+	// Unresolved merge conflicts (text markers or binary .ours/.theirs) - git can't
+	// see them, so flag the parent secret here (shown even without --all). The
+	// binary set also hides the side files from the unmanaged listing below.
+	conflictedSecrets, err := core.ConflictedSecrets(v.root, v.vstate.Secrets)
 	if err != nil {
-		return nil, fmt.Errorf("failed to scan for conflict markers: %w", err)
+		return nil, fmt.Errorf("failed to scan for merge conflicts: %w", err)
 	}
-	conflicted := make(map[string]bool, len(conflictedPaths))
-	for _, p := range conflictedPaths {
-		conflicted[p] = true
-	}
-
-	// A binary secret that conflicted has no in-file markers; the driver wrote
-	// <path>.ours and <path>.theirs beside the revealed file instead. Detect that
-	// so the parent secret is flagged (and the side files are not listed as stray
-	// unmanaged files).
+	conflicted := make(map[string]bool, len(conflictedSecrets))
 	binaryConflicts := make(map[string]bool)
-	for i := range v.vstate.Secrets {
-		p := v.vstate.Secrets[i].RevealedPath
-		if v.hasBinaryConflictSides(p) {
-			binaryConflicts[p] = true
+	for _, c := range conflictedSecrets {
+		conflicted[c.Path] = true
+		if c.Binary {
+			binaryConflicts[c.Path] = true
 		}
 	}
 

@@ -74,9 +74,17 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 				return err
 			}
 			if len(conflicted) > 0 {
+				var lines []string
+				for _, c := range conflicted {
+					if c.Binary {
+						lines = append(lines, "  "+c.Path+" (binary): copy its .ours or .theirs over it, then delete the side files")
+					} else {
+						lines = append(lines, "  "+c.Path+": resolve the conflict markers in the revealed file")
+					}
+				}
 				return fmt.Errorf(
-					"unresolved merge conflict markers in: %s\nresolve them in the revealed file(s), then run `git commit` again",
-					strings.Join(conflicted, ", "),
+					"unresolved merge conflicts:\n%s\nfix them, then run `git commit` again",
+					strings.Join(lines, "\n"),
 				)
 			}
 		}
