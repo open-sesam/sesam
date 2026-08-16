@@ -47,13 +47,14 @@ managers](https://opensesam.org/docs/alternatives.html).
 - Imperative (CLI) and declarative (Config) workflows are supported.
 - Simple modern deployment with a static binary.
 - Highly scriptable and even usable as Go library.
+- Allow merging of git branches due to smart git driver.
 
 ## Planned features
 
 - Declarative `sesam apply` workflow.
 - Rotation and exchange of secrets.
 - Better support for env-file based workflows.
-- Allow merging of git branches with secrets in them.
+- Password manager like features.
 - Possibly also a TUI.
 
 # Quickstart Links
