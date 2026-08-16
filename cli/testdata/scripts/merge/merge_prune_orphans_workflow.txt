@@ -1,0 +1,40 @@
+# A merge that kills a user and removes a secret must leave no orphans: the killed
+# user's signkey and the removed secret's object are gone after finalize, while an
+# unrelated user added on our side survives.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec sh -c 'printf "secret\n" > gone.txt'
+exec sesam add gone.txt --group admin
+exec git add -A
+exec git commit -m 'add bob and a secret'
+exists .sesam/signkeys/bob.age
+exists .sesam/objects/gone.txt.sesam
+
+# OURS adds carol (log divergence); THEIRS kills bob and removes the secret.
+exec git checkout -b ours
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'ours: add carol'
+
+exec git checkout -b theirs ours~1
+exec sesam kill --user bob
+exec sesam rm gone.txt
+exec git add -A
+exec git commit -m 'theirs: kill bob, rm secret'
+
+exec git checkout ours
+! exec git merge theirs
+exec git commit --no-edit
+
+exec sesam verify
+! exists .sesam/signkeys/bob.age
+! exists .sesam/objects/gone.txt.sesam
+exists .sesam/signkeys/carol.age

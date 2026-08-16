@@ -1,0 +1,36 @@
+# Both branches change the SAME secret's access groups disjointly. The audit-log
+# driver three-way delta-merges the access set; both groups survive and it verifies.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec sh -c 'printf "secret\n" > app.env'
+exec sesam add app.env --group admin
+exec git add -A
+exec git commit -m 'add secret'
+
+# OURS grants ops; THEIRS grants sec (both are change_access on app.env).
+exec git checkout -b ours
+exec sesam add app.env --group-add ops
+exec git add -A
+exec git commit -m 'ours: +ops'
+
+exec git checkout -b theirs ours~1
+exec sesam add app.env --group-add sec
+exec git add -A
+exec git commit -m 'theirs: +sec'
+
+exec git checkout ours
+! exec git merge theirs
+exec git commit --no-edit
+
+# The delta-merged access set keeps both grants and the log verifies.
+exec sesam verify
+exec sesam ls app.env
+stdout 'ops'
+stdout 'sec'

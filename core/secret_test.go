@@ -495,3 +495,28 @@ func TestContentHashChangesOnReseal(t *testing.T) {
 	require.NotEqual(t, first.HMACContentHash, second.HMACContentHash,
 		"fresh age file key per seal must change the keyed hash (equality hiding)")
 }
+
+func TestPruneOrphanObjects(t *testing.T) {
+	root, err := os.OpenRoot(t.TempDir())
+	require.NoError(t, err)
+	defer func() { _ = root.Close() }()
+
+	require.NoError(t, root.MkdirAll(".sesam/objects/sub", 0o700))
+	for _, p := range []string{"db.sesam", "api.sesam", "sub/x.sesam"} {
+		f, err := root.Create(".sesam/objects/" + p)
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+	}
+
+	// keep db and the nested sub/x; api is an orphan.
+	pruned, err := PruneOrphanObjects(root, "", map[string]bool{"db": true, "sub/x": true})
+	require.NoError(t, err)
+	require.Equal(t, []string{"api"}, pruned)
+
+	_, err = root.Stat(".sesam/objects/api.sesam")
+	require.True(t, os.IsNotExist(err), "orphan object must be removed")
+	_, err = root.Stat(".sesam/objects/db.sesam")
+	require.NoError(t, err)
+	_, err = root.Stat(".sesam/objects/sub/x.sesam")
+	require.NoError(t, err, "kept nested object must remain")
+}
