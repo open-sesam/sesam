@@ -171,6 +171,119 @@ func TestResolveTheirs(t *testing.T) {
 			base:       secretState(),
 			wantAction: MergeDropped,
 		},
+
+		// --- change_access (was entirely untested) ---
+		{
+			name:       "change_access delta-merges divergent sets",
+			their:      signed("admin", &DetailSecretChangeAccess{RevealedPath: "s/db", AccessGroups: []string{"dev", "sec"}}),
+			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev", "ops"}}),
+			base:       secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			wantAction: MergeRewritten,
+		},
+		{
+			name:       "change_access already covered by ours is dropped",
+			their:      signed("admin", &DetailSecretChangeAccess{RevealedPath: "s/db", AccessGroups: []string{"dev"}}),
+			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev", "ops"}}),
+			base:       secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			wantAction: MergeDropped,
+		},
+		{
+			name:       "change_access equal to theirs applies",
+			their:      signed("admin", &DetailSecretChangeAccess{RevealedPath: "s/db", AccessGroups: []string{"dev", "ops"}}),
+			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			base:       secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			wantAction: MergeApplied,
+		},
+		{
+			name:       "change_access on removed secret is dropped",
+			their:      signed("admin", &DetailSecretChangeAccess{RevealedPath: "s/db", AccessGroups: []string{"dev"}}),
+			merged:     secretState(),
+			base:       secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			wantAction: MergeDropped,
+		},
+
+		// --- secret remove / add conflict branches ---
+		{
+			name:       "remove wins over concurrent access change",
+			their:      signed("admin", &DetailSecretRemove{RevealedPath: "s/db"}),
+			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev", "ops"}}),
+			base:       secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			wantAction: MergeApplied,
+		},
+		{
+			name:       "add of same path with different access keeps ours",
+			their:      signed("admin", &DetailSecretAdd{RevealedPath: "s/db", AccessGroups: []string{"ops"}}),
+			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			base:       secretState(),
+			wantAction: MergeDropped,
+		},
+		{
+			name:       "add of same path with same access dedupes",
+			their:      signed("admin", &DetailSecretAdd{RevealedPath: "s/db", AccessGroups: []string{"dev"}}),
+			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			base:       secretState(),
+			wantAction: MergeDropped,
+		},
+
+		// --- secret move / rename / regen apply branches ---
+		{
+			name:       "move to a free path applies",
+			their:      signed("admin", &DetailSecretMove{OldRevealedPath: "s/db", NewRevealedPath: "s/new"}),
+			merged:     secretState(VerifiedSecret{RevealedPath: "s/db"}),
+			base:       secretState(),
+			wantAction: MergeApplied,
+		},
+		{
+			name:       "move with vanished source is dropped",
+			their:      signed("admin", &DetailSecretMove{OldRevealedPath: "s/db", NewRevealedPath: "s/new"}),
+			merged:     secretState(),
+			base:       secretState(),
+			wantAction: MergeDropped,
+		},
+		{
+			name:       "rename to a free name applies",
+			their:      signed("admin", &DetailUserRename{OldName: "bob", NewName: "carol"}),
+			merged:     userState(VerifiedUser{Name: "bob"}),
+			base:       userState(),
+			wantAction: MergeApplied,
+		},
+		{
+			name:       "regen applies when ours has not rotated",
+			their:      signed("admin", &DetailUserRegenerateSignKey{User: "bob", NewSignPubKey: "their-key"}),
+			merged:     userState(VerifiedUser{Name: "bob", SignPubKey: "base-key"}),
+			base:       userState(VerifiedUser{Name: "bob", SignPubKey: "base-key"}),
+			wantAction: MergeApplied,
+		},
+
+		// --- recipient add / remove (were untested) ---
+		{
+			name:       "add-recipients to a live user applies",
+			their:      signed("admin", &DetailUserAddRecipients{User: "bob"}),
+			merged:     userState(VerifiedUser{Name: "bob"}),
+			base:       userState(),
+			wantAction: MergeApplied,
+		},
+		{
+			name:       "add-recipients to a gone user is dropped",
+			their:      signed("admin", &DetailUserAddRecipients{User: "bob"}),
+			merged:     userState(),
+			base:       userState(),
+			wantAction: MergeDropped,
+		},
+		{
+			name:       "rm-recipients from a live user applies",
+			their:      signed("admin", &DetailUserRmRecipients{User: "bob"}),
+			merged:     userState(VerifiedUser{Name: "bob"}),
+			base:       userState(),
+			wantAction: MergeApplied,
+		},
+		{
+			name:       "rm-recipients from a gone user is a satisfied no-op",
+			their:      signed("admin", &DetailUserRmRecipients{User: "bob"}),
+			merged:     userState(),
+			base:       userState(),
+			wantAction: MergeDropped,
+		},
 	}
 
 	for _, tt := range tests {
@@ -384,4 +497,36 @@ func TestAuditMergeZeroAdminDeclined(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, MergeDropped, rec.Action)
 	require.Contains(t, rec.Reason, "last admin")
+}
+
+// TestAuditMergeRevertedTwinIsNotDropped documents the base-detection bug (review
+// finding #1): "theirs' new entries" are found by content-key membership over ALL
+// of ours' history, not a base-relative tail diff. When ours performs then reverts
+// a change and theirs makes that same change for real, theirs' entry matches a
+// SUPERSEDED ours entry and is dropped before any resolver runs - so theirs'
+// change is silently lost.
+//
+// Here ours adds then removes "ops" (net [dev]); theirs adds "ops" (net [dev,ops]).
+// Correct three-way merge keeps "ops" (ours made no net change vs base). This test
+// FAILS until base detection is made base-relative.
+func TestAuditMergeRevertedTwinIsNotDropped(t *testing.T) {
+	base, admin, _ := mergeBase(t) // bob starts in [dev]
+
+	ours := cloneLog(base)
+	feed(t, ours, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+	feed(t, ours, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev"}})
+
+	theirs := cloneLog(base)
+	feed(t, theirs, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+
+	merged, _, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
+	require.NoError(t, err)
+
+	state, err := VerifyChain(merged, EmptyKeyring(), nil)
+	require.NoError(t, err)
+
+	u, ok := state.UserExists("bob")
+	require.True(t, ok)
+	require.ElementsMatch(t, []string{"dev", "ops"}, u.Groups,
+		"theirs added ops and ours made no net change vs base; merge must keep ops")
 }
