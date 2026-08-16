@@ -62,6 +62,15 @@ func runGitMerge(ctx context.Context, revealedPath, ourPath, theirPath, originPa
 // errBinaryMerge marks git merge-file refusing to line-merge (binary content).
 var errBinaryMerge = errors.New("cannot line-merge (binary content)")
 
+// decryptBaseToBuf decrypts the merge base (%O), tolerating an empty file: for an
+// add/add of the same path there is no common ancestor, so git hands us a 0-byte base.
+func decryptBaseToBuf(path string, ids []age.Identity) (*bytes.Buffer, error) {
+	if info, err := os.Stat(path); err == nil && info.Size() == 0 {
+		return &bytes.Buffer{}, nil
+	}
+	return decryptSecretToBuf(path, ids)
+}
+
 func decryptSecretToBuf(path string, ids []age.Identity) (*bytes.Buffer, error) {
 	var buf bytes.Buffer
 
@@ -129,7 +138,7 @@ func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, reveal
 
 	// Decrypt all three sides up front; the plaintext feeds the text merge and, on
 	// a binary refusal, the .ours/.theirs side files.
-	originBuf, err := decryptSecretToBuf(originPath, ageIds)
+	originBuf, err := decryptBaseToBuf(originPath, ageIds)
 	if err != nil {
 		return 0, false, fmt.Errorf("decrypt origin side of %s: %w", revealedPath, err)
 	}
