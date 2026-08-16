@@ -17,12 +17,8 @@ import (
 	"opensesam.org/sesam/core"
 )
 
-// runGitMerge line-merges the three decrypted sides via `git merge-file`. The
-// three file arguments must be absolute paths: git runs the merge driver from
-// the worktree root, which for a nested sesam dir is not the sesam dir, so
-// sesam-relative paths would not resolve. conflictStyle and diff algorithm are
-// read by git merge-file from the inherited repo config; only the per-path
-// marker size (git's %L) has to be forwarded explicitly.
+// runGitMerge line-merges the three decrypted sides via `git merge-file`.
+// The three file arguments must be absolute paths!
 func runGitMerge(ctx context.Context, revealedPath, ourPath, theirPath, originPath string, conflictMarkerSize int) (io.Reader, int, error) {
 	//nolint:gosec // fixed git subcommand; the path args are sesam-controlled tmp files.
 	cmd := exec.CommandContext(
@@ -39,9 +35,9 @@ func runGitMerge(ctx context.Context, revealedPath, ourPath, theirPath, originPa
 		theirPath,
 	)
 
-	var buf bytes.Buffer
+	var buf, errBuf bytes.Buffer
 	cmd.Stdout = &buf
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = &errBuf
 
 	err := cmd.Run()
 
@@ -51,18 +47,20 @@ func runGitMerge(ctx context.Context, revealedPath, ourPath, theirPath, originPa
 		return nil, 0, fmt.Errorf("run git merge-file: %w", err)
 	}
 
-	// exits with 0 (no conflicts), <0 (error) or >0 (number of conflicts)
+	// exits with 0 (no conflicts), <0 (error) or 1-128 (number of conflicts)
+	// or >128 (some other error, most likely due to an unmergeable binary file)
 	switch code := cmd.ProcessState.ExitCode(); {
 	case code == 0:
 		return bytes.NewReader(buf.Bytes()), 0, nil
-	case code < 0:
-		return nil, 0, fmt.Errorf("git merge-file failed: %w", err)
-	case code > 0:
+	case code > 0 && code < 128:
 		return bytes.NewReader(buf.Bytes()), code, nil
 	default:
-		return nil, 0, fmt.Errorf("unreachable")
+		return nil, 0, fmt.Errorf("%w: git merge-file exit %d: %s", errBinaryMerge, code, strings.TrimSpace(errBuf.String()))
 	}
 }
+
+// errBinaryMerge marks git merge-file refusing to line-merge (binary content).
+var errBinaryMerge = errors.New("cannot line-merge (binary content)")
 
 func decryptSecretToBuf(path string, ids []age.Identity) (*bytes.Buffer, error) {
 	var buf bytes.Buffer
@@ -116,39 +114,63 @@ func writeSecretTmpBuf(root *os.Root, buf *bytes.Buffer, revealedPath, tag strin
 	return tmpPath, nil
 }
 
-func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, revealedPath, ourPath, theirPath, originPath string, conflictMarkerSize int) (int, error) {
+// MergeSecret three-way merges one secret's decrypted content into its revealed
+// file. It returns the number of text conflicts; `binary` is true when the secret
+// is binary and could not be line-merged (both sides were written out beside the
+// revealed file for manual resolution).
+func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, revealedPath, ourPath, theirPath, originPath string, conflictMarkerSize int) (conflicts int, binary bool, err error) {
+	lock, err := TryAcquireMergeLock(root.Name())
+	if err != nil {
+		return 0, false, err
+	}
+	defer func() { _ = lock.Unlock() }()
+
 	ageIds := ids.AgeIdentities()
 
-	// stage decrypts one side to a tmp file under .sesam/tmp and returns both
-	// its sesam-relative path (for root-relative cleanup) and its absolute path
-	// (git merge-file runs from the worktree root and needs a resolvable path).
-	stage := func(tag, blobPath string) (relPath, absPath string, err error) {
-		buf, err := decryptSecretToBuf(blobPath, ageIds)
-		if err != nil {
-			return "", "", fmt.Errorf("decrypt %s side of %s: %w", tag, revealedPath, err)
-		}
+	// Decrypt all three sides up front; the plaintext feeds the text merge and, on
+	// a binary refusal, the .ours/.theirs side files.
+	originBuf, err := decryptSecretToBuf(originPath, ageIds)
+	if err != nil {
+		return 0, false, fmt.Errorf("decrypt origin side of %s: %w", revealedPath, err)
+	}
+	ourBuf, err := decryptSecretToBuf(ourPath, ageIds)
+	if err != nil {
+		return 0, false, fmt.Errorf("decrypt ours side of %s: %w", revealedPath, err)
+	}
+	theirBuf, err := decryptSecretToBuf(theirPath, ageIds)
+	if err != nil {
+		return 0, false, fmt.Errorf("decrypt theirs side of %s: %w", revealedPath, err)
+	}
 
+	// Snapshot the two sides before staging drains their buffers - needed for the
+	// .ours/.theirs side files if the content turns out to be binary.
+	ourBytes := bytes.Clone(ourBuf.Bytes())
+	theirBytes := bytes.Clone(theirBuf.Bytes())
+
+	// stageBuf writes a decrypted side to a tmp file under .sesam/tmp and returns
+	// its sesam-relative path (for cleanup) and absolute path (git merge-file runs
+	// from the worktree root and needs a resolvable path).
+	stageBuf := func(tag string, buf *bytes.Buffer) (relPath, absPath string, err error) {
 		rel, err := writeSecretTmpBuf(root, buf, revealedPath, tag)
 		if err != nil {
 			return "", "", fmt.Errorf("stage %s side of %s: %w", tag, revealedPath, err)
 		}
-
 		return rel, filepath.Join(root.Name(), rel), nil
 	}
 
-	originRel, originAbs, err := stage("origin", originPath)
+	originRel, originAbs, err := stageBuf("origin", originBuf)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
-	ourRel, ourAbs, err := stage("ours", ourPath)
+	ourRel, ourAbs, err := stageBuf("ours", ourBuf)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
-	theirRel, theirAbs, err := stage("theirs", theirPath)
+	theirRel, theirAbs, err := stageBuf("theirs", theirBuf)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	// The decrypted sides are only needed for the merge itself; drop the
@@ -167,30 +189,63 @@ func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, reveal
 		originAbs,
 		conflictMarkerSize,
 	)
+	if errors.Is(err, errBinaryMerge) {
+		// git itself refuses to line-merge binary content. Keep ours as the revealed
+		// value and write both decrypted sides beside it for manual resolution.
+		if err := writeRevealedFile(root, revealedPath+".ours", ourBytes); err != nil {
+			return 0, false, err
+		}
+		if err := writeRevealedFile(root, revealedPath+".theirs", theirBytes); err != nil {
+			return 0, false, err
+		}
+		if err := writeRevealedFile(root, revealedPath, ourBytes); err != nil {
+			return 0, false, err
+		}
+		return 0, true, nil
+	}
 	if err != nil {
-		return 0, fmt.Errorf("merge %s: %w", revealedPath, err)
+		return 0, false, fmt.Errorf("merge %s: %w", revealedPath, err)
+	}
+
+	buf := new(bytes.Buffer)
+	if _, err := io.Copy(buf, mergedReader); err != nil {
+		return 0, false, fmt.Errorf("read merged %s: %w", revealedPath, err)
+	}
+	if err := writeRevealedFile(root, revealedPath, buf.Bytes()); err != nil {
+		return 0, false, err
+	}
+
+	return conflicts, false, nil
+}
+
+// writeRevealedFile atomically writes data to a revealed (root-relative) path.
+func writeRevealedFile(root *os.Root, relPath string, data []byte) error {
+	if dir := filepath.Dir(relPath); dir != "." {
+		if err := root.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create dir for %s: %w", relPath, err)
+		}
 	}
 
 	fd, err := renameio.NewPendingFile(
-		revealedPath,
+		relPath,
 		renameio.WithRoot(root),
 		renameio.WithTempDir(".sesam/tmp"),
 		renameio.WithPermissions(0o600),
 	)
 	if err != nil {
-		return 0, fmt.Errorf("create pending file %s: %w", revealedPath, err)
+		return fmt.Errorf("create pending file %s: %w", relPath, err)
 	}
 
-	if _, err := io.Copy(fd, mergedReader); err != nil {
+	if _, err := fd.Write(data); err != nil {
 		_ = fd.Cleanup()
-		return 0, fmt.Errorf("write merged %s: %w", revealedPath, err)
+		return fmt.Errorf("write %s: %w", relPath, err)
 	}
 
 	if err := fd.CloseAtomicallyReplace(); err != nil {
-		return 0, fmt.Errorf("finalize merged %s: %w", revealedPath, err)
+		return fmt.Errorf("finalize %s: %w", relPath, err)
 	}
 
-	return conflicts, nil
+	return nil
 }
 
 // resolveMergeSigner finds which of the caller's identities is the merging user
@@ -284,6 +339,12 @@ func MergeTouchedSesam(sesamDir string) (bool, error) {
 }
 
 func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourPath, theirPath, originPath string, conflictMarkerSize int) (*core.ConflictResolution, error) {
+	lock, err := TryAcquireMergeLock(root.Name())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lock.Unlock() }()
+
 	ourAuditLog, err := core.LoadAuditLogFromPath(ourPath, ids)
 	if err != nil {
 		return nil, err

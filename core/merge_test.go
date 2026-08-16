@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"crypto/rand"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -496,7 +497,9 @@ func TestAuditMergeZeroAdminDeclined(t *testing.T) {
 	rec, ok := findResolution(cr, OpUserKill)
 	require.True(t, ok)
 	require.Equal(t, MergeDropped, rec.Action)
-	require.Contains(t, rec.Reason, "last admin")
+	// theirs kills the merger, which the merger-preserve rule declines first (it
+	// front-runs the generic last-admin guard). Either way the merge keeps an admin.
+	require.Contains(t, rec.Reason, "merging admin")
 }
 
 // TestAuditMergeRevertedTwinIsNotDropped guards the base-relative new-entry
@@ -527,4 +530,100 @@ func TestAuditMergeRevertedTwinIsNotDropped(t *testing.T) {
 	require.True(t, ok)
 	require.ElementsMatch(t, []string{"dev", "ops"}, u.Groups,
 		"theirs added ops and ours made no net change vs base; merge must keep ops")
+}
+
+// TestAuditMergePreservesMerger checks that theirs' kill of the merging admin is
+// dropped (not applied), so the merge completes instead of aborting mid-replay
+// when the merger re-signs the terminal record. The merger must always survive.
+func TestAuditMergePreservesMerger(t *testing.T) {
+	base, admin, _ := mergeBase(t)
+
+	// A second admin exists so the kill is not blocked by the last-admin guard -
+	// it must be blocked specifically because the target is the merger.
+	carol := newTestUser(t, "carol")
+	carolTell := carol.DetailUserTell([]string{"admin"})
+	feed(t, base, admin.Signer, "admin", &carolTell)
+
+	ours := cloneLog(base)
+	feed(t, ours, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+
+	theirs := cloneLog(base)
+	feed(t, theirs, carol.Signer, "carol", &DetailUserKill{User: "admin"}) // theirs removes the merger
+
+	merged, cr, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
+	require.NoError(t, err, "merge must not abort when theirs kills the merger")
+
+	state, err := VerifyChain(merged, EmptyKeyring(), nil)
+	require.NoError(t, err)
+
+	u, ok := state.UserExists("admin")
+	require.True(t, ok, "the merging admin must survive the merge")
+	require.True(t, u.IsAdmin())
+
+	rec, ok := findResolution(cr, OpUserKill)
+	require.True(t, ok)
+	require.Equal(t, MergeDropped, rec.Action)
+	require.Contains(t, rec.Reason, "merging admin")
+}
+
+func TestHasConflictMarkers(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{
+			name: "real conflict",
+			in:   "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> other\nb\n",
+			want: true,
+		},
+		{
+			name: "diff3 conflict (base section) still has start+end",
+			in:   "<<<<<<< ours\nx\n||||||| base\ny\n=======\nz\n>>>>>>> theirs\n",
+			want: true,
+		},
+		{
+			name: "label-less markers",
+			in:   "<<<<<<<\nours\n=======\ntheirs\n>>>>>>>\n",
+			want: true,
+		},
+		{
+			name: "lone separator is not a conflict",
+			in:   "title\n=======\nunderline-style heading\n",
+			want: false,
+		},
+		{
+			name: "start without end is not flagged",
+			in:   "<<<<<<< looks like a start but no end marker\ndata\n",
+			want: false,
+		},
+		{
+			name: "short runs are not markers",
+			in:   "<<<< four\n>>>> four\n",
+			want: false,
+		},
+		{
+			name: "markers must be at line start",
+			in:   "prefix <<<<<<< HEAD\nprefix >>>>>>> other\n",
+			want: false,
+		},
+		{
+			name: "clean file",
+			in:   "user = admin\npassword = hunter2\n",
+			want: false,
+		},
+		{
+			name: "empty file",
+			in:   "",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := hasConflictMarkers(strings.NewReader(tt.in))
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
 }

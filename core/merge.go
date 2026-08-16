@@ -1,9 +1,13 @@
 package core
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"os"
+	"slices"
 	"sort"
 )
 
@@ -164,7 +168,16 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 
 	for i := range theirsNew {
 		their := &theirsNew[i]
-		r := resolveTheirs(their, mergedState, originState)
+
+		// Protect against removing the user that is executing this merge.
+		// That would inevitably lead to issues.
+		var r resolution
+		if reason := isMergeAdminKill(their, merger); reason != "" {
+			r = dropWith(reason, true)
+			r.Target = merger
+		} else {
+			r = resolveTheirs(their, mergedState, originState)
+		}
 
 		if r.entry != nil {
 			// Re-attribute to the merging admin, then feed onto the running state
@@ -258,6 +271,27 @@ func checkDanglingGroups(state *VerifiedState) []ConflictResolutionEntry {
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Target < out[j].Target })
 	return out
+}
+
+// isMergeAdminKill checks if `merger` (i.e. us) gets demoted or killed by the change described in `their`.
+func isMergeAdminKill(their *AuditEntrySigned, merger string) string {
+	switch their.Operation {
+	case OpUserKill:
+		if d, err := parseDetail[DetailUserKill](their); err == nil && d.User == merger {
+			return "would remove the merging admin " + merger + "; kept (cannot merge yourself away)"
+		}
+	case OpUserChangeGroups:
+		if d, err := parseDetail[DetailUserChangeGroups](their); err == nil &&
+			d.User == merger && !slices.Contains(d.NewGroups, "admin") {
+			return "would strip admin from the merging user " + merger + "; kept ours"
+		}
+	case OpUserRegenerateSignKey:
+		if d, err := parseDetail[DetailUserRegenerateSignKey](their); err == nil && d.User == merger {
+			return "would re-key the merging admin " + merger + " mid-merge; kept ours"
+		}
+	}
+
+	return ""
 }
 
 // resolveTheirs decides how one of theirs' new entries integrates on top of the
@@ -632,4 +666,79 @@ func stringSetEqual(a, b []string) bool {
 	return maps.Equal(am, bm)
 }
 
-// TODO: Write down rules in the documentation.
+// conflictMarkerMin is the minimum run length of a git conflict marker. git's
+// default marker size is 7; a custom size (git's %L) is always >= 7, so requiring
+// at least 7 never misses a real marker.
+const conflictMarkerMin = 7
+
+// hasConflictMarkers reports whether r contains an unresolved git conflict: both
+// a start line ("<<<<<<< …") and an end line (">>>>>>> …"). Requiring the pair
+// (rather than a lone "=======") keeps false positives off files that
+// legitimately contain separator lines.
+func hasConflictMarkers(r io.Reader) (bool, error) {
+	var sawStart, sawEnd bool
+
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	for sc.Scan() {
+		line := sc.Bytes()
+		switch {
+		case isMarkerLine(line, '<'):
+			sawStart = true
+		case isMarkerLine(line, '>'):
+			sawEnd = true
+		}
+
+		if sawStart && sawEnd {
+			return true, nil
+		}
+	}
+
+	return false, sc.Err()
+}
+
+// isMarkerLine reports whether line begins with >= conflictMarkerMin copies of c
+// followed by a space or end of line - i.e. "<<<<<<< label" or ">>>>>>>".
+func isMarkerLine(line []byte, c byte) bool {
+	n := 0
+	for n < len(line) && line[n] == c {
+		n++
+	}
+
+	if n < conflictMarkerMin {
+		return false
+	}
+
+	return n == len(line) || line[n] == ' '
+}
+
+// ConflictedSecrets returns the revealed paths whose plaintext still carries git
+// conflict markers left by the secret merge driver. Sealing such a file would
+// encrypt the markers into the object - and revealed files are gitignored, so git
+// itself never flags them - so the merge finalize must refuse until they are
+// resolved.
+func ConflictedSecrets(root *os.Root, secrets []VerifiedSecret) ([]string, error) {
+	var conflicted []string
+	for _, s := range secrets {
+		fd, err := root.Open(s.RevealedPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// Not revealed on disk - nothing to seal, nothing to check.
+				continue
+			}
+			return nil, fmt.Errorf("open revealed %s: %w", s.RevealedPath, err)
+		}
+
+		has, err := hasConflictMarkers(fd)
+		_ = fd.Close()
+		if err != nil {
+			return nil, fmt.Errorf("scan revealed %s: %w", s.RevealedPath, err)
+		}
+
+		if has {
+			conflicted = append(conflicted, s.RevealedPath)
+		}
+	}
+
+	return conflicted, nil
+}

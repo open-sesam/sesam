@@ -349,6 +349,19 @@ func (v *View) ConflictedSecrets() ([]string, error) {
 	return core.ConflictedSecrets(v.root, v.vstate.Secrets)
 }
 
+// hasBinaryConflictSides reports whether both .ours and .theirs side files exist
+// for a revealed secret - the marker a binary merge conflict leaves behind (it
+// has no in-file conflict markers to scan for).
+func (v *View) hasBinaryConflictSides(revealedPath string) bool {
+	if _, err := v.root.Stat(revealedPath + ".ours"); err != nil {
+		return false
+	}
+	if _, err := v.root.Stat(revealedPath + ".theirs"); err != nil {
+		return false
+	}
+	return true
+}
+
 // noGitIntegrationWarningFile is the opt-out sentinel: if present under the
 // sesam dir, the "git integration not installed" nudge is suppressed.
 const noGitIntegrationWarningFile = ".sesam/no-git-integration-warning"
@@ -435,6 +448,18 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 		conflicted[p] = true
 	}
 
+	// A binary secret that conflicted has no in-file markers; the driver wrote
+	// <path>.ours and <path>.theirs beside the revealed file instead. Detect that
+	// so the parent secret is flagged (and the side files are not listed as stray
+	// unmanaged files).
+	binaryConflicts := make(map[string]bool)
+	for i := range v.vstate.Secrets {
+		p := v.vstate.Secrets[i].RevealedPath
+		if v.hasBinaryConflictSides(p) {
+			binaryConflicts[p] = true
+		}
+	}
+
 	if !opts.IgnoreUnmanaged {
 		allPaths, err := v.cleanablePaths()
 		if err != nil {
@@ -442,9 +467,19 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 		}
 
 		for _, path := range allPaths {
-			if _, ok := secretMap[path]; !ok {
-				secretMap[path] = nil
+			if _, ok := secretMap[path]; ok {
+				continue
 			}
+			// Hide the .ours/.theirs of a binary conflict; they belong to their
+			// parent secret, which is reported as conflicted below.
+			base, ok := strings.CutSuffix(path, ".ours")
+			if !ok {
+				base, ok = strings.CutSuffix(path, ".theirs")
+			}
+			if ok && binaryConflicts[base] {
+				continue
+			}
+			secretMap[path] = nil
 		}
 	}
 
@@ -480,7 +515,7 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 			continue
 		}
 
-		if conflicted[revealedPath] {
+		if conflicted[revealedPath] || binaryConflicts[revealedPath] {
 			add(SecretStateConflicted)
 			continue
 		}

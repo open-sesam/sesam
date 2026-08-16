@@ -1,0 +1,39 @@
+# Concurrent sign-key handling: theirs regenerates bob's signing key while ours
+# changes bob's groups. The audit log records theirs' regen (ours did not rotate),
+# and because only theirs touched .sesam/signkeys/bob.age git takes theirs' file -
+# so the stored key and the log's recorded pubkey stay consistent and verify passes.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'add bob'
+
+# OURS: change bob's groups (a log change, so the audit-log driver runs on merge).
+exec git checkout -b ours
+exec sesam user change-groups --user bob --group-add ops
+exec git add -A
+exec git commit -m 'ours: bob += ops'
+
+# THEIRS: regenerate bob's signing key.
+exec git checkout -b theirs ours~1
+exec sesam user regen-sign-key --user bob
+exec git add -A
+exec git commit -m 'theirs: regen bob signkey'
+
+exec git checkout ours
+! exec git merge theirs
+exec git commit --no-edit
+
+# The regen survived, bob keeps ours' group change, and the log verifies - the
+# stored signkey matches the recorded pubkey (git took theirs' single-sided edit).
+exec sesam verify
+exec sesam show .sesam/audit/log.jsonl
+stdout '"operation": "user.regenerate_sign_key"'
+stdout 'ops'

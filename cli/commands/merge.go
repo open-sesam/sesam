@@ -36,20 +36,6 @@ func (e *ExitCodeError) Code() int {
 }
 
 func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
-	// # find out full revealed path from git tracked path
-	// revealed = map_tracked_to_revealed(%P)
-	// require_key() else {
-	//     # side effect: only admins may merge:
-	//     stderr("cannot decrypt %P: no key")
-	//     # user should git merge --abort and ask an admin.
-	//     exit 1
-	// }
-	// o,a,b   = decrypt(%O), decrypt(%A), decrypt(%B)
-	// merged, clean = three_way_text_merge(o, a, b)
-	// # If there are conflicts, tell the user - print something here.
-	// write(revealed, clean ? merged : merged_with_markers) # %A left as ours ciphertext (valid blob); real seal deferred to pre-commit
-	// exit clean ? 0 : 1
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -101,7 +87,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 	theirPath := cmd.StringArg("their-path")
 	conflictMarkerSize := cmd.IntArg("conflict-marker-size")
 
-	conflicts, err := repo.MergeSecret(
+	conflicts, binary, err := repo.MergeSecret(
 		ctx,
 		root,
 		ids,
@@ -122,8 +108,15 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 	slog.Debug(
 		"merged successfully",
 		slog.Int("conflicts", conflicts),
+		slog.Bool("binary", binary),
 		slog.String("path", revealedPath),
 	)
+
+	if binary {
+		fmt.Fprintf(os.Stderr, "sesam: binary secret %s changed on both sides - cannot auto-merge; wrote %s.ours and %s.theirs.\n"+revealedPath, revealedPath, revealedPath)
+		fmt.Fprintf(os.Stderr, "sesam: copy the one you want over %s (and delete the .ours/.theirs), then commit.\n", revealedPath)
+		return &ExitCodeError{err: nil, print: false, code: 1}
+	}
 
 	if conflicts > 0 {
 		fmt.Fprintf(os.Stderr,
@@ -142,33 +135,6 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 }
 
 func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
-	// # replay theirs onto ours, admin re-signs.
-	// # Try our very best to produce a coherent audit log - prio is
-	// # a working audit log and not staying true to the last bit of correctness here:
-	// # If something needs the user attention (e.g. user deleted on branch A, added on branch B)
-	// # then we take a pre-decision for them and let them know so they can change it if necessary.
-	// write(%A, rebase_ops(%O, %A, %B))
-	// stderr("merge needs finalize -> fix any markers in revealed paths, then git commit")
-	// # prevent the auto-commit from git - we don't want them
-	// # Side effect: That would always print something like:
-	// #
-	// # Auto-merging .sesam/audit.log
-	// # CONFLICT (content): Merge conflict in .sesam/audit.log
-	// # Auto-merging .sesam/secrets/db
-	// # Auto-merging .sesam/secrets/api-key
-	// # CONFLICT (content): Merge conflict in .sesam/secrets/api-key
-	// # Automatic merge failed; fix conflicts and then commit the result.
-	// #
-	// #
-	// # => UX is a bit funny here, if we always create conflicts.
-	// # => But we could say "go over all conflicting paths outside of audit log"
-	// #    and make sure there are no conflicts, then run git commit"
-	// #    The git commit will trigger the pre-commit below.
-	// #
-	// # Crux: If we allow the clean merge with exit 0, then we can't really hook in the seal.
-	// # We could of course scream loudly "RUN SESAM SEAL AND COMMIT AGAIN", but not ideal either.
-	// exit 1
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
