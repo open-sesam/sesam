@@ -114,31 +114,22 @@ func requireSameInit(logs ...*AuditLog) error {
 }
 
 // AuditMerge rebases 'theirs' entries onto 'ours', using 'origin' as the merge
-// base. `signer` is the merging admin: every rebased entry is re-attributed to
+// base. `signer` is the merging admin. Every rebased entry is re-attributed to
 // and re-signed by them (their original author is preserved in
-// ChangedByBeforeMerge). The result is an in-memory PLAN - a merged log whose
-// rebased entries are signed and chained but not yet encrypted/persisted; the
-// caller materializes it (see repo.MergeAuditLog).
-//
-// State is advanced with the ordinary FeedEntry -> AddEntry -> verify path: no
-// merge-specific replay logic. Because entries are re-signed by the merger (an
-// admin), the normal signature check passes, and a verify rejection means a
-// conflict resolveTheirs did not foresee - the entry is dropped with a warning.
+// ChangedByBeforeMerge).
 func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginUI) (*AuditLog, *ConflictResolution, error) {
 	if err := requireSameInit(ours, theirs, origin); err != nil {
 		return nil, nil, err
 	}
 
-	// Identify theirs' NEW entries by content. Comparing by signature will not work
-	// as rebasing will rewrite signatures.
-	oursContent := make(map[string]bool, len(ours.Entries))
-	for i := range ours.Entries {
-		oursContent[entryContentKey(&ours.Entries[i].AuditEntry)] = true
+	originContent := make(map[string]bool, len(origin.Entries))
+	for i := range origin.Entries {
+		originContent[entryContentKey(&origin.Entries[i].AuditEntry)] = true
 	}
 
 	var theirsNew []AuditEntrySigned
 	for i := range theirs.Entries {
-		if !oursContent[entryContentKey(&theirs.Entries[i].AuditEntry)] {
+		if !originContent[entryContentKey(&theirs.Entries[i].AuditEntry)] {
 			theirsNew = append(theirsNew, theirs.Entries[i])
 		}
 	}

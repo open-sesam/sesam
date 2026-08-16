@@ -499,16 +499,14 @@ func TestAuditMergeZeroAdminDeclined(t *testing.T) {
 	require.Contains(t, rec.Reason, "last admin")
 }
 
-// TestAuditMergeRevertedTwinIsNotDropped documents the base-detection bug (review
-// finding #1): "theirs' new entries" are found by content-key membership over ALL
-// of ours' history, not a base-relative tail diff. When ours performs then reverts
-// a change and theirs makes that same change for real, theirs' entry matches a
-// SUPERSEDED ours entry and is dropped before any resolver runs - so theirs'
-// change is silently lost.
+// TestAuditMergeRevertedTwinIsNotDropped guards the base-relative new-entry
+// detection: theirs' delta is computed against the merge base (origin), not
+// against ours' full history. When ours performs then reverts a change and theirs
+// makes that same change for real, theirs' entry must not be masked by the
+// superseded ours entry.
 //
 // Here ours adds then removes "ops" (net [dev]); theirs adds "ops" (net [dev,ops]).
-// Correct three-way merge keeps "ops" (ours made no net change vs base). This test
-// FAILS until base detection is made base-relative.
+// The three-way merge must keep "ops" (ours made no net change vs base).
 func TestAuditMergeRevertedTwinIsNotDropped(t *testing.T) {
 	base, admin, _ := mergeBase(t) // bob starts in [dev]
 
