@@ -166,16 +166,23 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 	var resolutions []ConflictResolutionEntry // conflict decisions, persisted in the merge entry
 	var applied, dropped int
 
+	orphanedUsers := map[string]bool{}
+	orphanedSecrets := map[string]bool{}
+
 	for i := range theirsNew {
 		their := &theirsNew[i]
+		orphanName := isOrphaned(their, orphanedUsers, orphanedSecrets)
 
-		// Protect against removing the user that is executing this merge.
-		// That would inevitably lead to issues.
 		var r resolution
-		if reason := isMergeAdminKill(their, merger); reason != "" {
-			r = dropWith(reason, true)
+		switch {
+		case isMergeAdminKill(their, merger) != "":
+			// The merging admin must survive - see isMergeAdminKill.
+			r = dropWith(isMergeAdminKill(their, merger), true)
 			r.Target = merger
-		} else {
+		case orphanName != "":
+			r = dropWith("references "+orphanName+", whose rename/move was dropped on merge; skipped", true)
+			r.Target = orphanName
+		default:
 			r = resolveTheirs(their, mergedState, originState)
 		}
 
@@ -194,6 +201,7 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 
 		if r.Action == MergeDropped {
 			dropped++
+			recordOrphanedRename(their, mergedState, orphanedUsers, orphanedSecrets)
 		} else {
 			applied++
 		}
@@ -294,6 +302,95 @@ func isMergeAdminKill(their *AuditEntrySigned, merger string) string {
 	return ""
 }
 
+// isOrphaned returns the name a modifying op acts on if that name is an
+// orphaned rename/move target (its rename was dropped on merge), else "".
+func isOrphaned(their *AuditEntrySigned, orphanedUsers, orphanedSecrets map[string]bool) string {
+	if n := entryUserTarget(their); n != "" && orphanedUsers[n] {
+		return n
+	}
+	if p := entrySecretTarget(their); p != "" && orphanedSecrets[p] {
+		return p
+	}
+	return ""
+}
+
+// recordOrphanedRename remembers that we've dropped a user/secret so that we can later
+// decide to do in case of renames.
+func recordOrphanedRename(their *AuditEntrySigned, merged *VerifiedState, orphanedUsers, orphanedSecrets map[string]bool) {
+	switch their.Operation {
+	case OpUserRename:
+		d, err := parseDetail[DetailUserRename](their)
+		if err != nil {
+			return
+		}
+		_, src := merged.UserExists(d.OldName)
+		_, dst := merged.UserExists(d.NewName)
+		if orphanedUsers[d.OldName] || (src && dst) {
+			orphanedUsers[d.NewName] = true
+		}
+	case OpSecretMove:
+		d, err := parseDetail[DetailSecretMove](their)
+		if err != nil {
+			return
+		}
+		_, src := merged.SecretExists(d.OldRevealedPath)
+		_, dst := merged.SecretExists(d.NewRevealedPath)
+		if orphanedSecrets[d.OldRevealedPath] || (src && dst) {
+			orphanedSecrets[d.NewRevealedPath] = true
+		}
+	}
+}
+
+// entryUserTarget returns the existing user a modifying op acts on ("" otherwise).
+func entryUserTarget(their *AuditEntrySigned) string {
+	switch their.Operation {
+	case OpUserKill:
+		if d, err := parseDetail[DetailUserKill](their); err == nil {
+			return d.User
+		}
+	case OpUserChangeGroups:
+		if d, err := parseDetail[DetailUserChangeGroups](their); err == nil {
+			return d.User
+		}
+	case OpUserAddRecipients:
+		if d, err := parseDetail[DetailUserAddRecipients](their); err == nil {
+			return d.User
+		}
+	case OpUserRmRecipients:
+		if d, err := parseDetail[DetailUserRmRecipients](their); err == nil {
+			return d.User
+		}
+	case OpUserRegenerateSignKey:
+		if d, err := parseDetail[DetailUserRegenerateSignKey](their); err == nil {
+			return d.User
+		}
+	case OpUserRename:
+		if d, err := parseDetail[DetailUserRename](their); err == nil {
+			return d.OldName
+		}
+	}
+	return ""
+}
+
+// entrySecretTarget returns the existing secret path a modifying op acts on.
+func entrySecretTarget(their *AuditEntrySigned) string {
+	switch their.Operation {
+	case OpSecretChangeAccess:
+		if d, err := parseDetail[DetailSecretChangeAccess](their); err == nil {
+			return d.RevealedPath
+		}
+	case OpSecretRemove:
+		if d, err := parseDetail[DetailSecretRemove](their); err == nil {
+			return d.RevealedPath
+		}
+	case OpSecretMove:
+		if d, err := parseDetail[DetailSecretMove](their); err == nil {
+			return d.OldRevealedPath
+		}
+	}
+	return ""
+}
+
 // resolveTheirs decides how one of theirs' new entries integrates on top of the
 // merged state built so far. base is the merge-base state, needed for the
 // three-way set deltas. It only reads state; applying is the caller's job.
@@ -319,7 +416,7 @@ func resolveTheirs(their *AuditEntrySigned, merged, base *VerifiedState) resolut
 	case OpUserChangeGroups:
 		return resolveUserChangeGroups(their, merged, base)
 	case OpUserAddRecipients:
-		return resolveUserAddRecipients(their, merged)
+		return resolveUserAddRecipients(their, merged, base)
 	case OpUserRmRecipients:
 		return resolveUserRmRecipients(their, merged)
 	case OpSecretAdd:
@@ -459,20 +556,45 @@ func resolveUserChangeGroups(their *AuditEntrySigned, merged, base *VerifiedStat
 
 // resolveUserAddRecipients applies onto a live user; verify dedupes keys already
 // present.
-func resolveUserAddRecipients(their *AuditEntrySigned, merged *VerifiedState) (r resolution) {
+func resolveUserAddRecipients(their *AuditEntrySigned, merged, base *VerifiedState) (r resolution) {
 	d, err := parseDetail[DetailUserAddRecipients](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
 	}
 	defer func() { r.Target = d.User }()
 
-	if _, ok := merged.UserExists(d.User); !ok {
+	cur, ok := merged.UserExists(d.User)
+	if !ok {
 		return dropWith("user "+d.User+" gone; dropped recipient add", true)
 	}
 
-	// TODO: cross-branch remove-wins - if ours removed a key that theirs re-adds,
-	// drop that key. Needs the base recipient diff.
-	return applyAs(their)
+	// Remove wins: drop any key our side revoked since base (present in base, gone
+	// now); theirs re-adding it must not resurrect it. Keys ours never had apply.
+	ourKeys := stringSet(cur.Recps.Strings())
+	var baseKeys map[string]bool
+	if b, ok := base.UserExists(d.User); ok {
+		baseKeys = stringSet(b.Recps.Strings())
+	}
+
+	kept := make([]UserPubKey, 0, len(d.PubKeys))
+	for _, pk := range d.PubKeys {
+		if baseKeys[pk.Key] && !ourKeys[pk.Key] {
+			continue // ours revoked it
+		}
+		kept = append(kept, pk)
+	}
+
+	switch {
+	case len(kept) == len(d.PubKeys):
+		return applyAs(their)
+	case len(kept) == 0:
+		return dropWith("recipients added for "+d.User+" were revoked on our side; kept ours", true)
+	default:
+		return rewriteAs(
+			newAuditEntry(their.ChangedBy, &DetailUserAddRecipients{User: d.User, PubKeys: kept}),
+			"kept our revocation of some recipients for "+d.User,
+		)
+	}
 }
 
 // resolveUserRmRecipients: a removal wins; a no-longer-present user makes it a

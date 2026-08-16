@@ -627,3 +627,73 @@ func TestHasConflictMarkers(t *testing.T) {
 		})
 	}
 }
+
+// TestAuditMergeRecipientRemoveWins pins A1: theirs re-adding a recipient key our
+// side revoked since base must not resurrect it (remove wins). A genuinely new
+// key theirs adds is still kept.
+func TestAuditMergeRecipientRemoveWins(t *testing.T) {
+	userState := func(u ...VerifiedUser) *VerifiedState { return &VerifiedState{Users: u} }
+
+	k1 := newTestUser(t, "k1").Recipient
+	k2 := newTestUser(t, "k2").Recipient
+	k3 := newTestUser(t, "k3").Recipient
+
+	base := userState(VerifiedUser{Name: "bob", Recps: Recipients{k1, k2}})
+	ours := userState(VerifiedUser{Name: "bob", Recps: Recipients{k1}}) // ours revoked k2
+
+	t.Run("revoked key alone is dropped", func(t *testing.T) {
+		their := signed("admin", &DetailUserAddRecipients{User: "bob", PubKeys: []UserPubKey{{Key: k2.String()}}})
+		r := resolveTheirs(their, ours, base)
+		require.Equal(t, MergeDropped, r.Action)
+		require.True(t, r.conflict)
+	})
+
+	t.Run("new key survives, revoked one dropped", func(t *testing.T) {
+		their := signed("admin", &DetailUserAddRecipients{User: "bob", PubKeys: []UserPubKey{{Key: k2.String()}, {Key: k3.String()}}})
+		r := resolveTheirs(their, ours, base)
+		require.Equal(t, MergeRewritten, r.Action)
+		d, err := parseDetail[DetailUserAddRecipients](&AuditEntrySigned{AuditEntry: *r.entry})
+		require.NoError(t, err)
+		require.Len(t, d.PubKeys, 1)
+		require.Equal(t, k3.String(), d.PubKeys[0].Key)
+	})
+}
+
+// TestAuditMergeDroppedRenameOrphansDependents pins A5: theirs renames alice->bob,
+// but bob already exists on our side (ours told a different bob). The rename is
+// dropped (target occupied); theirs' later change-groups on "bob" must be skipped,
+// not silently applied to our unrelated bob.
+func TestAuditMergeDroppedRenameOrphansDependents(t *testing.T) {
+	base, admin, _ := mergeBase(t) // admin + bob(dev)
+	// Add alice at base so theirs can rename her; remove the base bob so our side
+	// can introduce its own unrelated bob after divergence.
+	alice := newTestUser(t, "alice")
+	aliceTell := alice.DetailUserTell([]string{"dev"})
+	feed(t, base, admin.Signer, "admin", &aliceTell)
+	feed(t, base, admin.Signer, "admin", &DetailUserKill{User: "bob"})
+
+	ours := cloneLog(base)
+	ourBob := newTestUser(t, "ourbob")
+	bobTell := ourBob.DetailUserTell([]string{"dev"})
+	bobTell.User = "bob" // our own, unrelated "bob"
+	feed(t, ours, admin.Signer, "admin", &bobTell)
+
+	theirs := cloneLog(base)
+	feed(t, theirs, admin.Signer, "admin", &DetailUserRename{OldName: "alice", NewName: "bob"})
+	feed(t, theirs, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+
+	merged, cr, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
+	require.NoError(t, err)
+
+	state, err := VerifyChain(merged, EmptyKeyring(), nil)
+	require.NoError(t, err)
+
+	// Our bob keeps its original groups; theirs' change-groups did not land on it.
+	u, ok := state.UserExists("bob")
+	require.True(t, ok)
+	require.ElementsMatch(t, []string{"dev"}, u.Groups, "theirs' change-groups must not hit our unrelated bob")
+
+	rec, ok := findResolution(cr, OpUserChangeGroups)
+	require.True(t, ok)
+	require.Equal(t, MergeDropped, rec.Action)
+}
