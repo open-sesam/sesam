@@ -44,9 +44,9 @@ import (
 //     enforce the invariants: a kill that would drop the last admin, or a rename
 //     onto an occupied name, is simply declined and recorded - so most "global"
 //     repairs need no separate pass.
-//   - Their original authority was established on their branch; we do not re-check
-//     it against the reordered chain. The merger's re-signature is the post-merge
-//     attestation, and ChangedByBeforeMerge preserves accountability.
+//   - The merged log gets a fresh symmetric key. A merge can carry a kill or an
+//     rm-recipients from theirs, and reusing ours' key would let the removed user
+//     keep reading everything written after the merge.
 //   - The terminal seal is deferred to the pre-commit reseal, which recomputes the
 //     root hash from the actually-merged objects; both sides' post-base seals are
 //     dropped as authorities.
@@ -126,6 +126,20 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		return nil, nil, err
 	}
 
+	originState, err := VerifyChain(origin, EmptyKeyring(), pluginUI)
+	if err != nil {
+		return nil, nil, fmt.Errorf("verify origin: %w", err)
+	}
+
+	// Theirs is untrusted input - the driver gets the blob straight from git and
+	// loading it only decrypts. Chain-verify it before rebasing anything, else
+	// re-signing would launder hand-crafted entries into authority nobody granted.
+	// A log that does not verify is tampered or corrupt, not a conflict: refuse.
+	theirsState, err := VerifyChain(theirs, EmptyKeyring(), pluginUI)
+	if err != nil {
+		return nil, nil, fmt.Errorf("verify theirs: %w", err)
+	}
+
 	originCounts := make(map[string]int, len(origin.Entries))
 	for i := range origin.Entries {
 		originCounts[entryContentKey(&origin.Entries[i].AuditEntry)]++
@@ -141,16 +155,14 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		theirsNew = append(theirsNew, theirs.Entries[i])
 	}
 
-	originState, err := VerifyChain(origin, EmptyKeyring(), pluginUI)
-	if err != nil {
-		return nil, nil, fmt.Errorf("verify origin: %w", err)
-	}
-
 	merged := &AuditLog{
 		Entries:  append([]AuditEntrySigned(nil), ours.Entries...),
 		SesamDir: ours.SesamDir,
 		InitHash: ours.InitHash,
-		key:      ours.key,
+		// Rotate: the merge may apply a kill or an rm-recipients from theirs, and
+		// those paths rotate for a reason (see AuditLog.RotateKey). WriteEncrypted
+		// re-encrypts every entry anyway, so this costs nothing here.
+		key: newAuditKey(),
 	}
 
 	mergedState, err := VerifyChain(merged, EmptyKeyring(), pluginUI)
@@ -177,7 +189,7 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		orphanName := isOrphaned(their, orphanedUsers, orphanedSecrets)
 
 		var r resolution
-		switch {
+		switch revoked := authorRevoked(their, mergedState, theirsState); {
 		case isMergeAdminKill(their, merger) != "":
 			// The merging admin must survive - see isMergeAdminKill.
 			r = dropWith(isMergeAdminKill(their, merger), true)
@@ -185,6 +197,11 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		case orphanName != "":
 			r = dropWith("references "+orphanName+", whose rename/move was dropped on merge; skipped", true)
 			r.Target = orphanName
+		case revoked != "":
+			// Verified on their branch, but our side revoked the author since the
+			// base. Revocation wins here as everywhere else.
+			r = dropWith(revoked, true)
+			r.Target = their.ChangedBy
 		default:
 			r = resolveTheirs(their, mergedState, originState)
 		}
@@ -307,6 +324,78 @@ func isMergeAdminKill(their *AuditEntrySigned, merger string) string {
 	}
 
 	return ""
+}
+
+// authorRevoked reports why theirs' author may no longer perform the entry's
+// operation, or "" if they still may. Chain-verifying theirs establishes that
+// the author had authority on their branch; this catches the cross-branch case
+// where our side killed or demoted them since the base. Without it the merger's
+// re-signature would silently reinstate the authority we just revoked.
+func authorRevoked(their *AuditEntrySigned, merged, theirs *VerifiedState) string {
+	switch their.Operation {
+	case OpSeal, OpInit, OpMerge:
+		// Never replayed; resolveTheirs drops them with a more precise reason.
+		return ""
+	}
+
+	author, ok := authorInMerged(their, merged, theirs)
+	if !ok {
+		return "author " + their.ChangedBy + " was removed on our side; dropped"
+	}
+
+	switch their.Operation {
+	case OpUserTell, OpUserKill, OpUserRename, OpUserRegenerateSignKey,
+		OpUserChangeGroups, OpUserAddRecipients, OpUserRmRecipients:
+		if !author.IsAdmin() {
+			return "author " + their.ChangedBy + " is no longer an admin on our side; dropped"
+		}
+	case OpSecretAdd:
+		d, err := parseDetail[DetailSecretAdd](their)
+		if err != nil {
+			return "" // resolveTheirs reports the parse error
+		}
+		if !merged.UserHasAccess(author.Name, d.AccessGroups) {
+			return "author " + their.ChangedBy + " has no access to " + d.RevealedPath + " on our side; dropped"
+		}
+	case OpSecretChangeAccess, OpSecretMove, OpSecretRemove:
+		path := entrySecretTarget(their)
+		if _, ok := merged.SecretExists(path); !ok {
+			// Gone on our side: the resolvers decide (a double remove dedupes).
+			return ""
+		}
+		if !merged.SealerAuthorized(author.Name, path) {
+			return "author " + their.ChangedBy + " has no access to " + path + " on our side; dropped"
+		}
+	}
+
+	return ""
+}
+
+// authorInMerged resolves theirs' author in the merged state. A rename on our
+// side changes the name but not the signing key, so fall back to an unambiguous
+// key match before concluding the author is gone.
+func authorInMerged(their *AuditEntrySigned, merged, theirs *VerifiedState) (*VerifiedUser, bool) {
+	if u, ok := merged.UserExists(their.ChangedBy); ok {
+		return u, true
+	}
+
+	tu, ok := theirs.UserExists(their.ChangedBy)
+	if !ok || tu.SignPubKey == "" {
+		return nil, false
+	}
+
+	var match *VerifiedUser
+	for i := range merged.Users {
+		if merged.Users[i].SignPubKey != tu.SignPubKey {
+			continue
+		}
+		if match != nil {
+			return nil, false // ambiguous, fail closed
+		}
+		match = &merged.Users[i]
+	}
+
+	return match, match != nil
 }
 
 // isOrphaned returns the name a modifying op acts on if that name is an

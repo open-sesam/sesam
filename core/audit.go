@@ -507,6 +507,13 @@ func (aes *AuditEntrySigned) Verify(kr Keyring) (string, error) {
 	return kr.Verify(SesamDomainSignAuditTag, wholeEntryJSON, aes.Signature, aes.ChangedBy)
 }
 
+// newAuditKey returns a fresh symmetric key for the audit log.
+func newAuditKey() [32]byte {
+	var key [32]byte
+	rand.Read(key[:])
+	return key
+}
+
 // encryptAuditKey wraps key for recps using age, base64-encodes the result,
 // and appends a newline. The return value is a complete line-1 for log.jsonl.
 func encryptAuditKey(key [32]byte, recps Recipients) ([]byte, error) {
@@ -636,8 +643,7 @@ func (al *AuditLog) WriteAuditKey(recps Recipients) error {
 }
 
 func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
-	var newKey [32]byte
-	rand.Read(newKey[:])
+	newKey := newAuditKey()
 
 	newAead, err := chacha20poly1305.New(newKey[:])
 	if err != nil {
@@ -698,7 +704,7 @@ func InitAuditLog(root *os.Root, signer Signer, recps Recipients, admin DetailUs
 	}
 
 	// Generate the symmetric key and write it as line 1 of the log.
-	rand.Read(al.key[:])
+	al.key = newAuditKey()
 	line1, err := encryptAuditKey(al.key, recps)
 	if err != nil {
 		closeLogged(fd)

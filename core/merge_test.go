@@ -462,7 +462,7 @@ func TestAuditMergeMaterializeRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Serialize the way repo.MergeAuditLog does: derive recipients from the
-	// merged state, then encrypt with the reused symmetric key.
+	// merged state, then encrypt with the merged log's freshly rotated key.
 	kr := EmptyKeyring()
 	_, err = VerifyChain(merged, kr, nil)
 	require.NoError(t, err)
@@ -756,4 +756,116 @@ func TestAuditMergePreservesMergerRename(t *testing.T) {
 	rec, ok := findResolution(cr, OpUserRename)
 	require.True(t, ok)
 	require.Equal(t, MergeDropped, rec.Action)
+}
+
+// TestAuditMergeForgedTheirsRejected guards the merge's trust boundary: theirs
+// arrives from git as an opaque blob and is only decrypted on load, so the chain
+// has to be verified before any of it is rebased. Otherwise re-signing hands the
+// merging admin's authority to whatever the branch happened to contain.
+func TestAuditMergeForgedTheirsRejected(t *testing.T) {
+	base, admin, bob := mergeBase(t)
+
+	ours := cloneLog(base)
+	feed(t, ours, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+
+	// Every active user can decrypt the log, so bob can append a well-formed,
+	// correctly chained entry making himself admin. What he cannot do is sign it
+	// as the admin - and that is the only thing standing in his way.
+	theirs := cloneLog(base)
+	feed(t, theirs, bob.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "admin"}})
+
+	_, _, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
+	require.ErrorContains(t, err, "verify theirs")
+}
+
+// TestAuditMergeRevokedAuthorDropped covers the cross-branch half of the same
+// problem: theirs' entries do verify on their branch, but our side killed or
+// demoted their author since the base. Rebasing them onto the merger's signature
+// must not reinstate what we just took away.
+func TestAuditMergeRevokedAuthorDropped(t *testing.T) {
+	tests := []struct {
+		name       string
+		ourChange  func(t *testing.T, ours *AuditLog, admin *testUser)
+		wantApply  bool
+		wantReason string
+	}{
+		{
+			name: "killed author",
+			ourChange: func(t *testing.T, ours *AuditLog, admin *testUser) {
+				feed(t, ours, admin.Signer, "admin", &DetailUserKill{User: "carol"})
+			},
+			wantReason: "was removed on our side",
+		},
+		{
+			name: "demoted author",
+			ourChange: func(t *testing.T, ours *AuditLog, admin *testUser) {
+				feed(t, ours, admin.Signer, "admin", &DetailUserChangeGroups{User: "carol", NewGroups: []string{"dev"}})
+			},
+			wantReason: "no longer an admin",
+		},
+		{
+			name: "untouched author still applies",
+			ourChange: func(t *testing.T, ours *AuditLog, admin *testUser) {
+				feed(t, ours, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+			},
+			wantApply: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// carol is a second admin so demoting/killing her does not trip the
+			// last-admin guard, and she is not the merger.
+			base, admin, _ := mergeBase(t)
+			carol := newTestUser(t, "carol")
+			carolTell := carol.DetailUserTell([]string{"admin"})
+			feed(t, base, admin.Signer, "admin", &carolTell)
+
+			ours := cloneLog(base)
+			tc.ourChange(t, ours, admin)
+
+			theirs := cloneLog(base)
+			daveTell := newTestUser(t, "dave").DetailUserTell([]string{"dev"})
+			feed(t, theirs, carol.Signer, "carol", &daveTell)
+
+			merged, cr, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
+			require.NoError(t, err)
+
+			state, err := VerifyChain(merged, EmptyKeyring(), nil)
+			require.NoError(t, err)
+
+			_, daveExists := state.UserExists("dave")
+			if tc.wantApply {
+				require.True(t, daveExists)
+				require.Equal(t, 0, cr.Conflicts)
+				return
+			}
+
+			require.False(t, daveExists, "a revoked author must not get their entry applied")
+
+			rec, ok := findResolution(cr, OpUserTell)
+			require.True(t, ok)
+			require.Equal(t, MergeDropped, rec.Action)
+			require.Equal(t, "carol", rec.Target)
+			require.Contains(t, rec.Reason, tc.wantReason)
+		})
+	}
+}
+
+// TestAuditMergeRotatesKey: a merge can carry a kill from theirs, and the killed
+// user already holds ours' symmetric key. Keeping it would let them read every
+// entry written after the merge.
+func TestAuditMergeRotatesKey(t *testing.T) {
+	base, admin, _ := mergeBase(t)
+
+	ours := cloneLog(base)
+	ours.key = newAuditKey()
+	feed(t, ours, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+
+	theirs := cloneLog(base)
+	feed(t, theirs, admin.Signer, "admin", &DetailUserKill{User: "bob"})
+
+	merged, _, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
+	require.NoError(t, err)
+	require.NotEqual(t, ours.key, merged.key)
 }
