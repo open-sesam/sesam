@@ -272,6 +272,11 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 		return nil, err
 	}
 
+	postMergeCmd, err := sesamCmd(r, sesamDir, "hook", "post-merge")
+	if err != nil {
+		return nil, err
+	}
+
 	// suffix uniquifies the subsection names per sesam repo so several sesam
 	// repos can coexist in one git repo without clobbering each other's config
 	// (and, for hooks, so all of them fire). It also lands in .gitattributes as
@@ -313,6 +318,8 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 			{"hook.sesam-postcheckout.command", "hook", "sesam-postcheckout" + suffix, "command", wrapHookCmd(postCheckoutCmd), true},
 			{"hook.sesam-premergecommit.event", "hook", "sesam-premergecommit" + suffix, "event", "pre-merge-commit", false},
 			{"hook.sesam-premergecommit.command", "hook", "sesam-premergecommit" + suffix, "command", wrapHookCmd(preMergeCommitCmd), true},
+			{"hook.sesam-postmerge.event", "hook", "sesam-postmerge" + suffix, "event", "post-merge", false},
+			{"hook.sesam-postmerge.command", "hook", "sesam-postmerge" + suffix, "command", wrapHookCmd(postMergeCmd), true},
 		}...)
 	}
 

@@ -1,0 +1,77 @@
+# Where merge_conflict_markers_blocked refuses, `sesam seal` only warns - it is
+# what you reach for to get out of a half-finished merge. After a rebase that
+# warning is the only thing between the user and a secret full of markers.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+cp base.txt $TMPDIR/base.txt
+cp main.txt $TMPDIR/main.txt
+cp topic.txt $TMPDIR/topic.txt
+cp resolved.txt $TMPDIR/resolved.txt
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add secret'
+
+cp $TMPDIR/main.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'main: change secret'
+
+exec git checkout -b topic HEAD~1
+cp $TMPDIR/topic.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change secret'
+
+! exec git rebase master
+grep '^<<<<<<< ' s
+
+# Sealing without resolving warns, names the file, and still goes through.
+exec sesam seal
+stderr 'WARNING: sealing 1 secret with unresolved conflicts'
+stderr 's: resolve the conflict markers in the revealed file'
+exec sesam show .sesam/objects/s.sesam
+stdout '<<<<<<< '
+
+# The object is well-formed and correctly signed - verification cannot save the
+# user here, which is exactly why the warning has to.
+exec sesam verify
+stderr 'Integrity: ok'
+
+# Resolving and sealing again is silent and leaves a clean secret.
+cp $TMPDIR/resolved.txt s
+exec sesam seal
+! stderr 'WARNING'
+exec sesam show .sesam/objects/s.sesam
+stdout 'RESOLVED'
+! stdout '<<<<<<< '
+
+exec git add -A
+exec git -c core.editor=true rebase --continue
+exec sesam verify
+stderr 'Integrity: ok'
+
+-- base.txt --
+line one
+line two
+line three
+-- main.txt --
+line one
+MAIN
+line three
+-- topic.txt --
+line one
+TOPIC
+line three
+-- resolved.txt --
+line one
+RESOLVED
+line three

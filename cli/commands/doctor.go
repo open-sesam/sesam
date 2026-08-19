@@ -392,6 +392,7 @@ func identityUserCheck(env doctorEnv) DoctorCheck {
 			Interactive: true,
 			LockTimeout: env.lockTimeout,
 			VerifyMode:  repo.VerifyModeDefault,
+			InMerge:     mergeState(env.sesamDir).InProgress(),
 		})
 		if err != nil {
 			return docIssue(
@@ -664,6 +665,8 @@ func gitHooksCheck(env doctorEnv) DoctorCheck {
 		subChecks: []DoctorCheck{
 			entry("pre-commit (seal+verify)", "hook.sesam-precommit.command"),
 			entry("post-checkout (reveal)", "hook.sesam-postcheckout.command"),
+			entry("pre-merge-commit (merge)", "hook.sesam-premergecommit.command"),
+			entry("post-merge (reveal)", "hook.sesam-postmerge.command"),
 		},
 	}
 }

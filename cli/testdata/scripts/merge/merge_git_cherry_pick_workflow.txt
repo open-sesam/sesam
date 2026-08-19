@@ -1,0 +1,70 @@
+# A cherry-pick runs the drivers but finishes on its own - no pre-merge-commit
+# hook, and `--continue` runs no pre-commit either. So it commits a merged log
+# with nothing resealed, which is why a merge entry drops the root hash claim.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+cp base.txt $TMPDIR/base.txt
+cp changed.txt $TMPDIR/changed.txt
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+cp $TMPDIR/base.txt s
+cp $TMPDIR/base.txt t
+exec sesam add s --group admin
+exec sesam add t --group admin
+exec git add -A
+exec git commit -m 'add secrets'
+
+exec git checkout -b topic
+cp $TMPDIR/changed.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change s'
+
+# Master moves the log too, so the cherry-pick has to merge it semantically.
+exec git checkout master
+cp $TMPDIR/changed.txt t
+exec sesam seal
+exec git add -A
+exec git commit -m 'master: change t'
+
+exec git cherry-pick topic
+stderr 'the audit log was therefore semantically merged'
+
+# git had nothing to identify itself with when the driver ran (a cherry-pick sets
+# no ref and no env until it stops), so the advice stays deliberately generic.
+stderr 'finish the git operation you started'
+
+# The picked object arrived, the log verifies, and sesam asks for the seal it is
+# owed instead of erroring out.
+exec sesam verify
+stderr 'Integrity: ok'
+stderr 'a seal is pending'
+exec sesam status
+stdout 'out of sync'
+
+# Sealing after a reveal completes it. (Reveal first: the object git installed is
+# the authoritative one, our plaintext is the pre-pick version.)
+exec sesam reveal
+exec cat s
+stdout 'CHANGED'
+exec sesam seal
+exec git add -A
+exec git commit -m 'seal after cherry-pick'
+exec sesam verify
+stderr 'Integrity: ok'
+! stderr 'a seal is pending'
+
+-- base.txt --
+line one
+BASE
+line three
+-- changed.txt --
+line one
+CHANGED
+line three

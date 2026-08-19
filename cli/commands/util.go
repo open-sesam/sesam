@@ -40,6 +40,7 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 				AskpassRequired: askpassRequired(),
 				LockTimeout:     cmd.Duration("lock-timeout"),
 				VerifyMode:      verifyMode,
+				InMerge:         mergeState(cmd.String("sesam-dir")).InProgress(),
 			},
 		)
 		if err != nil {

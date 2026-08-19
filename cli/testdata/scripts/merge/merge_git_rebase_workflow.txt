@@ -1,12 +1,6 @@
-# A rebase replays commits through the same three-way machinery as a merge, so
-# both sesam drivers run - but git never writes MERGE_HEAD during a rebase, and
-# `git rebase --continue` does not run the pre-commit hook at all. sesam's merge
-# finalize (reseal + prune + conflict-marker guard) therefore never runs.
-#
-# This pins down what a user actually gets. The short version: nothing is
-# corrupted and `sesam status` flags the drift, but the resolution the user typed
-# into the revealed file does NOT make it into the rebased commit - they have to
-# seal and amend by hand.
+# A rebase runs both drivers, but never writes MERGE_HEAD and never calls the
+# pre-commit finalize. What carries it: clean merges are sealed into %A by the
+# driver, conflicted ones are reported by `sesam status` with rebase advice.
 
 exec git init
 exec git config user.email test@sesam.dev
@@ -45,43 +39,35 @@ exec git commit -m 'topic: change secret'
 stderr 'automatically merging revealed file s; 1 conflict'
 stderr 'the audit log was therefore semantically merged'
 
-# CAVEAT: the advice the driver prints is merge-specific. During a rebase the user
-# must run `git rebase --continue`, not `git commit`, and there is no `git merge
-# --abort` to fall back to either.
-stderr 'run .git commit.'
-stderr 'git merge --abort'
+# The advice is rebase-specific: git never sets MERGE_HEAD here, so telling the
+# user to run `git commit` (or to abort with `git merge --abort`) would be wrong.
+stderr 'finish this rebase with .git rebase --continue.'
+stderr 'start over with .git rebase --abort.'
+! stderr 'git merge --abort'
 
 grep '^<<<<<<< ' s
 exec sesam status
 stdout 'conflicted'
+stdout 'a rebase is in progress'
+stdout 'git rebase --continue'
 
-# Resolve the revealed file the way a user would and continue.
+# Resolve the revealed file, then seal it: `git rebase --continue` runs no
+# pre-commit hook, so nothing else will reseal the resolution for us.
 cp $TMPDIR/resolved.txt s
-exec git add .sesam/objects/s.sesam
-exec git -c core.editor=true rebase --continue
-
-# CAVEAT: `git rebase --continue` runs no pre-commit hook, so nothing resealed the
-# resolved plaintext. The committed object still holds MAIN - the resolution
-# exists only in the worktree.
-exec sesam show .sesam/objects/s.sesam
-stdout 'MAIN'
-! stdout 'RESOLVED'
-exec cat s
-stdout 'RESOLVED'
-
-# The safety net is `sesam status`, which reports the drift instead of pretending
-# the rebase was clean.
-exec sesam status
-stdout 'out of sync'
-
-# Recovery is manual but works: seal the resolved plaintext and amend.
 exec sesam seal
 exec git add -A
-exec git commit --amend --no-edit
+exec git -c core.editor=true rebase --continue
+
+# The rebased commit carries the resolution, and the repo verifies.
 exec sesam show .sesam/objects/s.sesam
 stdout 'RESOLVED'
+exec sesam status
+stdout 'in sync'
+! stdout 'in progress'
 exec sesam verify
 stderr 'Integrity: ok'
+exec git status --short
+! stdout .
 
 -- base.txt --
 line one

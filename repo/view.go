@@ -224,6 +224,21 @@ func (v *View) RevealAll() error {
 	return nil
 }
 
+// RevealPaths reveals only the named secrets to the worktree.
+func (v *View) RevealPaths(paths []string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return ErrClosed
+	}
+
+	if err := v.secret.RevealPaths(paths); err != nil {
+		return fmt.Errorf("failed to reveal secrets: %w", err)
+	}
+	return nil
+}
+
 // Clean removes stale plaintext from the worktree. See CleanOpts for modes.
 func (v *View) Clean(ctx context.Context, opts CleanOpts) error {
 	v.mu.Lock()

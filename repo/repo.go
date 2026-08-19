@@ -94,6 +94,11 @@ type RepoOpts struct {
 
 	// VerifyMode defines how the on-disk state is verified
 	VerifyMode VerifyMode
+
+	// InMerge relaxes the checks that cannot hold while a merge-like operation
+	// has the tree half-merged. The caller decides: only the CLI knows what git
+	// is doing, and finding out costs a subprocess we do not want on every Load.
+	InMerge bool
 }
 
 type GitConfigOpts struct {
@@ -468,7 +473,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	r.auditLog = auditLog
 
 	// Disable a couple checks if we're mid-merge.
-	r.merging = InMerge(resolvedDir)
+	r.merging = opts.InMerge
 
 	verifyFn := core.Verify
 	if opts.VerifyMode == VerifyModeNoDisk || r.merging {

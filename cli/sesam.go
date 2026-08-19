@@ -170,6 +170,11 @@ func Main(args []string) error {
 						Action: commands.HandleHookPreMergeCommit,
 					},
 					{
+						Name:   "post-merge",
+						Usage:  "Execute the post-merge hook - meant to be run by git!",
+						Action: commands.HandleHookPostMerge,
+					},
+					{
 						Name:   "install",
 						Usage:  "Make sure the git hooks are installed",
 						Action: commands.HandleHookInstall,

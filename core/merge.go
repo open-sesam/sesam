@@ -44,9 +44,8 @@ import (
 //     enforce the invariants: a kill that would drop the last admin, or a rename
 //     onto an occupied name, is simply declined and recorded - so most "global"
 //     repairs need no separate pass.
-//   - The merged log gets a fresh symmetric key. A merge can carry a kill or an
-//     rm-recipients from theirs, and reusing ours' key would let the removed user
-//     keep reading everything written after the merge.
+//   - The merged log gets a fresh symmetric key: a merge can carry a kill, and
+//     the removed user must not keep reading what comes after it.
 //   - The terminal seal is deferred to the pre-commit reseal, which recomputes the
 //     root hash from the actually-merged objects; both sides' post-base seals are
 //     dropped as authorities.
@@ -131,10 +130,8 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		return nil, nil, fmt.Errorf("verify origin: %w", err)
 	}
 
-	// Theirs is untrusted input - the driver gets the blob straight from git and
-	// loading it only decrypts. Chain-verify it before rebasing anything, else
-	// re-signing would launder hand-crafted entries into authority nobody granted.
-	// A log that does not verify is tampered or corrupt, not a conflict: refuse.
+	// Loading only decrypts. Without this, re-signing would launder hand-crafted
+	// entries into authority nobody granted - a refusal, not a conflict.
 	theirsState, err := VerifyChain(theirs, EmptyKeyring(), pluginUI)
 	if err != nil {
 		return nil, nil, fmt.Errorf("verify theirs: %w", err)
@@ -159,9 +156,8 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		Entries:  append([]AuditEntrySigned(nil), ours.Entries...),
 		SesamDir: ours.SesamDir,
 		InitHash: ours.InitHash,
-		// Rotate: the merge may apply a kill or an rm-recipients from theirs, and
-		// those paths rotate for a reason (see AuditLog.RotateKey). WriteEncrypted
-		// re-encrypts every entry anyway, so this costs nothing here.
+		// Rotate for the same reason UserKill does; WriteEncrypted re-encrypts
+		// everything anyway, so it is free here.
 		key: newAuditKey(),
 	}
 
@@ -198,8 +194,7 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 			r = dropWith("references "+orphanName+", whose rename/move was dropped on merge; skipped", true)
 			r.Target = orphanName
 		case revoked != "":
-			// Verified on their branch, but our side revoked the author since the
-			// base. Revocation wins here as everywhere else.
+			// Verified on their branch, but we revoked the author since the base.
 			r = dropWith(revoked, true)
 			r.Target = their.ChangedBy
 		default:
@@ -327,14 +322,12 @@ func isMergeAdminKill(their *AuditEntrySigned, merger string) string {
 }
 
 // authorRevoked reports why theirs' author may no longer perform the entry's
-// operation, or "" if they still may. Chain-verifying theirs establishes that
-// the author had authority on their branch; this catches the cross-branch case
-// where our side killed or demoted them since the base. Without it the merger's
-// re-signature would silently reinstate the authority we just revoked.
+// operation, or "" if they still may. Verifying theirs only proves what they
+// could do on their own branch, not what we left them since the base.
 func authorRevoked(their *AuditEntrySigned, merged, theirs *VerifiedState) string {
 	switch their.Operation {
 	case OpSeal, OpInit, OpMerge:
-		// Never replayed; resolveTheirs drops them with a more precise reason.
+		// Never replayed; resolveTheirs has a better reason for dropping them.
 		return ""
 	}
 
@@ -360,7 +353,7 @@ func authorRevoked(their *AuditEntrySigned, merged, theirs *VerifiedState) strin
 	case OpSecretChangeAccess, OpSecretMove, OpSecretRemove:
 		path := entrySecretTarget(their)
 		if _, ok := merged.SecretExists(path); !ok {
-			// Gone on our side: the resolvers decide (a double remove dedupes).
+			// Gone on our side - let the resolvers dedupe it.
 			return ""
 		}
 		if !merged.SealerAuthorized(author.Name, path) {
@@ -372,8 +365,7 @@ func authorRevoked(their *AuditEntrySigned, merged, theirs *VerifiedState) strin
 }
 
 // authorInMerged resolves theirs' author in the merged state. A rename on our
-// side changes the name but not the signing key, so fall back to an unambiguous
-// key match before concluding the author is gone.
+// side changes the name but not the sign key, hence the key fallback.
 func authorInMerged(their *AuditEntrySigned, merged, theirs *VerifiedState) (*VerifiedUser, bool) {
 	if u, ok := merged.UserExists(their.ChangedBy); ok {
 		return u, true

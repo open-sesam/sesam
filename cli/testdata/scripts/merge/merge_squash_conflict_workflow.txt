@@ -1,0 +1,54 @@
+# `git merge --squash` fires post-merge even when it conflicted, with the
+# conflicts still sitting in the index. Revealing there would overwrite the
+# driver's merge result with our side, so the hook keeps its hands off.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+cp base.txt $TMPDIR/base.txt
+cp ours.txt $TMPDIR/ours.txt
+cp theirs.txt $TMPDIR/theirs.txt
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add secret'
+
+exec git checkout -b topic
+cp $TMPDIR/theirs.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change s'
+
+exec git checkout master
+cp $TMPDIR/ours.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'master: change s'
+
+! exec git merge --squash topic
+
+# The markers the driver wrote survive the hook.
+grep '^<<<<<<< ' s
+grep 'OURS' s
+grep 'THEIRS' s
+exec sesam status
+stdout 'conflicted'
+
+-- base.txt --
+line one
+BASE
+line three
+-- ours.txt --
+line one
+OURS
+line three
+-- theirs.txt --
+line one
+THEIRS
+line three

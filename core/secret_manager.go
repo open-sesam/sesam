@@ -317,7 +317,28 @@ func (sm *SecretManager) readSecretFooter(path string) (*secretFooter, error) {
 
 // RevealAll reveals all known secrets.
 func (sm *SecretManager) RevealAll() error {
+	return sm.reveal(nil)
+}
+
+// RevealPaths reveals only the named secrets. Unknown or inaccessible paths are
+// skipped, so callers can pass a raw list from git.
+func (sm *SecretManager) RevealPaths(paths []string) error {
+	want := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		want[p] = true
+	}
+
+	return sm.reveal(want)
+}
+
+// reveal writes out every secret in want, or all of them when want is nil. The
+// nil case stays in here: an empty RevealPaths must reveal nothing, not everything.
+func (sm *SecretManager) reveal(want map[string]bool) error {
 	for _, vsecret := range sm.State.Secrets {
+		if want != nil && !want[vsecret.RevealedPath] {
+			continue
+		}
+
 		if !sm.State.UserHasAccess(sm.Signer.UserName(), vsecret.AccessGroups) {
 			// ignore files we can't decrypt:
 			continue

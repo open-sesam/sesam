@@ -109,10 +109,29 @@ func sealSecret(
 		_ = wc.Cleanup()
 	}()
 
-	// use the stream to compute the hash, what is written to wc, is also written to the hash:
+	ss, err := SealStream(rd, wc.File, revealedPath, recipients, sm.Identities.AgeIdentities(), sm.Signer, sealedByUser)
+	if err != nil {
+		return nil, err
+	}
+
+	return ss, wc.CloseAtomicallyReplace()
+}
+
+// SealStream is sealSecret without the destination handling, for the merge
+// driver's %A temp file. `dst` must be readable: we read the age key back.
+func SealStream(
+	rd io.Reader,
+	dst io.ReadWriteSeeker,
+	revealedPath string,
+	recipients Recipients,
+	ageIds []age.Identity,
+	signer Signer,
+	sealedByUser string,
+) (*secretFooter, error) {
+	// use the stream to compute the hash, what is written to dst, is also written to the hash:
 	ciphertextHash := sha3.New256()
 	contentHash := sha3.New256()
-	mw := io.MultiWriter(wc, ciphertextHash)
+	mw := io.MultiWriter(dst, ciphertextHash)
 
 	encW, err := age.Encrypt(mw, recipients.AgeRecipients()...)
 	if err != nil {
@@ -132,11 +151,11 @@ func sealSecret(
 	_, _ = ciphertextHash.Write([]byte(revealedPath))
 	_, _ = contentHash.Write([]byte(revealedPath))
 
-	if _, err := wc.Seek(0, io.SeekStart); err != nil {
+	if _, err := dst.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("failed to seek back to crypt file: %w", err)
 	}
 
-	ageKey, err := readAgeEncryptionKey(wc.File, sm.Identities.AgeIdentities())
+	ageKey, err := readAgeEncryptionKey(dst, ageIds)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read age key: %w", err)
 	}
@@ -144,12 +163,12 @@ func sealSecret(
 	hmacContentHash := keyContentHash(ageKey, contentHash.Sum(nil))
 	ciphertextHashBytes := ciphertextHash.Sum(nil)
 	recipientsHashBytes := recipientsHash(recipients)
-	sig, err := sm.Signer.Sign(
+	sig, err := signer.Sign(
 		SesamDomainSignSecretTag,
 		slices.Concat(ciphertextHashBytes, hmacContentHash, recipientsHashBytes),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to compute signature for %s: %w", destPath, err)
+		return nil, fmt.Errorf("failed to compute signature for %s: %w", revealedPath, err)
 	}
 
 	ss := secretFooter{
@@ -162,12 +181,12 @@ func sealSecret(
 		Version:         1,
 	}
 
-	if _, err := wc.Seek(0, io.SeekEnd); err != nil {
+	if _, err := dst.Seek(0, io.SeekEnd); err != nil {
 		return nil, fmt.Errorf("failed to seek back to crypt file: %w", err)
 	}
 
 	// Write signature to buffer, delimited by newline:
-	if _, err := wc.Write([]byte("\n")); err != nil {
+	if _, err := dst.Write([]byte("\n")); err != nil {
 		return nil, err
 	}
 
@@ -182,11 +201,11 @@ func sealSecret(
 		return nil, fmt.Errorf("footer bigger than page: %d - please file a bug", len(sigJSONBytes))
 	}
 
-	if _, err := wc.Write(sigJSONBytes); err != nil {
+	if _, err := dst.Write(sigJSONBytes); err != nil {
 		return nil, err
 	}
 
-	return &ss, wc.CloseAtomicallyReplace()
+	return &ss, nil
 }
 
 // readFooter seeks to the footer & parses it.

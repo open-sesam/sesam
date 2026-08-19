@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -37,6 +38,7 @@ func silentWithRepo(verifyMode repo.VerifyMode, action RepoAction) cli.ActionFun
 			Interactive: true,
 			LockTimeout: cmd.Duration("lock-timeout"),
 			VerifyMode:  verifyMode,
+			InMerge:     mergeState(sesamDir).InProgress(),
 		})
 		if err != nil {
 			return err
@@ -60,37 +62,42 @@ func silentWithRepo(verifyMode repo.VerifyMode, action RepoAction) cli.ActionFun
 // load and block the commit without a way to self-heal.
 func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 	return silentWithRepo(repo.VerifyModeNoDisk, func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-		// If a merge is being finalized, reconcile the derived tree (signkeys,
-		// objects) with the merged log before sealing, pruning orphans left by
-		// git's tree merge. Guarded on MERGE_HEAD so ordinary commits are untouched.
-		merging := repo.InMerge(cmd.String("sesam-dir"))
+		// If we're in a merge, then we need to straighten a few things before we can really commit.
+		kind := mergeState(cmd.String("sesam-dir"))
+		merging := kind.InProgress()
 
-		// Refuse to seal revealed secrets that still hold conflict markers - the
-		// seal would bake them into the ciphertext, and git can't see them
-		// (revealed files are gitignored). Only meaningful mid-merge.
+		// Refuse to seal markers into the ciphertext - git can't see them, since
+		// revealed files are gitignored.
 		if merging {
 			conflicted, err := r.ConflictedSecrets()
 			if err != nil {
 				return err
 			}
 			if len(conflicted) > 0 {
-				var lines []string
-				for _, c := range conflicted {
-					if c.Binary {
-						lines = append(lines, "  "+c.Path+" (binary): copy its .ours or .theirs over it, then delete the side files")
-					} else {
-						lines = append(lines, "  "+c.Path+": resolve the conflict markers in the revealed file")
-					}
-				}
 				return fmt.Errorf(
-					"unresolved merge conflicts:\n%s\nfix them, then run `git commit` again",
-					strings.Join(lines, "\n"),
+					"unresolved conflicts in this %s:\n%s\nfix them, then run `%s` again",
+					kind,
+					strings.Join(conflictedSecretHints(conflicted), "\n"),
+					cmp.Or(kind.ContinueCmd(), "git commit"),
 				)
+			}
+
+			// Refresh the plaintext of objects the merge changed, or the seal below
+			// writes our stale version back over them and reverts the merge.
+			merged, err := stagedSecretPaths(cmd.String("sesam-dir"))
+			if err != nil {
+				return err
+			}
+
+			if err := r.RevealPaths(merged); err != nil {
+				return err
 			}
 		}
 
 		if err := r.Update(func(s *repo.Stage) error {
 			if merging {
+				// There might be leftover secrets or signkeys, that are not in the audit-log anymore.
+				// (i.e. the decisions made during audit log merge might be different than what secret-merger does)
 				if err := s.PruneUnusedAfterMerge(); err != nil {
 					return err
 				}
@@ -152,7 +159,7 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 		// As a safety measure we disable the post-checkout in this case.
 		// Checking out secrets (or other files) will still work on normal git-level,
 		// but it's probably not something that is being done all the time.
-		if repo.InMerge(cmd.String("sesam-dir")) {
+		if mergeState(cmd.String("sesam-dir")).InProgress() {
 			return nil
 		}
 
@@ -165,6 +172,47 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 		}
 		if err := r.Update(func(s *repo.Stage) error { return s.Seal(false) }); err != nil {
 			slog.Warn("failed to reseal after file checkout", slog.Any("err", err))
+		}
+
+		return nil
+	})(ctx, cmd)
+}
+
+// HandleHookPostMerge refreshes the plaintext of secrets a completed merge changed.
+// It's the only way to make sure the revealed text is up-to-date when doing
+// things like fast-forward (i.e. git pull).
+//
+// Revealing is important, because leftover stale revealed files might be
+// written back on an explicit seal.
+func HandleHookPostMerge(ctx context.Context, cmd *cli.Command) error {
+	// git passes 1 for a squash merge, which leaves the changes staged instead of
+	// committing them - so HEAD has not moved and ORIG_HEAD tells us nothing.
+	squash := cmd.Args().Get(0) == "1"
+
+	return silentWithRepo(repo.VerifyModeNoDisk, func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+		sesamDir := cmd.String("sesam-dir")
+
+		// Only git knows which objects the merge brought in. Revealing everything
+		// instead would overwrite plaintext edits the user has not sealed yet.
+		paths, err := mergedSecretPaths(sesamDir)
+		if squash {
+			paths, err = stagedSecretPaths(sesamDir)
+		}
+		if err != nil {
+			slog.Warn("failed to list merged secrets", slog.Any("err", err))
+			return nil
+		}
+
+		// A conflicted squash merge fires this hook too, and those files hold the
+		// driver's merge result - revealing would throw it away.
+		conflicted, err := r.ConflictedSecrets()
+		if err != nil {
+			slog.Warn("failed to check for conflicted secrets", slog.Any("err", err))
+			return nil
+		}
+
+		if err := r.RevealPaths(withoutConflicted(paths, conflicted)); err != nil {
+			slog.Warn("failed to reveal secrets after merge", slog.Any("err", err))
 		}
 
 		return nil
@@ -189,7 +237,7 @@ func HandleHookPreMergeCommit(_ context.Context, cmd *cli.Command) error {
 		return nil
 	}
 
-	changed, err := repo.MergeTouchedSesam(sesamDir)
+	changed, err := mergeTouchedSesam(sesamDir)
 	if err != nil {
 		slog.Warn("pre-merge-commit: sesam-change check failed; forcing manual finalize", slog.Any("err", err))
 		changed = true // fail safe: never auto-commit an unsealed sesam merge

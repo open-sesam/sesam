@@ -1,10 +1,6 @@
-# `git stash` and `git stash pop` around a sealed secret. Two things make this
-# different from a merge: revealed plaintext is gitignored, so a stash cannot take
-# it along, and a pop invokes the merge drivers without MERGE_HEAD ever existing -
-# so sesam's merge finalize does not run.
-#
-# Nothing is corrupted and `sesam status` stays truthful throughout, but a stash
-# is only half a stash for sesam users. This pins the behaviour down.
+# A stash cannot take revealed plaintext along (gitignored), and a pop runs the
+# drivers without MERGE_HEAD, so no finalize. Nothing breaks, but a stash is only
+# half a stash here - pinned down below.
 
 exec git init
 exec git config user.email test@sesam.dev
@@ -13,6 +9,7 @@ exec git config user.name 'Sesam Test'
 cp base.txt $TMPDIR/base.txt
 cp wip.txt $TMPDIR/wip.txt
 cp other.txt $TMPDIR/other.txt
+cp merged.txt $TMPDIR/merged.txt
 
 exec sesam init --user admin --install-merge
 exec git add -A
@@ -52,6 +49,7 @@ stderr 'automatically merging revealed file s; 1 conflict'
 grep '^<<<<<<< ' s
 exec sesam status
 stdout 'conflicted'
+stdout 'in progress'
 
 # CAVEAT: the audit-log driver ran too, so a stash pop leaves a semantically
 # merged log (with a merge entry) staged - a change the user never asked for.
@@ -66,6 +64,22 @@ stdout 'OTHER'
 exec git stash list
 stdout 'stash@\{0\}'
 
+# Resolving is the same as anywhere else: fix the revealed file, seal, add.
+cp $TMPDIR/merged.txt s
+exec sesam seal
+exec git add -A
+exec sesam show .sesam/objects/s.sesam
+stdout 'MERGED'
+
+# The repo is consistent again and nothing is left in progress.
+exec sesam verify
+stderr 'Integrity: ok'
+exec sesam status
+! stdout 'in progress'
+exec git commit -m 'resolve stash pop'
+exec sesam verify
+stderr 'Integrity: ok'
+
 -- base.txt --
 line one
 line two
@@ -77,4 +91,8 @@ line three
 -- other.txt --
 line one
 OTHER
+line three
+-- merged.txt --
+line one
+MERGED
 line three

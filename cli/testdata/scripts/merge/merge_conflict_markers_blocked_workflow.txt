@@ -51,7 +51,7 @@ stdout 'conflicted'
 # into the ciphertext, and git itself can't catch it.
 exec git add -A
 ! exec git commit --no-edit
-stderr 'unresolved merge conflicts'
+stderr 'unresolved conflicts in this merge'
 stderr 'resolve the conflict markers'
 
 # Resolve the markers in the revealed file; the finalize then succeeds and the

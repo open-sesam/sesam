@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -79,26 +80,31 @@ func decryptBaseToBuf(path string, ids []age.Identity) (*bytes.Buffer, error) {
 	if info, err := os.Stat(path); err == nil && info.Size() == 0 {
 		return &bytes.Buffer{}, nil
 	}
-	return decryptSecretToBuf(path, ids)
+
+	buf, _, err := decryptSecretToBuf(path, ids)
+	return buf, err
 }
 
-func decryptSecretToBuf(path string, ids []age.Identity) (*bytes.Buffer, error) {
+// decryptSecretToBuf also returns the footer's recipients hash, which is how the
+// caller notices that the two sides were sealed for different people.
+func decryptSecretToBuf(path string, ids []age.Identity) (*bytes.Buffer, string, error) {
 	var buf bytes.Buffer
 
 	// we're opening git paths here, so regular ShowSecret won't work.
 	//nolint:gosec // git hands us the O/A/B blob temp paths to read.
 	fd, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, "", fmt.Errorf("open %s: %w", path, err)
 	}
 
 	defer func() { _ = fd.Close() }()
 
-	if _, _, _, err := core.RevealStream(fd, &buf, ids); err != nil {
-		return nil, fmt.Errorf("decrypt %s: %w", path, err)
+	_, _, footer, err := core.RevealStream(fd, &buf, ids)
+	if err != nil {
+		return nil, "", fmt.Errorf("decrypt %s: %w", path, err)
 	}
 
-	return &buf, nil
+	return &buf, footer.RecipientsHash, nil
 }
 
 func writeSecretTmpBuf(root *os.Root, buf *bytes.Buffer, revealedPath, tag string) (string, error) {
@@ -134,14 +140,26 @@ func writeSecretTmpBuf(root *os.Root, buf *bytes.Buffer, revealedPath, tag strin
 	return tmpPath, nil
 }
 
+// MergeSecretResult reports what the secret driver did with one object.
+type MergeSecretResult struct {
+	// Conflicts left in the revealed file.
+	Conflicts int
+
+	// Binary content: git refused to line-merge, both sides were written out
+	// beside the revealed file.
+	Binary bool
+
+	// Sealed back into %A, so no reseal is owed. Only ever set on a clean merge.
+	Sealed bool
+}
+
 // MergeSecret three-way merges one secret's decrypted content into its revealed
-// file. It returns the number of text conflicts; `binary` is true when the secret
-// is binary and could not be line-merged (both sides were written out beside the
-// revealed file for manual resolution).
-func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, revealedPath, ourPath, theirPath, originPath string, conflictMarkerSize int) (conflicts int, binary bool, err error) {
+// file. A clean merge is also sealed back into %A: a rebase or cherry-pick
+// finishes without ever calling a sesam hook, so nothing else would.
+func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, revealedPath, ourPath, theirPath, originPath string, conflictMarkerSize int) (res MergeSecretResult, err error) {
 	lock, err := TryAcquireMergeLock(root.Name())
 	if err != nil {
-		return 0, false, err
+		return res, err
 	}
 	defer func() { _ = lock.Unlock() }()
 
@@ -151,15 +169,15 @@ func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, reveal
 	// a binary refusal, the .ours/.theirs side files.
 	originBuf, err := decryptBaseToBuf(originPath, ageIds)
 	if err != nil {
-		return 0, false, fmt.Errorf("decrypt origin side of %s: %w", revealedPath, err)
+		return res, fmt.Errorf("decrypt origin side of %s: %w", revealedPath, err)
 	}
-	ourBuf, err := decryptSecretToBuf(ourPath, ageIds)
+	ourBuf, ourRecps, err := decryptSecretToBuf(ourPath, ageIds)
 	if err != nil {
-		return 0, false, fmt.Errorf("decrypt ours side of %s: %w", revealedPath, err)
+		return res, fmt.Errorf("decrypt ours side of %s: %w", revealedPath, err)
 	}
-	theirBuf, err := decryptSecretToBuf(theirPath, ageIds)
+	theirBuf, theirRecps, err := decryptSecretToBuf(theirPath, ageIds)
 	if err != nil {
-		return 0, false, fmt.Errorf("decrypt theirs side of %s: %w", revealedPath, err)
+		return res, fmt.Errorf("decrypt theirs side of %s: %w", revealedPath, err)
 	}
 
 	// Snapshot the two sides before staging drains their buffers - needed for the
@@ -180,17 +198,17 @@ func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, reveal
 
 	originRel, originAbs, err := stageBuf("origin", originBuf)
 	if err != nil {
-		return 0, false, err
+		return res, err
 	}
 
 	ourRel, ourAbs, err := stageBuf("ours", ourBuf)
 	if err != nil {
-		return 0, false, err
+		return res, err
 	}
 
 	theirRel, theirAbs, err := stageBuf("theirs", theirBuf)
 	if err != nil {
-		return 0, false, err
+		return res, err
 	}
 
 	// The decrypted sides are only needed for the merge itself; drop the
@@ -213,29 +231,102 @@ func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, reveal
 		// git itself refuses to line-merge binary content. Keep ours as the revealed
 		// value and write both decrypted sides beside it for manual resolution.
 		if err := writeRevealedFile(root, revealedPath+".ours", ourBytes); err != nil {
-			return 0, false, err
+			return res, err
 		}
 		if err := writeRevealedFile(root, revealedPath+".theirs", theirBytes); err != nil {
-			return 0, false, err
+			return res, err
 		}
 		if err := writeRevealedFile(root, revealedPath, ourBytes); err != nil {
-			return 0, false, err
+			return res, err
 		}
-		return 0, true, nil
+
+		res.Binary = true
+		return res, nil
 	}
 	if err != nil {
-		return 0, false, fmt.Errorf("merge %s: %w", revealedPath, err)
+		return res, fmt.Errorf("merge %s: %w", revealedPath, err)
 	}
 
 	buf := new(bytes.Buffer)
 	if _, err := io.Copy(buf, mergedReader); err != nil {
-		return 0, false, fmt.Errorf("read merged %s: %w", revealedPath, err)
+		return res, fmt.Errorf("read merged %s: %w", revealedPath, err)
 	}
 	if err := writeRevealedFile(root, revealedPath, buf.Bytes()); err != nil {
-		return 0, false, err
+		return res, err
 	}
 
-	return conflicts, false, nil
+	res.Conflicts = conflicts
+	if conflicts > 0 {
+		// Needs a human first, so %A keeps ours until someone reseals.
+		return res, nil
+	}
+
+	if ourRecps != theirRecps {
+		// Access changed on one side, so ours' log is not a safe source for who to
+		// encrypt to. Leave %A to the finalize, which has the merged log.
+		return res, nil
+	}
+
+	// Best effort: theirs may have added the secret, in which case ours' log knows
+	// no recipients for it yet. Leave %A alone then and let the finalize sort it out.
+	if err := sealMergedSecret(root, ids, revealedPath, ourPath, buf.Bytes()); err != nil {
+		slog.Warn("merge: could not seal merged secret into %A", slog.String("path", revealedPath), slog.Any("err", err))
+		return res, nil
+	}
+
+	res.Sealed = true
+	return res, nil
+}
+
+// sealMergedSecret seals `data` to destPath, which is git's %A temp file and thus
+// outside the sesam root. The audit log is the worktree's, i.e. still ours - the
+// driver runs once per conflicting secret, each in its own process, so there is
+// nothing to cache it in.
+func sealMergedSecret(root *os.Root, ids core.Identities, revealedPath, destPath string, data []byte) error {
+	auditLog, err := core.LoadAuditLog(root, ids)
+	if err != nil {
+		return fmt.Errorf("load audit log: %w", err)
+	}
+
+	defer func() { _ = auditLog.Close() }()
+
+	kr := core.EmptyKeyring()
+	state, err := core.VerifyChain(auditLog, kr, nil)
+	if err != nil {
+		return fmt.Errorf("verify audit log: %w", err)
+	}
+
+	recps := kr.Recipients(state.UsersForSecret(revealedPath))
+	if len(recps) == 0 {
+		return fmt.Errorf("no recipients known for %s", revealedPath)
+	}
+
+	signer, err := signerFor(root, ids, kr)
+	if err != nil {
+		return err
+	}
+
+	//nolint:gosec // git hands us the %A blob temp path to write.
+	fd, err := os.OpenFile(destPath, os.O_RDWR|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", destPath, err)
+	}
+
+	defer func() { _ = fd.Close() }()
+
+	if _, err := core.SealStream(
+		bytes.NewReader(data),
+		fd,
+		revealedPath,
+		recps,
+		ids.AgeIdentities(),
+		signer,
+		signer.UserName(),
+	); err != nil {
+		return fmt.Errorf("seal %s: %w", revealedPath, err)
+	}
+
+	return fd.Close()
 }
 
 // writeRevealedFile atomically writes data to a revealed (root-relative) path.
@@ -285,6 +376,11 @@ func resolveMergeSigner(root *os.Root, ids core.Identities, ourLog *core.AuditLo
 		return nil, fmt.Errorf("verify ours for merger resolution: %w", err)
 	}
 
+	return signerFor(root, ids, kr)
+}
+
+// signerFor picks the identity that maps to a known user and loads its sign key.
+func signerFor(root *os.Root, ids core.Identities, kr core.Keyring) (core.Signer, error) {
 	users := kr.ListUsers()
 	for _, id := range ids {
 		user, err := core.IdentityToUser(id, users)
@@ -296,66 +392,6 @@ func resolveMergeSigner(root *os.Root, ids core.Identities, ourLog *core.AuditLo
 	}
 
 	return nil, fmt.Errorf("none of the supplied identities maps to a known user; cannot merge")
-}
-
-// InMerge reports whether a merge is in progress (MERGE_HEAD exists). The
-// pre-commit hook uses it to run the merge reconciliation only when finalizing a
-// merge, not on ordinary commits.
-func InMerge(sesamDir string) bool {
-	worktreeRoot, err := GitWorktreeRoot(sesamDir)
-	if err != nil {
-		return false
-	}
-
-	cmd := exec.CommandContext(context.Background(), "git", "rev-parse", "-q", "--verify", "MERGE_HEAD")
-	cmd.Dir = worktreeRoot
-	return cmd.Run() == nil // exit 0 => MERGE_HEAD present
-}
-
-// MergeTouchedSesam reports whether an in-progress merge changed anything under
-// the sesam dir (staged index vs HEAD).
-func MergeTouchedSesam(sesamDir string) (bool, error) {
-	worktreeRoot, err := GitWorktreeRoot(sesamDir)
-	if err != nil {
-		return false, fmt.Errorf("locate worktree root: %w", err)
-	}
-
-	absSesam, err := filepath.Abs(sesamDir)
-	if err != nil {
-		return false, err
-	}
-
-	prefix, err := filepath.Rel(worktreeRoot, absSesam)
-	if err != nil {
-		return false, err
-	}
-
-	// `git diff --cached --quiet` exits 0 for no change, 1 for a change.
-	//nolint:gosec // fixed git subcommand; pathspec is derived from the repo layout.
-	cmd := exec.CommandContext(
-		context.Background(),
-		"git",
-		"diff",
-		"--cached",
-		"--quiet",
-		"HEAD",
-		"--",
-		filepath.Join(prefix, ".sesam"),
-	)
-	cmd.Dir = worktreeRoot
-	cmd.Stderr = os.Stderr
-
-	err = cmd.Run()
-	if err == nil {
-		return false, nil
-	}
-
-	exitErr := new(exec.ExitError)
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-		return true, nil
-	}
-
-	return false, fmt.Errorf("git diff for merge check: %w", err)
 }
 
 func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourPath, theirPath, originPath string, conflictMarkerSize int) (*core.ConflictResolution, error) {

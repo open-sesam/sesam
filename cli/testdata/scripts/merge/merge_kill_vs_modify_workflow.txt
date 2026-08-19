@@ -32,9 +32,9 @@ exec git checkout ours
 ! exec git merge theirs
 
 # The live merge driver explains the semantic merge and how to finalize.
-stderr 'both sides of the merge changed the audit log'
+stderr 'both sides changed the audit log'
 stderr 'modified on our side but killed on theirs; kill wins'
-stderr 'then run .git commit'
+stderr 'finish this merge with `git commit`'
 
 # Mid-merge, sesam assumes --verify-mode no-disk (the on-disk state is unsealed
 # until finalize) and stays quiet about the deferred seal, so a plain `sesam

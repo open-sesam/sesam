@@ -87,7 +87,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 	theirPath := cmd.StringArg("their-path")
 	conflictMarkerSize := cmd.IntArg("conflict-marker-size")
 
-	conflicts, binary, err := repo.MergeSecret(
+	res, err := repo.MergeSecret(
 		ctx,
 		root,
 		ids,
@@ -107,30 +107,44 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 
 	slog.Debug(
 		"merged successfully",
-		slog.Int("conflicts", conflicts),
-		slog.Bool("binary", binary),
+		slog.Int("conflicts", res.Conflicts),
+		slog.Bool("binary", res.Binary),
+		slog.Bool("sealed", res.Sealed),
 		slog.String("path", revealedPath),
 	)
 
-	if binary {
+	if res.Binary {
 		fmt.Fprintf(os.Stderr, "sesam: binary secret %s changed on both sides - cannot auto-merge; wrote %s.ours and %s.theirs.\n", revealedPath, revealedPath, revealedPath)
 		fmt.Fprintf(os.Stderr, "sesam: copy the one you want over %s (and delete the .ours/.theirs), then commit.\n", revealedPath)
 		return &ExitCodeError{err: nil, print: false, code: 1}
 	}
 
-	if conflicts > 0 {
-		fmt.Fprintf(os.Stderr,
+	if res.Conflicts > 0 {
+		fmt.Fprintf(
+			os.Stderr,
 			"sesam: automatically merging revealed file %s; %d %s - please fix manually.\n",
-			revealedPath, conflicts, pluralize("conflict", conflicts),
+			revealedPath, res.Conflicts, pluralize("conflict", res.Conflicts),
 		)
 		return &ExitCodeError{
 			err:   nil,
 			print: false,
-			code:  (conflicts % 127) + 1,
+			code:  (res.Conflicts % 127) + 1,
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "sesam: automatically merging revealed file %s; no conflicts\n", revealedPath)
+	if res.Sealed {
+		fmt.Fprintf(os.Stderr, "sesam: automatically merging revealed file %s; no conflicts, resealed\n", revealedPath)
+		return nil
+	}
+
+	// %A is still ours, so someone has to seal before committing. A plain merge
+	// has the finalize hook for that, a rebase or cherry-pick has nothing.
+	fmt.Fprintf(
+		os.Stderr,
+		"sesam: automatically merging revealed file %s; no conflicts, but it could not be resealed\n"+
+			"sesam: run `sesam seal` before finishing, or the merged content will not be committed\n",
+		revealedPath,
+	)
 	return nil
 }
 
@@ -205,9 +219,41 @@ func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
 	// Even though we exit without error here (which git would normally take as "continue with merge commit")
 	// we rely on the pre-merge-commit hook to fail. This allows the user to handle conflicts he/she would have
 	// resolved differently.
-	fmt.Fprint(os.Stderr, mergeDriverSummary(cr.Resolutions))
+	fmt.Fprint(os.Stderr, mergeDriverSummary(cr.Resolutions, mergeState(sesamDir)))
 
 	return nil
+}
+
+// withoutConflicted drops the secrets a merge left unresolved from paths.
+func withoutConflicted(paths []string, conflicted []core.ConflictedSecret) []string {
+	skip := make(map[string]bool, len(conflicted))
+	for _, c := range conflicted {
+		skip[c.Path] = true
+	}
+
+	kept := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if !skip[p] {
+			kept = append(kept, p)
+		}
+	}
+
+	return kept
+}
+
+// conflictedSecretHints renders a fix-it line per unresolved secret, shared by
+// the finalize (which refuses) and `sesam seal` (which only warns).
+func conflictedSecretHints(conflicted []core.ConflictedSecret) []string {
+	lines := make([]string, 0, len(conflicted))
+	for _, c := range conflicted {
+		if c.Binary {
+			lines = append(lines, "  "+c.Path+" (binary): copy its .ours or .theirs over it, then delete the side files")
+		} else {
+			lines = append(lines, "  "+c.Path+": resolve the conflict markers in the revealed file")
+		}
+	}
+
+	return lines
 }
 
 // mergeDecisionLines renders each noteworthy merge decision as a "- ..." bullet.
@@ -236,11 +282,13 @@ func mergeDecisionText(r *core.ConflictResolutionEntry) string {
 	return string(r.Action)
 }
 
-func mergeDriverSummary(resolutions []core.ConflictResolutionEntry) string {
+// mergeDriverSummary explains what the log driver decided and how to finish.
+// The advice stays vague on MergeKindNone rather than guessing "merge".
+func mergeDriverSummary(resolutions []core.ConflictResolutionEntry, kind mergeKind) string {
 	lines := mergeDecisionLines(resolutions)
 
 	var b strings.Builder
-	b.WriteString("sesam: both sides of the merge changed the audit log.\n")
+	b.WriteString("sesam: both sides changed the audit log.\n")
 	b.WriteString("sesam: the audit log was therefore semantically merged.\n")
 	b.WriteString("sesam:\n")
 	if len(lines) > 0 {
@@ -251,11 +299,22 @@ func mergeDriverSummary(resolutions []core.ConflictResolutionEntry) string {
 	}
 
 	b.WriteString("sesam:\n")
-	b.WriteString("sesam: NOTE: git will tell you the merge failed below.\n")
-	b.WriteString("sesam:       this is only to give you a chance to review the repo state before continuing to create a merge commit.\n")
+	b.WriteString("sesam: NOTE: git may tell you the operation failed below.\n")
+	b.WriteString("sesam:       this is only to give you a chance to review the repo state before continuing.\n")
 	b.WriteString("sesam:\n")
-	b.WriteString("sesam: please continue to resolve any conflicts mentioned above (if any) and then run `git commit`\n")
+	b.WriteString("sesam: resolve any conflicts mentioned above (if any), then check with `sesam status`.\n")
+
+	if cont := kind.ContinueCmd(); cont != "" {
+		b.WriteString("sesam: finish this " + kind.String() + " with `" + cont + "`.\n")
+	} else {
+		b.WriteString("sesam: then finish the git operation you started (`git commit`, `git rebase --continue`, ...).\n")
+	}
+
 	b.WriteString("sesam: in case you don't have the git integration installed run `sesam hook pre-commit` directly.\n")
-	b.WriteString("sesam: if you're unsure what any of this means, you can also abort the merge with `git merge --abort` and then `sesam reveal --all`\n")
+
+	if abort := kind.AbortCmd(); abort != "" {
+		b.WriteString("sesam: if you're unsure what any of this means, you can also start over with `" + abort + "` and then `sesam reveal --all`\n")
+	}
+
 	return b.String()
 }

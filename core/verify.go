@@ -703,6 +703,10 @@ func verifyMerge(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) e
 		return fmt.Errorf("parse merge detail: %w", err)
 	}
 
+	// The last seal's root hash describes neither merged side, so drop the claim
+	// rather than carry a wrong one until someone reseals.
+	state.LastSealRootHash = ""
+	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
 
