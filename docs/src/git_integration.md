@@ -41,6 +41,17 @@ This hook does the following:
 This is not being called when running `git reset`. If you do this, you should probably run `sesam open` explicitly.
 ```
 
+### `post-merge`
+
+`git` does not run `post-checkout` after a merge, and a fast-forward merge (what
+`git pull` usually is) runs no other hook either. Without this hook the revealed
+files would keep the pre-merge content while the sealed objects moved on - and
+the next `sesam seal` would write the stale plaintext back over what you pulled.
+
+This hook reveals the secrets whose objects the merge changed. It stays out of
+the way while conflicts are still unresolved in the index, so a merge you are
+mid-way through resolving is never overwritten.
+
 ### `pre-commit`
 
 When you commit you most likely want to make sure that all files you've edited in the worktree are sealed (i.e. `sesam status` shows nothing)
@@ -124,23 +135,26 @@ $ git add . && git commit -am 'add secret.txt and Adel'
 # Actual merge action:
 $ git merge feature
 sesam: automatically merging revealed file secret.txt; 1 conflict - please fix manually.
-sesam: automatically merging revealed file README.md; no conflicts
-sesam: both sides of the merge changed the audit log.
+sesam: automatically merging revealed file README.md; no conflicts, but it could not be resealed
+sesam: run `sesam seal` before finishing, or the merged content will not be committed
+sesam: both sides changed the audit log.
 sesam: the audit log was therefore semantically merged.
 sesam:
 sesam:
-sesam: NOTE: git will tell you the merge failed below.
-sesam:       this is only to give you a chance to review the repo state before continuing to create a merge commit.
+sesam: NOTE: git may tell you the operation failed below.
+sesam:       this is only to give you a chance to review the repo state before continuing.
 sesam:
-sesam: please continue to resolve any conflicts mentioned above (if any) and then run `git commit`
+sesam: resolve any conflicts mentioned above (if any), then check with `sesam status`.
+sesam: finish this merge with `git commit`.
 sesam: in case you don't have the git integration installed run `sesam hook pre-commit` directly.
-sesam: if you're unsure what any of this means, you can also abort the merge with `git merge --abort` and then `sesam reveal --all`
+sesam: if you're unsure what any of this means, you can also start over with `git merge --abort` and then `sesam reveal --all`
 Auto-merging .sesam/audit/log.jsonl
 Auto-merging .sesam/objects/README.md.sesam
 Auto-merging .sesam/objects/secret.txt.sesam
 CONFLICT (add/add): Merge conflict in .sesam/objects/secret.txt.sesam
 Auto-merging sesam.yml
 Automatic merge failed; fix conflicts and then commit the result.
+
 
 # You will see merge 
 $ cat secret.txt

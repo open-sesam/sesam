@@ -6,41 +6,69 @@
 
 **`sesam` is a tool for managing secrets in git.**
 
-Software projects often required to store and load several secrets such as database passwords, certificates, API keys or other credentials. Those secrets should be stored encrypted and only be accessible to the users that actually need them.
+Three words, each of them doing some work:
 
-`sesam` allows leveled access with multiple users to those encrypted secrets and gives you a simple interface to manage both users and secrets.
+- `secrets`: Are just regular files that contain something precious to you. They are on your filesystem *revealed* (decrypted) and *sealed* (encrypted).
+- `managing`: Making sure *sealed* and *revealed* are in sync and allow the user to define who has access to what secret.
+- `in git`: Developers are naturally used to `git` and `sesam` integrates well with it.
+
+## Intro
+
+Software projects often need to store and load several secrets such as
+database passwords, certificates, API keys or other credentials. Those secrets
+should be stored encrypted and only be accessible to the users that actually
+need them.
+
+`sesam` allows leveled access with multiple users to those encrypted secrets
+and gives you a simple interface to manage both users and secrets.
 
 ```admonish note
 The term *user* does not necessarily refer to a person. A user can also be a machine, like a server where `sesam` is installed.
 ```
 
-You might think of a password manager now, which is not too far off. A password manager is usually targeted at managing individual secrets,
-while a secret manager is focused on sharing selected secrets with other users in a team and machines. If you already know what a secret manager is then you might be interested in [Why we built another tool](./alternatives.md).
+### What is a secret manager?
+
+You might think of a password manager now, which is not too far off - `sesam`
+can indeed also be used as a password manager. A password manager is usually
+targeted at managing individual secrets, while a secret manager is focused on
+sharing selected secrets with other users in a team and machines. If you
+already know what a secret manager is then you might be interested in [Why we
+built another tool](./alternatives.md).
 
 ## Features
 
-- Signed, hash-chained and encrypted audit log.
+### Security
+
+- Every write is recorded, signed and verified by an audit log.
 - Support for SSH keys, age keys and age plugin identities.
+- Different access levels through user groups.
+- Encrypted at rest; only secret paths and group membership are visible in the repo.
+- Safe to use (hard to accidentally push unencrypted secrets)
+- Per-secret integrity checks with root-hash verification.
+- Support for rotation and swap of secrets ([planned](https://github.com/open-sesam/sesam/issues/40))
+
+### Convenience
+
 - Forge recipient shortcuts for GitHub, GitLab and Codeberg.
 - Both declarative (config) and imperative (CLI) workflows possible.
-- Different access levels through user groups.
-- Secure - common crypto, minimal info leakage in rest.
-- High level of integration with `git`.
 - Familiarity to `git` users.
-- Versioned - by wrapping git.
 - Decentralized & offline ready.
-- Safe to use (hard to accidentally push unencrypted secrets)
 - Scriptable via CLI interface.
-- Fast encryption and decryption.
+- Somewhat fast encryption and decryption.¹
 - Almost zero dependencies.
-- Support for rotation and exchange of secrets.
-- Per-secret integrity checks with root-hash verification.
-
-In short, `sesam` fits well the [GitOps model](https://about.gitlab.com/topics/gitops/) of infrastructure.
 
 <small>
 ¹ <i>somewhat fast</i> is the new <i>🚀 blazingly fast 🚀</i> - benchmarks will follow later.
 </small>
+
+### Git Integration
+
+- Secrets are naturally versioned.
+- Allows viewing local diffs of secrets and the audit log.
+- Hooks keep revealed files in sync on checkout, pull and merge.
+- Merging of secrets is supported.
+
+In short, `sesam` fits well the [GitOps model](https://about.gitlab.com/topics/gitops/) of infrastructure.
 
 ## Who is it for?
 

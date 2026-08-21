@@ -140,6 +140,12 @@ Execute the pre-merge-commit hook - meant to be run by git!
 
 **--help, -h**: show help
 
+### post-merge
+
+Execute the post-merge hook - meant to be run by git!
+
+**--help, -h**: show help
+
 ### install
 
 Make sure the git hooks are installed
