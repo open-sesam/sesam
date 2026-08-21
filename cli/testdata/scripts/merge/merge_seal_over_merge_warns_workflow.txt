@@ -1,0 +1,64 @@
+# After a cherry-pick nothing has reconciled the worktree: the objects moved, the
+# revealed files did not. Sealing then writes the pre-pick plaintext back over the
+# picked objects. `sesam seal` cannot tell that apart from a hand-resolved merge,
+# so it warns instead of refusing - and this is what the warning is protecting.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+cp base.txt $TMPDIR/base.txt
+cp changed.txt $TMPDIR/changed.txt
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+cp $TMPDIR/base.txt s
+cp $TMPDIR/base.txt t
+exec sesam add s --group admin
+exec sesam add t --group admin
+exec git add -A
+exec git commit -m 'add secrets'
+
+exec git checkout -b topic
+cp $TMPDIR/changed.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change s'
+
+exec git checkout master
+cp $TMPDIR/changed.txt t
+exec sesam seal
+exec git add -A
+exec git commit -m 'master: change t'
+
+exec git cherry-pick topic
+
+# The picked object is CHANGED, our plaintext is still BASE.
+exec sesam show .sesam/objects/s.sesam
+stdout 'CHANGED'
+exec cat s
+stdout 'BASE'
+
+exec sesam seal
+stderr 'the last audit entry is a merge'
+stderr 'run .sesam reveal. first'
+
+# The warning is not idle: the picked content is gone from the object now.
+exec sesam show .sesam/objects/s.sesam
+stdout 'BASE'
+
+# Sealing again is quiet - the log no longer ends on a merge, and there is
+# nothing left out of sync either.
+exec sesam seal
+! stderr 'WARNING'
+
+-- base.txt --
+line one
+BASE
+line three
+-- changed.txt --
+line one
+CHANGED
+line three

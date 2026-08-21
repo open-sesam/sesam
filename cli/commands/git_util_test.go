@@ -21,6 +21,8 @@ func TestMergeKind(t *testing.T) {
 		{mergeKindRebase, "rebase", true, "git rebase --continue", "git rebase --abort"},
 		{mergeKindCherryPick, "cherry-pick", true, "git cherry-pick --continue", "git cherry-pick --abort"},
 		{mergeKindRevert, "revert", true, "git revert --continue", "git revert --abort"},
+		// A squash has no merge commit, so there is nothing for git to abort.
+		{mergeKindSquash, "squash merge", true, "git commit", ""},
 		// A conflicted `git stash pop` has nothing to continue or abort.
 		{mergeKindOther, "conflicted operation", true, "", ""},
 	}

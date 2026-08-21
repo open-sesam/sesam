@@ -48,12 +48,14 @@ stderr 'a seal is pending'
 exec sesam status
 stdout 'out of sync'
 
-# Sealing after a reveal completes it. (Reveal first: the object git installed is
-# the authoritative one, our plaintext is the pre-pick version.)
+# Reveal before sealing: the object git installed is the authoritative one, our
+# plaintext is the pre-pick version. (Sealing straight away is the trap that
+# merge_seal_over_merge_warns covers.)
 exec sesam reveal
 exec cat s
 stdout 'CHANGED'
 exec sesam seal
+! stderr 'WARNING'
 exec git add -A
 exec git commit -m 'seal after cherry-pick'
 exec sesam verify

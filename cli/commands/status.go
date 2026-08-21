@@ -275,15 +275,15 @@ func printMergeHint(kind mergeKind) {
 	}
 
 	fmt.Printf("\na %s is in progress.\n", kind)
-	fmt.Printf("  resolve the conflicted (U) secrets above, then run `sesam seal`\n")
+	fmt.Printf("resolve the conflicted (U) secrets above, then run `sesam seal`\n")
 
 	if cont := kind.ContinueCmd(); cont != "" {
-		fmt.Printf("  and finish with `%s`\n", cont)
+		fmt.Printf("and finish with `%s`\n", cont)
 	} else {
-		fmt.Printf("  and `git add` them (a conflicted `git stash pop` ends up here)\n")
+		fmt.Printf("and `git add` them (a conflicted `git stash pop` ends up here)\n")
 	}
 
 	if abort := kind.AbortCmd(); abort != "" {
-		fmt.Printf("  or start over with `%s` followed by `sesam reveal --all`\n", abort)
+		fmt.Printf("or start over with `%s` followed by `sesam reveal --all`\n", abort)
 	}
 }

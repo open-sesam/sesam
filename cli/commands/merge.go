@@ -109,7 +109,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 		"merged successfully",
 		slog.Int("conflicts", res.Conflicts),
 		slog.Bool("binary", res.Binary),
-		slog.Bool("sealed", res.Sealed),
+		slog.String("seal", res.Seal.String()),
 		slog.String("path", revealedPath),
 	)
 
@@ -132,19 +132,27 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	if res.Sealed {
+	switch res.Seal {
+	case repo.MergeSealDone:
 		fmt.Fprintf(os.Stderr, "sesam: automatically merging revealed file %s; no conflicts, resealed\n", revealedPath)
-		return nil
+	case repo.MergeSealDeferred:
+		fmt.Fprintf(
+			os.Stderr,
+			"sesam: automatically merging revealed file %s; no conflicts, but access to it changed on both sides\n"+
+				"sesam: it will be sealed with the merged recipients when you commit\n",
+			revealedPath,
+		)
+	default:
+		// %A is still ours, so someone has to seal before committing. A plain merge
+		// has the finalize hook for that, a rebase or cherry-pick has nothing.
+		fmt.Fprintf(
+			os.Stderr,
+			"sesam: automatically merging revealed file %s; no conflicts, but it could not be resealed\n"+
+				"sesam: run `sesam seal` before finishing, or the merged content will not be committed\n",
+			revealedPath,
+		)
 	}
 
-	// %A is still ours, so someone has to seal before committing. A plain merge
-	// has the finalize hook for that, a rebase or cherry-pick has nothing.
-	fmt.Fprintf(
-		os.Stderr,
-		"sesam: automatically merging revealed file %s; no conflicts, but it could not be resealed\n"+
-			"sesam: run `sesam seal` before finishing, or the merged content will not be committed\n",
-		revealedPath,
-	)
 	return nil
 }
 

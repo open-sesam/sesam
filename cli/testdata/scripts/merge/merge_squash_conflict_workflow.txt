@@ -37,8 +37,29 @@ exec git commit -m 'master: change s'
 grep '^<<<<<<< ' s
 grep 'OURS' s
 grep 'THEIRS' s
+
+# A squash sets no MERGE_HEAD, so it used to look like "no merge at all" and skip
+# the finalize. SQUASH_MSG gives it away instead.
 exec sesam status
 stdout 'conflicted'
+stdout 'a squash merge is in progress'
+stdout 'git commit'
+! stdout 'abort'
+
+# The finalize therefore refuses the markers, as it would in a plain merge.
+exec git add -A
+! exec git commit -m squashed
+stderr 'unresolved conflicts in this squash merge'
+
+# Resolving lets it through, and the squashed commit is consistent.
+cp $TMPDIR/ours.txt s
+exec git commit -m squashed
+exec sesam show .sesam/objects/s.sesam
+stdout 'OURS'
+exec sesam verify
+stderr 'Integrity: ok'
+exec sesam status
+! stdout 'in progress'
 
 -- base.txt --
 line one

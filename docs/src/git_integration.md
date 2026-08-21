@@ -135,8 +135,8 @@ $ git add . && git commit -am 'add secret.txt and Adel'
 # Actual merge action:
 $ git merge feature
 sesam: automatically merging revealed file secret.txt; 1 conflict - please fix manually.
-sesam: automatically merging revealed file README.md; no conflicts, but it could not be resealed
-sesam: run `sesam seal` before finishing, or the merged content will not be committed
+sesam: automatically merging revealed file README.md; no conflicts, but access to it changed on both sides
+sesam: it will be sealed with the merged recipients when you commit
 sesam: both sides changed the audit log.
 sesam: the audit log was therefore semantically merged.
 sesam:
@@ -171,6 +171,11 @@ $ sesam status
 ╰─ U secret.txt (admin)
   1 conflicted · 1 out of sync
 
+a merge is in progress.
+  resolve the conflicted (U) secrets above, then run `sesam seal`
+  and finish with `git commit`
+  or start over with `git merge --abort` followed by `sesam reveal --all`
+
 # Do a content merge:
 $ echo 'hello world' > secret.txt
 
@@ -179,6 +184,11 @@ $ sesam status
 ├─ M README.md (admin)
 ╰─ M secret.txt (admin)
   2 out of sync
+
+a merge is in progress.
+  resolve the conflicted (U) secrets above, then run `sesam seal`
+  and finish with `git commit`
+  or start over with `git merge --abort` followed by `sesam reveal --all`
 
 # Audit log was automatically merged:
 $ sesam log
@@ -207,6 +217,7 @@ $ git commit -am 'merge'
 - The `sesam.yml` files will always be resetted to the merged state. Any additional change will be lost.
 - Merging without the git integration is not possible. Doing so will likely result in a repository state that does not survive `sesam verify`.
 - If you have a secret that is binary in nature, we can't merge it with conflict markers. In this case we'll add a TODO `.theirs` version next to it and inform you.
+- A rebase or cherry-pick uses the same machinery, but `git` runs no hook when they finish. Check `sesam status` afterwards: it names the operation and what is left to do.
 
 ### Internal flow
 

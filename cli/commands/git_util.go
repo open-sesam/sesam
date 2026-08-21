@@ -23,6 +23,7 @@ const (
 	mergeKindRebase
 	mergeKindCherryPick
 	mergeKindRevert
+	mergeKindSquash
 	// mergeKindOther: unmerged index with no state ref to explain it, e.g. a
 	// conflicted `git stash pop`.
 	mergeKindOther
@@ -44,6 +45,8 @@ var mergeKinds = map[mergeKind]struct {
 	mergeKindRevert: {
 		name: "revert", cont: "git revert --continue", abort: "git revert --abort",
 	},
+	// A squash has no merge commit to abort; `git merge --abort` refuses.
+	mergeKindSquash: {name: "squash merge", cont: "git commit"},
 	// Nothing to continue or abort: resolving the files is the whole job.
 	mergeKindOther: {name: "conflicted operation"},
 }
@@ -85,6 +88,12 @@ func mergeState(sesamDir string) mergeKind {
 		if _, err := gitOutput(worktreeRoot, "rev-parse", "-q", "--verify", probe.ref); err == nil {
 			return probe.kind
 		}
+	}
+
+	// A squash merge leaves no ref and no merge commit - only this file, until the
+	// user commits. Without it the finalize would skip a squash entirely.
+	if _, err := os.Stat(filepath.Join(gitDir, "SQUASH_MSG")); err == nil {
+		return mergeKindSquash
 	}
 
 	// MERGE_HEAD is only written once the tree merge is done, so mid-driver this

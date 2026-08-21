@@ -140,6 +140,39 @@ func writeSecretTmpBuf(root *os.Root, buf *bytes.Buffer, revealedPath, tag strin
 	return tmpPath, nil
 }
 
+// MergeSealOutcome says what became of %A on a conflict-free merge.
+type MergeSealOutcome int
+
+const (
+	// MergeSealSkipped: not attempted, e.g. because the merge conflicted.
+	MergeSealSkipped MergeSealOutcome = iota
+
+	// MergeSealDone: %A holds the merged content; we were able to write it back.
+	MergeSealDone
+
+	// MergeSealDeferred: left to the finalize on purpose, which knows more than
+	// this driver invocation does.
+	MergeSealDeferred
+
+	// MergeSealFailed: we wanted to seal and could not.
+	MergeSealFailed
+)
+
+func (mso MergeSealOutcome) String() string {
+	switch mso {
+	case MergeSealSkipped:
+		return "skipped"
+	case MergeSealDone:
+		return "sealed"
+	case MergeSealDeferred:
+		return "defer"
+	case MergeSealFailed:
+		return "failed"
+	default:
+		return ""
+	}
+}
+
 // MergeSecretResult reports what the secret driver did with one object.
 type MergeSecretResult struct {
 	// Conflicts left in the revealed file.
@@ -149,8 +182,8 @@ type MergeSecretResult struct {
 	// beside the revealed file.
 	Binary bool
 
-	// Sealed back into %A, so no reseal is owed. Only ever set on a clean merge.
-	Sealed bool
+	// Seal is what happened to %A.
+	Seal MergeSealOutcome
 }
 
 // MergeSecret three-way merges one secret's decrypted content into its revealed
@@ -264,17 +297,17 @@ func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, reveal
 	if ourRecps != theirRecps {
 		// Access changed on one side, so ours' log is not a safe source for who to
 		// encrypt to. Leave %A to the finalize, which has the merged log.
+		res.Seal = MergeSealDeferred
 		return res, nil
 	}
 
-	// Best effort: theirs may have added the secret, in which case ours' log knows
-	// no recipients for it yet. Leave %A alone then and let the finalize sort it out.
 	if err := sealMergedSecret(root, ids, revealedPath, ourPath, buf.Bytes()); err != nil {
 		slog.Warn("merge: could not seal merged secret into %A", slog.String("path", revealedPath), slog.Any("err", err))
+		res.Seal = MergeSealFailed
 		return res, nil
 	}
 
-	res.Sealed = true
+	res.Seal = MergeSealDone
 	return res, nil
 }
 
