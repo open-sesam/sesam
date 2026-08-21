@@ -148,8 +148,11 @@ func (aes *AuditEntrySigned) Encrypt(aead cipher.AEAD) ([]byte, error) {
 	}
 
 	nonce := make([]byte, aead.NonceSize())
-	binary.BigEndian.PutUint64(nonce, aes.SeqID)
-	encData := aead.Seal(nil, nonce, sigJSON, nil)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("generate nonce: %w", err)
+	}
+
+	encData := aead.Seal(nonce, nonce, sigJSON, seqAssociatedData(aes.SeqID))
 
 	base64Buf := make([]byte, base64.RawStdEncoding.EncodedLen(len(encData))+1)
 	base64.RawStdEncoding.Encode(base64Buf, encData)
@@ -507,6 +510,17 @@ func (aes *AuditEntrySigned) Verify(kr Keyring) (string, error) {
 	return kr.Verify(SesamDomainSignAuditTag, wholeEntryJSON, aes.Signature, aes.ChangedBy)
 }
 
+// newAuditAEAD builds the audit log's AEAD. XChaCha20's 24 byte nonce makes
+// random nonces safe without having to count how many entries share a key.
+func newAuditAEAD(key []byte) (cipher.AEAD, error) {
+	return chacha20poly1305.NewX(key)
+}
+
+// seqAssociatedData binds an entry line to its position in the log.
+func seqAssociatedData(seqID uint64) []byte {
+	return binary.BigEndian.AppendUint64(nil, seqID)
+}
+
 // newAuditKey returns a fresh symmetric key for the audit log.
 func newAuditKey() [32]byte {
 	var key [32]byte
@@ -542,7 +556,7 @@ func writeEncryptedLog(w io.Writer, key [32]byte, recps Recipients, entries []Au
 		return fmt.Errorf("write key line: %w", err)
 	}
 
-	aead, err := chacha20poly1305.New(key[:])
+	aead, err := newAuditAEAD(key[:])
 	if err != nil {
 		return fmt.Errorf("init aead: %w", err)
 	}
@@ -579,7 +593,7 @@ func (al *AuditLog) SetBase(base string) { al.base = base }
 // sharing cipher state. The caller is responsible for having materialized the
 // log file at base beforehand (Repo.materializeFork byte-copies it).
 func (al *AuditLog) Fork(root *os.Root, base string) (*AuditLog, error) {
-	aead, err := chacha20poly1305.New(al.key[:])
+	aead, err := newAuditAEAD(al.key[:])
 	if err != nil {
 		return nil, fmt.Errorf("derive aead for fork: %w", err)
 	}
@@ -645,7 +659,7 @@ func (al *AuditLog) WriteAuditKey(recps Recipients) error {
 func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 	newKey := newAuditKey()
 
-	newAead, err := chacha20poly1305.New(newKey[:])
+	newAead, err := newAuditAEAD(newKey[:])
 	if err != nil {
 		return fmt.Errorf("init aead with new key: %w", err)
 	}
@@ -719,7 +733,7 @@ func InitAuditLog(root *os.Root, signer Signer, recps Recipients, admin DetailUs
 		return nil, fmt.Errorf("sync audit log: %w", err)
 	}
 
-	al.aead, err = chacha20poly1305.New(al.key[:])
+	al.aead, err = newAuditAEAD(al.key[:])
 	if err != nil {
 		return nil, err
 	}
@@ -941,15 +955,15 @@ func loadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
 		return nil, fmt.Errorf("failed to load audit key: %w", err)
 	}
 	copy(al.key[:], key)
-	al.aead, err = chacha20poly1305.New(key)
+	al.aead, err = newAuditAEAD(key)
 	if err != nil {
 		return nil, fmt.Errorf("init aead: %w", err)
 	}
 
-	// Lines 2+: encrypted entries. Nonce = SeqID = len(Entries)+1 before each append.
+	// Lines 2+: encrypted entries, each prefixed with its own nonce.
 	decBuf := make([]byte, 64*1024)   // base64 decode target, grown as needed
 	plainBuf := make([]byte, 16*1024) // AEAD plaintext target, grown by Open
-	nonce := make([]byte, al.aead.NonceSize())
+	nonceSize := al.aead.NonceSize()
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++
@@ -964,8 +978,16 @@ func loadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
 			return nil, fmt.Errorf("base64 decode line %d: %w", lineNumber, err)
 		}
 
-		binary.BigEndian.PutUint64(nonce, uint64(len(al.Entries)+1))
-		jsonData, err := al.aead.Open(plainBuf[:0], nonce, decBuf[:n], nil)
+		if n < nonceSize {
+			return nil, fmt.Errorf("line %d is too short to hold a nonce", lineNumber)
+		}
+
+		jsonData, err := al.aead.Open(
+			plainBuf[:0],
+			decBuf[:nonceSize],
+			decBuf[nonceSize:n],
+			seqAssociatedData(uint64(len(al.Entries)+1)),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt line %d: %w", lineNumber, err)
 		}
