@@ -1,0 +1,79 @@
+# Before anything is taken from the branch being merged in, that branch is
+# checked out into the tmp dir and verified as a whole - the same check `sesam
+# verify` runs. Its state is left behind so the driver runs that follow (git
+# calls one per conflicting path) reuse it instead of repeating the work.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+cp base.txt $TMPDIR/base.txt
+cp mine.txt $TMPDIR/mine.txt
+cp theirs.txt $TMPDIR/theirs.txt
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+cp $TMPDIR/base.txt a
+cp $TMPDIR/base.txt b
+cp $TMPDIR/base.txt c
+exec sesam add a --group admin
+exec sesam add b --group admin
+exec sesam add c --group admin
+exec git add -A
+exec git commit -m 'add a b c'
+
+exec git checkout -b topic
+cp $TMPDIR/theirs.txt a
+cp $TMPDIR/theirs.txt b
+cp $TMPDIR/theirs.txt c
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change all three'
+
+exec git checkout master
+cp $TMPDIR/mine.txt a
+cp $TMPDIR/mine.txt b
+cp $TMPDIR/mine.txt c
+exec sesam seal
+exec git add -A
+exec git commit -m 'ours: change all three'
+
+# All three conflict, so the driver runs three times.
+! exec git merge topic
+stderr 'automatically merging revealed file a'
+stderr 'automatically merging revealed file b'
+stderr 'automatically merging revealed file c'
+
+# One state file covers all three, and the branch it came from is unpacked
+# beside it rather than checked out over the worktree.
+exec ls .sesam/tmp
+stdout 'theirs-vstate\.json'
+stdout '^theirs$'
+
+# It really is the incoming branch's state: it knows the secrets, and it is
+# readable as plain json.
+grep '"RevealedPath":"a"' .sesam/tmp/theirs-vstate.json
+grep '"name":"admin"' .sesam/tmp/theirs-vstate.json
+
+# Finishing the merge still works and leaves a repo that verifies.
+cp $TMPDIR/mine.txt a
+cp $TMPDIR/mine.txt b
+cp $TMPDIR/mine.txt c
+exec git add -A
+exec git commit --no-edit
+exec sesam verify
+stderr 'Integrity: ok'
+
+# The scratch space is emptied by the finalize - the unpacked branch is a full
+# copy of their .sesam and would otherwise pile up, one per merge.
+exec ls .sesam/tmp
+! stdout 'theirs'
+
+-- base.txt --
+BASE
+-- mine.txt --
+MINE
+-- theirs.txt --
+THEIRS

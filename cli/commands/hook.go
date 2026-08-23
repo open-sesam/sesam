@@ -124,6 +124,13 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 			return fmt.Errorf("verification failed - please fix before committing")
 		}
 
+		if merging {
+			// Whatever the merge unpacked to verify is not needed past this point.
+			if err := r.ClearTmp(); err != nil {
+				slog.Warn("could not clear the tmp dir", slog.Any("err", err))
+			}
+		}
+
 		return r.GitAddDotSesam()
 	})(ctx, cmd)
 }

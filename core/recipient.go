@@ -58,6 +58,22 @@ func (r *Recipient) MarshalJSON() ([]byte, error) {
 	})
 }
 
+func (r *Recipient) UnmarshalJSON(data []byte) error {
+	var pub UserPubKey
+	if err := json.Unmarshal(data, &pub); err != nil {
+		return err
+	}
+
+	parsed, err := ParseRecipient(pub.Key, nil)
+	if err != nil {
+		return err
+	}
+
+	*r = *parsed
+	r.Source = pub.Source
+	return nil
+}
+
 // Recipients is a helper to manage several recipients
 type Recipients []*Recipient
 

@@ -239,6 +239,31 @@ func (v *View) RevealPaths(paths []string) error {
 	return nil
 }
 
+// VerifiedState is the state the audit log replayed to. Callers must treat it as
+// read-only; it is the same value the view keeps working with.
+func (v *View) VerifiedState() (*core.VerifiedState, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return nil, ErrClosed
+	}
+
+	return v.vstate, nil
+}
+
+// ClearTmp empties the repo's scratch space.
+func (v *View) ClearTmp() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return ErrClosed
+	}
+
+	return ClearTmp(v.root)
+}
+
 // Clean removes stale plaintext from the worktree. See CleanOpts for modes.
 func (v *View) Clean(ctx context.Context, opts CleanOpts) error {
 	v.mu.Lock()

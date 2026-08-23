@@ -2,12 +2,14 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/sahib/renameio/v2"
 	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/core"
 	"opensesam.org/sesam/repo"
@@ -96,6 +98,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 		theirPath,
 		originPath,
 		conflictMarkerSize,
+		theirStateFunc(ctx, cmd, sesamDir, theirPath, identityPaths, ids),
 	)
 	if err != nil {
 		return &ExitCodeError{
@@ -325,4 +328,121 @@ func mergeDriverSummary(resolutions []core.ConflictResolutionEntry, kind mergeKi
 	}
 
 	return b.String()
+}
+
+// theirsVStatePath is where the incoming branch's verified state is parked for
+// the driver runs that follow.
+const theirsVStatePath = repo.TmpDir + "/theirs-vstate.json"
+
+// theirsCheckoutPath is where the incoming .sesam is unpacked to be verified.
+const theirsCheckoutPath = ".sesam/tmp/theirs"
+
+// theirStateFunc yields the state of the branch being merged in, verifying that
+// branch the first time anything asks. git runs a driver per conflicting path,
+// so the work happens once and the rest read the file it left behind.
+func theirStateFunc(
+	ctx context.Context,
+	cmd *cli.Command,
+	sesamDir, theirPath string,
+	identityPaths []string,
+	ids core.Identities,
+) repo.TheirStateFunc {
+	return func() (*core.VerifiedState, error) {
+		state, err := readTheirState(sesamDir)
+		if err == nil {
+			return state, nil
+		}
+
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+
+		if err := ensureTheirsVerified(ctx, sesamDir, theirPath, identityPaths, repo.RepoOpts{
+			AskpassProgram:  cmd.String("askpass"),
+			AskpassRequired: askpassRequired(),
+
+			// The disk checks are left to the explicit Verify: at load time a
+			// mismatch aborts with "try --verify-mode no-disk", which hides the
+			// actual finding behind advice to pass a flag.
+			VerifyMode: repo.VerifyModeNoDisk,
+
+			// We unlocked these already; loading them again could prompt twice.
+			Identities: ids,
+		}); err != nil {
+			return nil, err
+		}
+
+		return readTheirState(sesamDir)
+	}
+}
+
+func readTheirState(sesamDir string) (*core.VerifiedState, error) {
+	//nolint:gosec // path is the sesam dir plus a fixed name.
+	fd, err := os.Open(filepath.Join(sesamDir, theirsVStatePath))
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = fd.Close() }()
+
+	var state core.VerifiedState
+	if err := json.NewDecoder(fd).Decode(&state); err != nil {
+		return nil, fmt.Errorf("read %s: %w", theirsVStatePath, err)
+	}
+
+	return &state, nil
+}
+
+// ensureTheirsVerified makes sure the branch being merged in was verified as a
+// whole before we take anything from it. It is the equivalent of checking that
+// branch out and running `sesam verify` on it: unpack its .sesam, load it as a
+// repo of its own, verify, and leave the resulting state behind for the drivers.
+//
+// git runs a driver per conflicting path, so this happens once and the rest of
+// the invocations read the file.
+func ensureTheirsVerified(ctx context.Context, sesamDir, theirPath string, identityPaths []string, opts repo.RepoOpts) error {
+	rev, err := resolveTheirRevision(sesamDir, theirPath)
+	if err != nil {
+		return err
+	}
+
+	checkoutDir := filepath.Join(sesamDir, theirsCheckoutPath)
+	if err := extractSesamDir(ctx, sesamDir, rev, checkoutDir); err != nil {
+		return fmt.Errorf("unpack %s: %w", rev, err)
+	}
+
+	theirs, err := repo.Load(checkoutDir, identityPaths, opts)
+	if err != nil {
+		return fmt.Errorf("load %s: %w", rev, err)
+	}
+
+	defer func() { _ = theirs.Close() }()
+
+	// Truncation and forge checks need the history and the network; neither says
+	// anything about whether the objects we are about to merge are sound.
+	report, err := theirs.Verify(ctx, repo.VerifyOptions{Integrity: true, KeyReuse: true})
+	if err != nil {
+		return fmt.Errorf("verify %s: %w", rev, err)
+	}
+
+	if !report.OK() {
+		printReport(repo.VerifyOptions{Integrity: true, KeyReuse: true}, report)
+		return fmt.Errorf("the branch being merged in does not verify - refusing to merge it")
+	}
+
+	state, err := theirs.VerifiedState()
+	if err != nil {
+		return err
+	}
+
+	return writeJSONFile(filepath.Join(sesamDir, theirsVStatePath), state)
+}
+
+func writeJSONFile(path string, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+
+	return renameio.WriteFile(path, data, 0o600)
 }

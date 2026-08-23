@@ -1,0 +1,61 @@
+# An object that decrypts is not an object we should trust. Here the attacker
+# supplies a well-formed, correctly self-signed object taken from a different
+# sesam repo: right path in the footer, valid age content, but signed by a key
+# the incoming branch's audit log never pinned.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+cp base.txt $TMPDIR/base.txt
+cp mine.txt $TMPDIR/mine.txt
+cp other.txt $TMPDIR/other.txt
+
+exec sesam init --user admin --install-merge
+exec git add -A
+exec git commit -m 'init sesam'
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+
+# A second, unrelated sesam repo with a secret of the same name. Its signing key
+# is its own, so its objects mean nothing here.
+mkdir $TMPDIR/foreign
+cd $TMPDIR/foreign
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam init --user admin
+cp $TMPDIR/other.txt s
+exec sesam add s --group admin
+cd $WORK
+
+# ATTACKER: import the foreign object, leave the audit log alone.
+exec git checkout -b evil
+cp $TMPDIR/foreign/.sesam/objects/s.sesam .sesam/objects/s.sesam
+exec git add .sesam/objects/s.sesam
+exec git commit --no-verify -m 'evil: foreign object'
+
+# OURS: a legitimate change to the same secret.
+exec git checkout master
+cp $TMPDIR/mine.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'ours: reseal s'
+
+# Refused: the sealer is in nobody's keyring here.
+! exec git merge evil
+stderr 's: invalid signature'
+stderr 'does not verify - refusing to merge it'
+
+exec cat s
+stdout 'MINE'
+
+-- base.txt --
+BASE
+-- mine.txt --
+MINE
+-- other.txt --
+FOREIGN

@@ -285,12 +285,13 @@ func revealSecret(sm *SecretManager, revealedPath string) error {
 	}()
 
 	ids := sm.Identities.AgeIdentities()
-	if err := revealStreamAndVerify(
+	if _, err := RevealStreamAndVerify(
 		srcFd,
 		dstFd,
 		ids,
 		sm.Keyring,
 		sm.State.SealerAuthorized,
+		revealedPath,
 	); err != nil {
 		return err
 	}
@@ -306,7 +307,7 @@ func revealSecret(sm *SecretManager, revealedPath string) error {
 	return dstFd.CloseAtomicallyReplace()
 }
 
-// BadSealerError is returned by revealStreamAndVerify when the
+// BadSealerError is returned by RevealStreamAndVerify when the
 // footer's signature is cryptographically valid but the named sealer is
 // not in the access list for that path. The decryption itself
 // succeeded, so callers may choose to accept the plaintext anyway -
@@ -321,36 +322,38 @@ func (e *BadSealerError) Error() string {
 	return fmt.Sprintf("sealer %s was not authorized to seal %s", e.SealedBy, e.Path)
 }
 
-// revealStreamAndVerify decrypts the stream in `srcFd`, then validates the footer.
-// The result is piped to `dstFd`. For decryption the identities in `ageIds` are used.
-// For verification `kr` checks if the signature fits to the encrypted content and
-// using `authorize` we can check if the user was actually allowed to seal this file
-// (to avoid having users overwrite secrets they have no access to).
-//
-// Authorization failure is returned as a typed *BadSealerError so callers
-// can distinguish "decryption succeeded, policy says no" from cryptographic
-// failures and apply different policies.
-func revealStreamAndVerify(
+// Authorization failure is returned as a typed *BadSealerError so callers can
+// distinguish "decryption succeeded, policy says no" from cryptographic failures.
+// RevealStreamAndVerify decrypts srcFd into dstFd and validates the footer:
+// `kr` checks the signature, `authorize` that the sealer may seal this path, and
+// `expectedPath` that the object belongs where it was found - the path in the
+// footer is a claim by whoever sealed it.
+func RevealStreamAndVerify(
 	srcFd io.ReadSeeker,
 	dstFd io.Writer,
 	ageIds []age.Identity,
 	kr Keyring,
 	authorize func(user, path string) bool,
-) error {
+	expectedPath string,
+) (*secretFooter, error) {
 	cipherTextHash, contentHashBytes, footer, err := RevealStream(srcFd, dstFd, ageIds)
 	if err != nil {
-		return err
+		return nil, err
+	}
+
+	if expectedPath != "" && footer.RevealedPath != expectedPath {
+		return nil, fmt.Errorf("object at %s is sealed for %s", expectedPath, footer.RevealedPath)
 	}
 
 	// Verify the signature, but check before if hashes are the same at all as quick check:
 	computedhash := MulticodeEncode(cipherTextHash, MhSHA3_256)
 	if computedhash != footer.CipherTextHash {
-		return fmt.Errorf("encrypted file changed (exp: %s, got: %s)", computedhash, footer.CipherTextHash)
+		return nil, fmt.Errorf("encrypted file changed (exp: %s, got: %s)", computedhash, footer.CipherTextHash)
 	}
 
 	recipientsHashBytes, _, err := multicodeDecode(footer.RecipientsHash)
 	if err != nil {
-		return fmt.Errorf("failed to decode recipients hash for %s: %w", footer.RevealedPath, err)
+		return nil, fmt.Errorf("failed to decode recipients hash for %s: %w", footer.RevealedPath, err)
 	}
 
 	sealer, err := kr.Verify(
@@ -360,14 +363,14 @@ func revealStreamAndVerify(
 		footer.SealedBy,
 	)
 	if err != nil {
-		return fmt.Errorf("signature verification failed for %s: %w", footer.RevealedPath, err)
+		return nil, fmt.Errorf("signature verification failed for %s: %w", footer.RevealedPath, err)
 	}
 
 	if authorize != nil && !authorize(sealer, footer.RevealedPath) {
-		return &BadSealerError{SealedBy: sealer, Path: footer.RevealedPath}
+		return nil, &BadSealerError{SealedBy: sealer, Path: footer.RevealedPath}
 	}
 
-	return nil
+	return footer, nil
 }
 
 func RevealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) ([]byte, []byte, *secretFooter, error) {

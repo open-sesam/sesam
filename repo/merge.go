@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -71,6 +73,30 @@ func runGitMerge(ctx context.Context, revealedPath, ourPath, theirPath, originPa
 	}
 }
 
+// TmpDir is the repo's scratch space. Everything in it belongs to whatever
+// operation is running and may be dropped once that finishes.
+const TmpDir = ".sesam/tmp"
+
+// ClearTmp empties the scratch space.
+func ClearTmp(root *os.Root) error {
+	entries, err := fs.ReadDir(root.FS(), TmpDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+
+		return err
+	}
+
+	for _, entry := range entries {
+		if err := root.RemoveAll(path.Join(TmpDir, entry.Name())); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // errBinaryMerge marks git merge-file refusing to line-merge (binary content).
 var errBinaryMerge = errors.New("cannot line-merge (binary content)")
 
@@ -102,6 +128,49 @@ func decryptSecretToBuf(path string, ids []age.Identity) (*bytes.Buffer, string,
 	_, _, footer, err := core.RevealStream(fd, &buf, ids)
 	if err != nil {
 		return nil, "", fmt.Errorf("decrypt %s: %w", path, err)
+	}
+
+	return &buf, footer.RecipientsHash, nil
+}
+
+// TheirStateFunc yields the verified state of the branch being merged in. The
+// driver asks for it the first time it has to check an incoming object; how it
+// is obtained (and cached) is the caller's business.
+type TheirStateFunc func() (*core.VerifiedState, error)
+
+// decryptTheirSecret decrypts the incoming side and checks it against the state
+// of the branch it comes from. Without that check an object nobody was allowed
+// to seal would be merged in and resealed under the merging user's key.
+func decryptTheirSecret(ids core.Identities, revealedPath, theirPath string, theirState TheirStateFunc) (*bytes.Buffer, string, error) {
+	state, err := theirState()
+	if err != nil {
+		return nil, "", fmt.Errorf("state of the incoming branch: %w", err)
+	}
+
+	kr, err := core.KeyringFromState(state)
+	if err != nil {
+		return nil, "", fmt.Errorf("keyring of the incoming branch: %w", err)
+	}
+
+	//nolint:gosec // git hands us the B blob temp path to read.
+	fd, err := os.Open(theirPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("open %s: %w", theirPath, err)
+	}
+
+	defer func() { _ = fd.Close() }()
+
+	var buf bytes.Buffer
+	footer, err := core.RevealStreamAndVerify(
+		fd,
+		&buf,
+		ids.AgeIdentities(),
+		kr,
+		state.SealerAuthorized,
+		revealedPath,
+	)
+	if err != nil {
+		return nil, "", fmt.Errorf("verify their %s: %w", revealedPath, err)
 	}
 
 	return &buf, footer.RecipientsHash, nil
@@ -189,7 +258,7 @@ type MergeSecretResult struct {
 // MergeSecret three-way merges one secret's decrypted content into its revealed
 // file. A clean merge is also sealed back into %A: a rebase or cherry-pick
 // finishes without ever calling a sesam hook, so nothing else would.
-func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, revealedPath, ourPath, theirPath, originPath string, conflictMarkerSize int) (res MergeSecretResult, err error) {
+func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, revealedPath, ourPath, theirPath, originPath string, conflictMarkerSize int, theirState TheirStateFunc) (res MergeSecretResult, err error) {
 	lock, err := TryAcquireMergeLock(root.Name())
 	if err != nil {
 		return res, err
@@ -208,9 +277,9 @@ func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, reveal
 	if err != nil {
 		return res, fmt.Errorf("decrypt ours side of %s: %w", revealedPath, err)
 	}
-	theirBuf, theirRecps, err := decryptSecretToBuf(theirPath, ageIds)
+	theirBuf, theirRecps, err := decryptTheirSecret(ids, revealedPath, theirPath, theirState)
 	if err != nil {
-		return res, fmt.Errorf("decrypt theirs side of %s: %w", revealedPath, err)
+		return res, err
 	}
 
 	// Snapshot the two sides before staging drains their buffers - needed for the

@@ -166,6 +166,32 @@ outer:
 	return users
 }
 
+// KeyringFromState rebuilds the keyring a state implies. Replay normally fills
+// both together; this is for the callers that have a state read back from disk.
+func KeyringFromState(state *VerifiedState) (Keyring, error) {
+	kr := EmptyKeyring()
+	for idx := range state.Users {
+		user := &state.Users[idx]
+
+		signPubKey, err := decodeSignPubKey(user.SignPubKey)
+		if err != nil {
+			return nil, fmt.Errorf("sign key of %s: %w", user.Name, err)
+		}
+
+		if err := kr.SetSignPubKey(user.Name, signPubKey); err != nil {
+			return nil, fmt.Errorf("keyring entry for %s: %w", user.Name, err)
+		}
+
+		for _, recp := range user.Recps {
+			if _, err := kr.AddRecipient(user.Name, recp); err != nil {
+				return nil, fmt.Errorf("recipient of %s: %w", user.Name, err)
+			}
+		}
+	}
+
+	return kr, nil
+}
+
 func (s *VerifiedState) RequireAdmin(entry *AuditEntrySigned) (*VerifiedUser, error) {
 	adminUser, exists := s.UserExists(entry.ChangedBy)
 	if !exists {

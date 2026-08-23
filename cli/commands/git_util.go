@@ -1,10 +1,12 @@
 package commands
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -221,4 +223,196 @@ func gitOutput(dir string, args ...string) (string, error) {
 	}
 
 	return strings.TrimSpace(buf.String()), nil
+}
+
+// resolveTheirRevision finds the commit being merged in. git names it differently
+// per operation and, for a cherry-pick or stash pop, not at all - hence the
+// index-free fallbacks.
+func resolveTheirRevision(sesamDir, theirPath string) (string, error) {
+	worktreeRoot, err := repo.GitWorktreeRoot(sesamDir)
+	if err != nil {
+		return "", fmt.Errorf("locate worktree root: %w", err)
+	}
+
+	// A plain merge exports one GITHEAD_<sha> per merge head. That variable is set
+	// by git when it invokes a strategy and appears in no documentation, so treat
+	// it as a hint and keep the blob search below as the real answer.
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GITHEAD_") {
+			continue
+		}
+
+		if sha, _, _ := strings.Cut(strings.TrimPrefix(kv, "GITHEAD_"), "="); sha != "" {
+			return sha, nil
+		}
+	}
+
+	gitDir, err := gitOutput(worktreeRoot, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return "", err
+	}
+
+	// A rebase is replaying a commit; while the drivers run it is the last line of
+	// `done` ("pick <sha> # subject"). stopped-sha only appears once it stops.
+	if sha := rebasePickedCommit(gitDir); sha != "" {
+		return sha, nil
+	}
+
+	for _, ref := range []string{"CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_HEAD", "refs/stash"} {
+		if sha, err := gitOutput(worktreeRoot, "rev-parse", "-q", "--verify", ref); err == nil && sha != "" {
+			return sha, nil
+		}
+	}
+
+	// Last resort, and the only one that needs no ref and no env: find the commit
+	// carrying the very blob git handed us.
+	if sha := commitContaining(worktreeRoot, theirPath); sha != "" {
+		return sha, nil
+	}
+
+	return "", errors.New("cannot tell which branch is being merged in")
+}
+
+// rebasePickedCommit reads the commit a rebase is currently replaying.
+func rebasePickedCommit(gitDir string) string {
+	for _, name := range []string{"rebase-merge/stopped-sha", "rebase-merge/done", "rebase-apply/original-commit"} {
+		//nolint:gosec // path is built from the git dir and a fixed name.
+		data, err := os.ReadFile(filepath.Join(gitDir, filepath.FromSlash(name)))
+		if err != nil {
+			continue
+		}
+
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		fields := strings.Fields(lines[len(lines)-1])
+
+		switch len(fields) {
+		case 0:
+			continue
+		case 1:
+			return fields[0] // a bare sha, as in stopped-sha
+		default:
+			return fields[1] // "<command> <sha> # subject"
+		}
+	}
+
+	return ""
+}
+
+// extractSesamDir unpacks the .sesam directory of `rev` into destDir. A worktree
+// would be the obvious way, but `git worktree add` fires post-checkout, which
+// would have sesam clean and reveal into the temporary tree.
+func extractSesamDir(ctx context.Context, sesamDir, rev, destDir string) error {
+	worktreeRoot, err := repo.GitWorktreeRoot(sesamDir)
+	if err != nil {
+		return err
+	}
+
+	prefix, err := filepath.Rel(worktreeRoot, sesamDir)
+	if err != nil {
+		return err
+	}
+
+	if err := os.RemoveAll(destDir); err != nil {
+		return err
+	}
+
+	//nolint:gosec // fixed git subcommand; rev is a sha we resolved ourselves.
+	cmd := exec.CommandContext(ctx, "git", "archive", "--format=tar", rev, "--",
+		filepath.ToSlash(filepath.Join(prefix, ".sesam")))
+	cmd.Dir = worktreeRoot
+
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	if err := untar(out, destDir, filepath.ToSlash(prefix)); err != nil {
+		_ = cmd.Wait()
+		return err
+	}
+
+	return cmd.Wait()
+}
+
+// untar writes the archive below destDir, dropping `strip` from every path so a
+// nested sesam dir lands at the root of the extraction.
+func untar(rd io.Reader, destDir, strip string) error {
+	root, err := makeRoot(destDir)
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = root.Close() }()
+
+	tr := tar.NewReader(rd)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		name := strings.TrimPrefix(filepath.ToSlash(hdr.Name), strip+"/")
+		if name == "" || name == "." {
+			// git archive emits an entry for the prefix directory itself.
+			continue
+		}
+
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := root.MkdirAll(name, 0o700); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := root.MkdirAll(filepath.Dir(name), 0o700); err != nil {
+				return err
+			}
+
+			fd, err := root.Create(name)
+			if err != nil {
+				return err
+			}
+
+			//nolint:gosec // archive comes from our own git repo.
+			if _, err := io.Copy(fd, tr); err != nil {
+				_ = fd.Close()
+				return err
+			}
+
+			if err := fd.Close(); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func makeRoot(dir string) (*os.Root, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+
+	return os.OpenRoot(dir)
+}
+
+// commitContaining finds a commit that carries the blob in `file`. Picking the
+// wrong one is safe: its audit log would not vouch for the object either, and
+// the verification refuses.
+func commitContaining(worktreeRoot, file string) string {
+	blob, err := gitOutput(worktreeRoot, "hash-object", file)
+	if err != nil {
+		return ""
+	}
+
+	sha, err := gitOutput(worktreeRoot, "log", "--all", "--format=%H", "-n", "1", "--find-object="+blob)
+	if err != nil {
+		return ""
+	}
+
+	return sha
 }

@@ -95,6 +95,11 @@ type RepoOpts struct {
 	// VerifyMode defines how the on-disk state is verified
 	VerifyMode VerifyMode
 
+	// Identities, when set, are used instead of unlocking identityPaths again.
+	// A process that already holds them would otherwise ask for the passphrase
+	// a second time whenever the keyring cache is unavailable.
+	Identities core.Identities
+
 	// InMerge relaxes the checks that cannot hold while a merge-like operation
 	// has the tree half-merged. The caller decides: only the CLI knows what git
 	// is doing, and finding out costs a subprocess we do not want on every Load.
@@ -458,9 +463,12 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 		return nil, fmt.Errorf("reap stale stage fork: %w", err)
 	}
 
-	identities, err := LoadIdentities(ids, opts)
-	if err != nil {
-		return nil, err
+	identities := opts.Identities
+	if identities == nil {
+		identities, err = LoadIdentities(ids, opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 	r.identities = identities
 
