@@ -105,7 +105,7 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 			if err := r.Clean(ctx, repo.CleanOpts{Aggressive: true}); err != nil {
 				slog.Warn("failed to clean up previous revealed secrets", slog.Any("err", err))
 			}
-			if err := r.RevealAll(); err != nil {
+			if err := r.Reveal(false); err != nil {
 				slog.Warn("failed to reveal secrets after checkout", slog.Any("err", err))
 			}
 			return nil
@@ -115,7 +115,7 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 		// been restored without its audit log, leaving the on-disk root hash
 		// stale. Reveal from the checked-out object, then seal to record it in the
 		// log so the repo is consistent again (a no-op when nothing drifted).
-		if err := r.RevealAll(); err != nil {
+		if err := r.Reveal(false); err != nil {
 			slog.Warn("failed to reveal secrets after checkout", slog.Any("err", err))
 		}
 		if err := r.Update(func(s *repo.Stage) error { return s.Seal(false) }); err != nil {

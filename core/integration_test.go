@@ -88,7 +88,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	report := VerifyIntegrity(testRoot(t, sesamDir), vstate2, keyring2)
 	require.True(t, report.OK(), "integrity check failed: %s", report.String())
 
-	require.NoError(t, sm2.RevealAll())
+	require.NoError(t, sm2.Reveal(true))
 	got, err := os.ReadFile(filepath.Join(sesamDir, secretPath))
 	require.NoError(t, err)
 	require.Equal(t, "hunter2", string(got))
@@ -157,7 +157,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	gitCommitAll(t, repo, "seal")
 
 	os.Remove(filepath.Join(sesamDir, secretPath))
-	require.NoError(t, smBob.RevealAll())
+	require.NoError(t, smBob.Reveal(true))
 
 	got, err := os.ReadFile(filepath.Join(sesamDir, secretPath))
 	require.NoError(t, err)

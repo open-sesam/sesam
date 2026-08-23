@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -113,6 +114,33 @@ func TestAddEntryChaining(t *testing.T) {
 
 	// PreviousHash of entry 2 should be hash of entry 1.
 	require.Equal(t, al.Entries[0].Hash(), al.Entries[1].PreviousHash)
+}
+
+// TestHashMatchesReadsStoredAlgorithm proves an audit chain link written with
+// the legacy SHA3-256 hash still verifies: HashMatches reads the algorithm from
+// the stored PreviousHash prefix rather than assuming the current default.
+func TestHashMatchesReadsStoredAlgorithm(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+	entry := al.Entries[0]
+
+	// The default (BLAKE3) hash matches.
+	ok, err := entry.HashMatches(entry.Hash())
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	// A SHA3-256 hash of the same entry bytes matches too.
+	sigJSON, err := json.Marshal(entry)
+	require.NoError(t, err)
+	ok, err = entry.HashMatches(encodeHashWith(t, MhSHA3_256, sigJSON))
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	// A hash of unrelated bytes is rejected under either algorithm.
+	ok, err = entry.HashMatches(encodeHashWith(t, MhSHA3_256, []byte("tampered")))
+	require.NoError(t, err)
+	require.False(t, ok)
 }
 
 func TestAddEntryFirstPrevHash(t *testing.T) {
@@ -332,9 +360,10 @@ func TestShowAuditLogSuccess(t *testing.T) {
 	al := initAuditLog(t, sesamDir, admin)
 	require.NoError(t, al.Close())
 
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
+	root := testRoot(t, sesamDir)
+	logPath := filepath.Join(".sesam", "audit", "log.jsonl")
 	var buf bytes.Buffer
-	ok, err := ShowAuditLog(Identities{admin.Identity}, logPath, &buf)
+	ok, err := ShowAuditLog(root, Identities{admin.Identity}, logPath, &buf)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.True(t, strings.Contains(buf.String(), `"operation"`))
@@ -342,7 +371,8 @@ func TestShowAuditLogSuccess(t *testing.T) {
 }
 
 func TestShowAuditLogNotFound(t *testing.T) {
-	ok, err := ShowAuditLog(Identities{}, "/nonexistent/log.jsonl", &bytes.Buffer{})
+	root := testRoot(t, t.TempDir())
+	ok, err := ShowAuditLog(root, Identities{}, filepath.Join("nonexistent", "log.jsonl"), &bytes.Buffer{})
 	require.NoError(t, err)
 	require.False(t, ok)
 }
@@ -354,8 +384,9 @@ func TestShowAuditLogWrongIdentity(t *testing.T) {
 	require.NoError(t, al.Close())
 
 	stranger := newTestUser(t, "stranger")
-	logPath := filepath.Join(sesamDir, ".sesam", "audit", "log.jsonl")
-	ok, err := ShowAuditLog(Identities{stranger.Identity}, logPath, &bytes.Buffer{})
+	root := testRoot(t, sesamDir)
+	logPath := filepath.Join(".sesam", "audit", "log.jsonl")
+	ok, err := ShowAuditLog(root, Identities{stranger.Identity}, logPath, &bytes.Buffer{})
 	require.True(t, ok)
 	require.Error(t, err, "wrong identity should fail to decrypt audit key")
 }

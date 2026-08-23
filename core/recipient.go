@@ -58,13 +58,42 @@ func (r *Recipient) MarshalJSON() ([]byte, error) {
 	})
 }
 
+type FileKeyWrapper struct {
+	r   age.Recipient
+	key []byte
+}
+
+func (fkw *FileKeyWrapper) Wrap(fileKey []byte) ([]*age.Stanza, error) {
+	fkw.key = fileKey
+	return fkw.r.Wrap(fileKey)
+}
+
+func (fkw *FileKeyWrapper) WrapWithLabels(fileKey []byte) (s []*age.Stanza, labels []string, err error) {
+	fkw.key = fileKey
+	rwl, ok := fkw.r.(age.RecipientWithLabels)
+	if !ok {
+		s, err = fkw.r.Wrap(fileKey)
+		return s, nil, err
+	}
+
+	return rwl.WrapWithLabels(fileKey)
+}
+
+func (fkw *FileKeyWrapper) ReadKey() []byte {
+	key := fkw.key
+	fkw.key = nil
+	return key
+}
+
 // Recipients is a helper to manage several recipients
 type Recipients []*Recipient
 
 func (rs Recipients) AgeRecipients() []age.Recipient {
 	ageRecps := make([]age.Recipient, 0, len(rs))
 	for _, recp := range rs {
-		ageRecps = append(ageRecps, recp.Recipient)
+		ageRecps = append(ageRecps, &FileKeyWrapper{
+			r: recp.Recipient,
+		})
 	}
 
 	return ageRecps
