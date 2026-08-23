@@ -4,16 +4,7 @@
 # entries - a silent truncation of the mainline. VerifyHistory's first-parent
 # walk must catch it (a proper `sesam` merge rebases instead, losing nothing).
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-cp base.txt $TMPDIR/base.txt
-cp theirs.txt $TMPDIR/theirs.txt
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo admin base.txt theirs.txt
 
 cp $TMPDIR/base.txt db.txt
 exec sesam add db.txt --group admin

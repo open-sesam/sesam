@@ -2,18 +2,7 @@
 # pre-commit finalize. What carries it: clean merges are sealed into %A by the
 # driver, conflicted ones are reported by `sesam status` with rebase advice.
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-cp base.txt $TMPDIR/base.txt
-cp main.txt $TMPDIR/main.txt
-cp topic.txt $TMPDIR/topic.txt
-cp resolved.txt $TMPDIR/resolved.txt
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo admin base.txt main.txt topic.txt resolved.txt
 
 cp $TMPDIR/base.txt s
 exec sesam add s --group admin

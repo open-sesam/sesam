@@ -2,13 +2,7 @@
 # removes and then re-adds. The re-add must not resurrect the revoked key, so the
 # revoked identity stays locked out after the merge.
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo
 
 # bob has two recipient keys; carol's key can decrypt the log via bob.
 exec sesam tell --user bob --recipient $BOB_PUBKEY --recipient $CAROL_PUBKEY --group dev

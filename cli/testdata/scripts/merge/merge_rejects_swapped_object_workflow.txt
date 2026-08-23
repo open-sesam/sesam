@@ -3,17 +3,7 @@
 # decrypted whatever it was handed. Both sides of the footer are now checked
 # against the incoming branch's own audit log.
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-cp a.txt $TMPDIR/a.txt
-cp b.txt $TMPDIR/b.txt
-cp a2.txt $TMPDIR/a2.txt
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo admin a.txt b.txt a2.txt
 
 cp $TMPDIR/a.txt a
 cp $TMPDIR/b.txt b

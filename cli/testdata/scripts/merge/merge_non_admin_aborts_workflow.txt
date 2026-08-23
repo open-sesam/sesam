@@ -1,13 +1,7 @@
 # Only admins can merge (decrypt + re-sign the rebased entries). When the merging
 # identity is a non-admin, the audit-log driver aborts and the merge fails.
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo
 
 # bob is a dev (non-admin) but a recipient of the audit key, so he can decrypt
 # the log - he just may not merge it.

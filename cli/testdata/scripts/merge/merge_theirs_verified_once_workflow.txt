@@ -3,17 +3,7 @@
 # verify` runs. Its state is left behind so the driver runs that follow (git
 # calls one per conflicting path) reuse it instead of repeating the work.
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-cp base.txt $TMPDIR/base.txt
-cp mine.txt $TMPDIR/mine.txt
-cp theirs.txt $TMPDIR/theirs.txt
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo admin base.txt mine.txt theirs.txt
 
 cp $TMPDIR/base.txt a
 cp $TMPDIR/base.txt b

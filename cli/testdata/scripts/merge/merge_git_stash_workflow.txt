@@ -2,18 +2,7 @@
 # drivers without MERGE_HEAD, so no finalize. Nothing breaks, but a stash is only
 # half a stash here - pinned down below.
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-cp base.txt $TMPDIR/base.txt
-cp wip.txt $TMPDIR/wip.txt
-cp other.txt $TMPDIR/other.txt
-cp merged.txt $TMPDIR/merged.txt
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo admin base.txt wip.txt other.txt merged.txt
 
 cp $TMPDIR/base.txt s
 exec sesam add s --group admin

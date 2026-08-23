@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sahib/renameio/v2"
 	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/core"
 	"opensesam.org/sesam/repo"
@@ -38,67 +37,28 @@ func (e *ExitCodeError) Code() int {
 }
 
 func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
-	cwd, err := os.Getwd()
+	drv, err := openMergeDriver(cmd)
 	if err != nil {
 		return err
 	}
 
-	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
-	if err != nil {
-		return err
-	}
+	defer drv.close()
 
-	// %P is worktree-root-relative; git runs the driver from the worktree root,
-	// so join it onto cwd to get an absolute path toRepoPath can rebase.
-	pathArg := cmd.StringArg("path")
-	if !filepath.IsAbs(pathArg) {
-		pathArg = filepath.Join(cwd, pathArg)
-	}
-
-	revealedPath, err := toRepoPath(sesamDir, cwd, pathArg)
-	if err != nil {
-		return err
-	}
-
-	if !strings.HasPrefix(revealedPath, ".sesam/objects/") {
+	revealedPath, ok := core.RevealedPath(drv.path)
+	if !ok {
 		return fmt.Errorf("%%P needs to be a sesam object - gitattributes wrongly configured?")
 	}
 
-	// figure the revealed path from the object path:
-	revealedPath = strings.TrimPrefix(revealedPath, ".sesam/objects/")
-	revealedPath = strings.TrimSuffix(revealedPath, ".sesam")
-
-	identityPaths := cmd.StringSlice("identity")
-	ids, err := repo.LoadIdentities(identityPaths, repo.RepoOpts{
-		AskpassProgram:  cmd.String("askpass"),
-		AskpassRequired: askpassRequired(),
-	})
-	if err != nil {
-		return err
-	}
-
-	root, rootErr := os.OpenRoot(sesamDir)
-	if rootErr != nil {
-		return rootErr
-	}
-
-	defer func() { _ = root.Close() }()
-
-	originPath := cmd.StringArg("origin")
-	ourPath := cmd.StringArg("our-path")
-	theirPath := cmd.StringArg("their-path")
-	conflictMarkerSize := cmd.IntArg("conflict-marker-size")
-
 	res, err := repo.MergeSecret(
 		ctx,
-		root,
-		ids,
+		drv.root,
+		drv.ids,
 		revealedPath,
-		ourPath,
-		theirPath,
-		originPath,
-		conflictMarkerSize,
-		theirStateFunc(ctx, cmd, sesamDir, theirPath, identityPaths, ids),
+		drv.ourPath,
+		drv.theirPath,
+		drv.originPath,
+		drv.conflictMarkerSize,
+		theirStateFunc(ctx, cmd, drv),
 	)
 	if err != nil {
 		return &ExitCodeError{
@@ -160,61 +120,25 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 }
 
 func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
-	cwd, err := os.Getwd()
+	drv, err := openMergeDriver(cmd)
 	if err != nil {
 		return err
 	}
 
-	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
-	if err != nil {
-		return err
+	defer drv.close()
+
+	if !strings.HasSuffix(drv.path, core.SesamDir()+"/audit/log.jsonl") {
+		return fmt.Errorf("%%P needs to be the audit log path but is %s - gitattributes wrongly configured?", drv.path)
 	}
-
-	// %P is worktree-root-relative; git runs the driver from the worktree root,
-	// so join it onto cwd to get an absolute path toRepoPath can rebase.
-	pathArg := cmd.StringArg("path")
-	if !filepath.IsAbs(pathArg) {
-		pathArg = filepath.Join(cwd, pathArg)
-	}
-
-	auditLogPath, err := toRepoPath(sesamDir, cwd, pathArg)
-	if err != nil {
-		return err
-	}
-
-	if !strings.HasSuffix(auditLogPath, ".sesam/audit/log.jsonl") {
-		return fmt.Errorf("%%P needs to be the audit log path but is %s %v - gitattributes wrongly configured?", pathArg, os.Args)
-	}
-
-	identityPaths := cmd.StringSlice("identity")
-	ids, err := repo.LoadIdentities(identityPaths, repo.RepoOpts{
-		AskpassProgram:  cmd.String("askpass"),
-		AskpassRequired: askpassRequired(),
-	})
-	if err != nil {
-		return err
-	}
-
-	root, rootErr := os.OpenRoot(sesamDir)
-	if rootErr != nil {
-		return rootErr
-	}
-
-	defer func() { _ = root.Close() }()
-
-	originPath := cmd.StringArg("origin")
-	ourPath := cmd.StringArg("our-path")
-	theirPath := cmd.StringArg("their-path")
-	conflictMarkerSize := cmd.IntArg("conflict-marker-size")
 
 	cr, err := repo.MergeAuditLog(
 		ctx,
-		root,
-		ids,
-		ourPath,
-		theirPath,
-		originPath,
-		conflictMarkerSize,
+		drv.root,
+		drv.ids,
+		drv.ourPath,
+		drv.theirPath,
+		drv.originPath,
+		drv.conflictMarkerSize,
 	)
 	if err != nil {
 		return &ExitCodeError{
@@ -230,7 +154,7 @@ func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
 	// Even though we exit without error here (which git would normally take as "continue with merge commit")
 	// we rely on the pre-merge-commit hook to fail. This allows the user to handle conflicts he/she would have
 	// resolved differently.
-	fmt.Fprint(os.Stderr, mergeDriverSummary(cr.Resolutions, mergeState(sesamDir)))
+	fmt.Fprint(os.Stderr, mergeDriverSummary(cr.Resolutions, mergeState(drv.sesamDir)))
 
 	return nil
 }
@@ -250,6 +174,76 @@ func withoutConflicted(paths []string, conflicted []core.ConflictedSecret) []str
 	}
 
 	return kept
+}
+
+// mergeDriver is everything git hands a merge driver, resolved once: both of
+// ours take the same %O/%A/%B/%L arguments and need the same repo handles.
+type mergeDriver struct {
+	sesamDir string
+	root     *os.Root
+	ids      core.Identities
+
+	identityPaths []string
+
+	// path is %P, the merged file, as a sesam-relative path.
+	path string
+
+	originPath, ourPath, theirPath string
+	conflictMarkerSize             int
+}
+
+func openMergeDriver(cmd *cli.Command) (*mergeDriver, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+
+	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+	if err != nil {
+		return nil, err
+	}
+
+	// %P is worktree-root-relative and git runs the driver from the worktree
+	// root, so join it onto cwd to get something toRepoPath can rebase.
+	pathArg := cmd.StringArg("path")
+	if !filepath.IsAbs(pathArg) {
+		pathArg = filepath.Join(cwd, pathArg)
+	}
+
+	path, err := toRepoPath(sesamDir, cwd, pathArg)
+	if err != nil {
+		return nil, err
+	}
+
+	identityPaths := cmd.StringSlice("identity")
+	ids, err := repo.LoadIdentities(identityPaths, repo.RepoOpts{
+		AskpassProgram:  cmd.String("askpass"),
+		AskpassRequired: askpassRequired(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	root, err := os.OpenRoot(sesamDir)
+	if err != nil {
+		return nil, err
+	}
+
+	return &mergeDriver{
+		sesamDir:           sesamDir,
+		root:               root,
+		ids:                ids,
+		identityPaths:      identityPaths,
+		path:               path,
+		originPath:         cmd.StringArg("origin"),
+		ourPath:            cmd.StringArg("our-path"),
+		theirPath:          cmd.StringArg("their-path"),
+		conflictMarkerSize: cmd.IntArg("conflict-marker-size"),
+	}, nil
+}
+
+func (d *mergeDriver) close() {
+	_ = d.root.Close()
 }
 
 // conflictedSecretHints renders a fix-it line per unresolved secret, shared by
@@ -332,23 +326,17 @@ func mergeDriverSummary(resolutions []core.ConflictResolutionEntry, kind mergeKi
 
 // theirsVStatePath is where the incoming branch's verified state is parked for
 // the driver runs that follow.
-const theirsVStatePath = repo.TmpDir + "/theirs-vstate.json"
+var theirsVStatePath = filepath.Join(core.SesamTmpDir(), "theirs-vstate.json")
 
 // theirsCheckoutPath is where the incoming .sesam is unpacked to be verified.
-const theirsCheckoutPath = ".sesam/tmp/theirs"
+var theirsCheckoutPath = filepath.Join(core.SesamTmpDir(), "theirs")
 
 // theirStateFunc yields the state of the branch being merged in, verifying that
 // branch the first time anything asks. git runs a driver per conflicting path,
 // so the work happens once and the rest read the file it left behind.
-func theirStateFunc(
-	ctx context.Context,
-	cmd *cli.Command,
-	sesamDir, theirPath string,
-	identityPaths []string,
-	ids core.Identities,
-) repo.TheirStateFunc {
+func theirStateFunc(ctx context.Context, cmd *cli.Command, drv *mergeDriver) repo.TheirStateFunc {
 	return func() (*core.VerifiedState, error) {
-		state, err := readTheirState(sesamDir)
+		state, err := readTheirState(drv.sesamDir)
 		if err == nil {
 			return state, nil
 		}
@@ -357,7 +345,7 @@ func theirStateFunc(
 			return nil, err
 		}
 
-		if err := ensureTheirsVerified(ctx, sesamDir, theirPath, identityPaths, repo.RepoOpts{
+		if err := ensureTheirsVerified(ctx, drv.sesamDir, drv.theirPath, drv.identityPaths, repo.RepoOpts{
 			AskpassProgram:  cmd.String("askpass"),
 			AskpassRequired: askpassRequired(),
 
@@ -367,12 +355,12 @@ func theirStateFunc(
 			VerifyMode: repo.VerifyModeNoDisk,
 
 			// We unlocked these already; loading them again could prompt twice.
-			Identities: ids,
+			Identities: drv.ids,
 		}); err != nil {
 			return nil, err
 		}
 
-		return readTheirState(sesamDir)
+		return readTheirState(drv.sesamDir)
 	}
 }
 
@@ -401,7 +389,7 @@ func readTheirState(sesamDir string) (*core.VerifiedState, error) {
 // git runs a driver per conflicting path, so this happens once and the rest of
 // the invocations read the file.
 func ensureTheirsVerified(ctx context.Context, sesamDir, theirPath string, identityPaths []string, opts repo.RepoOpts) error {
-	rev, err := resolveTheirRevision(sesamDir, theirPath)
+	rev, err := mergeSource(sesamDir, theirPath)
 	if err != nil {
 		return err
 	}
@@ -436,13 +424,4 @@ func ensureTheirsVerified(ctx context.Context, sesamDir, theirPath string, ident
 	}
 
 	return writeJSONFile(filepath.Join(sesamDir, theirsVStatePath), state)
-}
-
-func writeJSONFile(path string, value any) error {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-
-	return renameio.WriteFile(path, data, 0o600)
 }

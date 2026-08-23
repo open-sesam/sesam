@@ -4,13 +4,7 @@
 # matches by signature). Both of theirs' changes must survive and the twice-merged
 # log must verify.
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo
 
 exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
 exec git add -A

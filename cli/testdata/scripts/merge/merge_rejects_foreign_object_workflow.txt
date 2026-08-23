@@ -3,17 +3,7 @@
 # sesam repo: right path in the footer, valid age content, but signed by a key
 # the incoming branch's audit log never pinned.
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-cp base.txt $TMPDIR/base.txt
-cp mine.txt $TMPDIR/mine.txt
-cp other.txt $TMPDIR/other.txt
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo admin base.txt mine.txt other.txt
 
 cp $TMPDIR/base.txt s
 exec sesam add s --group admin

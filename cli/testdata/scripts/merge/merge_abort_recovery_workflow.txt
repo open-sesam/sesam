@@ -3,17 +3,7 @@
 # `sesam open` recovers ours' content and the repo verifies. (No auto re-reveal on
 # abort - see A8.)
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-cp base.txt $TMPDIR/base.txt
-cp ours.txt $TMPDIR/ours.txt
-cp theirs.txt $TMPDIR/theirs.txt
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo admin base.txt ours.txt theirs.txt
 
 cp $TMPDIR/base.txt secret.txt
 exec sesam add secret.txt --group admin

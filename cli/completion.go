@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/core"
 )
 
 // Shell completion for the sesam CLI.
@@ -117,7 +118,7 @@ func completeSecrets(ctx context.Context, cmd *cli.Command) {
 		return
 	}
 
-	root := filepath.Join(cmd.String("sesam-dir"), ".sesam", "objects")
+	root := filepath.Join(cmd.String("sesam-dir"), core.SesamObjectsDir())
 	w := cmd.Root().Writer
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".sesam") {

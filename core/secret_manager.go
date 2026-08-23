@@ -91,11 +91,11 @@ func (sm *SecretManager) recipientsFor(revealedPath string) Recipients {
 // join them with SesamDir explicitly.
 
 func (sm *SecretManager) cryptPath(path string) string {
-	return filepath.Join(sm.objectsDir(), path+".sesam")
+	return objectPath(sm.base, path)
 }
 
 func (sm *SecretManager) objectsDir() string {
-	return filepath.Join(sesamBase(sm.base), "objects")
+	return sesamObjectsDir(sm.base)
 }
 
 // SealedPath returns the repo-relative path of the encrypted object for path.

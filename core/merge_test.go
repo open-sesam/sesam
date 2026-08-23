@@ -869,3 +869,37 @@ func TestAuditMergeRotatesKey(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, ours.key, merged.key)
 }
+
+// The table is the one place that says what an operation is, so nothing may
+// fall out of it silently. verify() is the authority on who may do what; if the
+// two disagree, an entry gets rebased that verification would have rejected.
+func TestOpTableCoversEveryOperation(t *testing.T) {
+	all := []Operation{
+		OpInit, OpUserTell, OpUserKill, OpSecretAdd, OpSecretRemove, OpSeal, OpMerge,
+		OpUserRename, OpUserChangeGroups, OpSecretMove, OpSecretChangeAccess,
+		OpUserAddRecipients, OpUserRmRecipients, OpUserRegenerateSignKey,
+	}
+
+	for _, op := range all {
+		t.Run(string(op), func(t *testing.T) {
+			info, ok := mergeOpTable[op]
+			require.True(t, ok, "operation missing from opTable")
+			require.NotNil(t, info.resolve, "every operation needs a resolver")
+		})
+	}
+
+	require.Len(t, mergeOpTable, len(all), "opTable has an entry for an unknown operation")
+}
+
+// The user-facing ops are exactly the ones verify() gates on RequireAdmin.
+func TestOpTableAdminOnlyMatchesVerify(t *testing.T) {
+	adminOnly := map[Operation]bool{
+		OpUserTell: true, OpUserKill: true, OpUserRename: true,
+		OpUserRegenerateSignKey: true, OpUserChangeGroups: true,
+		OpUserAddRecipients: true, OpUserRmRecipients: true, OpMerge: true,
+	}
+
+	for op, info := range mergeOpTable {
+		require.Equal(t, adminOnly[op], info.adminOnly, "adminOnly mismatch for %s", op)
+	}
+}

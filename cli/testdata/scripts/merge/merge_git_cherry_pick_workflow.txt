@@ -2,16 +2,7 @@
 # hook, and `--continue` runs no pre-commit either. So it commits a merged log
 # with nothing resealed, which is why a merge entry drops the root hash claim.
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-cp base.txt $TMPDIR/base.txt
-cp changed.txt $TMPDIR/changed.txt
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo admin base.txt changed.txt
 
 cp $TMPDIR/base.txt s
 cp $TMPDIR/base.txt t

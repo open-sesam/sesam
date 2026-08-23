@@ -198,7 +198,7 @@ func PruneOrphanSignKeys(root *os.Root, base string, keep map[string]bool) ([]st
 
 // readAllSignatures finds all .sesam files under .sesam/objects/ and parses their signature footers.
 func readAllSignatures(root *os.Root) ([]*secretFooter, error) {
-	return readAllSignaturesForDir(root, filepath.Join(".sesam", "objects"))
+	return readAllSignaturesForDir(root, SesamObjectsDir())
 }
 
 func readAllSignaturesForDir(root *os.Root, objectsDir string) ([]*secretFooter, error) {

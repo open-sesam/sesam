@@ -115,6 +115,47 @@ func sesamTmpDir(base string) string {
 	return filepath.Join(sesamBase(base), "tmp")
 }
 
+// objectSuffix is what a sealed object is called on disk.
+const objectSuffix = ".sesam"
+
+// SesamDir is the repo-relative sesam directory of the live tree.
+func SesamDir() string {
+	return sesamBase("")
+}
+
+// SesamObjectsDir is the repo-relative directory holding sealed objects.
+func SesamObjectsDir() string {
+	return sesamObjectsDir("")
+}
+
+func sesamObjectsDir(base string) string {
+	return filepath.Join(sesamBase(base), "objects")
+}
+
+// ObjectPath is the sealed object belonging to a revealed path.
+func ObjectPath(revealedPath string) string {
+	return objectPath("", revealedPath)
+}
+
+func objectPath(base, revealedPath string) string {
+	return filepath.Join(sesamObjectsDir(base), revealedPath+objectSuffix)
+}
+
+// RevealedPath is the inverse of ObjectPath. It reports false for a path that is
+// not a sealed object, which is how callers tell a stray file from one of ours.
+func RevealedPath(objectPath string) (string, bool) {
+	rel, err := filepath.Rel(SesamObjectsDir(), filepath.Clean(objectPath))
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", false
+	}
+
+	if !strings.HasSuffix(rel, objectSuffix) {
+		return "", false
+	}
+
+	return filepath.ToSlash(strings.TrimSuffix(rel, objectSuffix)), true
+}
+
 // ValidUserName checks that a user name is safe for use in file paths and log entries.
 // Only alphanumeric characters (mixed case), hyphens, underscores, '@' and '.'
 // are allowed. The name must not be empty and must not exceed 64 characters.

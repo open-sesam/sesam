@@ -7,13 +7,7 @@
 # Each round: X and Y each add a distinct group to bob, tag their tip, then X
 # merges Y's tip and Y merges X's tip. bob accumulates every group.
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo
 
 exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
 exec git add -A

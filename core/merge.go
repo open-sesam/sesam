@@ -298,23 +298,22 @@ func checkDanglingGroups(state *VerifiedState) []ConflictResolutionEntry {
 
 // isMergeAdminKill checks if `merger` (i.e. us) gets demoted or killed by the change described in `their`.
 func isMergeAdminKill(their *AuditEntrySigned, merger string) string {
+	if entryUserTarget(their) != merger {
+		return ""
+	}
+
 	switch their.Operation {
 	case OpUserKill:
-		if d, err := parseDetail[DetailUserKill](their); err == nil && d.User == merger {
-			return "would remove the merging admin " + merger + "; kept (cannot merge yourself away)"
-		}
-	case OpUserChangeGroups:
-		if d, err := parseDetail[DetailUserChangeGroups](their); err == nil &&
-			d.User == merger && !slices.Contains(d.NewGroups, "admin") {
-			return "would strip admin from the merging user " + merger + "; kept ours"
-		}
+		return "would remove the merging admin " + merger + "; kept (cannot merge yourself away)"
 	case OpUserRegenerateSignKey:
-		if d, err := parseDetail[DetailUserRegenerateSignKey](their); err == nil && d.User == merger {
-			return "would re-key the merging admin " + merger + " mid-merge; kept ours"
-		}
+		return "would re-key the merging admin " + merger + " mid-merge; kept ours"
 	case OpUserRename:
-		if d, err := parseDetail[DetailUserRename](their); err == nil && d.OldName == merger {
-			return "would rename the merging admin " + merger + " mid-merge; kept ours"
+		return "would rename the merging admin " + merger + " mid-merge; kept ours"
+	case OpUserChangeGroups:
+		// Only a problem when it takes admin away; other group edits are fine.
+		if d, err := parseDetail[DetailUserChangeGroups](their); err == nil &&
+			!slices.Contains(d.NewGroups, "admin") {
+			return "would strip admin from the merging user " + merger + "; kept ours"
 		}
 	}
 
@@ -325,40 +324,48 @@ func isMergeAdminKill(their *AuditEntrySigned, merger string) string {
 // operation, or "" if they still may. Verifying theirs only proves what they
 // could do on their own branch, not what we left them since the base.
 func authorRevoked(their *AuditEntrySigned, merged, theirs *VerifiedState) string {
-	switch their.Operation {
-	case OpSeal, OpInit, OpMerge:
-		// Never replayed; resolveTheirs has a better reason for dropping them.
+	op, ok := mergeOpTable[their.Operation]
+	if !ok || !op.replayed {
+		// Unknown or never rebased; resolveTheirs has a better reason to drop it.
 		return ""
 	}
 
-	author, ok := authorInMerged(their, merged, theirs)
-	if !ok {
+	author, found := authorInMerged(their, merged, theirs)
+	if !found {
 		return "author " + their.ChangedBy + " was removed on our side; dropped"
 	}
 
-	switch their.Operation {
-	case OpUserTell, OpUserKill, OpUserRename, OpUserRegenerateSignKey,
-		OpUserChangeGroups, OpUserAddRecipients, OpUserRmRecipients:
+	if op.adminOnly {
 		if !author.IsAdmin() {
 			return "author " + their.ChangedBy + " is no longer an admin on our side; dropped"
 		}
-	case OpSecretAdd:
+
+		return ""
+	}
+
+	// The rest are gated on access to the path they touch. secret.add names its
+	// groups directly; the others act on a secret that has to exist first.
+	if their.Operation == OpSecretAdd {
 		d, err := parseDetail[DetailSecretAdd](their)
 		if err != nil {
 			return "" // resolveTheirs reports the parse error
 		}
+
 		if !merged.UserHasAccess(author.Name, d.AccessGroups) {
 			return "author " + their.ChangedBy + " has no access to " + d.RevealedPath + " on our side; dropped"
 		}
-	case OpSecretChangeAccess, OpSecretMove, OpSecretRemove:
-		path := entrySecretTarget(their)
-		if _, ok := merged.SecretExists(path); !ok {
-			// Gone on our side - let the resolvers dedupe it.
-			return ""
-		}
-		if !merged.SealerAuthorized(author.Name, path) {
-			return "author " + their.ChangedBy + " has no access to " + path + " on our side; dropped"
-		}
+
+		return ""
+	}
+
+	path := entrySecretTarget(their)
+	if _, exists := merged.SecretExists(path); !exists {
+		// Gone on our side - let the resolvers dedupe it.
+		return ""
+	}
+
+	if !merged.SealerAuthorized(author.Name, path) {
+		return "author " + their.ChangedBy + " has no access to " + path + " on our side; dropped"
 	}
 
 	return ""
@@ -429,100 +436,151 @@ func recordOrphanedRename(their *AuditEntrySigned, merged *VerifiedState, orphan
 	}
 }
 
-// entryUserTarget returns the existing user a modifying op acts on ("" otherwise).
-func entryUserTarget(their *AuditEntrySigned) string {
-	switch their.Operation {
-	case OpUserKill:
-		if d, err := parseDetail[DetailUserKill](their); err == nil {
-			return d.User
-		}
-	case OpUserChangeGroups:
-		if d, err := parseDetail[DetailUserChangeGroups](their); err == nil {
-			return d.User
-		}
-	case OpUserAddRecipients:
-		if d, err := parseDetail[DetailUserAddRecipients](their); err == nil {
-			return d.User
-		}
-	case OpUserRmRecipients:
-		if d, err := parseDetail[DetailUserRmRecipients](their); err == nil {
-			return d.User
-		}
-	case OpUserRegenerateSignKey:
-		if d, err := parseDetail[DetailUserRegenerateSignKey](their); err == nil {
-			return d.User
-		}
-	case OpUserRename:
-		if d, err := parseDetail[DetailUserRename](their); err == nil {
-			return d.OldName
-		}
-	}
-	return ""
+// opInfo is what a merge needs to know about an operation. Keeping it in one
+// table means adding an operation is one entry, not an edit in five switches
+// that nothing forces you to keep in step.
+type opInfo struct {
+	// replayed is false for entries a merge never rebases onto ours.
+	replayed bool
+
+	// adminOnly mirrors what verify enforces: only an admin may do this.
+	adminOnly bool
+
+	// userTarget and secretTarget name what the operation acts on, "" if it acts
+	// on neither (or the detail does not parse).
+	userTarget   func(*AuditEntrySigned) string
+	secretTarget func(*AuditEntrySigned) string
+
+	// resolve decides how the entry integrates on top of the merged state.
+	resolve func(their *AuditEntrySigned, merged, base *VerifiedState) resolution
 }
 
-// entrySecretTarget returns the existing secret path a modifying op acts on.
-func entrySecretTarget(their *AuditEntrySigned) string {
-	switch their.Operation {
-	case OpSecretChangeAccess:
-		if d, err := parseDetail[DetailSecretChangeAccess](their); err == nil {
-			return d.RevealedPath
+func detailField[T AuditDetail](pick func(*T) string) func(*AuditEntrySigned) string {
+	return func(their *AuditEntrySigned) string {
+		d, err := parseDetail[T](their)
+		if err != nil {
+			return ""
 		}
-	case OpSecretRemove:
-		if d, err := parseDetail[DetailSecretRemove](their); err == nil {
-			return d.RevealedPath
-		}
-	case OpSecretMove:
-		if d, err := parseDetail[DetailSecretMove](their); err == nil {
-			return d.OldRevealedPath
-		}
+
+		return pick(d)
 	}
-	return ""
+}
+
+// This table defines what happens on incoming audit log entries:
+var mergeOpTable = map[Operation]opInfo{
+	OpSeal: {
+		resolve: alwaysDrop("seal superseded by post-merge reseal", false),
+	},
+	OpInit: {
+		resolve: alwaysDrop("unexpected init among new entries", true),
+	},
+	OpMerge: {
+		adminOnly: true,
+		resolve:   alwaysDrop("theirs' merge entry is not replayed", false),
+	},
+	OpUserTell: {
+		replayed:   true,
+		adminOnly:  true,
+		userTarget: detailField(func(d *DetailUserTell) string { return d.User }),
+		resolve:    resolveUserTell,
+	},
+	OpUserKill: {
+		replayed:   true,
+		adminOnly:  true,
+		userTarget: detailField(func(d *DetailUserKill) string { return d.User }),
+		resolve:    resolveUserKill,
+	},
+	OpUserRename: {
+		replayed:   true,
+		adminOnly:  true,
+		userTarget: detailField(func(d *DetailUserRename) string { return d.OldName }),
+		resolve:    resolveUserRename,
+	},
+	OpUserRegenerateSignKey: {
+		replayed:   true,
+		adminOnly:  true,
+		userTarget: detailField(func(d *DetailUserRegenerateSignKey) string { return d.User }),
+		resolve:    resolveUserRegenKey,
+	},
+	OpUserChangeGroups: {
+		replayed:   true,
+		adminOnly:  true,
+		userTarget: detailField(func(d *DetailUserChangeGroups) string { return d.User }),
+		resolve:    resolveUserChangeGroups,
+	},
+	OpUserAddRecipients: {
+		replayed:   true,
+		adminOnly:  true,
+		userTarget: detailField(func(d *DetailUserAddRecipients) string { return d.User }),
+		resolve:    resolveUserAddRecipients,
+	},
+	OpUserRmRecipients: {
+		replayed:   true,
+		adminOnly:  true,
+		userTarget: detailField(func(d *DetailUserRmRecipients) string { return d.User }),
+		resolve:    resolveUserRmRecipients,
+	},
+	// The secret operations are gated on access to the path, not on admin.
+	OpSecretAdd: {
+		replayed: true,
+		resolve:  resolveSecretAdd,
+	},
+	OpSecretRemove: {
+		replayed:     true,
+		secretTarget: detailField(func(d *DetailSecretRemove) string { return d.RevealedPath }),
+		resolve:      resolveSecretRemove,
+	},
+	OpSecretChangeAccess: {
+		replayed:     true,
+		secretTarget: detailField(func(d *DetailSecretChangeAccess) string { return d.RevealedPath }),
+		resolve:      resolveSecretChangeAccess,
+	},
+	OpSecretMove: {
+		replayed:     true,
+		secretTarget: detailField(func(d *DetailSecretMove) string { return d.OldRevealedPath }),
+		resolve:      resolveSecretMove,
+	},
+}
+
+func alwaysDrop(reason string, conflict bool) func(*AuditEntrySigned, *VerifiedState, *VerifiedState) resolution {
+	return func(*AuditEntrySigned, *VerifiedState, *VerifiedState) resolution {
+		return dropWith(reason, conflict)
+	}
 }
 
 // resolveTheirs decides how one of theirs' new entries integrates on top of the
 // merged state built so far. base is the merge-base state, needed for the
 // three-way set deltas. It only reads state; applying is the caller's job.
 func resolveTheirs(their *AuditEntrySigned, merged, base *VerifiedState) resolution {
-	switch their.Operation {
-	case OpSeal:
-		// Post-base seals never survive a merge; the terminal reseal is the only
-		// authority afterwards.
-		return dropWith("seal superseded by post-merge reseal", false)
-	case OpInit:
-		// The init check guarantees this never happens; guard anyway.
-		return dropWith("unexpected init among new entries", true)
-	case OpMerge:
-		return dropWith("theirs' merge entry is not replayed", false)
-	case OpUserTell:
-		return resolveUserTell(their, merged)
-	case OpUserKill:
-		return resolveUserKill(their, merged, base)
-	case OpUserRename:
-		return resolveUserRename(their, merged)
-	case OpUserRegenerateSignKey:
-		return resolveUserRegenKey(their, merged, base)
-	case OpUserChangeGroups:
-		return resolveUserChangeGroups(their, merged, base)
-	case OpUserAddRecipients:
-		return resolveUserAddRecipients(their, merged, base)
-	case OpUserRmRecipients:
-		return resolveUserRmRecipients(their, merged)
-	case OpSecretAdd:
-		return resolveSecretAdd(their, merged)
-	case OpSecretRemove:
-		return resolveSecretRemove(their, merged, base)
-	case OpSecretChangeAccess:
-		return resolveSecretChangeAccess(their, merged, base)
-	case OpSecretMove:
-		return resolveSecretMove(their, merged)
-	default:
+	op, ok := mergeOpTable[their.Operation]
+	if !ok {
 		return dropWith(fmt.Sprintf("unknown operation %q", their.Operation), true)
 	}
+
+	return op.resolve(their, merged, base)
+}
+
+// entryUserTarget returns the existing user a modifying op acts on ("" otherwise).
+func entryUserTarget(their *AuditEntrySigned) string {
+	if op, ok := mergeOpTable[their.Operation]; ok && op.userTarget != nil {
+		return op.userTarget(their)
+	}
+
+	return ""
+}
+
+// entrySecretTarget returns the existing secret path a modifying op acts on.
+func entrySecretTarget(their *AuditEntrySigned) string {
+	if op, ok := mergeOpTable[their.Operation]; ok && op.secretTarget != nil {
+		return op.secretTarget(their)
+	}
+
+	return ""
 }
 
 // resolveUserTell dedupes an identical re-tell of the same name; a same-name tell
 // with a different identity keeps ours and warns (two identities cannot be fused).
-func resolveUserTell(their *AuditEntrySigned, merged *VerifiedState) (r resolution) {
+func resolveUserTell(their *AuditEntrySigned, merged, _ *VerifiedState) (r resolution) {
 	d, err := parseDetail[DetailUserTell](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
@@ -569,7 +627,7 @@ func resolveUserKill(their *AuditEntrySigned, merged, base *VerifiedState) (r re
 
 // resolveUserRename prefers ours: drop on a vanished source or an occupied target
 // (a single-valued field has no union).
-func resolveUserRename(their *AuditEntrySigned, merged *VerifiedState) (r resolution) {
+func resolveUserRename(their *AuditEntrySigned, merged, _ *VerifiedState) (r resolution) {
 	d, err := parseDetail[DetailUserRename](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
@@ -687,7 +745,7 @@ func resolveUserAddRecipients(their *AuditEntrySigned, merged, base *VerifiedSta
 
 // resolveUserRmRecipients: a removal wins; a no-longer-present user makes it a
 // satisfied no-op.
-func resolveUserRmRecipients(their *AuditEntrySigned, merged *VerifiedState) (r resolution) {
+func resolveUserRmRecipients(their *AuditEntrySigned, merged, _ *VerifiedState) (r resolution) {
 	d, err := parseDetail[DetailUserRmRecipients](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
@@ -713,7 +771,7 @@ func resolveUserRmRecipients(their *AuditEntrySigned, merged *VerifiedState) (r 
 
 // resolveSecretAdd: an add of the same path dedupes; differing access is a
 // conflict (content itself is merged by the secret driver).
-func resolveSecretAdd(their *AuditEntrySigned, merged *VerifiedState) (r resolution) {
+func resolveSecretAdd(their *AuditEntrySigned, merged, _ *VerifiedState) (r resolution) {
 	d, err := parseDetail[DetailSecretAdd](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
@@ -793,7 +851,7 @@ func resolveSecretChangeAccess(their *AuditEntrySigned, merged, base *VerifiedSt
 }
 
 // resolveSecretMove prefers ours: drop on a vanished source or an occupied target.
-func resolveSecretMove(their *AuditEntrySigned, merged *VerifiedState) (r resolution) {
+func resolveSecretMove(their *AuditEntrySigned, merged, _ *VerifiedState) (r resolution) {
 	d, err := parseDetail[DetailSecretMove](their)
 	if err != nil {
 		return dropWith(err.Error(), true)

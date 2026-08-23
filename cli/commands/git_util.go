@@ -1,17 +1,16 @@
 package commands
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"opensesam.org/sesam/core"
 	"opensesam.org/sesam/repo"
 )
 
@@ -61,21 +60,57 @@ func (k mergeKind) AbortCmd() string    { return mergeKinds[k].abort }
 // mergeState reports which merge-like operation is in progress. Refs are checked
 // before the index, since a rebase or cherry-pick also leaves unmerged entries.
 func mergeState(sesamDir string) mergeKind {
+	kind, _ := inspectMerge(sesamDir)
+	return kind
+}
+
+// mergeSource resolves the commit being merged in. Falls back to `theirPath`,
+// the blob git handed the driver, when git names the operation but not its
+// source (a cherry-pick sets no ref until it stops).
+func mergeSource(sesamDir, theirPath string) (string, error) {
+	_, rev := inspectMerge(sesamDir)
+	if rev != "" {
+		return rev, nil
+	}
+
 	worktreeRoot, err := repo.GitWorktreeRoot(sesamDir)
 	if err != nil {
-		return mergeKindNone
+		return "", err
+	}
+
+	if sha := commitContaining(worktreeRoot, theirPath); sha != "" {
+		return sha, nil
+	}
+
+	// A stash pop merges against the stash entry, which git keeps out of --all
+	// so commitContaining never finds it. Verifying against the wrong revision
+	// only ever refuses the merge, so this is safe as a last guess.
+	if sha, err := gitOutput(worktreeRoot, "rev-parse", "-q", "--verify", "refs/stash"); err == nil && sha != "" {
+		return sha, nil
+	}
+
+	return "", errors.New("cannot tell which branch is being merged in")
+}
+
+// inspectMerge asks git once what is going on and, where git says so, which
+// commit is coming in. The two questions read the same markers, so they are
+// answered together rather than by two probes that can disagree.
+func inspectMerge(sesamDir string) (mergeKind, string) {
+	worktreeRoot, err := repo.GitWorktreeRoot(sesamDir)
+	if err != nil {
+		return mergeKindNone, ""
 	}
 
 	gitDir, err := gitOutput(worktreeRoot, "rev-parse", "--absolute-git-dir")
 	if err != nil {
-		return mergeKindNone
+		return mergeKindNone, ""
 	}
 
 	// A rebase has no ref until it stops, but its state dir lives for the whole
 	// run (rebase-apply is the older `git am` backend).
 	for _, dir := range []string{"rebase-merge", "rebase-apply"} {
 		if _, err := os.Stat(filepath.Join(gitDir, dir)); err == nil {
-			return mergeKindRebase
+			return mergeKindRebase, rebasePickedCommit(gitDir)
 		}
 	}
 
@@ -87,32 +122,37 @@ func mergeState(sesamDir string) mergeKind {
 		{"REVERT_HEAD", mergeKindRevert},
 		{"MERGE_HEAD", mergeKindMerge},
 	} {
-		if _, err := gitOutput(worktreeRoot, "rev-parse", "-q", "--verify", probe.ref); err == nil {
-			return probe.kind
+		if sha, err := gitOutput(worktreeRoot, "rev-parse", "-q", "--verify", probe.ref); err == nil {
+			return probe.kind, sha
 		}
 	}
 
 	// A squash merge leaves no ref and no merge commit - only this file, until the
 	// user commits. Without it the finalize would skip a squash entirely.
 	if _, err := os.Stat(filepath.Join(gitDir, "SQUASH_MSG")); err == nil {
-		return mergeKindSquash
+		return mergeKindSquash, ""
 	}
 
-	// MERGE_HEAD is only written once the tree merge is done, so mid-driver this
-	// env var is all we have. A hint only: a miss costs a vaguer message, nothing
-	// more. git exports it to hooks too, so never use this to detect "still busy".
+	// A plain merge exports one GITHEAD_<sha> per merge head while a strategy
+	// runs. git sets it in no documented place, so it is a hint: worth taking for
+	// the revision, never trusted to mean "still busy" (hooks see it too).
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "GITHEAD_") {
-			return mergeKindMerge
+		if !strings.HasPrefix(kv, "GITHEAD_") {
+			continue
 		}
+
+		sha, _, _ := strings.Cut(strings.TrimPrefix(kv, "GITHEAD_"), "=")
+		return mergeKindMerge, sha
 	}
 
-	// Nothing named it, but the index is still unmerged.
+	// Nothing named it, but the index is still unmerged - a conflicted stash pop
+	// looks like this, and the stash entry is what it merged against.
 	if out, err := gitOutput(worktreeRoot, "ls-files", "--unmerged"); err == nil && out != "" {
-		return mergeKindOther
+		stash, _ := gitOutput(worktreeRoot, "rev-parse", "-q", "--verify", "refs/stash")
+		return mergeKindOther, stash
 	}
 
-	return mergeKindNone
+	return mergeKindNone, ""
 }
 
 // mergeTouchedSesam reports whether an in-progress merge changed anything under
@@ -128,7 +168,7 @@ func mergeTouchedSesam(sesamDir string) (bool, error) {
 	cmd := exec.CommandContext(
 		context.Background(),
 		"git", "diff", "--cached", "--quiet", "HEAD", "--",
-		filepath.Join(prefix, ".sesam"),
+		filepath.Join(prefix, core.SesamDir()),
 	)
 	cmd.Dir = worktreeRoot
 	cmd.Stderr = os.Stderr
@@ -166,7 +206,7 @@ func changedSecretPaths(sesamDir string, gitArgs ...string) ([]string, error) {
 		return nil, err
 	}
 
-	objectsDir := filepath.ToSlash(filepath.Join(prefix, ".sesam", "objects"))
+	objectsDir := filepath.ToSlash(filepath.Join(prefix, core.SesamObjectsDir()))
 	out, err := gitOutput(worktreeRoot, append(gitArgs, "--", objectsDir)...)
 	if err != nil {
 		return nil, fmt.Errorf("git diff for changed objects: %w", err)
@@ -179,12 +219,17 @@ func changedSecretPaths(sesamDir string, gitArgs ...string) ([]string, error) {
 			continue
 		}
 
-		rel, err := filepath.Rel(objectsDir, line)
+		rel, err := filepath.Rel(prefix, line)
 		if err != nil {
 			continue
 		}
 
-		paths = append(paths, strings.TrimSuffix(filepath.ToSlash(rel), ".sesam"))
+		revealed, ok := core.RevealedPath(rel)
+		if !ok {
+			continue
+		}
+
+		paths = append(paths, revealed)
 	}
 
 	return paths, nil
@@ -225,54 +270,6 @@ func gitOutput(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(buf.String()), nil
 }
 
-// resolveTheirRevision finds the commit being merged in. git names it differently
-// per operation and, for a cherry-pick or stash pop, not at all - hence the
-// index-free fallbacks.
-func resolveTheirRevision(sesamDir, theirPath string) (string, error) {
-	worktreeRoot, err := repo.GitWorktreeRoot(sesamDir)
-	if err != nil {
-		return "", fmt.Errorf("locate worktree root: %w", err)
-	}
-
-	// A plain merge exports one GITHEAD_<sha> per merge head. That variable is set
-	// by git when it invokes a strategy and appears in no documentation, so treat
-	// it as a hint and keep the blob search below as the real answer.
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "GITHEAD_") {
-			continue
-		}
-
-		if sha, _, _ := strings.Cut(strings.TrimPrefix(kv, "GITHEAD_"), "="); sha != "" {
-			return sha, nil
-		}
-	}
-
-	gitDir, err := gitOutput(worktreeRoot, "rev-parse", "--absolute-git-dir")
-	if err != nil {
-		return "", err
-	}
-
-	// A rebase is replaying a commit; while the drivers run it is the last line of
-	// `done` ("pick <sha> # subject"). stopped-sha only appears once it stops.
-	if sha := rebasePickedCommit(gitDir); sha != "" {
-		return sha, nil
-	}
-
-	for _, ref := range []string{"CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_HEAD", "refs/stash"} {
-		if sha, err := gitOutput(worktreeRoot, "rev-parse", "-q", "--verify", ref); err == nil && sha != "" {
-			return sha, nil
-		}
-	}
-
-	// Last resort, and the only one that needs no ref and no env: find the commit
-	// carrying the very blob git handed us.
-	if sha := commitContaining(worktreeRoot, theirPath); sha != "" {
-		return sha, nil
-	}
-
-	return "", errors.New("cannot tell which branch is being merged in")
-}
-
 // rebasePickedCommit reads the commit a rebase is currently replaying.
 func rebasePickedCommit(gitDir string) string {
 	for _, name := range []string{"rebase-merge/stopped-sha", "rebase-merge/done", "rebase-apply/original-commit"} {
@@ -302,12 +299,7 @@ func rebasePickedCommit(gitDir string) string {
 // would be the obvious way, but `git worktree add` fires post-checkout, which
 // would have sesam clean and reveal into the temporary tree.
 func extractSesamDir(ctx context.Context, sesamDir, rev, destDir string) error {
-	worktreeRoot, err := repo.GitWorktreeRoot(sesamDir)
-	if err != nil {
-		return err
-	}
-
-	prefix, err := filepath.Rel(worktreeRoot, sesamDir)
+	worktreeRoot, prefix, err := worktreePrefix(sesamDir)
 	if err != nil {
 		return err
 	}
@@ -336,68 +328,6 @@ func extractSesamDir(ctx context.Context, sesamDir, rev, destDir string) error {
 	}
 
 	return cmd.Wait()
-}
-
-// untar writes the archive below destDir, dropping `strip` from every path so a
-// nested sesam dir lands at the root of the extraction.
-func untar(rd io.Reader, destDir, strip string) error {
-	root, err := makeRoot(destDir)
-	if err != nil {
-		return err
-	}
-
-	defer func() { _ = root.Close() }()
-
-	tr := tar.NewReader(rd)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		name := strings.TrimPrefix(filepath.ToSlash(hdr.Name), strip+"/")
-		if name == "" || name == "." {
-			// git archive emits an entry for the prefix directory itself.
-			continue
-		}
-
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := root.MkdirAll(name, 0o700); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := root.MkdirAll(filepath.Dir(name), 0o700); err != nil {
-				return err
-			}
-
-			fd, err := root.Create(name)
-			if err != nil {
-				return err
-			}
-
-			//nolint:gosec // archive comes from our own git repo.
-			if _, err := io.Copy(fd, tr); err != nil {
-				_ = fd.Close()
-				return err
-			}
-
-			if err := fd.Close(); err != nil {
-				return err
-			}
-		}
-	}
-}
-
-func makeRoot(dir string) (*os.Root, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-
-	return os.OpenRoot(dir)
 }
 
 // commitContaining finds a commit that carries the blob in `file`. Picking the

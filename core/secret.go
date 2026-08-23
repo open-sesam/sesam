@@ -418,7 +418,7 @@ func RevealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) (
 // is not in `keep`, returning the pruned revealed paths. Used by merge finalize
 // to drop objects for secrets removed on the merged branch.
 func PruneOrphanObjects(root *os.Root, base string, keep map[string]bool) ([]string, error) {
-	dir := filepath.ToSlash(filepath.Join(sesamBase(base), "objects"))
+	dir := filepath.ToSlash(sesamObjectsDir(base))
 
 	var pruned []string
 	err := fs.WalkDir(root.FS(), dir, func(p string, d fs.DirEntry, err error) error {

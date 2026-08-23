@@ -2,13 +2,7 @@
 # pre-merge-commit only stops the auto-commit when .sesam actually changed. Here a
 # force-tracked plain file is merged; sesam stays out of the way (no finalize nag).
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo
 
 # Force-track a plain file (the sesam gitignore would otherwise ignore it).
 exec sh -c 'printf "l1\nl2\nl3\n" > notes.txt'

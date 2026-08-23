@@ -2,13 +2,7 @@
 # theirs' user.tell onto ours, so the merged log holds both users, records a
 # merge entry, and chain-verifies.
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo
 
 # OURS: add bob.
 exec git checkout -b ours

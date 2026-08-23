@@ -1,13 +1,7 @@
 # Delete-vs-modify: ours changes bob's groups, theirs kills bob. Revocation
 # wins - bob is gone from the merged state (and the drop is flagged for review).
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo
 
 # Base: bob is a dev, shared by both branches.
 exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev

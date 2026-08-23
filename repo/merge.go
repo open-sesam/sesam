@@ -73,13 +73,9 @@ func runGitMerge(ctx context.Context, revealedPath, ourPath, theirPath, originPa
 	}
 }
 
-// TmpDir is the repo's scratch space. Everything in it belongs to whatever
-// operation is running and may be dropped once that finishes.
-const TmpDir = ".sesam/tmp"
-
 // ClearTmp empties the scratch space.
 func ClearTmp(root *os.Root) error {
-	entries, err := fs.ReadDir(root.FS(), TmpDir)
+	entries, err := fs.ReadDir(root.FS(), core.SesamTmpDir())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -89,7 +85,7 @@ func ClearTmp(root *os.Root) error {
 	}
 
 	for _, entry := range entries {
-		if err := root.RemoveAll(path.Join(TmpDir, entry.Name())); err != nil {
+		if err := root.RemoveAll(path.Join(core.SesamTmpDir(), entry.Name())); err != nil {
 			return err
 		}
 	}
@@ -178,7 +174,7 @@ func decryptTheirSecret(ids core.Identities, revealedPath, theirPath string, the
 
 func writeSecretTmpBuf(root *os.Root, buf *bytes.Buffer, revealedPath, tag string) (string, error) {
 	tmpPath := fmt.Sprintf(
-		".sesam/tmp/%s.%s",
+		core.SesamTmpDir()+"/%s.%s",
 		strings.ReplaceAll(revealedPath, "/", "_"),
 		tag,
 	)
@@ -190,7 +186,7 @@ func writeSecretTmpBuf(root *os.Root, buf *bytes.Buffer, revealedPath, tag strin
 	fd, err := renameio.NewPendingFile(
 		tmpPath,
 		renameio.WithRoot(root),
-		renameio.WithTempDir(".sesam/tmp"),
+		renameio.WithTempDir(core.SesamTmpDir()),
 		renameio.WithPermissions(0o600),
 	)
 	if err != nil {
@@ -442,7 +438,7 @@ func writeRevealedFile(root *os.Root, relPath string, data []byte) error {
 	fd, err := renameio.NewPendingFile(
 		relPath,
 		renameio.WithRoot(root),
-		renameio.WithTempDir(".sesam/tmp"),
+		renameio.WithTempDir(core.SesamTmpDir()),
 		renameio.WithPermissions(0o600),
 	)
 	if err != nil {

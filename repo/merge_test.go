@@ -27,8 +27,8 @@ func TestDecryptTheirSecretRefusesWithoutState(t *testing.T) {
 
 func TestClearTmp(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, TmpDir, "theirs", ".sesam"), 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, TmpDir+"/theirs-vstate.json"), []byte("{}"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, core.SesamTmpDir(), "theirs", ".sesam"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, core.SesamTmpDir(), "theirs-vstate.json"), []byte("{}"), 0o600))
 
 	root, err := os.OpenRoot(dir)
 	require.NoError(t, err)
@@ -37,7 +37,7 @@ func TestClearTmp(t *testing.T) {
 
 	require.NoError(t, ClearTmp(root))
 
-	left, err := os.ReadDir(filepath.Join(dir, TmpDir))
+	left, err := os.ReadDir(filepath.Join(dir, core.SesamTmpDir()))
 	require.NoError(t, err)
 	require.Empty(t, left)
 

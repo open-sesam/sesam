@@ -3,13 +3,7 @@
 # and because only theirs touched .sesam/signkeys/bob.age git takes theirs' file -
 # so the stored key and the log's recorded pubkey stay consistent and verify passes.
 
-exec git init
-exec git config user.email test@sesam.dev
-exec git config user.name 'Sesam Test'
-
-exec sesam init --user admin --install-merge
-exec git add -A
-exec git commit -m 'init sesam'
+sesam-repo
 
 exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
 exec git add -A
