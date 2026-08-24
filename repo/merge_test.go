@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,11 +19,11 @@ func TestDecryptTheirSecretRefusesWithoutState(t *testing.T) {
 		"s",
 		filepath.Join(t.TempDir(), "nonexistent"),
 		func() (*core.VerifiedState, error) {
-			return nil, os.ErrNotExist
+			return nil, errors.New("the branch being merged in was never verified")
 		},
 	)
 
-	require.ErrorContains(t, err, "state of the incoming branch")
+	require.ErrorContains(t, err, "never verified")
 }
 
 func TestClearTmp(t *testing.T) {

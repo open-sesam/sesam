@@ -123,6 +123,12 @@ func SesamDir() string {
 	return sesamBase("")
 }
 
+// AuditInitPath is the repo-relative trust anchor: the hash of the init entry,
+// written once at init and never again.
+func AuditInitPath() string {
+	return auditInitPath("")
+}
+
 // SesamObjectsDir is the repo-relative directory holding sealed objects.
 func SesamObjectsDir() string {
 	return sesamObjectsDir("")

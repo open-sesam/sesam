@@ -22,6 +22,8 @@ need them.
 `sesam` allows leveled access with multiple users to those encrypted secrets
 and gives you a simple interface to manage both users and secrets.
 
+In short, `sesam` fits well the [GitOps model](https://about.gitlab.com/topics/gitops/) of infrastructure.
+
 ```admonish note
 The term *user* does not necessarily refer to a person. A user can also be a machine, like a server where `sesam` is installed.
 ```
@@ -45,7 +47,6 @@ built another tool](./alternatives.md).
 - Encrypted at rest; only secret paths and group membership are visible in the repo.
 - Safe to use (hard to accidentally push unencrypted secrets)
 - Per-secret integrity checks with root-hash verification.
-- Support for rotation and swap of secrets ([planned](https://github.com/open-sesam/sesam/issues/40))
 
 ### Convenience
 
@@ -57,6 +58,11 @@ built another tool](./alternatives.md).
 - Somewhat fast encryption and decryption.¹
 - Almost zero dependencies.
 
+### Planned features
+
+- Support for rotation and swapping of secrets ([Plan](https://github.com/open-sesam/sesam/issues/40))
+- 
+
 <small>
 ¹ <i>somewhat fast</i> is the new <i>🚀 blazingly fast 🚀</i> - benchmarks will follow later.
 </small>
@@ -67,8 +73,6 @@ built another tool](./alternatives.md).
 - Allows viewing local diffs of secrets and the audit log.
 - Hooks keep revealed files in sync on checkout, pull and merge.
 - Merging of secrets is supported.
-
-In short, `sesam` fits well the [GitOps model](https://about.gitlab.com/topics/gitops/) of infrastructure.
 
 ## Who is it for?
 

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -326,7 +327,11 @@ func mergeDriverSummary(resolutions []core.ConflictResolutionEntry, kind mergeKi
 
 // theirsVStatePath is where the incoming branch's verified state is parked for
 // the driver runs that follow.
-var theirsVStatePath = filepath.Join(core.SesamTmpDir(), "theirs-vstate.json")
+// theirsVStatePath names the state by the revision it was verified for, so a
+// file left behind by an aborted merge is simply never looked up again.
+func theirsVStatePath(rev string) string {
+	return filepath.Join(core.SesamTmpDir(), "theirs-vstate-"+rev+".json")
+}
 
 // theirsCheckoutPath is where the incoming .sesam is unpacked to be verified.
 var theirsCheckoutPath = filepath.Join(core.SesamTmpDir(), "theirs")
@@ -336,16 +341,21 @@ var theirsCheckoutPath = filepath.Join(core.SesamTmpDir(), "theirs")
 // so the work happens once and the rest read the file it left behind.
 func theirStateFunc(ctx context.Context, cmd *cli.Command, drv *mergeDriver) repo.TheirStateFunc {
 	return func() (*core.VerifiedState, error) {
-		state, err := readTheirState(drv.sesamDir)
-		if err == nil {
-			return state, nil
-		}
-
-		if !os.IsNotExist(err) {
+		rev, err := mergeSource(drv.sesamDir, drv.theirPath)
+		if err != nil {
 			return nil, err
 		}
 
-		if err := ensureTheirsVerified(ctx, drv.sesamDir, drv.theirPath, drv.identityPaths, repo.RepoOpts{
+		// The revision becomes a file name below, so insist it is an object id.
+		if _, err := hex.DecodeString(rev); rev == "" || err != nil {
+			return nil, fmt.Errorf("%q is not a commit id", rev)
+		}
+
+		if state, err := readTheirState(drv.sesamDir, rev); err == nil {
+			return state, nil
+		}
+
+		if err := ensureTheirsVerified(ctx, drv.sesamDir, rev, drv.identityPaths, repo.RepoOpts{
 			AskpassProgram:  cmd.String("askpass"),
 			AskpassRequired: askpassRequired(),
 
@@ -360,13 +370,14 @@ func theirStateFunc(ctx context.Context, cmd *cli.Command, drv *mergeDriver) rep
 			return nil, err
 		}
 
-		return readTheirState(drv.sesamDir)
+		return readTheirState(drv.sesamDir, rev)
 	}
 }
 
-func readTheirState(sesamDir string) (*core.VerifiedState, error) {
-	//nolint:gosec // path is the sesam dir plus a fixed name.
-	fd, err := os.Open(filepath.Join(sesamDir, theirsVStatePath))
+// readTheirState returns the state verified for `rev`, if there is one.
+func readTheirState(sesamDir, rev string) (*core.VerifiedState, error) {
+	//nolint:gosec // sesam dir plus a name built from a revision we resolved.
+	fd, err := os.Open(filepath.Join(sesamDir, theirsVStatePath(rev)))
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +386,7 @@ func readTheirState(sesamDir string) (*core.VerifiedState, error) {
 
 	var state core.VerifiedState
 	if err := json.NewDecoder(fd).Decode(&state); err != nil {
-		return nil, fmt.Errorf("read %s: %w", theirsVStatePath, err)
+		return nil, fmt.Errorf("read %s: %w", theirsVStatePath(rev), err)
 	}
 
 	return &state, nil
@@ -388,15 +399,17 @@ func readTheirState(sesamDir string) (*core.VerifiedState, error) {
 //
 // git runs a driver per conflicting path, so this happens once and the rest of
 // the invocations read the file.
-func ensureTheirsVerified(ctx context.Context, sesamDir, theirPath string, identityPaths []string, opts repo.RepoOpts) error {
-	rev, err := mergeSource(sesamDir, theirPath)
-	if err != nil {
-		return err
-	}
-
+func ensureTheirsVerified(ctx context.Context, sesamDir, rev string, identityPaths []string, opts repo.RepoOpts) error {
 	checkoutDir := filepath.Join(sesamDir, theirsCheckoutPath)
 	if err := extractSesamDir(ctx, sesamDir, rev, checkoutDir); err != nil {
 		return fmt.Errorf("unpack %s: %w", rev, err)
+	}
+
+	// we need to double check that that the incoming audit log is actually from the same root as ours.
+	// otherwise some attacker could craft an audit log that is not based on ours.
+	// usually, this would be noticed in the audit log merge driver, but it's here as double bolt.
+	if err := requireSameInitAnchor(sesamDir, checkoutDir); err != nil {
+		return err
 	}
 
 	theirs, err := repo.Load(checkoutDir, identityPaths, opts)
@@ -423,5 +436,39 @@ func ensureTheirsVerified(ctx context.Context, sesamDir, theirPath string, ident
 		return err
 	}
 
-	return writeJSONFile(filepath.Join(sesamDir, theirsVStatePath), state)
+	return writeJSONFile(filepath.Join(sesamDir, theirsVStatePath(rev)), state)
+}
+
+// requireSameInitAnchor refuses a vault that does not belong to this repository.
+// The anchor is the hash of the init entry, which pins the repo id and the first
+// admin's signing key, so one comparison covers the whole chain below it.
+func requireSameInitAnchor(sesamDir, checkoutDir string) error {
+	ours, err := readInitAnchor(sesamDir)
+	if err != nil {
+		return err
+	}
+
+	theirs, err := readInitAnchor(checkoutDir)
+	if err != nil {
+		return err
+	}
+
+	if ours != theirs {
+		return fmt.Errorf(
+			"the branch being merged in belongs to a different repository (init %s != %s) - refusing to merge it",
+			theirs, ours,
+		)
+	}
+
+	return nil
+}
+
+func readInitAnchor(dir string) (string, error) {
+	//nolint:gosec // dir is ours; the file name is fixed.
+	data, err := os.ReadFile(filepath.Join(dir, core.AuditInitPath()))
+	if err != nil {
+		return "", fmt.Errorf("read init anchor: %w", err)
+	}
+
+	return strings.TrimSpace(string(data)), nil
 }

@@ -39,13 +39,15 @@ stderr 'automatically merging revealed file c'
 # One state file covers all three, and the branch it came from is unpacked
 # beside it rather than checked out over the worktree.
 exec ls .sesam/tmp
-stdout 'theirs-vstate\.json'
+stdout 'theirs-vstate-'
 stdout '^theirs$'
 
 # It really is the incoming branch's state: it knows the secrets, and it is
 # readable as plain json.
-grep '"RevealedPath":"a"' .sesam/tmp/theirs-vstate.json
-grep '"name":"admin"' .sesam/tmp/theirs-vstate.json
+exec sh -c 'cat .sesam/tmp/theirs-vstate-*.json'
+stdout '"RevealedPath":"a"'
+stdout '"name":"admin"'
+
 
 # Finishing the merge still works and leaves a repo that verifies.
 cp $TMPDIR/mine.txt a

@@ -140,7 +140,8 @@ type TheirStateFunc func() (*core.VerifiedState, error)
 func decryptTheirSecret(ids core.Identities, revealedPath, theirPath string, theirState TheirStateFunc) (*bytes.Buffer, string, error) {
 	state, err := theirState()
 	if err != nil {
-		return nil, "", fmt.Errorf("state of the incoming branch: %w", err)
+		// The provider's errors already name the branch and what went wrong.
+		return nil, "", err
 	}
 
 	kr, err := core.KeyringFromState(state)
