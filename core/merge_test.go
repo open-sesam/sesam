@@ -86,11 +86,18 @@ func TestResolveTheirs(t *testing.T) {
 	alice := newTestUser(t, "alice")
 
 	// State helpers: merged/base carry only the fields the resolvers read.
+	// The lookup indexes are derived, so a hand-built state needs them too.
 	userState := func(users ...VerifiedUser) *VerifiedState {
-		return &VerifiedState{Users: users}
+		state := &VerifiedState{Users: users}
+		state.rebuildUserIndex()
+		state.rebuildSecretIndex()
+		return state
 	}
 	secretState := func(secrets ...VerifiedSecret) *VerifiedState {
-		return &VerifiedState{Secrets: secrets}
+		state := &VerifiedState{Secrets: secrets}
+		state.rebuildUserIndex()
+		state.rebuildSecretIndex()
+		return state
 	}
 
 	tests := []struct {
@@ -639,7 +646,12 @@ func TestHasConflictMarkers(t *testing.T) {
 // side revoked since base must not resurrect it (remove wins). A genuinely new
 // key theirs adds is still kept.
 func TestAuditMergeRecipientRemoveWins(t *testing.T) {
-	userState := func(u ...VerifiedUser) *VerifiedState { return &VerifiedState{Users: u} }
+	userState := func(u ...VerifiedUser) *VerifiedState {
+		state := &VerifiedState{Users: u}
+		state.rebuildUserIndex()
+		state.rebuildSecretIndex()
+		return state
+	}
 
 	k1 := newTestUser(t, "k1").Recipient
 	k2 := newTestUser(t, "k2").Recipient
