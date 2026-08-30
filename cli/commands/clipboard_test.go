@@ -2,6 +2,8 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -49,8 +51,7 @@ func TestHashClipboardRoundtrip(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			digest, err := hashClipboard([]byte(tc.hashed))
-			require.NoError(t, err)
+			digest := hashClipboard([]byte(tc.hashed))
 
 			got, err := matchClipboard([]byte(tc.checked), digest)
 			require.NoError(t, err)
@@ -60,10 +61,8 @@ func TestHashClipboardRoundtrip(t *testing.T) {
 }
 
 func TestHashClipboardIsSalted(t *testing.T) {
-	first, err := hashClipboard([]byte("hunter2"))
-	require.NoError(t, err)
-	second, err := hashClipboard([]byte("hunter2"))
-	require.NoError(t, err)
+	first := hashClipboard([]byte("hunter2"))
+	second := hashClipboard([]byte("hunter2"))
 
 	require.NotEqual(t, first, second, "equal secrets must not produce equal digests")
 }
@@ -74,11 +73,8 @@ func TestMatchClipboardMalformedDigest(t *testing.T) {
 		digest string
 	}{
 		{name: "empty", digest: ""},
-		{name: "too few fields", digest: "argon2id$1$65536$4$c2FsdA"},
-		{name: "unknown scheme", digest: "bcrypt$1$65536$4$c2FsdA$a2V5"},
-		{name: "bad time", digest: "argon2id$x$65536$4$c2FsdA$a2V5"},
-		{name: "bad salt", digest: "argon2id$1$65536$4$!!!$a2V5"},
-		{name: "empty key", digest: "argon2id$1$65536$4$c2FsdA$"},
+		{name: "not base64", digest: "!!!not base64!!!"},
+		{name: "too short", digest: "c2FsdA"},
 	}
 
 	for _, tc := range tests {
@@ -123,9 +119,11 @@ func TestClearClipboard(t *testing.T) {
 
 func TestCommandClipboardRoundtrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "clipboard")
+	// No shell any more, so the commands have to do their own file handling:
+	// tee truncates and writes stdin, cat prints it back.
 	cb := commandClipboard{
-		copyCmd:  "cat > " + path,
-		pasteCmd: "cat " + path,
+		copyCmd:  []string{"tee", path},
+		pasteCmd: []string{"cat", path},
 	}
 
 	require.NoError(t, cb.Write(t.Context(), []byte("hunter2")))
@@ -148,16 +146,16 @@ func TestNewClipboardBackend(t *testing.T) {
 		wantKind any
 	}{
 		{name: "both set", copyCmd: "true", pasteCmd: "true", wantKind: commandClipboard{}},
+		{name: "quoted arguments", copyCmd: `xclip -selection "clip board"`, pasteCmd: "true", wantKind: commandClipboard{}},
 		{name: "only copy set", copyCmd: "true", wantErr: true},
 		{name: "only paste set", pasteCmd: "true", wantErr: true},
+		{name: "unbalanced quote", copyCmd: `xclip "unclosed`, pasteCmd: "true", wantErr: true},
+		{name: "blank command", copyCmd: "   ", pasteCmd: "true", wantErr: true},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(envClipboardCopyCmd, tc.copyCmd)
-			t.Setenv(envClipboardPasteCmd, tc.pasteCmd)
-
-			cb, err := newClipboardBackend()
+			cb, err := newClipboardBackend(t.Context(), tc.copyCmd, tc.pasteCmd)
 			if tc.wantErr {
 				require.Error(t, err)
 				require.Nil(t, cb)
@@ -174,19 +172,24 @@ func TestUnclipStatePath(t *testing.T) {
 	runtimeDir := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 
-	path, err := unclipStatePath()
-	require.NoError(t, err)
+	path := unclipStatePath()
 	require.Equal(t, filepath.Join(runtimeDir, "sesam", "unclip.json"), path)
 
 	// Only the copying side may create the directory; the unclip child has
 	// to cope with it being gone.
 	require.NoDirExists(t, filepath.Dir(path))
+
+	// Without a runtime dir it must land in a uid-scoped /tmp subdir, never in
+	// the persistent cache dir - the digest should not outlive the session.
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	fallback := unclipStatePath()
+	require.Equal(t, filepath.Join(os.TempDir(), fmt.Sprintf("sesam-%d", os.Getuid()), "unclip.json"), fallback)
+	require.NotContains(t, fallback, ".cache")
 }
 
 func TestCopyToClipboardRefusesEmpty(t *testing.T) {
-	t.Setenv(envClipboardCopyCmd, "cat >/dev/null")
-	t.Setenv(envClipboardPasteCmd, "true")
+	opts := clipboardOpts{copyCmd: "true", pasteCmd: "true"}
 
-	require.Error(t, copyToClipboard(t.Context(), nil, false, 0))
-	require.Error(t, copyToClipboard(t.Context(), []byte("\n\n"), false, 0))
+	require.Error(t, copyToClipboard(t.Context(), nil, opts))
+	require.Error(t, copyToClipboard(t.Context(), []byte("\n\n"), opts))
 }
