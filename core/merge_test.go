@@ -152,6 +152,15 @@ func TestResolveTheirs(t *testing.T) {
 			wantAction: MergeRewritten,
 		},
 		{
+			// Theirs removing the last group would leave nothing to apply, so ours
+			// is kept rather than emptying the set.
+			name:       "U3 group merge that would empty the set keeps ours",
+			their:      signed("admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{}}),
+			merged:     userState(VerifiedUser{Name: "bob", Groups: []string{"dev"}}),
+			base:       userState(VerifiedUser{Name: "bob", Groups: []string{"dev"}}),
+			wantAction: MergeDropped,
+		},
+		{
 			name:       "U5 rename with occupied target is dropped",
 			their:      signed("admin", &DetailUserRename{OldName: "bob", NewName: "alice"}),
 			merged:     userState(VerifiedUser{Name: "bob"}, VerifiedUser{Name: "alice"}),
@@ -914,4 +923,242 @@ func TestOpTableAdminOnlyMatchesVerify(t *testing.T) {
 	for op, info := range mergeOpTable {
 		require.Equal(t, adminOnly[op], info.adminOnly, "adminOnly mismatch for %s", op)
 	}
+}
+
+// mergeState builds a VerifiedState for the guards below. The lookup indexes are
+// derived, so a hand-built state has to rebuild them or every lookup misses.
+func mergeState(users []VerifiedUser, secrets []VerifiedSecret) *VerifiedState {
+	state := &VerifiedState{Users: users, Secrets: secrets}
+	state.rebuildUserIndex()
+	state.rebuildSecretIndex()
+	return state
+}
+
+// The merging admin has to survive whatever theirs did to them: they are the one
+// re-signing the rebased entries, so a merge that removes or re-keys them mid-way
+// cannot complete.
+func TestIsMergeAdminKill(t *testing.T) {
+	tests := []struct {
+		name  string
+		their *AuditEntrySigned
+		want  string
+	}{
+		{
+			name:  "kill of the merger",
+			their: signed("carol", &DetailUserKill{User: "admin"}),
+			want:  "cannot merge yourself away",
+		},
+		{
+			name:  "re-keying the merger",
+			their: signed("carol", &DetailUserRegenerateSignKey{User: "admin", NewSignPubKey: "k"}),
+			want:  "would re-key the merging admin",
+		},
+		{
+			name:  "renaming the merger",
+			their: signed("carol", &DetailUserRename{OldName: "admin", NewName: "root"}),
+			want:  "would rename the merging admin",
+		},
+		{
+			name:  "stripping admin from the merger",
+			their: signed("carol", &DetailUserChangeGroups{User: "admin", NewGroups: []string{"dev"}}),
+			want:  "would strip admin from the merging user",
+		},
+		{
+			// Editing the merger's other groups is fine as long as admin stays.
+			name:  "group change that keeps admin",
+			their: signed("carol", &DetailUserChangeGroups{User: "admin", NewGroups: []string{"admin", "ops"}}),
+			want:  "",
+		},
+		{
+			name:  "same operation against somebody else",
+			their: signed("carol", &DetailUserKill{User: "bob"}),
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isMergeAdminKill(tt.their, "admin")
+			if tt.want == "" {
+				require.Empty(t, got)
+				return
+			}
+
+			require.Contains(t, got, tt.want)
+		})
+	}
+}
+
+// Verifying theirs proves what its author could do on their own branch. This is
+// the other half: what we have taken away from them since the merge base.
+func TestAuthorRevoked(t *testing.T) {
+	admin := VerifiedUser{Name: "admin", Groups: []string{"admin"}}
+	demoted := VerifiedUser{Name: "bob", Groups: []string{"dev"}}
+	db := VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}
+	locked := VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin"}}
+
+	theirs := mergeState([]VerifiedUser{admin, {Name: "bob", Groups: []string{"admin"}}}, []VerifiedSecret{db})
+
+	tests := []struct {
+		name   string
+		their  *AuditEntrySigned
+		merged *VerifiedState
+		want   string
+	}{
+		{
+			name:   "author gone on our side",
+			their:  signed("bob", &DetailUserTell{User: "dave"}),
+			merged: mergeState([]VerifiedUser{admin}, nil),
+			want:   "was removed on our side",
+		},
+		{
+			name:   "author demoted on our side",
+			their:  signed("bob", &DetailUserTell{User: "dave"}),
+			merged: mergeState([]VerifiedUser{admin, demoted}, nil),
+			want:   "no longer an admin",
+		},
+		{
+			name:   "author still admin",
+			their:  signed("bob", &DetailUserTell{User: "dave"}),
+			merged: mergeState([]VerifiedUser{admin, {Name: "bob", Groups: []string{"admin"}}}, nil),
+			want:   "",
+		},
+		{
+			name:   "secret.add into groups the author cannot reach",
+			their:  signed("bob", &DetailSecretAdd{RevealedPath: "s/new", AccessGroups: []string{"ops"}}),
+			merged: mergeState([]VerifiedUser{admin, demoted}, nil),
+			want:   "has no access to s/new",
+		},
+		{
+			name:   "secret.add the author can reach",
+			their:  signed("bob", &DetailSecretAdd{RevealedPath: "s/new", AccessGroups: []string{"dev"}}),
+			merged: mergeState([]VerifiedUser{admin, demoted}, nil),
+			want:   "",
+		},
+		{
+			name:   "access to the secret withdrawn on our side",
+			their:  signed("bob", &DetailSecretChangeAccess{RevealedPath: "s/db", AccessGroups: []string{"dev"}}),
+			merged: mergeState([]VerifiedUser{admin, demoted}, []VerifiedSecret{locked}),
+			want:   "has no access to s/db",
+		},
+		{
+			name:   "move of a secret the author can no longer reach",
+			their:  signed("bob", &DetailSecretMove{OldRevealedPath: "s/db", NewRevealedPath: "s/api"}),
+			merged: mergeState([]VerifiedUser{admin, demoted}, []VerifiedSecret{locked}),
+			want:   "has no access to s/db",
+		},
+		{
+			name:   "author still has access",
+			their:  signed("bob", &DetailSecretRemove{RevealedPath: "s/db"}),
+			merged: mergeState([]VerifiedUser{admin, demoted}, []VerifiedSecret{db}),
+			want:   "",
+		},
+		{
+			// Gone on our side is the resolvers' business (a double remove dedupes),
+			// not an authority problem.
+			name:   "secret gone on our side is left to the resolver",
+			their:  signed("bob", &DetailSecretRemove{RevealedPath: "s/db"}),
+			merged: mergeState([]VerifiedUser{admin, demoted}, nil),
+			want:   "",
+		},
+		{
+			name:   "entries that are never replayed are not judged here",
+			their:  signed("bob", &DetailSeal{RootHash: "x"}),
+			merged: mergeState([]VerifiedUser{admin}, nil),
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := authorRevoked(tt.their, tt.merged, theirs)
+			if tt.want == "" {
+				require.Empty(t, got)
+				return
+			}
+
+			require.Contains(t, got, tt.want)
+		})
+	}
+}
+
+// A rename on our side changes an author's name but not their signing key, so
+// the name lookup alone would drop their in-flight work.
+func TestAuthorInMerged(t *testing.T) {
+	const key = "7QEgsignkeyofbob00000000000000000000000000000="
+
+	their := signed("bob", &DetailUserTell{User: "dave"})
+	theirs := mergeState([]VerifiedUser{{Name: "bob", Groups: []string{"admin"}, SignPubKey: key}}, nil)
+
+	t.Run("found by name", func(t *testing.T) {
+		merged := mergeState([]VerifiedUser{{Name: "bob", SignPubKey: key}}, nil)
+		u, ok := authorInMerged(their, merged, theirs)
+		require.True(t, ok)
+		require.Equal(t, "bob", u.Name)
+	})
+
+	t.Run("found by sign key after a rename", func(t *testing.T) {
+		merged := mergeState([]VerifiedUser{{Name: "bobby", SignPubKey: key}}, nil)
+		u, ok := authorInMerged(their, merged, theirs)
+		require.True(t, ok, "a renamed author keeps their signing key")
+		require.Equal(t, "bobby", u.Name)
+	})
+
+	t.Run("ambiguous key match fails closed", func(t *testing.T) {
+		merged := mergeState([]VerifiedUser{{Name: "x", SignPubKey: key}, {Name: "y", SignPubKey: key}}, nil)
+		_, ok := authorInMerged(their, merged, theirs)
+		require.False(t, ok, "two users on one key must not resolve to either")
+	})
+
+	t.Run("unknown to theirs", func(t *testing.T) {
+		merged := mergeState([]VerifiedUser{{Name: "bobby", SignPubKey: key}}, nil)
+		_, ok := authorInMerged(their, merged, mergeState(nil, nil))
+		require.False(t, ok)
+	})
+}
+
+// A dropped rename orphans everything that referred to the new name; the same
+// has to hold for a dropped secret move.
+func TestRecordOrphanedRename(t *testing.T) {
+	users := map[string]bool{}
+	secrets := map[string]bool{}
+
+	// Both sides ended up with the move's source and target present, so theirs'
+	// move was dropped and its target is an orphan.
+	merged := mergeState(
+		[]VerifiedUser{{Name: "bob"}, {Name: "bobby"}},
+		[]VerifiedSecret{{RevealedPath: "s/old"}, {RevealedPath: "s/new"}},
+	)
+
+	recordOrphanedRename(signed("admin", &DetailUserRename{OldName: "bob", NewName: "bobby"}), merged, users, secrets)
+	require.True(t, users["bobby"], "the rename target is orphaned")
+
+	recordOrphanedRename(signed("admin", &DetailSecretMove{OldRevealedPath: "s/old", NewRevealedPath: "s/new"}), merged, users, secrets)
+	require.True(t, secrets["s/new"], "the move target is orphaned")
+
+	// And entries acting on those names are then recognised as orphaned.
+	require.Equal(t, "bobby", isOrphaned(signed("admin", &DetailUserKill{User: "bobby"}), users, secrets))
+	require.Equal(t, "s/new", isOrphaned(signed("admin", &DetailSecretRemove{RevealedPath: "s/new"}), users, secrets))
+	require.Empty(t, isOrphaned(signed("admin", &DetailUserKill{User: "bob"}), users, secrets))
+}
+
+// requireSameInit is the first thing a merge does; it has to reject a log that
+// cannot be compared at all as well as one from another repository.
+func TestRequireSameInit(t *testing.T) {
+	base, _, _ := mergeBase(t)
+
+	t.Run("same init passes and seeds the anchor", func(t *testing.T) {
+		other := cloneLog(base)
+		require.NoError(t, requireSameInit(base, other))
+		require.Equal(t, base.Entries[0].Hash(), other.InitHash)
+	})
+
+	t.Run("empty log is rejected", func(t *testing.T) {
+		require.ErrorContains(t, requireSameInit(base, &AuditLog{}), "empty audit log")
+	})
+
+	t.Run("a different repository is rejected", func(t *testing.T) {
+		foreign, _, _ := mergeBase(t)
+		require.ErrorContains(t, requireSameInit(base, foreign), "not the same repository")
+	})
 }
