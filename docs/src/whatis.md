@@ -58,11 +58,6 @@ built another tool](./alternatives.md).
 - Somewhat fast encryption and decryption.¹
 - Almost zero dependencies.
 
-### Planned features
-
-- Support for rotation and swapping of secrets ([Plan](https://github.com/open-sesam/sesam/issues/40))
-- 
-
 <small>
 ¹ <i>somewhat fast</i> is the new <i>🚀 blazingly fast 🚀</i> - benchmarks will follow later.
 </small>
@@ -73,6 +68,12 @@ built another tool](./alternatives.md).
 - Allows viewing local diffs of secrets and the audit log.
 - Hooks keep revealed files in sync on checkout, pull and merge.
 - Merging of secrets is supported.
+
+### Planned features
+
+- Support for rotation and swapping of secrets ([Plan](https://github.com/open-sesam/sesam/issues/40))
+- More tooling so that `sesam` can be well used as password manager.
+- Deeper support for `env` files.
 
 ## Who is it for?
 
