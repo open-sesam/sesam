@@ -128,7 +128,7 @@ roughly the same thing and it makes keeping an overview hard.
 | [**git-age**](https://github.com/prskr/git-age)                      | Go   | 2024  | active         | transparent (clean/smudge)                    | age (X25519)                  |
 | [**Sealed Secrets**](https://github.com/bitnami-labs/sealed-secrets) | Go   | 2017  | active         | commit sealed YAML                            | RSA-OAEP + AES-GCM            |
 | [**cottage**](https://github.com/sayanarijit/cottage)                | Rust | 2026  | new³           | explicit encrypt/decrypt (`ctg`) + env-inject | age (X25519 / ssh)            |
-| **sesam**                                                            | Go   | 2025  | in development | transparent (hooks, diff, merge)              | age / ChaCha20-Poly1305 / ssh |
+| **sesam**                                                            | Go   | 2025  | in development | transparent (hooks, diff, merge)              | age / XChaCha20-Poly1305 / ssh |
 
 ¹ AES-CBC via OpenSSL — considered weaker than GCM/ChaCha20.  
 ² Works alongside git but requires explicit encrypt/decrypt invocation.  
