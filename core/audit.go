@@ -160,6 +160,44 @@ func (aes *AuditEntrySigned) Encrypt(aead cipher.AEAD) ([]byte, error) {
 	return base64Buf, nil
 }
 
+// decryptEntryLine opens one entry line: nonce prefix, ciphertext, seq id as
+// associated data.
+func (al *AuditLog) decryptEntryLine(dst, data []byte, seqID uint64) ([]byte, error) {
+	nonceSize := al.aead.NonceSize()
+	if len(data) > nonceSize {
+		plain, err := al.aead.Open(dst, data[:nonceSize], data[nonceSize:], seqAssociatedData(seqID))
+		if err == nil {
+			return plain, nil
+		}
+	}
+
+	// Older commits still carry logs in the pre-nonce container; see audit_legacy.go.
+	return legacyDecryptEntry(dst, al.key, data, seqID)
+}
+
+// Reading the pre-nonce audit log container.
+//
+// Entries used to be sealed with ChaCha20-Poly1305, the nonce derived from the
+// seq id and no associated data. Two branches appending at the same seq then
+// reused a (key, nonce) pair, so the format moved to XChaCha20-Poly1305 with a
+// stored random nonce.
+func legacyDecryptEntry(dst []byte, key [32]byte, data []byte, seqID uint64) ([]byte, error) {
+	aead, err := chacha20poly1305.New(key[:])
+	if err != nil {
+		return nil, fmt.Errorf("init legacy aead: %w", err)
+	}
+
+	nonce := make([]byte, aead.NonceSize())
+	binary.BigEndian.PutUint64(nonce, seqID)
+
+	plain, err := aead.Open(dst, nonce, data, nil)
+	if err != nil {
+		return nil, fmt.Errorf("not readable as current or legacy format: %w", err)
+	}
+
+	return plain, nil
+}
+
 ///////// DETAILS /////////////
 
 // DetailInit is added on init.
@@ -974,7 +1012,6 @@ func loadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
 	// Lines 2+: encrypted entries, each prefixed with its own nonce.
 	decBuf := make([]byte, 64*1024)   // base64 decode target, grown as needed
 	plainBuf := make([]byte, 16*1024) // AEAD plaintext target, grown by Open
-	nonceSize := al.aead.NonceSize()
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++
@@ -989,16 +1026,7 @@ func loadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
 			return nil, fmt.Errorf("base64 decode line %d: %w", lineNumber, err)
 		}
 
-		if n < nonceSize {
-			return nil, fmt.Errorf("line %d is too short to hold a nonce", lineNumber)
-		}
-
-		jsonData, err := al.aead.Open(
-			plainBuf[:0],
-			decBuf[:nonceSize],
-			decBuf[nonceSize:n],
-			seqAssociatedData(uint64(len(al.Entries)+1)),
-		)
+		jsonData, err := al.decryptEntryLine(plainBuf[:0], decBuf[:n], uint64(len(al.Entries)+1))
 		if err != nil {
 			return nil, fmt.Errorf("decrypt line %d: %w", lineNumber, err)
 		}
