@@ -69,6 +69,7 @@ func auditLogHistory(sesamDir string, repo *git.Repository, ids Identities, from
 		// should take the route the merge driver should have taken as well.
 		hash := *fromCommit
 		var lastBlob plumbing.Hash
+		var sawGap bool
 		for {
 			commit, err := repo.CommitObject(hash)
 			if err != nil {
@@ -86,19 +87,33 @@ func auditLogHistory(sesamDir string, repo *git.Repository, ids Identities, from
 			}
 
 			file, err := tree.File(auditPathRel)
-			if err != nil {
-				// The log exists at the init commit (checked below), so between
-				// init and HEAD it must always be present. A gap here means it was
-				// deleted - tampering - and is a hard error. (renames would surface
-				// here too; see the VerifyHistory caveat.)
-				yield(nil, fmt.Errorf("audit log not found at commit %s: %w", commit.Hash, err))
+			switch {
+			case errors.Is(err, object.ErrFileNotFound):
+				// Below the commit that introduced the vault - the end of this line
+				// of history, not tampering. initCommitRev comes from an all-parents
+				// walk, so when the vault was created on a side branch it sits off
+				// the first-parent chain we follow and we run past it.
+				//
+				// Keep walking rather than stopping: the log reappearing further
+				// back would mean it was deleted in between, which is tampering and
+				// still has to be caught.
+				sawGap = true
+				file = nil
+			case err != nil:
+				yield(nil, fmt.Errorf("read audit log at commit %s: %w", commit.Hash, err))
+				return
+			case sawGap:
+				yield(nil, fmt.Errorf(
+					"audit log was removed from history: present at commit %s but missing in a newer one",
+					commit.Hash,
+				))
 				return
 			}
 
 			// Only load (and decrypt) when the log blob actually changed from the
 			// child we last yielded - unchanged logs are trivially a prefix of each
 			// other. This keeps the walk as cheap as the old path-filtered one.
-			if file.Hash != lastBlob {
+			if file != nil && file.Hash != lastBlob {
 				lastBlob = file.Hash
 
 				rd, err := file.Reader()
