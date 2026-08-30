@@ -30,20 +30,20 @@ type VerifiedSecret struct {
 // - Config was edited by user locally (to add new secrets or users declaratively)
 // - Something was tampered with (e.g. Eve added herself as admin)
 type VerifiedState struct {
-	Users   []VerifiedUser
-	Secrets []VerifiedSecret
+	Users   []VerifiedUser   `json:"users"`
+	Secrets []VerifiedSecret `json:"secrets"`
 
 	// SealRequiredSeqID tells us the entry that required a seal but didn't have one yet.
 	// If a seal was provided, it is set back to 0.
-	SealRequiredSeqID uint64
+	SealRequiredSeqID uint64 `json:"seal_required_seq_id"`
 
 	// VerifiedUntil tells us until which seq_id we verified.
 	// This is useful to update the state which entries that were added later.
-	VerifiedUntil uint64
+	VerifiedUntil uint64 `json:"verified_until"`
 
 	// LastSealRootHash is the RootHash from the most recent seal entry.
 	// Compared against disk after replay to detect file substitution.
-	LastSealRootHash string
+	LastSealRootHash string `json:"last_seal_root_hash"`
 
 	// userIdx / secretIdx map a Name / RevealedPath to its position in Users /
 	// Secrets. They exist as optimization only and are lazily loaded.

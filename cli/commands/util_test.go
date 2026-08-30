@@ -103,6 +103,10 @@ func TestJSONOutputIsSnakeCase(t *testing.T) {
 		{command: "verify --json", typ: reflect.TypeFor[repo.VerifyReport]()},
 		{command: "status --json", typ: reflect.TypeFor[repo.Status]()},
 		{command: "log --json", typ: reflect.TypeFor[core.AuditEntrySigned]()},
+
+		// Not a --json flag, but the same contract: the merge driver parks the
+		// incoming branch's state as json under .sesam/tmp for its sibling runs.
+		{command: "merge theirs-vstate", typ: reflect.TypeFor[core.VerifiedState]()},
 	}
 
 	for _, root := range roots {

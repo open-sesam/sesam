@@ -8,6 +8,8 @@ sesam
 
 ```
 [--askpass]=[value]
+[--clipboard-copy-cmd]=[value]
+[--clipboard-paste-cmd]=[value]
 [--cpuprofile]=[value]
 [--help|-h]
 [--identity|-i]=[value]
@@ -21,6 +23,14 @@ sesam
 [--version]
 ```
 
+# DESCRIPTION
+
+
+See https://opensesam.org for the documentation.
+
+If no sub-command is given, but the first argument is a path,
+we assume 'sesam show path/to/secret' as convenience.
+
 **Usage**:
 
 ```
@@ -30,6 +40,10 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 # GLOBAL OPTIONS
 
 **--askpass**="": Askpass helper for encrypted identities
+
+**--clipboard-copy-cmd**="": Command reading the secret on stdin, instead of the system clipboard
+
+**--clipboard-paste-cmd**="": Command printing the clipboard, instead of the system clipboard
 
 **--cpuprofile**="": Write a CPU profile of this invocation to `FILE` (pprof format)
 

@@ -25,6 +25,18 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 	identityPaths := cmd.StringSlice("identity")
 	object := cmd.StringArg("object")
 
+	// Nothing to show. That is either a bare `sesam`, which the root hands to
+	// show as its default command, or an explicit `sesam show`. The root's own
+	// arguments tell the two apart, so each gets the help it actually asked
+	// for instead of an error.
+	if object == "" {
+		if cmd.Root().Args().Len() == 0 {
+			return cli.ShowRootCommandHelp(cmd.Root())
+		}
+
+		return cli.ShowSubcommandHelp(cmd)
+	}
+
 	ids, err := repo.LoadIdentities(identityPaths, repo.RepoOpts{
 		AskpassProgram:  cmd.String("askpass"),
 		AskpassRequired: askpassRequired(),
@@ -33,17 +45,18 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	clip := cmd.Bool("clip") || cmd.Bool("alsoclip")
-	if !clip && (cmd.IsSet("wait") || cmd.IsSet("ttl")) {
+	clipOpts := clipboardOptsFrom(cmd)
+	clip := clipOpts.clip || clipOpts.alsoClip
+	if !clip && (flagGiven(cmd, "wait") || flagGiven(cmd, "ttl")) {
 		return fmt.Errorf("--wait and --ttl require --clip or --alsoclip")
 	}
 
 	var clipBuf bytes.Buffer
 	var out io.Writer = os.Stdout
 	switch {
-	case cmd.Bool("alsoclip"):
+	case clipOpts.alsoClip:
 		out = io.MultiWriter(os.Stdout, &clipBuf)
-	case cmd.Bool("clip"):
+	case clipOpts.clip:
 		out = &clipBuf
 	}
 
@@ -54,7 +67,7 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 		if !clip {
 			return nil
 		}
-		return copyToClipboard(ctx, clipBuf.Bytes(), cmd.Bool("wait"), cmd.Duration("ttl"))
+		return copyToClipboard(ctx, clipBuf.Bytes(), clipOpts)
 	}
 
 	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))

@@ -13,6 +13,7 @@ require (
 	github.com/gopasspw/clipboard v0.0.5-0.20260524141134-6b387ae5aa1a
 	github.com/hdevalence/ed25519consensus v0.2.0
 	github.com/jedib0t/go-pretty/v6 v6.8.3
+	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 	github.com/mattn/go-colorable v0.1.15
 	github.com/muesli/termenv v0.16.0
 	github.com/multiformats/go-multihash v0.2.3
