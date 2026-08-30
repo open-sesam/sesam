@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -31,6 +33,30 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	clip := cmd.Bool("clip") || cmd.Bool("alsoclip")
+	if !clip && (cmd.IsSet("wait") || cmd.IsSet("ttl")) {
+		return fmt.Errorf("--wait and --ttl require --clip or --alsoclip")
+	}
+
+	var clipBuf bytes.Buffer
+	var out io.Writer = os.Stdout
+	switch {
+	case cmd.Bool("alsoclip"):
+		out = io.MultiWriter(os.Stdout, &clipBuf)
+	case cmd.Bool("clip"):
+		out = &clipBuf
+	}
+
+	// Arms the clipboard once an object was shown successfully. Without a
+	// clip flag this is a no-op: `show` also runs as git's textconv driver,
+	// once per blob, and must not touch the clipboard there.
+	onShown := func() error {
+		if !clip {
+			return nil
+		}
+		return copyToClipboard(ctx, clipBuf.Bytes(), cmd.Bool("wait"), cmd.Duration("ttl"))
+	}
+
 	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
@@ -55,24 +81,33 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 	// Both the audit log and secrets are read through root, so an in-repo
 	// path is sandbox-confined regardless of which branch handles it.
 	if filepath.Base(object) == "log.jsonl" {
-		ok, err := core.ShowAuditLog(root, ids, showPath, os.Stdout)
+		ok, err := core.ShowAuditLog(root, ids, showPath, out)
 		if ok {
-			return err
+			if err != nil {
+				return err
+			}
+			return onShown()
 		}
 		return fmt.Errorf("cannot open audit log: %s", object)
 	}
 
-	ok, showErr := core.ShowSecret(root, ids, showPath, os.Stdout)
+	ok, showErr := core.ShowSecret(root, ids, showPath, out)
 	if ok {
-		return showErr
+		if showErr != nil {
+			return showErr
+		}
+		return onShown()
 	}
 
 	// Last resort: the object might be a user name. This needs the audit
 	// log + managers, so we accept the load cost only on this branch.
 	return WithRepo(func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-		ok, err := r.ShowUser(object, os.Stdout)
+		ok, err := r.ShowUser(object, out)
 		if ok {
-			return err
+			if err != nil {
+				return err
+			}
+			return onShown()
 		}
 
 		return fmt.Errorf("not sure what this is: %s", object)

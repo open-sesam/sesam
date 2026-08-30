@@ -20,8 +20,8 @@ type VerifiedUser struct {
 
 // VerifiedSecret is a secret verified by the audit log.
 type VerifiedSecret struct {
-	RevealedPath string
-	AccessGroups []string
+	RevealedPath string   `json:"revealed_path"`
+	AccessGroups []string `json:"access_groups"`
 }
 
 // VerifiedState is the state of the repo based on the audit log.

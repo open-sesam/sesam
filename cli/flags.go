@@ -281,7 +281,42 @@ var flagsUserRegenerateSignKey = []cli.Flag{
 	userFlag(true, "Regenerate the signing key for a user"),
 }
 
-var flagsShow = []cli.Flag{}
+var flagsShow = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "clip",
+		Aliases: []string{"c"},
+		Usage:   "Copy to clipboard instead of printing to stdout",
+	},
+	&cli.BoolFlag{
+		Name:    "alsoclip",
+		Aliases: []string{"C"},
+		Usage:   "Copy to clipboard and print to stdout",
+	},
+	&cli.BoolFlag{
+		Name:    "wait",
+		Aliases: []string{"w"},
+		Usage:   "Wait for the password to be cleared instead of forking to the background",
+	},
+	&cli.DurationFlag{
+		Name:    "ttl",
+		Aliases: []string{"t"},
+		Usage:   "How long to wait before clearing the clipboard (0 disables)",
+		Value:   45 * time.Second,
+	},
+}
+
+var flagsUnclip = []cli.Flag{
+	&cli.DurationFlag{
+		Name:  "ttl",
+		Usage: "How long to wait before clearing the clipboard",
+		Value: 45 * time.Second,
+	},
+	&cli.StringFlag{
+		Name:     "token",
+		Usage:    "Ownership token of the clipboard copy this should clear",
+		Required: true,
+	},
+}
 
 var flagsLog = []cli.Flag{
 	&cli.BoolFlag{

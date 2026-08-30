@@ -232,7 +232,15 @@ Show overview over repo state (revealed, sealed, unmanaged, ...)
 
 Show objects managed by sesam
 
+**--alsoclip, -C**: Copy to clipboard and print to stdout
+
+**--clip, -c**: Copy to clipboard instead of printing to stdout
+
 **--help, -h**: show help
+
+**--ttl, -t**="": How long to wait before clearing the clipboard (0 disables) (default: 45s)
+
+**--wait, -w**: Wait for the password to be cleared instead of forking to the background
 
 ## ls, list-secrets
 
