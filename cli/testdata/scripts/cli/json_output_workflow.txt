@@ -1,0 +1,48 @@
+# Every `--json` payload is a machine interface, so its keys must be
+# snake_case. Go serializes untagged fields under their Go name, which makes
+# a stray PascalCase key an easy accident - the regex below catches any key
+# (a quoted string followed by a colon) that carries an upper case letter.
+#
+# TestJSONOutputIsSnakeCase in cli/commands guards the same rule at type
+# level; this script checks what the commands actually print.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec sesam add secret.txt --group dev
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+
+exec sesam ls --json
+stdout '"revealed_path"'
+stdout '"access_groups"'
+! stdout '"[A-Za-z_]*[A-Z][A-Za-z_]*":'
+
+exec sesam user list --json
+stdout '"sign_pub_key"'
+! stdout '"[A-Za-z_]*[A-Z][A-Za-z_]*":'
+
+exec sesam id --json
+stdout '"name"'
+! stdout '"[A-Za-z_]*[A-Z][A-Za-z_]*":'
+
+exec sesam status --json
+stdout '"revealed_path"'
+! stdout '"[A-Za-z_]*[A-Z][A-Za-z_]*":'
+
+exec sesam verify --json
+stdout '"success"'
+! stdout '"[A-Za-z_]*[A-Z][A-Za-z_]*":'
+
+exec sesam log --json
+stdout '"changed_by"'
+stdout '"seq_id"'
+stdout '"previous_hash"'
+! stdout '"[A-Za-z_]*[A-Z][A-Za-z_]*":'
+
+-- secret.txt --
+s3cr3t

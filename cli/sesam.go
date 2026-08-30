@@ -274,6 +274,14 @@ func Main(args []string) error {
 				},
 			},
 			{
+				Name:     "unclip",
+				Hidden:   true,
+				Category: catSecrets,
+				Flags:    flagsUnclip,
+				Action:   commands.HandleUnclip,
+				Usage:    "Clear the clipboard (spawned by `sesam show --clip`)",
+			},
+			{
 				Name:     "ls",
 				Category: catSecrets,
 				Aliases:  []string{"list-secrets"},
