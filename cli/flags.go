@@ -225,6 +225,14 @@ var flagsMove = []cli.Flag{
 	},
 }
 
+var flagsEdit = []cli.Flag{
+	&cli.StringFlag{
+		Name:  "editor",
+		Usage: "Editor command to use instead of $EDITOR",
+	},
+	flagSeal,
+}
+
 // flagsTell contains controls for adding or updating users.
 var flagsTell = []cli.Flag{
 	userFlag(false, "User name to add or update"),

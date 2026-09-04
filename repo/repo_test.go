@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-git/go-git/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,6 +60,27 @@ func TestInit_Negative(t *testing.T) {
 			require.Contains(t, err.Error(), tc.wantErr)
 		})
 	}
+}
+
+func TestGuessInitUserNameFromGitConfigFallsBackToGitCLI(t *testing.T) {
+	dir := t.TempDir()
+	gr, err := git.PlainInit(dir, false)
+	require.NoError(t, err)
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".gitconfig"), nil, 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".config", "git"), 0o700))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(home, ".config", "git", "config"),
+		[]byte("[user]\n\temail = config@example.com\n\tname = Config User\n"),
+		0o600,
+	))
+
+	user, err := guessInitUserNameFromGitConfig(gr, dir)
+	require.NoError(t, err)
+	require.Equal(t, "config@example.com", user)
 }
 
 func TestLoad_Negative(t *testing.T) {
