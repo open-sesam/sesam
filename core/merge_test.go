@@ -710,6 +710,29 @@ func TestHasConflictMarkers(t *testing.T) {
 			in:   "",
 			want: false,
 		},
+		{
+			name: "no trailing newline",
+			in:   "<<<<<<< ours\nx\n=======\ny\n>>>>>>> theirs",
+			want: true,
+		},
+		// A secret can be one huge line (minified blob, key without a trailing
+		// newline). Only line prefixes are scanned, so its length is irrelevant
+		// and markers behind it are still found.
+		{
+			name: "markers after a line larger than any buffer",
+			in:   strings.Repeat("A", 20*1024*1024) + "\n<<<<<<< ours\nx\n=======\ny\n>>>>>>> theirs\n",
+			want: true,
+		},
+		{
+			name: "huge single line without markers",
+			in:   strings.Repeat("A", 20*1024*1024),
+			want: false,
+		},
+		{
+			name: "over-long marker run is flagged (fail closed)",
+			in:   strings.Repeat("<", 100*1024) + "\n" + strings.Repeat(">", 100*1024) + "\n",
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {

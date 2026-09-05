@@ -1080,30 +1080,48 @@ const conflictMarkerMin = 7
 // a start line ("<<<<<<< …") and an end line (">>>>>>> …"). Requiring the pair
 // (rather than a lone "=======") keeps false positives off files that
 // legitimately contain separator lines.
+//
+// A marker sits at the start of a line, so only line prefixes are inspected and
+// the rest of an over-long line is skipped. A secret can be one huge line (a
+// minified blob, a key without a trailing newline) and buffering it whole would
+// mean picking a cap - past which a legitimate file could no longer be checked.
 func hasConflictMarkers(r io.Reader) (bool, error) {
 	var sawStart, sawEnd bool
 
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		switch {
-		case isMarkerLine(line, '<'):
-			sawStart = true
-		case isMarkerLine(line, '>'):
-			sawEnd = true
+	br := bufio.NewReader(r)
+	atStart := true
+	for {
+		chunk, isPrefix, err := br.ReadLine()
+		if atStart {
+			switch {
+			case isMarkerLine(chunk, '<'):
+				sawStart = true
+			case isMarkerLine(chunk, '>'):
+				sawEnd = true
+			}
+
+			if sawStart && sawEnd {
+				return true, nil
+			}
 		}
 
-		if sawStart && sawEnd {
-			return true, nil
+		// A continuation of an over-long line cannot start a marker.
+		atStart = !isPrefix
+
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return false, nil
+			}
+
+			return false, err
 		}
 	}
-
-	return false, sc.Err()
 }
 
 // isMarkerLine reports whether line begins with >= conflictMarkerMin copies of c
-// followed by a space or end of line - i.e. "<<<<<<< label" or ">>>>>>>".
+// followed by a space or end of line - i.e. "<<<<<<< label" or ">>>>>>>". `line`
+// may be the head of a longer line; a run filling all of it then counts as a
+// marker, which is the fail-closed direction for a gate that refuses to seal.
 func isMarkerLine(line []byte, c byte) bool {
 	n := 0
 	for n < len(line) && line[n] == c {
