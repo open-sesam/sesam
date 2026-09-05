@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"opensesam.org/sesam/core"
@@ -207,14 +208,21 @@ func changedSecretPaths(sesamDir string, gitArgs ...string) ([]string, error) {
 	}
 
 	objectsDir := filepath.ToSlash(filepath.Join(prefix, core.SesamObjectsDir()))
-	out, err := gitOutput(worktreeRoot, append(gitArgs, "--", objectsDir)...)
+
+	// -z gives raw NUL-separated bytes. Without it git C-quotes any path holding
+	// non-ASCII, a control char, a quote or a backslash ("h\303\251llo") - which
+	// then matches no real path, gets skipped here, and the seal afterwards
+	// writes our stale plaintext back over the incoming object. Setting
+	// core.quotePath=false is not enough: a newline or quote in the name stays
+	// escaped either way.
+	args := slices.Concat(gitArgs, []string{"-z", "--", objectsDir})
+	out, err := gitOutputRaw(worktreeRoot, args...)
 	if err != nil {
 		return nil, fmt.Errorf("git diff for changed objects: %w", err)
 	}
 
 	var paths []string
-	for line := range strings.SplitSeq(out, "\n") {
-		line = strings.TrimSpace(line)
+	for line := range strings.SplitSeq(out, "\x00") {
 		if line == "" {
 			continue
 		}
@@ -257,6 +265,17 @@ func worktreePrefix(sesamDir string) (root, prefix string, err error) {
 
 // gitOutput runs git in dir and returns its trimmed stdout.
 func gitOutput(dir string, args ...string) (string, error) {
+	out, err := gitOutputRaw(dir, args...)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(out), nil
+}
+
+// gitOutputRaw is gitOutput without the trim - for output where whitespace is
+// data, i.e. path lists (a file name may start or end with a space).
+func gitOutputRaw(dir string, args ...string) (string, error) {
 	//nolint:gosec // fixed git subcommands; args are constants from this file.
 	cmd := exec.CommandContext(context.Background(), "git", args...)
 	cmd.Dir = dir
@@ -267,7 +286,7 @@ func gitOutput(dir string, args ...string) (string, error) {
 		return "", err
 	}
 
-	return strings.TrimSpace(buf.String()), nil
+	return buf.String(), nil
 }
 
 // rebasePickedCommit reads the commit a rebase is currently replaying.
@@ -334,7 +353,7 @@ func extractSesamDir(ctx context.Context, sesamDir, rev, destDir string) error {
 // wrong one is safe: its audit log would not vouch for the object either, and
 // the verification refuses.
 func commitContaining(worktreeRoot, file string) string {
-	blob, err := gitOutput(worktreeRoot, "hash-object", file)
+	blob, err := gitOutput(worktreeRoot, "hash-object", "--", file)
 	if err != nil {
 		return ""
 	}
