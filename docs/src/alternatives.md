@@ -144,7 +144,7 @@ roughly the same thing and it makes keeping an overview hard.
 | [git-secret](https://git-secret.io)                              | GPG keyring               | ✗            | ✗                    | ✗                |
 | [keyringer](https://keyringer.pw)                                | GPG keyring               | ✗            | ✗                    | ✗                |
 | [BlackBox](https://github.com/StackExchange/blackbox)            | GPG keyring               | ✗            | ✗                    | ✗                |
-| [gopass](https://www.gopass.pw)                                  | team mounts               | ✗            | ✗                    | ✗                |
+| [gopass](https://www.gopass.pw)                                  | recipients per store      | ✗            | ✓ (per subtree)¹     | ✗                |
 | [sops](https://github.com/getsops/sops)                          | yes                       | ✓            | ✓                    | ✗                |
 | [agebox](https://github.com/slok/agebox)                         | age recipients            | ✗            | ✗                    | ✗                |
 | [git-agecrypt](https://github.com/vlaci/git-agecrypt)            | age recipients            | ✗            | ✓                    | ✗                |
@@ -152,6 +152,10 @@ roughly the same thing and it makes keeping an overview hard.
 | [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) | cluster RBAC              | ✗            | ✗                    | ✓ (cluster RBAC) |
 | [cottage](https://github.com/sayanarijit/cottage)                | age recipients            | ✗            | ✓ (allow/deny globs) | ✗                |
 | sesam                                                            | age recipients            | ✓            | ✓                    | ✓                |
+
+¹ A subdirectory `.gpg-id` overrides the root recipients for that subtree, so access is
+directory-shaped: restricting a single secret means giving it its own directory, and every
+recipient listed there is equal.
 
 
 ### Security
@@ -164,14 +168,20 @@ roughly the same thing and it makes keeping an overview hard.
 | [git-secret](https://git-secret.io)                              | ✗       | ✗              | ✗                                   | manual         | ✗                |
 | [keyringer](https://keyringer.pw)                                | ✗       | ✗              | ✗                                   | manual         | ✗                |
 | [BlackBox](https://github.com/StackExchange/blackbox)            | ✗       | ✗              | ✗                                   | manual         | ✗                |
-| [gopass](https://www.gopass.pw)                                  | partial | ✗              | ✗                                   | manual         | ✗                |
+| [gopass](https://www.gopass.pw)                                  | partial | ✗              | ✗                                   | manual         | ✓ (re-encrypt)²  |
 | [sops](https://github.com/getsops/sops)                          | ✓       | ✗              | ✗                                   | `sops rotate`  | manual           |
 | [agebox](https://github.com/slok/agebox)                         | ✓       | ✗              | ✗                                   | partial        | manual           |
 | [git-agecrypt](https://github.com/vlaci/git-agecrypt)            | ✓       | ✗              | ✗                                   | manual         | ✗                |
 | [git-age](https://github.com/prskr/git-age)                      | ✓       | ✗              | ✗                                   | manual         | ✗                |
 | [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) | ✓       | ✗              | k8s audit                           | key renewal    | ✗                |
 | [cottage](https://github.com/sayanarijit/cottage)                | ✓       | ✗              | ✗ (checksum only)                   | not documented | ✗                |
-| sesam                                                            | ✓       | ✓              | ✓ (encrypted, signed, hash-chained) | manual         | ✓                |
+| sesam                                                            | ✓       | ✓              | ✓ (encrypted, signed, hash-chained) | manual         | ✓ (automatic)    |
+
+² `gopass recipients remove` re-encrypts every secret to the remaining recipients. It is a
+separate step you have to remember; sesam does it as part of `sesam kill` and rotates the
+underlying key while doing so. Neither can help with what the removed person already read,
+or with old revisions still sitting in the git history - gopass says so plainly in its docs,
+and it applies to sesam just the same.
 
 ---
 
