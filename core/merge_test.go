@@ -45,12 +45,76 @@ func mergeBase(t *testing.T) (base *AuditLog, admin, bob *testUser) {
 	return base, admin, bob
 }
 
+// mergeBaseTwoKeys is mergeBase with a second recipient on bob (returned as
+// `spare`), so recipient removals stay above the "one key left" guard.
+func mergeBaseTwoKeys(t *testing.T) (base *AuditLog, admin, bob *testUser, spare UserPubKey) {
+	t.Helper()
+
+	admin = newTestUser(t, "admin")
+	bob = newTestUser(t, "bob")
+	spare = UserPubKey{Key: newTestUser(t, "bob-spare").Recipient.String(), Source: KeySourceManual}
+
+	base = &AuditLog{}
+	initDetail := DetailInit{InitUUID: "merge-test", Admin: admin.DetailUserTell([]string{"admin"})}
+	feed(t, base, admin.Signer, "admin", &initDetail)
+
+	bobTell := bob.DetailUserTell([]string{"dev"})
+	bobTell.PubKeys = append(bobTell.PubKeys, spare)
+	feed(t, base, admin.Signer, "admin", &bobTell)
+	return base, admin, bob, spare
+}
+
+// mergeToState merges and replays the result: the end state a checkout sees.
+func mergeToState(t *testing.T, ours, theirs, base *AuditLog, signer Signer) (*VerifiedState, *ConflictResolution) {
+	t.Helper()
+
+	merged, cr, err := AuditMerge(ours, theirs, base, signer, nil)
+	require.NoError(t, err)
+
+	state, err := VerifyChain(merged, EmptyKeyring(), nil)
+	require.NoError(t, err)
+	return state, cr
+}
+
+// lastRegenKey returns the sign key of the last regenerate entry in the log the
+// state was replayed from.
+func lastRegenKey(t *testing.T, state *VerifiedState) string {
+	t.Helper()
+
+	for i := len(state.auditLog.Entries) - 1; i >= 0; i-- {
+		e := &state.auditLog.Entries[i]
+		if e.Operation != OpUserRegenerateSignKey {
+			continue
+		}
+		d, err := parseDetail[DetailUserRegenerateSignKey](e)
+		require.NoError(t, err)
+		return d.NewSignPubKey
+	}
+
+	t.Fatal("no regenerate_sign_key in merged log")
+	return ""
+}
+
 func cloneLog(base *AuditLog) *AuditLog {
 	return &AuditLog{Entries: append([]AuditEntrySigned(nil), base.Entries...)}
 }
 
 func signed[T AuditDetail](changedBy string, detail *T) *AuditEntrySigned {
 	return &AuditEntrySigned{AuditEntry: *newAuditEntry(changedBy, detail)}
+}
+
+// statesFor builds the resolver's state bundle. theirPrev and ours may be nil:
+// for a theirs of one entry, theirs' pre-entry state IS the base and the merged
+// state IS our side, so those are the honest defaults.
+func statesFor(merged, base, theirPrev, ours *VerifiedState) *mergeStates {
+	if theirPrev == nil {
+		theirPrev = base
+	}
+	if ours == nil {
+		ours = merged
+	}
+
+	return &mergeStates{merged: merged, theirPrev: theirPrev, ours: ours, base: base}
 }
 
 // findResolution returns the first resolution record for an operation.
@@ -105,6 +169,8 @@ func TestResolveTheirs(t *testing.T) {
 		their      *AuditEntrySigned
 		merged     *VerifiedState
 		base       *VerifiedState
+		theirPrev  *VerifiedState // nil => base (a theirs of one entry)
+		ours       *VerifiedState // nil => merged (nothing of ours after it)
 		wantAction MergeAction
 	}{
 		{
@@ -312,7 +378,7 @@ func TestResolveTheirs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := resolveTheirs(tt.their, tt.merged, tt.base)
+			r := resolveTheirs(tt.their, statesFor(tt.merged, tt.base, tt.theirPrev, tt.ours))
 			require.Equal(t, tt.wantAction, r.Action)
 		})
 	}
@@ -321,7 +387,7 @@ func TestResolveTheirs(t *testing.T) {
 	t.Run("U2 dedupes identical tell", func(t *testing.T) {
 		existing := VerifiedUser{Name: alice.Name, SignPubKey: alice.SignPubKey, Recps: Recipients{alice.Recipient}}
 		d := alice.DetailUserTell([]string{"dev"})
-		r := resolveTheirs(signed("admin", &d), userState(existing), userState())
+		r := resolveTheirs(signed("admin", &d), statesFor(userState(existing), userState(), nil, nil))
 		require.Equal(t, MergeDropped, r.Action)
 		require.False(t, r.conflict, "identical re-tell is not a conflict")
 	})
@@ -329,7 +395,7 @@ func TestResolveTheirs(t *testing.T) {
 	t.Run("U2 keeps ours on identity clash", func(t *testing.T) {
 		existing := VerifiedUser{Name: alice.Name, SignPubKey: "different-key", Recps: Recipients{alice.Recipient}}
 		d := alice.DetailUserTell([]string{"dev"})
-		r := resolveTheirs(signed("admin", &d), userState(existing), userState())
+		r := resolveTheirs(signed("admin", &d), statesFor(userState(existing), userState(), nil, nil))
 		require.Equal(t, MergeDropped, r.Action)
 		require.True(t, r.conflict, "diverging identity needs review")
 	})
@@ -345,6 +411,10 @@ func TestThreeWaySet(t *testing.T) {
 		{"ours add preserved", []string{"dev"}, []string{"dev", "sec"}, []string{"dev", "ops"}, []string{"dev", "ops", "sec"}},
 		{"remove wins over keep", []string{"dev", "ops"}, []string{"dev", "ops", "sec"}, []string{"ops"}, []string{"ops", "sec"}},
 		{"both remove same", []string{"dev", "ops"}, []string{"ops"}, []string{"ops"}, []string{"ops"}},
+		// `base` is theirs' pre-entry state, so a revert of their own add reads
+		// as a removal and wins; elements theirs never saw stay untouched.
+		{"theirs reverts own add", []string{"dev", "ops"}, []string{"dev", "ops"}, []string{"dev"}, []string{"dev"}},
+		{"outside theirs' view is kept", []string{"dev"}, []string{"dev", "sec"}, []string{"dev"}, []string{"dev", "sec"}},
 	}
 
 	for _, tt := range tests {
@@ -671,19 +741,39 @@ func TestAuditMergeRecipientRemoveWins(t *testing.T) {
 
 	t.Run("revoked key alone is dropped", func(t *testing.T) {
 		their := signed("admin", &DetailUserAddRecipients{User: "bob", PubKeys: []UserPubKey{{Key: k2.String()}}})
-		r := resolveTheirs(their, ours, base)
+		r := resolveTheirs(their, statesFor(ours, base, nil, nil))
 		require.Equal(t, MergeDropped, r.Action)
 		require.True(t, r.conflict)
 	})
 
 	t.Run("new key survives, revoked one dropped", func(t *testing.T) {
 		their := signed("admin", &DetailUserAddRecipients{User: "bob", PubKeys: []UserPubKey{{Key: k2.String()}, {Key: k3.String()}}})
-		r := resolveTheirs(their, ours, base)
+		r := resolveTheirs(their, statesFor(ours, base, nil, nil))
 		require.Equal(t, MergeRewritten, r.Action)
 		d, err := parseDetail[DetailUserAddRecipients](&AuditEntrySigned{AuditEntry: *r.entry})
 		require.NoError(t, err)
 		require.Len(t, d.PubKeys, 1)
 		require.Equal(t, k3.String(), d.PubKeys[0].Key)
+	})
+
+	// Theirs churning the key on its own branch (remove, then add back) must not
+	// launder it past our revocation: what counts is base vs ours, and theirs'
+	// own removal has already moved both theirPrev and the running state.
+	t.Run("their churn does not undo our revocation", func(t *testing.T) {
+		churned := userState(VerifiedUser{Name: "bob", Recps: Recipients{k1}}) // theirs removed k2 too
+		their := signed("admin", &DetailUserAddRecipients{User: "bob", PubKeys: []UserPubKey{{Key: k2.String()}}})
+		r := resolveTheirs(their, statesFor(churned, base, churned, ours))
+		require.Equal(t, MergeDropped, r.Action)
+		require.True(t, r.conflict)
+	})
+
+	// Same churn, but we never revoked anything: theirs' re-add is their own
+	// decision and must land.
+	t.Run("their churn without our revocation applies", func(t *testing.T) {
+		churned := userState(VerifiedUser{Name: "bob", Recps: Recipients{k1}})
+		their := signed("admin", &DetailUserAddRecipients{User: "bob", PubKeys: []UserPubKey{{Key: k2.String()}}})
+		r := resolveTheirs(their, statesFor(churned, base, churned, base))
+		require.Equal(t, MergeApplied, r.Action)
 	})
 }
 
@@ -1161,4 +1251,185 @@ func TestRequireSameInit(t *testing.T) {
 		foreign, _, _ := mergeBase(t)
 		require.ErrorContains(t, requireSameInit(base, foreign), "not the same repository")
 	})
+}
+
+// TestAuditMergeTheirsMultiEntry pins the rebase base: every entry of theirs is
+// resolved against theirs' own previous state, not against the frozen merge
+// base. Otherwise theirs' earlier entries read as changes of ours and the union
+// rule resurrects what theirs itself undid.
+func TestAuditMergeTheirsMultiEntry(t *testing.T) {
+	tests := []struct {
+		name   string
+		setup  func(t *testing.T, base, ours, theirs *AuditLog, admin, bob *testUser, spare UserPubKey)
+		verify func(t *testing.T, state *VerifiedState, cr *ConflictResolution)
+	}{
+		{
+			name: "theirs reverts its own group add",
+			setup: func(t *testing.T, _, _, theirs *AuditLog, admin, _ *testUser, _ UserPubKey) {
+				feed(t, theirs, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+				feed(t, theirs, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev"}})
+			},
+			verify: func(t *testing.T, state *VerifiedState, cr *ConflictResolution) {
+				u, ok := state.UserExists("bob")
+				require.True(t, ok)
+				require.ElementsMatch(t, []string{"dev"}, u.Groups)
+				require.Zero(t, cr.Conflicts, "a branch reverting itself is no conflict")
+			},
+		},
+		{
+			name: "theirs reverts its own add, our add survives",
+			setup: func(t *testing.T, _, ours, theirs *AuditLog, admin, _ *testUser, _ UserPubKey) {
+				feed(t, ours, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "sec"}})
+				feed(t, theirs, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+				feed(t, theirs, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev"}})
+			},
+			verify: func(t *testing.T, state *VerifiedState, _ *ConflictResolution) {
+				u, ok := state.UserExists("bob")
+				require.True(t, ok)
+				require.ElementsMatch(t, []string{"dev", "sec"}, u.Groups)
+			},
+		},
+		{
+			name: "theirs swaps a group over two entries",
+			setup: func(t *testing.T, _, _, theirs *AuditLog, admin, _ *testUser, _ UserPubKey) {
+				feed(t, theirs, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+				feed(t, theirs, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"ops"}})
+			},
+			verify: func(t *testing.T, state *VerifiedState, _ *ConflictResolution) {
+				u, ok := state.UserExists("bob")
+				require.True(t, ok)
+				require.ElementsMatch(t, []string{"ops"}, u.Groups)
+			},
+		},
+		{
+			name: "theirs rotates the same sign key twice",
+			setup: func(t *testing.T, _, _, theirs *AuditLog, admin, _ *testUser, _ UserPubKey) {
+				k1 := newTestUser(t, "rot1").SignPubKey
+				k2 := newTestUser(t, "rot2").SignPubKey
+				feed(t, theirs, admin.Signer, "admin", &DetailUserRegenerateSignKey{User: "bob", NewSignPubKey: k1})
+				feed(t, theirs, admin.Signer, "admin", &DetailUserRegenerateSignKey{User: "bob", NewSignPubKey: k2})
+			},
+			verify: func(t *testing.T, state *VerifiedState, cr *ConflictResolution) {
+				u, ok := state.UserExists("bob")
+				require.True(t, ok)
+				// The last rotation must land, else their key holder is stranded.
+				require.Equal(t, lastRegenKey(t, state), u.SignPubKey)
+				require.Zero(t, cr.Conflicts, "one branch rotating twice is not a both-sides rotation")
+			},
+		},
+		{
+			name: "theirs modifies then kills the same user",
+			setup: func(t *testing.T, _, _, theirs *AuditLog, admin, _ *testUser, _ UserPubKey) {
+				feed(t, theirs, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+				feed(t, theirs, admin.Signer, "admin", &DetailUserKill{User: "bob"})
+			},
+			verify: func(t *testing.T, state *VerifiedState, cr *ConflictResolution) {
+				_, ok := state.UserExists("bob")
+				require.False(t, ok, "the kill must land")
+				for _, r := range cr.Resolutions {
+					require.NotContains(t, r.Reason, "modified on our side",
+						"theirs modified bob, not us")
+				}
+			},
+		},
+		{
+			name: "our group removal survives their churn",
+			setup: func(t *testing.T, base, ours, theirs *AuditLog, admin, _ *testUser, _ UserPubKey) {
+				feed(t, base, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+				*ours, *theirs = *cloneLog(base), *cloneLog(base)
+
+				feed(t, ours, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev"}})
+				feed(t, theirs, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev"}})
+				feed(t, theirs, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "ops"}})
+			},
+			verify: func(t *testing.T, state *VerifiedState, cr *ConflictResolution) {
+				u, ok := state.UserExists("bob")
+				require.True(t, ok)
+				require.ElementsMatch(t, []string{"dev"}, u.Groups, "we revoked ops; their churn must not restore it")
+				rec, ok := findResolution(cr, OpUserChangeGroups)
+				require.True(t, ok, "overriding their re-grant is a judgement call")
+				require.Equal(t, MergeRewritten, rec.Action)
+			},
+		},
+		{
+			name: "theirs re-adds a recipient it removed itself",
+			setup: func(t *testing.T, _, _, theirs *AuditLog, admin, _ *testUser, spare UserPubKey) {
+				feed(t, theirs, admin.Signer, "admin", &DetailUserRmRecipients{User: "bob", PubKeys: []UserPubKey{spare}})
+				feed(t, theirs, admin.Signer, "admin", &DetailUserAddRecipients{User: "bob", PubKeys: []UserPubKey{spare}})
+			},
+			verify: func(t *testing.T, state *VerifiedState, cr *ConflictResolution) {
+				u, ok := state.UserExists("bob")
+				require.True(t, ok)
+				require.Len(t, u.Recps, 2, "theirs undid its own revocation; nothing of ours says otherwise")
+				require.Zero(t, cr.Conflicts)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base, admin, bob, spare := mergeBaseTwoKeys(t)
+			ours, theirs := cloneLog(base), cloneLog(base)
+			tt.setup(t, base, ours, theirs, admin, bob, spare)
+
+			state, cr := mergeToState(t, ours, theirs, base, admin.Signer)
+			tt.verify(t, state, cr)
+		})
+	}
+}
+
+// TestAuditMergeRewriteConflictFlag separates the two delta-merge rewrites: a
+// union of things theirs never saw is routine, dropping something theirs asked
+// to keep is a decision and must be surfaced.
+func TestAuditMergeRewriteConflictFlag(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseGroups   []string
+		ourGroups    []string
+		theirGroups  []string
+		wantGroups   []string
+		wantConflict bool
+	}{
+		{
+			name:        "union of our unrelated add is routine",
+			baseGroups:  []string{"dev"},
+			ourGroups:   []string{"dev", "sec"},
+			theirGroups: []string{"dev", "ops"},
+			wantGroups:  []string{"dev", "ops", "sec"},
+		},
+		{
+			name:         "our removal beating their keep is flagged",
+			baseGroups:   []string{"dev", "ops"},
+			ourGroups:    []string{"dev"},
+			theirGroups:  []string{"dev", "ops", "sec"},
+			wantGroups:   []string{"dev", "sec"},
+			wantConflict: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base, admin, _ := mergeBase(t)
+			feed(t, base, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: tt.baseGroups})
+
+			ours := cloneLog(base)
+			feed(t, ours, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: tt.ourGroups})
+
+			theirs := cloneLog(base)
+			feed(t, theirs, admin.Signer, "admin", &DetailUserChangeGroups{User: "bob", NewGroups: tt.theirGroups})
+
+			state, cr := mergeToState(t, ours, theirs, base, admin.Signer)
+
+			u, ok := state.UserExists("bob")
+			require.True(t, ok)
+			require.ElementsMatch(t, tt.wantGroups, u.Groups)
+
+			rec, ok := findResolution(cr, OpUserChangeGroups)
+			require.Equal(t, tt.wantConflict, ok, "conflict record presence")
+			if tt.wantConflict {
+				require.Equal(t, MergeRewritten, rec.Action)
+				require.Contains(t, rec.Reason, "ops", "name what we removed")
+			}
+		})
+	}
 }

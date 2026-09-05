@@ -850,15 +850,34 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) er
 // and is consulted at seal-time if the plugin asks for user interaction. Pass
 // nil to default to a non-interactive UI (plugins will refuse to prompt).
 func VerifyChain(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, error) {
+	return VerifyChainUntil(log, kr, pluginUI, replayToEnd)
+}
+
+// VerifyChainUntil is VerifyChain, stopping after seq id `upTo`. Pass 0 to get
+// a state that has verified nothing yet and walk it forward with
+// [VerifiedState.AdvanceTo].
+func VerifyChainUntil(log *AuditLog, kr Keyring, pluginUI *PluginUI, upTo uint64) (*VerifiedState, error) {
 	state := VerifiedState{
 		auditLog: log,
 		keyring:  kr,
 		pluginUI: pluginUI,
 	}
-	if err := verify(&state); err != nil {
+	if err := verifyUntil(&state, upTo); err != nil {
 		return nil, err
 	}
 	return &state, nil
+}
+
+// AdvanceTo verifies the entries between where the state stands and seq id
+// `seqID`, leaving the state as of that entry. It only moves forward: a seq id
+// already reached is a no-op (a projection cannot be rewound). Several states
+// may walk the same log this way, since replay only reads it.
+func (s *VerifiedState) AdvanceTo(seqID uint64) error {
+	if s.VerifiedUntil >= seqID {
+		return nil
+	}
+
+	return verifyUntil(s, seqID)
 }
 
 // Verify is like VerifyChain but additionally checks the trust-anchor file
@@ -983,23 +1002,37 @@ func entrySigCheck(entry *AuditEntrySigned, kr Keyring) SigCheck {
 	}
 }
 
+// replayToEnd asks for an unbounded replay (up to the last entry in the log).
+const replayToEnd = ^uint64(0)
+
+// errReplayBound stops the log iteration at the requested bound. It is not a
+// failure, so the replayed state is still committed.
+var errReplayBound = errors.New("replay bound reached")
+
 // verify checks the audit-log chain. It first tries the batched signature path
 // (one ed25519 batch over all entries) and falls back to serial per-entry
 // verification only to name the failing entry when the batch is rejected.
 func verify(state *VerifiedState) error {
-	if err := replay(state, true); err == nil || !errors.Is(err, errBatchSignatureRejected) {
+	return verifyUntil(state, replayToEnd)
+}
+
+// verifyUntil is verify, stopping after seq id `upTo`. Entries the state has
+// already verified are skipped, so walking a log in steps costs the same as
+// verifying it once.
+func verifyUntil(state *VerifiedState, upTo uint64) error {
+	if err := replay(state, true, upTo); err == nil || !errors.Is(err, errBatchSignatureRejected) {
 		return err
 	}
 
 	// The batch rejected the log; re-run serially to name the offending entry.
-	return replay(state, false)
+	return replay(state, false, upTo)
 }
 
 // replay verifies the audit-log chain. When batched is true, per-entry
 // signatures are collected and checked in a single batch after the replay (fast
 // path). When false, each signature is verified inline so the failing entry can
 // be named (serial path and batch fallback).
-func replay(state *VerifiedState, batched bool) error {
+func replay(state *VerifiedState, batched bool, upTo uint64) error {
 	log := state.auditLog
 	kr := state.keyring
 
@@ -1021,6 +1054,10 @@ func replay(state *VerifiedState, batched bool) error {
 		if entry.SeqID <= newState.VerifiedUntil {
 			previousEntry = entry
 			return nil
+		}
+
+		if entry.SeqID > upTo {
+			return errReplayBound
 		}
 
 		// first do the logical checks & then the signature check.
@@ -1111,7 +1148,7 @@ func replay(state *VerifiedState, batched bool) error {
 		newState.VerifiedUntil = entry.SeqID
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errReplayBound) {
 		// Roll the keyring back to its pre-replay contents (in place, so the
 		// repo's and managers' pointers stay valid). newState is simply
 		// discarded, leaving the caller's state untouched.

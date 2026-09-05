@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strings"
 )
 
 // Audit-log merge: design notes.
@@ -23,7 +24,8 @@ import (
 // Guiding decisions:
 //   - Revocation wins: a kill/remove beats a concurrent modify (least privilege).
 //   - Set-valued fields (groups, recipients, access lists) three-way delta-merge
-//     against the base; on an add-vs-remove clash of the same element, remove wins.
+//     against theirs' pre-entry state; on an add-vs-remove clash of the same
+//     element, remove wins.
 //   - Single-valued fields (rename/move target, sign key) prefer ours + warn:
 //     there is no union to form.
 //   - delete-vs-modify: the delete wins + warn (the modification is discarded).
@@ -62,6 +64,33 @@ type ConflictResolution struct {
 	Conflicts   int
 }
 
+// mergeStates are the four states a resolver needs to place one of theirs'
+// entries. They answer different questions:
+//
+//   - merged: the running result (ours plus theirs' entries applied so far).
+//   - theirPrev: theirs just before this entry, so its delta can be read off.
+//   - ours: our side at the point we diverged, frozen. `merged` drifts from it
+//     as theirs' entries land, so only `ours` still says what WE decided.
+//   - base: what both sides started from. Together with `ours` it identifies
+//     what our side revoked, which theirs must not resurrect.
+type mergeStates struct {
+	merged    *VerifiedState
+	theirPrev *VerifiedState
+	ours      *VerifiedState
+	base      *VerifiedState
+}
+
+// oursRemovedGroups returns the groups our side dropped from `user` since the
+// base - the ones a re-grant from theirs must not bring back (least privilege).
+func (s *mergeStates) oursRemovedGroups(user string) []string {
+	return stringSetMinus(userGroups(s.base, user), userGroups(s.ours, user))
+}
+
+// oursRemovedAccess is oursRemovedGroups for a secret's access list.
+func (s *mergeStates) oursRemovedAccess(path string) []string {
+	return stringSetMinus(secretAccess(s.base, path), secretAccess(s.ours, path))
+}
+
 // resolution is resolveTheirs' decision for one incoming entry. The embedded
 // ConflictResolutionEntry carries the user-facing fields (Action, Reason, ...);
 // `entry` is what to apply (nil => drop) and `conflict` marks a judgement call
@@ -77,8 +106,15 @@ func applyAs(their *AuditEntrySigned) resolution {
 	return resolution{ConflictResolutionEntry: ConflictResolutionEntry{Action: MergeApplied}, entry: &e}
 }
 
-func rewriteAs(e *AuditEntry, reason string) resolution {
-	return resolution{ConflictResolutionEntry: ConflictResolutionEntry{Action: MergeRewritten, Reason: reason}, entry: e}
+// rewriteAs applies a modified version of theirs' entry. `conflict` marks the
+// rewrite as a judgement call: set it when the rewrite contradicts what theirs
+// asked for, not when it merely unions in something theirs never mentioned.
+func rewriteAs(e *AuditEntry, reason string, conflict bool) resolution {
+	return resolution{
+		ConflictResolutionEntry: ConflictResolutionEntry{Action: MergeRewritten, Reason: reason},
+		entry:                   e,
+		conflict:                conflict,
+	}
 }
 
 func dropWith(reason string, conflict bool) resolution {
@@ -125,7 +161,7 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		return nil, nil, err
 	}
 
-	originState, err := VerifyChain(origin, EmptyKeyring(), pluginUI)
+	baseState, err := VerifyChain(origin, EmptyKeyring(), pluginUI)
 	if err != nil {
 		return nil, nil, fmt.Errorf("verify origin: %w", err)
 	}
@@ -142,14 +178,13 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		originCounts[entryContentKey(&origin.Entries[i].AuditEntry)]++
 	}
 
-	var theirsNew []AuditEntrySigned
+	absorbed := make([]bool, len(theirs.Entries))
 	for i := range theirs.Entries {
 		key := entryContentKey(&theirs.Entries[i].AuditEntry)
 		if originCounts[key] > 0 {
 			originCounts[key]-- // absorbed by the base
-			continue
+			absorbed[i] = true
 		}
-		theirsNew = append(theirsNew, theirs.Entries[i])
 	}
 
 	merged := &AuditLog{
@@ -173,6 +208,25 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		return nil, nil, fmt.Errorf("merging user %q is not an admin; abort and ask an admin to merge", merger)
 	}
 
+	// theirPrev walks theirs' own log, stopping one entry short of the entry
+	// being resolved, so a resolver sees the delta that entry actually made. The
+	// base state cannot serve here: it never advances, so anything theirs changed
+	// in an earlier entry would read as a change of ours and get union-protected
+	// - their own later revert would then be undone.
+	theirPrev, err := VerifyChainUntil(theirs, EmptyKeyring(), pluginUI, 0)
+	if err != nil {
+		return nil, nil, fmt.Errorf("init theirs replay: %w", err)
+	}
+
+	// mergedState is mutated as theirs' entries land, so freeze a copy of our
+	// side now: it is the only witness left of what WE decided since the base.
+	states := &mergeStates{
+		merged:    mergedState,
+		theirPrev: theirPrev,
+		ours:      mergedState.Clone(merged, EmptyKeyring()),
+		base:      baseState,
+	}
+
 	cr := &ConflictResolution{}
 	var resolutions []ConflictResolutionEntry // conflict decisions, persisted in the merge entry
 	var applied, dropped int
@@ -180,8 +234,18 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 	orphanedUsers := map[string]bool{}
 	orphanedSecrets := map[string]bool{}
 
-	for i := range theirsNew {
-		their := &theirsNew[i]
+	for i := range theirs.Entries {
+		their := &theirs.Entries[i]
+		if absorbed[i] {
+			continue // already in the base, nothing to resolve
+		}
+
+		// theirs verified as a whole above, so a failure here is a bug in the
+		// merge rather than a conflict.
+		if err := theirPrev.AdvanceTo(their.SeqID - 1); err != nil {
+			return nil, nil, fmt.Errorf("replay theirs up to seq_id %d: %w", their.SeqID-1, err)
+		}
+
 		orphanName := isOrphaned(their, orphanedUsers, orphanedSecrets)
 
 		var r resolution
@@ -198,7 +262,7 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 			r = dropWith(revoked, true)
 			r.Target = their.ChangedBy
 		default:
-			r = resolveTheirs(their, mergedState, originState)
+			r = resolveTheirs(their, states)
 		}
 
 		if r.entry != nil {
@@ -452,7 +516,7 @@ type opInfo struct {
 	secretTarget func(*AuditEntrySigned) string
 
 	// resolve decides how the entry integrates on top of the merged state.
-	resolve func(their *AuditEntrySigned, merged, base *VerifiedState) resolution
+	resolve func(their *AuditEntrySigned, s *mergeStates) resolution
 }
 
 func detailField[T AuditDetail](pick func(*T) string) func(*AuditEntrySigned) string {
@@ -542,22 +606,22 @@ var mergeOpTable = map[Operation]opInfo{
 	},
 }
 
-func alwaysDrop(reason string, conflict bool) func(*AuditEntrySigned, *VerifiedState, *VerifiedState) resolution {
-	return func(*AuditEntrySigned, *VerifiedState, *VerifiedState) resolution {
+func alwaysDrop(reason string, conflict bool) func(*AuditEntrySigned, *mergeStates) resolution {
+	return func(*AuditEntrySigned, *mergeStates) resolution {
 		return dropWith(reason, conflict)
 	}
 }
 
 // resolveTheirs decides how one of theirs' new entries integrates on top of the
-// merged state built so far. base is the merge-base state, needed for the
-// three-way set deltas. It only reads state; applying is the caller's job.
-func resolveTheirs(their *AuditEntrySigned, merged, base *VerifiedState) resolution {
+// merged state built so far. See [mergeStates] for what each view is good for.
+// It only reads state; applying is the caller's job.
+func resolveTheirs(their *AuditEntrySigned, s *mergeStates) resolution {
 	op, ok := mergeOpTable[their.Operation]
 	if !ok {
 		return dropWith(fmt.Sprintf("unknown operation %q", their.Operation), true)
 	}
 
-	return op.resolve(their, merged, base)
+	return op.resolve(their, s)
 }
 
 // entryUserTarget returns the existing user a modifying op acts on ("" otherwise).
@@ -580,20 +644,20 @@ func entrySecretTarget(their *AuditEntrySigned) string {
 
 // resolveUserTell dedupes an identical re-tell of the same name; a same-name tell
 // with a different identity keeps ours and warns (two identities cannot be fused).
-func resolveUserTell(their *AuditEntrySigned, merged, _ *VerifiedState) (r resolution) {
+func resolveUserTell(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	d, err := parseDetail[DetailUserTell](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
 	}
 	defer func() { r.Target = d.User }()
 
-	existing, ok := merged.UserExists(d.User)
+	existing, ok := s.merged.UserExists(d.User)
 	if !ok {
 		// added and we don't have it.
 		return applyAs(their)
 	}
 
-	if sameUserIdentity(existing, d, merged.pluginUI) {
+	if sameUserIdentity(existing, d, s.merged.pluginUI) {
 		return dropWith("duplicate tell for "+d.User, false)
 	}
 
@@ -601,21 +665,22 @@ func resolveUserTell(their *AuditEntrySigned, merged, _ *VerifiedState) (r resol
 }
 
 // resolveUserKill: a kill wins over a concurrent modify. Killing an already-absent
-// user is a no-op dedupe; if our side modified the victim since base, the kill
-// still wins but is flagged (the modification is discarded).
-func resolveUserKill(their *AuditEntrySigned, merged, base *VerifiedState) (r resolution) {
+// user is a no-op dedupe; if our side modified the victim since the base, the
+// kill still wins but is flagged (the modification is discarded).
+func resolveUserKill(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	d, err := parseDetail[DetailUserKill](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
 	}
 	defer func() { r.Target = d.User }()
 
-	cur, ok := merged.UserExists(d.User)
-	if !ok {
+	if _, ok := s.merged.UserExists(d.User); !ok {
 		return dropWith("user "+d.User+" already removed", false)
 	}
 
-	if b, ok := base.UserExists(d.User); ok && userModified(b, cur) {
+	b, inBase := s.base.UserExists(d.User)
+	o, inOurs := s.ours.UserExists(d.User)
+	if inBase && inOurs && userModified(b, o) {
 		r = applyAs(their)
 		r.Reason = "user " + d.User + " was modified on our side but killed on theirs; kill wins"
 		r.conflict = true
@@ -627,39 +692,41 @@ func resolveUserKill(their *AuditEntrySigned, merged, base *VerifiedState) (r re
 
 // resolveUserRename prefers ours: drop on a vanished source or an occupied target
 // (a single-valued field has no union).
-func resolveUserRename(their *AuditEntrySigned, merged, _ *VerifiedState) (r resolution) {
+func resolveUserRename(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	d, err := parseDetail[DetailUserRename](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
 	}
 	defer func() { r.Target = d.OldName + " -> " + d.NewName }()
 
-	if _, ok := merged.UserExists(d.OldName); !ok {
+	if _, ok := s.merged.UserExists(d.OldName); !ok {
 		return dropWith("rename source "+d.OldName+" gone on our side; dropped", true)
 	}
 
-	if _, ok := merged.UserExists(d.NewName); ok {
+	if _, ok := s.merged.UserExists(d.NewName); ok {
 		return dropWith("rename target "+d.NewName+" already exists; kept ours", true)
 	}
 
 	return applyAs(their)
 }
 
-// resolveUserRegenKey prefers ours if we already rotated the user's sign key since
-// base (their private-key holder would be stranded until re-rotated).
-func resolveUserRegenKey(their *AuditEntrySigned, merged, base *VerifiedState) (r resolution) {
+// resolveUserRegenKey prefers ours if our side rotated the user's sign key since
+// the base (their private-key holder would be stranded until re-rotated). Theirs
+// rotating twice on its own branch is not a clash - only ours diverging is.
+func resolveUserRegenKey(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	d, err := parseDetail[DetailUserRegenerateSignKey](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
 	}
 	defer func() { r.Target = d.User }()
 
-	cur, ok := merged.UserExists(d.User)
-	if !ok {
+	if _, ok := s.merged.UserExists(d.User); !ok {
 		return dropWith("user "+d.User+" gone; dropped sign-key rotation", true)
 	}
 
-	if b, ok := base.UserExists(d.User); ok && cur.SignPubKey != b.SignPubKey {
+	b, inBase := s.base.UserExists(d.User)
+	o, inOurs := s.ours.UserExists(d.User)
+	if inBase && inOurs && o.SignPubKey != b.SignPubKey {
 		return dropWith("sign key of "+d.User+" rotated on both sides; kept ours (their key holder is stranded)", true)
 	}
 
@@ -668,24 +735,22 @@ func resolveUserRegenKey(their *AuditEntrySigned, merged, base *VerifiedState) (
 
 // resolveUserChangeGroups three-way delta-merges the group set; remove wins on a
 // clash.
-func resolveUserChangeGroups(their *AuditEntrySigned, merged, base *VerifiedState) (r resolution) {
+func resolveUserChangeGroups(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	d, err := parseDetail[DetailUserChangeGroups](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
 	}
 	defer func() { r.Target = d.User }()
 
-	cur, ok := merged.UserExists(d.User)
+	cur, ok := s.merged.UserExists(d.User)
 	if !ok {
 		return dropWith("user "+d.User+" gone (killed); dropped group change", true)
 	}
 
-	var baseGroups []string
-	if b, ok := base.UserExists(d.User); ok {
-		baseGroups = b.Groups
-	}
-
-	mergedGroups := threeWaySet(baseGroups, cur.Groups, d.NewGroups)
+	// theirPrev makes the delta theirs' own; oursRemovedGroups then re-applies our
+	// revocations, which the delta cannot see (theirs may never have seen them).
+	mergedGroups := threeWaySet(userGroups(s.theirPrev, d.User), cur.Groups, d.NewGroups)
+	mergedGroups = stringSetMinus(mergedGroups, s.oursRemovedGroups(d.User))
 	if len(mergedGroups) == 0 {
 		return dropWith("group merge for "+d.User+" would empty the set; kept ours", true)
 	}
@@ -694,37 +759,47 @@ func resolveUserChangeGroups(their *AuditEntrySigned, merged, base *VerifiedStat
 		return applyAs(their)
 	}
 
+	// Anything theirs asked to keep that did not survive lost to a removal of
+	// ours - that is a decision, unlike unioning in groups theirs never saw.
+	if lost := stringSetMinus(d.NewGroups, mergedGroups); len(lost) > 0 {
+		return rewriteAs(
+			newAuditEntry(their.ChangedBy, &DetailUserChangeGroups{User: d.User, NewGroups: mergedGroups}),
+			"kept our removal of "+strings.Join(lost, ", ")+" from "+d.User,
+			true,
+		)
+	}
+
 	return rewriteAs(
 		newAuditEntry(their.ChangedBy, &DetailUserChangeGroups{User: d.User, NewGroups: mergedGroups}),
 		"groups of "+d.User+" delta-merged",
+		false,
 	)
 }
 
 // resolveUserAddRecipients applies onto a live user; verify dedupes keys already
 // present.
-func resolveUserAddRecipients(their *AuditEntrySigned, merged, base *VerifiedState) (r resolution) {
+func resolveUserAddRecipients(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	d, err := parseDetail[DetailUserAddRecipients](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
 	}
 	defer func() { r.Target = d.User }()
 
-	cur, ok := merged.UserExists(d.User)
-	if !ok {
+	if _, ok := s.merged.UserExists(d.User); !ok {
 		return dropWith("user "+d.User+" gone; dropped recipient add", true)
 	}
 
-	// Remove wins: drop any key our side revoked since base (present in base, gone
-	// now); theirs re-adding it must not resurrect it. Keys ours never had apply.
-	ourKeys := stringSet(cur.Recps.Strings())
-	var baseKeys map[string]bool
-	if b, ok := base.UserExists(d.User); ok {
-		baseKeys = stringSet(b.Recps.Strings())
+	// Remove wins: drop any key our side revoked since the base, even if theirs
+	// re-added it deliberately. Measured on `ours`, not on the running state -
+	// that one already carries theirs' own removals. Keys ours never had apply.
+	revoked := stringSet(recipientKeys(s.base, d.User))
+	for _, k := range recipientKeys(s.ours, d.User) {
+		delete(revoked, k)
 	}
 
 	kept := make([]UserPubKey, 0, len(d.PubKeys))
 	for _, pk := range d.PubKeys {
-		if baseKeys[pk.Key] && !ourKeys[pk.Key] {
+		if revoked[pk.Key] {
 			continue // ours revoked it
 		}
 		kept = append(kept, pk)
@@ -739,20 +814,21 @@ func resolveUserAddRecipients(their *AuditEntrySigned, merged, base *VerifiedSta
 		return rewriteAs(
 			newAuditEntry(their.ChangedBy, &DetailUserAddRecipients{User: d.User, PubKeys: kept}),
 			"kept our revocation of some recipients for "+d.User,
+			true,
 		)
 	}
 }
 
 // resolveUserRmRecipients: a removal wins; a no-longer-present user makes it a
 // satisfied no-op.
-func resolveUserRmRecipients(their *AuditEntrySigned, merged, _ *VerifiedState) (r resolution) {
+func resolveUserRmRecipients(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	d, err := parseDetail[DetailUserRmRecipients](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
 	}
 	defer func() { r.Target = d.User }()
 
-	cur, ok := merged.UserExists(d.User)
+	cur, ok := s.merged.UserExists(d.User)
 	if !ok {
 		return dropWith("user "+d.User+" gone; removal already satisfied", false)
 	}
@@ -771,14 +847,14 @@ func resolveUserRmRecipients(their *AuditEntrySigned, merged, _ *VerifiedState) 
 
 // resolveSecretAdd: an add of the same path dedupes; differing access is a
 // conflict (content itself is merged by the secret driver).
-func resolveSecretAdd(their *AuditEntrySigned, merged, _ *VerifiedState) (r resolution) {
+func resolveSecretAdd(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	d, err := parseDetail[DetailSecretAdd](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
 	}
 	defer func() { r.Target = d.RevealedPath }()
 
-	existing, ok := merged.SecretExists(d.RevealedPath)
+	existing, ok := s.merged.SecretExists(d.RevealedPath)
 	if !ok {
 		return applyAs(their)
 	}
@@ -791,20 +867,20 @@ func resolveSecretAdd(their *AuditEntrySigned, merged, _ *VerifiedState) (r reso
 }
 
 // resolveSecretRemove: a removal wins; if our side changed the secret's access
-// since base, the removal still wins but is flagged (the change is discarded).
-func resolveSecretRemove(their *AuditEntrySigned, merged, base *VerifiedState) (r resolution) {
+// since the base, the removal still wins but is flagged (the change is discarded).
+func resolveSecretRemove(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	d, err := parseDetail[DetailSecretRemove](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
 	}
 	defer func() { r.Target = d.RevealedPath }()
 
-	cur, ok := merged.SecretExists(d.RevealedPath)
-	if !ok {
+	if _, ok := s.merged.SecretExists(d.RevealedPath); !ok {
 		return dropWith("secret "+d.RevealedPath+" already removed", false)
 	}
 
-	if b, ok := base.SecretExists(d.RevealedPath); ok && !stringSetEqual(b.AccessGroups, cur.AccessGroups) {
+	if b, ok := s.base.SecretExists(d.RevealedPath); ok &&
+		!stringSetEqual(b.AccessGroups, secretAccess(s.ours, d.RevealedPath)) {
 		r = applyAs(their)
 		r.Reason = "secret " + d.RevealedPath + " had its access changed on our side but was removed on theirs; remove wins"
 		r.conflict = true
@@ -816,25 +892,21 @@ func resolveSecretRemove(their *AuditEntrySigned, merged, base *VerifiedState) (
 
 // resolveSecretChangeAccess three-way delta-merges the access set; remove wins on
 // a clash.
-func resolveSecretChangeAccess(their *AuditEntrySigned, merged, base *VerifiedState) (r resolution) {
+func resolveSecretChangeAccess(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	d, err := parseDetail[DetailSecretChangeAccess](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
 	}
 	defer func() { r.Target = d.RevealedPath }()
 
-	cur, ok := merged.SecretExists(d.RevealedPath)
+	cur, ok := s.merged.SecretExists(d.RevealedPath)
 	if !ok {
 		return dropWith("secret "+d.RevealedPath+" removed; dropped access change", true)
 	}
 
-	var baseGroups []string
-	if b, ok := base.SecretExists(d.RevealedPath); ok {
-		baseGroups = b.AccessGroups
-	}
-
 	theirGroups := normalizeAccessGroups(d.AccessGroups)
-	mergedGroups := normalizeAccessGroups(threeWaySet(baseGroups, cur.AccessGroups, theirGroups))
+	mergedGroups := threeWaySet(secretAccess(s.theirPrev, d.RevealedPath), cur.AccessGroups, theirGroups)
+	mergedGroups = normalizeAccessGroups(stringSetMinus(mergedGroups, s.oursRemovedAccess(d.RevealedPath)))
 
 	if stringSetEqual(mergedGroups, cur.AccessGroups) {
 		return dropWith("access of "+d.RevealedPath+" already covers theirs", false)
@@ -844,25 +916,36 @@ func resolveSecretChangeAccess(their *AuditEntrySigned, merged, base *VerifiedSt
 		return applyAs(their)
 	}
 
+	// Access theirs asked to keep but that lost to a removal of ours: a narrowing
+	// of what theirs intended, so surface it.
+	if lost := stringSetMinus(theirGroups, mergedGroups); len(lost) > 0 {
+		return rewriteAs(
+			newAuditEntry(their.ChangedBy, &DetailSecretChangeAccess{RevealedPath: d.RevealedPath, AccessGroups: mergedGroups}),
+			"kept our removal of "+strings.Join(lost, ", ")+" from "+d.RevealedPath,
+			true,
+		)
+	}
+
 	return rewriteAs(
 		newAuditEntry(their.ChangedBy, &DetailSecretChangeAccess{RevealedPath: d.RevealedPath, AccessGroups: mergedGroups}),
 		"access of "+d.RevealedPath+" delta-merged",
+		false,
 	)
 }
 
 // resolveSecretMove prefers ours: drop on a vanished source or an occupied target.
-func resolveSecretMove(their *AuditEntrySigned, merged, _ *VerifiedState) (r resolution) {
+func resolveSecretMove(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	d, err := parseDetail[DetailSecretMove](their)
 	if err != nil {
 		return dropWith(err.Error(), true)
 	}
 	defer func() { r.Target = d.OldRevealedPath + " -> " + d.NewRevealedPath }()
 
-	if _, ok := merged.SecretExists(d.OldRevealedPath); !ok {
+	if _, ok := s.merged.SecretExists(d.OldRevealedPath); !ok {
 		return dropWith("move source "+d.OldRevealedPath+" gone; dropped", true)
 	}
 
-	if _, ok := merged.SecretExists(d.NewRevealedPath); ok {
+	if _, ok := s.merged.SecretExists(d.NewRevealedPath); ok {
 		return dropWith("move target "+d.NewRevealedPath+" occupied; kept ours", true)
 	}
 
@@ -885,9 +968,9 @@ func sameUserIdentity(existing *VerifiedUser, d *DetailUserTell, ui *PluginUI) b
 	return existing.Recps.Equal(theirRecps)
 }
 
-// userModified reports whether `cur` differs from its base version `b` in any
-// security-relevant way (groups, signing key or recipient set) - i.e. whether
-// our side changed the user since the merge base.
+// userModified reports whether `cur` differs from `b` in any security-relevant
+// way (groups, signing key or recipient set) - i.e. whether our side changed the
+// user away from the version theirs acted on.
 func userModified(b, cur *VerifiedUser) bool {
 	return b.SignPubKey != cur.SignPubKey ||
 		!stringSetEqual(b.Groups, cur.Groups) ||
@@ -915,6 +998,10 @@ func sortedKeys(m map[string]bool) []string {
 // then apply theirs' delta relative to `base` - theirs' additions are unioned
 // in, theirs' removals are deleted. Because a removal always wins over the other
 // side keeping an element, the genuine add-vs-remove clash resolves to removed.
+//
+// `base` must be theirs' state just before the entry, not the merge base: only
+// then does the delta describe what this entry did. Elements outside theirs'
+// view are left to `current` - theirs said nothing about them.
 func threeWaySet(base, current, theirs []string) []string {
 	baseSet := stringSet(base)
 	theirsSet := stringSet(theirs)
@@ -933,6 +1020,46 @@ func threeWaySet(base, current, theirs []string) []string {
 	}
 
 	return sortedKeys(out)
+}
+
+// stringSetMinus returns the sorted elements of `a` that are missing from `b`.
+// userGroups / secretAccess / recipientKeys read one field out of a state, empty
+// if the user or secret is absent there.
+func userGroups(s *VerifiedState, user string) []string {
+	if u, ok := s.UserExists(user); ok {
+		return u.Groups
+	}
+
+	return nil
+}
+
+func secretAccess(s *VerifiedState, path string) []string {
+	if sec, ok := s.SecretExists(path); ok {
+		return sec.AccessGroups
+	}
+
+	return nil
+}
+
+func recipientKeys(s *VerifiedState, user string) []string {
+	if u, ok := s.UserExists(user); ok {
+		return u.Recps.Strings()
+	}
+
+	return nil
+}
+
+func stringSetMinus(a, b []string) []string {
+	bm := stringSet(b)
+	out := make([]string, 0, len(a))
+	for _, v := range a {
+		if !bm[v] {
+			out = append(out, v)
+		}
+	}
+
+	sort.Strings(out)
+	return out
 }
 
 func stringSetEqual(a, b []string) bool {

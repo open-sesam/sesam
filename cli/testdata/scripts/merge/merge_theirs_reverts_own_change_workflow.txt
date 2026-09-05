@@ -1,0 +1,36 @@
+# A branch that undoes its own change must not have it resurrected by the merge.
+# Theirs adds ops and takes it away again (via --group, the absolute set); the
+# net effect over their two commits is nothing, so the merged log must not carry
+# ops. Our own unrelated group stays.
+
+sesam-repo
+
+# Base: bob in dev.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'add bob'
+
+# OURS: bob gains sec.
+exec git checkout -b ours
+exec sesam user change-groups --user bob --group-add sec
+exec git add -A
+exec git commit -m 'ours: bob += sec'
+
+# THEIRS: bob gains ops, then loses it again.
+exec git checkout -b theirs ours~1
+exec sesam user change-groups --user bob --group-add ops
+exec git add -A
+exec git commit -m 'theirs: bob += ops'
+exec sesam user change-groups --user bob --group dev
+exec git add -A
+exec git commit -m 'theirs: bob -= ops'
+
+exec git checkout ours
+! exec git merge theirs
+
+# ops was added and removed on their side; only our sec survives on top of dev.
+exec sesam verify --verify-mode no-disk
+exec sesam user ls
+stdout 'bob'
+stdout 'sec'
+! stdout 'ops'
