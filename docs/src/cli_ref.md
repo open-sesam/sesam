@@ -180,9 +180,13 @@ Move a secret file or directory to a new name
 
 ## edit
 
-Open secret in $EDITOR and immediately seal it afterwards
+Open secret in $VISUAL or $EDITOR and immediately seal it afterwards
+
+**--editor**="": Editor executable to use instead of $VISUAL or $EDITOR
 
 **--help, -h**: show help
+
+**--seal-all, --all**: When we seal, seal also files that did not change
 
 ## seal
 
