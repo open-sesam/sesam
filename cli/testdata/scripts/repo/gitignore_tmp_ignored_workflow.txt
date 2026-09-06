@@ -1,0 +1,15 @@
+# The secret merge driver stages decrypted plaintext under .sesam/tmp. That
+# directory must be git-ignored so a crashed/interrupted merge can never leave
+# plaintext that a later `git add .sesam` would commit into history.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# check-ignore exits 0 and echoes the path when it is ignored.
+exec git check-ignore .sesam/tmp/secret.txt.ours
+stdout '\.sesam/tmp'

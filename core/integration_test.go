@@ -45,6 +45,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 		testRoot(t, sesamDir),
 		Identities{admin.Identity},
 		signer, keyring, auditLog, vstate,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -82,6 +83,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 		testRoot(t, sesamDir),
 		Identities{admin.Identity},
 		signer2, keyring2, auditLog2, vstate2,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -151,6 +153,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 		testRoot(t, sesamDir),
 		Identities{bob.Identity},
 		bobSignKey, keyring, al, vstate,
+		"",
 	)
 	require.NoError(t, err)
 	require.NoError(t, smBob.Seal(true))
@@ -237,6 +240,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 		kr,
 		al,
 		vs,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -267,6 +271,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 		kr,
 		al,
 		vs,
+		"",
 	)
 	require.NoError(t, err)
 	require.NoError(t, sm.Seal(true))

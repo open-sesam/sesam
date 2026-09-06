@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 )
 
@@ -74,7 +73,7 @@ func verifyIntegritySingleSecret(
 		return
 	}
 
-	sesamPath := filepath.Join(".sesam", "objects", vs.RevealedPath+".sesam")
+	sesamPath := ObjectPath(vs.RevealedPath)
 
 	fd, err := root.Open(sesamPath)
 	if err != nil {

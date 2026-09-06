@@ -1,0 +1,65 @@
+# When both branches change the same region of a secret, the secret merge driver
+# writes git conflict markers into the REVEALED (gitignored) plaintext. git never
+# sees them - the tracked object is ciphertext - so the pre-commit finalize scans
+# for them and refuses to seal until they are resolved. Otherwise the markers
+# would be silently encrypted into the object.
+
+sesam-repo admin base.txt ours.txt theirs.txt
+
+cp $TMPDIR/base.txt db.txt
+exec sesam add db.txt --group admin
+exec git add -A
+exec git commit -m 'add db'
+
+# OURS and THEIRS change the SAME line, so the merge cannot combine them.
+exec git checkout -b ours
+cp $TMPDIR/ours.txt db.txt
+exec sesam seal
+exec git add -A
+exec git commit -m 'ours'
+
+exec git checkout -b theirs ours~1
+cp $TMPDIR/theirs.txt db.txt
+exec sesam seal
+exec git add -A
+exec git commit -m 'theirs'
+
+# Merge: content conflict -> markers land in the revealed db.txt, and the driver
+# reports the conflict count on stderr.
+exec git checkout ours
+! exec git merge theirs
+stderr 'automatically merging revealed file db.txt; 1 conflict - please fix manually'
+grep '^<<<<<<< ' db.txt
+grep '^>>>>>>> ' db.txt
+
+# `sesam status` surfaces the conflict even without --all (git cannot see it).
+exec sesam status
+stdout 'db.txt'
+stdout 'conflicted'
+
+# Finalizing without resolving the markers is refused - the seal would bake them
+# into the ciphertext, and git itself can't catch it.
+exec git add -A
+! exec git commit --no-edit
+stderr 'unresolved conflicts in this merge'
+stderr 'resolve the conflict markers'
+
+# Resolve the markers in the revealed file; the finalize then succeeds and the
+# committed merge verifies (no markers sealed into the object).
+cp $TMPDIR/ours.txt db.txt
+exec git commit --no-edit
+exec sesam verify
+! grep '^<<<<<<< ' db.txt
+
+-- base.txt --
+line1
+SECRET = BASE
+line3
+-- ours.txt --
+line1
+SECRET = OURS
+line3
+-- theirs.txt --
+line1
+SECRET = THEIRS
+line3

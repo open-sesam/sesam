@@ -216,8 +216,9 @@ for the entry schema.
 - First line is the base64 encoded, age-encrypted audit-key log.
 - This first line will change when adding new users or removing existing ones.
 - Every other line is a base64 encoded audit entry.
-- Each entry is encoded as JSON and then encrypted with the symmetric key from line1 with `ChaCha20Poly1305`.
-- Each entry's nonce is derived from its monotonic `seq_id`, so no key/nonce pair is ever reused.
+- Each entry is encoded as JSON and then encrypted with the symmetric key from line1 with `XChaCha20Poly1305`.
+- Each entry carries its own random nonce as a prefix. 
+- The `seq_id` is the entry's associated data, so a line moved within the log fails to decrypt.
 - Anyone who can decrypt line 1 can decrypt the entire log. In practice
   this means every currently-active user. After a `kill`, the
   symmetric key is rotated and line 1 is rewritten - but a removed

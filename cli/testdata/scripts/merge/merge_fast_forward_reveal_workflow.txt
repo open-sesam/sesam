@@ -1,0 +1,44 @@
+# A fast-forward merge - what `git pull` usually is - runs no finalize and no
+# post-checkout, so nothing used to refresh the revealed plaintext. The next seal
+# then wrote our stale version back over what we just pulled. post-merge reveals
+# the objects the merge brought in.
+
+sesam-repo admin base.txt changed.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add secret'
+
+exec git checkout -b topic
+cp $TMPDIR/changed.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change s'
+
+# Nothing on our side, so this fast-forwards.
+exec git checkout master
+exec git merge topic
+stdout 'Fast-forward'
+
+# The revealed file followed the object instead of staying behind.
+exec cat s
+stdout 'CHANGED'
+exec sesam status
+! stdout 'out of sync'
+
+# And sealing keeps it, rather than reverting to BASE.
+exec sesam seal
+exec sesam show .sesam/objects/s.sesam
+stdout 'CHANGED'
+exec sesam verify
+stderr 'Integrity: ok'
+
+-- base.txt --
+line one
+BASE
+line three
+-- changed.txt --
+line one
+CHANGED
+line three

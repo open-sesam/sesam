@@ -22,7 +22,7 @@ import (
 func revealableBy(t *testing.T, sesamDir string, u *testUser, kr Keyring, al *AuditLog, state *VerifiedState, revealedPath string) bool {
 	t.Helper()
 
-	mgr, err := BuildSecretManager(sesamDir, testRoot(t, sesamDir), Identities{u.Identity}, u.Signer, kr, al, state)
+	mgr, err := BuildSecretManager(sesamDir, testRoot(t, sesamDir), Identities{u.Identity}, u.Signer, kr, al, state, "")
 	require.NoError(t, err)
 
 	err = revealSecret(mgr, revealedPath)
@@ -281,6 +281,7 @@ func testSecretManagerFull(t *testing.T) *SecretManager {
 		kr,
 		al,
 		state,
+		"",
 	)
 	if err != nil {
 		t.Fatal(err)

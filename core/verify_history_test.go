@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/require"
 )
@@ -70,6 +71,7 @@ func (f *historyFixture) tellUser(t *testing.T, newUser *testUser, groups []stri
 
 	secMgr, err := BuildSecretManager(
 		f.SesamDir, f.AuditLog.root, Identities{f.Admin.Identity}, f.Admin.Signer, kr, f.AuditLog, state,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -280,7 +282,7 @@ func TestVerifyHistory(t *testing.T) {
 				f.deleteLog(t)
 				f.commit(t, "removed log.jsonl")
 			},
-			wantErr: "audit log not found at commit",
+			wantErr: "audit log was removed from history",
 		},
 		{
 			name: "user added after init stops walk gracefully",
@@ -368,4 +370,53 @@ func TestVerifyHistory_NoLogJsonl(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, VerifyHistory(sesamDir, repo, Identities{}, NewNonInteractivePluginUI()))
+}
+
+// TestVerifyHistoryVaultAddedOnSideBranch covers the shape a normal PR flow
+// produces: the vault is created on a branch and merged, so the commit that
+// introduced it sits off the first-parent chain this walk follows. Running past
+// it lands on commits from before the vault existed, which is the end of the
+// walk - not a deleted log.
+func TestVerifyHistoryVaultAddedOnSideBranch(t *testing.T) {
+	sesamDir, repo := testGitRepo(t)
+
+	// History from before the vault, on what will be the first-parent chain.
+	require.NoError(t, os.WriteFile(filepath.Join(sesamDir, "readme"), []byte("hi"), 0o600))
+	gitCommitAll(t, repo, "before sesam")
+
+	head, err := repo.Head()
+	require.NoError(t, err)
+	preVault := head.Hash()
+
+	// The vault itself, as if committed on a side branch.
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	defer func() { _ = al.Close() }()
+
+	gitCommitAll(t, repo, "sesam init")
+
+	head, err = repo.Head()
+	require.NoError(t, err)
+	vaultCommit := head.Hash()
+
+	// Merge it, with the pre-vault commit as FIRST parent.
+	wt, err := repo.Worktree()
+	require.NoError(t, err)
+
+	_, err = wt.Add(".")
+	require.NoError(t, err)
+
+	_, err = wt.Commit("merge the vault branch", &git.CommitOptions{
+		Author:            &object.Signature{Name: "Test", Email: "test@test.com", When: time.Now()},
+		Parents:           []plumbing.Hash{preVault, vaultCommit},
+		AllowEmptyCommits: true,
+	})
+	require.NoError(t, err)
+
+	require.NoError(
+		t,
+		VerifyHistory(sesamDir, repo, Identities{admin.Identity}, NewNonInteractivePluginUI()),
+		"walking past the commit that introduced the vault is the end of history, not tampering",
+	)
 }

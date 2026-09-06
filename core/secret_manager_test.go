@@ -93,6 +93,7 @@ func TestSecretChangeGroupsUnauthorized(t *testing.T) {
 	bobMgr, err := BuildSecretManager(
 		mgr.SesamDir, mgr.root, Identities{bob.Identity}, bob.Signer,
 		mgr.Keyring, mgr.AuditLog, mgr.State,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -266,6 +267,7 @@ func TestSealIncrementalResealsOnRecipientChange(t *testing.T) {
 	bobMgr, err := BuildSecretManager(
 		mgr.SesamDir, mgr.root, Identities{bob.Identity}, bob.Signer,
 		mgr.Keyring, mgr.AuditLog, mgr.State,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -339,6 +341,7 @@ func TestRevealSkipsInaccessibleSecrets(t *testing.T) {
 	bobMgr, err := BuildSecretManager(
 		mgr.SesamDir, mgr.root, Identities{bob.Identity}, bob.Signer,
 		mgr.Keyring, mgr.AuditLog, mgr.State,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -430,6 +433,7 @@ func TestSecretRemoveKeepsFilesOnAuthFailure(t *testing.T) {
 	bobMgr, err := BuildSecretManager(
 		mgr.SesamDir, mgr.root, Identities{bob.Identity}, bob.Signer,
 		mgr.Keyring, mgr.AuditLog, mgr.State,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -633,6 +637,7 @@ func TestSealMultiple(t *testing.T) {
 		kr,
 		al,
 		state,
+		"",
 	)
 
 	writeSecret(t, sesamDir, "secrets/a", "aaa")
@@ -662,6 +667,7 @@ func TestSealRejectsUnauthorizedUser(t *testing.T) {
 	bobMgr, err := BuildSecretManager(
 		mgr.SesamDir, mgr.root, Identities{bob.Identity}, bob.Signer,
 		mgr.Keyring, mgr.AuditLog, mgr.State,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -718,6 +724,7 @@ func TestSealNonAdminPreservesCiphertextItCannotDecrypt(t *testing.T) {
 	adminMgr, err := BuildSecretManager(
 		sesamDir,
 		testRoot(t, sesamDir), Identities{admin.Identity}, admin.Signer, kr, al, state,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -739,6 +746,7 @@ func TestSealNonAdminPreservesCiphertextItCannotDecrypt(t *testing.T) {
 	bobMgr, err := BuildSecretManager(
 		sesamDir,
 		testRoot(t, sesamDir), Identities{bob.Identity}, bob.Signer, kr, al, state,
+		"",
 	)
 	require.NoError(t, err)
 

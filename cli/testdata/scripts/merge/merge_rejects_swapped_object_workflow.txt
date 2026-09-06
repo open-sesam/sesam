@@ -1,0 +1,44 @@
+# The footer's path is a claim by whoever sealed the object, so a legitimately
+# sealed object dropped in at another path used to merge happily - the driver
+# decrypted whatever it was handed. Both sides of the footer are now checked
+# against the incoming branch's own audit log.
+
+sesam-repo admin a.txt b.txt a2.txt
+
+cp $TMPDIR/a.txt a
+cp $TMPDIR/b.txt b
+exec sesam add a --group admin
+exec sesam add b --group admin
+exec git add -A
+exec git commit -m 'add a and b'
+
+# ATTACKER: put b's (properly signed) object at a's path, without touching the
+# audit log, and bypass our hooks the way any plain git client would.
+exec git checkout -b evil
+cp .sesam/objects/b.sesam .sesam/objects/a.sesam
+exec git add .sesam/objects/a.sesam
+exec git commit --no-verify -m 'evil: b object at a path'
+
+# OURS: change a legitimately, so git has to merge that object.
+exec git checkout master
+cp $TMPDIR/a2.txt a
+exec sesam seal
+exec git add -A
+exec git commit -m 'ours: reseal a'
+
+# Refused: verifying the incoming branch as a whole catches it before anything
+# is decrypted, because the object no longer answers for the path it sits at.
+! exec git merge evil
+stderr 'a: missing \.sesam file'
+stderr 'does not verify - refusing to merge it'
+
+# Our own content is untouched.
+exec cat a
+stdout 'A-SECOND'
+
+-- a.txt --
+A-FIRST
+-- b.txt --
+B-ONLY
+-- a2.txt --
+A-SECOND

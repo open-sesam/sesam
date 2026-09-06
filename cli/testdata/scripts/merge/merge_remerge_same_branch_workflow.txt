@@ -1,0 +1,49 @@
+# Re-merging the SAME branch: merge theirs into ours, theirs then adds another
+# commit, merge theirs again. The first merge re-signs theirs' rebased entries,
+# so the second merge must still locate the shared base against ours (it no longer
+# matches by signature). Both of theirs' changes must survive and the twice-merged
+# log must verify.
+
+sesam-repo
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'base: bob'
+
+# OURS diverges with its own user.
+exec git checkout -b ours
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'ours: carol'
+
+# THEIRS: first change.
+exec git checkout -b theirs ours~1
+exec sesam user change-groups --user bob --group-add ops
+exec git add -A
+exec git commit -m 'theirs: bob += ops'
+
+# Merge #1, finalized. sesam.yml takes ours via the sesam-ours merge driver
+# (config-regen from the merged log is a separate, tracked follow-up), so there
+# is nothing to resolve by hand: git stops via pre-merge-commit, `git commit`
+# finalizes.
+exec git checkout ours
+! exec git merge theirs
+exec git commit --no-edit
+exec sesam verify
+
+# THEIRS gets a SECOND change on top of the already-merged branch.
+exec git checkout theirs
+exec sesam user change-groups --user bob --group-add sec
+exec git add -A
+exec git commit -m 'theirs: bob += sec'
+
+# Merge #2 - the re-merge that used to fail with "failed to find common origin".
+exec git checkout ours
+! exec git merge theirs
+exec git commit --no-edit
+
+# Both of theirs' changes are in the twice-merged log, which verifies end to end.
+exec sesam verify
+exec sesam show .sesam/audit/log.jsonl
+stdout 'ops'
+stdout 'sec'

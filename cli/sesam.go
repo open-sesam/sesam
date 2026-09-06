@@ -96,12 +96,56 @@ func Main(args []string) error {
 					{
 						Name:   "secret",
 						Usage:  "Merge secrets",
-						Action: commands.HandleStub,
+						Action: commands.HandleMergeSecret,
+						Arguments: []cli.Argument{
+							&cli.StringArg{
+								Name:      "origin",
+								UsageText: "%O",
+							},
+							&cli.StringArg{
+								Name:      "our-path",
+								UsageText: "%A",
+							},
+							&cli.StringArg{
+								Name:      "their-path",
+								UsageText: "%B",
+							},
+							&cli.IntArg{
+								Name:      "conflict-marker-size",
+								UsageText: "%L",
+							},
+							&cli.StringArg{
+								Name:      "path",
+								UsageText: "%P",
+							},
+						},
 					},
 					{
 						Name:   "log",
 						Usage:  "Merge audit log",
-						Action: commands.HandleStub,
+						Action: commands.HandleMergeAuditLog,
+						Arguments: []cli.Argument{
+							&cli.StringArg{
+								Name:      "origin",
+								UsageText: "%O",
+							},
+							&cli.StringArg{
+								Name:      "our-path",
+								UsageText: "%A",
+							},
+							&cli.StringArg{
+								Name:      "their-path",
+								UsageText: "%B",
+							},
+							&cli.IntArg{
+								Name:      "conflict-marker-size",
+								UsageText: "%L",
+							},
+							&cli.StringArg{
+								Name:      "path",
+								UsageText: "%P",
+							},
+						},
 					},
 				},
 			},
@@ -119,6 +163,16 @@ func Main(args []string) error {
 						Name:   "post-checkout",
 						Usage:  "Execute the post-checkout hook - meant to be run by git!",
 						Action: commands.HandleHookPostCheckout,
+					},
+					{
+						Name:   "pre-merge-commit",
+						Usage:  "Execute the pre-merge-commit hook - meant to be run by git!",
+						Action: commands.HandleHookPreMergeCommit,
+					},
+					{
+						Name:   "post-merge",
+						Usage:  "Execute the post-merge hook - meant to be run by git!",
+						Action: commands.HandleHookPostMerge,
 					},
 					{
 						Name:   "install",

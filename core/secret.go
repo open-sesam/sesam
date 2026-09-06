@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/sahib/renameio/v2"
 	"golang.org/x/crypto/hkdf"
@@ -92,11 +95,6 @@ func sealSecret(
 	recipients Recipients,
 	destPath, sealedByUser string,
 ) (*secretFooter, error) {
-	rcps := recipients.AgeRecipients()
-	if len(rcps) == 0 {
-		return nil, fmt.Errorf("empty recipients not allowed")
-	}
-
 	rd, err := sm.root.Open(revealedPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secret: %w", err)
@@ -116,6 +114,31 @@ func sealSecret(
 		_ = wc.Cleanup()
 	}()
 
+	ss, err := SealStream(rd, wc.File, revealedPath, recipients, sm.Identities.AgeIdentities(), sm.Signer, sealedByUser)
+	if err != nil {
+		return nil, err
+	}
+
+	return ss, wc.CloseAtomicallyReplace()
+}
+
+// SealStream is sealSecret without the destination handling, for the merge
+// driver's %A temp file. `dst` must be readable: with a recipient that is not a
+// FileKeyWrapper the age key is read back from it.
+func SealStream(
+	rd io.Reader,
+	dst io.ReadWriteSeeker,
+	revealedPath string,
+	recipients Recipients,
+	ageIds []age.Identity,
+	signer Signer,
+	sealedByUser string,
+) (*secretFooter, error) {
+	rcps := recipients.AgeRecipients()
+	if len(rcps) == 0 {
+		return nil, fmt.Errorf("empty recipients not allowed")
+	}
+
 	newHash, err := newHasher(defaultHashCode)
 	if err != nil {
 		return nil, err
@@ -124,7 +147,7 @@ func sealSecret(
 	// use the stream to compute the hash, what is written to wc, is also written to the hash:
 	ciphertextHash := newHash()
 	contentHash := newHash()
-	mw := io.MultiWriter(wc, ciphertextHash)
+	mw := io.MultiWriter(dst, ciphertextHash)
 
 	encW, err := age.Encrypt(mw, rcps...)
 	if err != nil {
@@ -144,7 +167,7 @@ func sealSecret(
 	_, _ = ciphertextHash.Write([]byte(revealedPath))
 	_, _ = contentHash.Write([]byte(revealedPath))
 
-	if _, err := wc.Seek(0, io.SeekStart); err != nil {
+	if _, err := dst.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("failed to seek back to crypt file: %w", err)
 	}
 
@@ -156,7 +179,7 @@ func sealSecret(
 	var ageKey []byte
 	if !ok {
 		// that's more of a programmer error, but fall back to reading it from file.
-		ageKey, err = readAgeEncryptionKey(wc.File, sm.Identities.AgeIdentities())
+		ageKey, err = readAgeEncryptionKey(dst, ageIds)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read age key: %w", err)
 		}
@@ -167,12 +190,12 @@ func sealSecret(
 	hmacContentHash := keyContentHash(newHash, ageKey, contentHash.Sum(nil))
 	ciphertextHashBytes := ciphertextHash.Sum(nil)
 	recipientsHashBytes := recipientsHash(newHash, recipients)
-	sig, err := sm.Signer.Sign(
+	sig, err := signer.Sign(
 		SesamDomainSignSecretTag,
 		slices.Concat(ciphertextHashBytes, hmacContentHash, recipientsHashBytes),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to compute signature for %s: %w", destPath, err)
+		return nil, fmt.Errorf("failed to compute signature for %s: %w", revealedPath, err)
 	}
 
 	ss := secretFooter{
@@ -185,12 +208,12 @@ func sealSecret(
 		Version:         footerFormatVersion,
 	}
 
-	if _, err := wc.Seek(0, io.SeekEnd); err != nil {
+	if _, err := dst.Seek(0, io.SeekEnd); err != nil {
 		return nil, fmt.Errorf("failed to seek back to crypt file: %w", err)
 	}
 
 	// Write signature to buffer, delimited by newline:
-	if _, err := wc.Write([]byte("\n")); err != nil {
+	if _, err := dst.Write([]byte("\n")); err != nil {
 		return nil, err
 	}
 
@@ -205,11 +228,11 @@ func sealSecret(
 		return nil, fmt.Errorf("footer bigger than page: %d - please file a bug", len(sigJSONBytes))
 	}
 
-	if _, err := wc.Write(sigJSONBytes); err != nil {
+	if _, err := dst.Write(sigJSONBytes); err != nil {
 		return nil, err
 	}
 
-	return &ss, wc.CloseAtomicallyReplace()
+	return &ss, nil
 }
 
 // readFooter seeks to the footer & parses it.
@@ -289,12 +312,13 @@ func revealSecret(sm *SecretManager, revealedPath string) error {
 	}()
 
 	ids := sm.Identities.AgeIdentities()
-	if err := revealStreamAndVerify(
+	if _, err := RevealStreamAndVerify(
 		srcFd,
 		dstFd,
 		ids,
 		sm.Keyring,
 		sm.State.SealerAuthorized,
+		revealedPath,
 	); err != nil {
 		return err
 	}
@@ -334,30 +358,35 @@ func (e *BadSealerError) Error() string {
 // Authorization failure is returned as a typed *BadSealerError so callers
 // can distinguish "decryption succeeded, policy says no" from cryptographic
 // failures and apply different policies.
-func revealStreamAndVerify(
+func RevealStreamAndVerify(
 	srcFd io.ReadSeeker,
 	dstFd io.Writer,
 	ageIds []age.Identity,
 	kr Keyring,
 	authorize func(user, path string) bool,
-) error {
-	cipherTextHash, contentHashBytes, footer, err := revealStream(srcFd, dstFd, ageIds)
+	expectedPath string,
+) (*secretFooter, error) {
+	cipherTextHash, contentHashBytes, footer, err := RevealStream(srcFd, dstFd, ageIds)
 	if err != nil {
-		return err
+		return nil, err
+	}
+
+	if expectedPath != "" && footer.RevealedPath != expectedPath {
+		return nil, fmt.Errorf("object at %s is sealed for %s", expectedPath, footer.RevealedPath)
 	}
 
 	// Verify the signature, but check before if hashes are the same at all as quick check:
 	ok, err := hashEqual(footer.CipherTextHash, cipherTextHash)
 	if err != nil {
-		return fmt.Errorf("failed to check ciphertext hash for %s: %w", footer.RevealedPath, err)
+		return nil, fmt.Errorf("failed to check ciphertext hash for %s: %w", footer.RevealedPath, err)
 	}
 	if !ok {
-		return fmt.Errorf("encrypted file changed for %s", footer.RevealedPath)
+		return nil, fmt.Errorf("encrypted file changed for %s", footer.RevealedPath)
 	}
 
 	recipientsHashBytes, _, err := multicodeDecode(footer.RecipientsHash)
 	if err != nil {
-		return fmt.Errorf("failed to decode recipients hash for %s: %w", footer.RevealedPath, err)
+		return nil, fmt.Errorf("failed to decode recipients hash for %s: %w", footer.RevealedPath, err)
 	}
 
 	sealer, err := kr.Verify(
@@ -367,17 +396,17 @@ func revealStreamAndVerify(
 		footer.SealedBy,
 	)
 	if err != nil {
-		return fmt.Errorf("signature verification failed for %s: %w", footer.RevealedPath, err)
+		return nil, fmt.Errorf("signature verification failed for %s: %w", footer.RevealedPath, err)
 	}
 
 	if authorize != nil && !authorize(sealer, footer.RevealedPath) {
-		return &BadSealerError{SealedBy: sealer, Path: footer.RevealedPath}
+		return nil, &BadSealerError{SealedBy: sealer, Path: footer.RevealedPath}
 	}
 
-	return nil
+	return footer, nil
 }
 
-func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) ([]byte, []byte, *secretFooter, error) {
+func RevealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) ([]byte, []byte, *secretFooter, error) {
 	ageRd, sigDesc, err := readFooter(srcFd)
 	if err != nil {
 		return nil, nil, nil, err
@@ -422,4 +451,37 @@ func revealStream(srcFd io.ReadSeeker, dstFd io.Writer, ageIds []age.Identity) (
 
 	hmacContentHash := keyContentHash(newHash, ageKey, contentHash.Sum(nil))
 	return cipherTextHash.Sum(nil), hmacContentHash, sigDesc, nil
+}
+
+// PruneOrphanObjects removes sealed object files under base whose revealed path
+// is not in `keep`, returning the pruned revealed paths. Used by merge finalize
+// to drop objects for secrets removed on the merged branch.
+func PruneOrphanObjects(root *os.Root, base string, keep map[string]bool) ([]string, error) {
+	dir := filepath.ToSlash(sesamObjectsDir(base))
+
+	var pruned []string
+	err := fs.WalkDir(root.FS(), dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(p, ".sesam") {
+			return nil
+		}
+
+		revealed := strings.TrimSuffix(strings.TrimPrefix(filepath.ToSlash(p), dir+"/"), ".sesam")
+		if keep[revealed] {
+			return nil
+		}
+
+		if err := root.Remove(p); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove orphan object %s: %w", p, err)
+		}
+		pruned = append(pruned, revealed)
+		return nil
+	})
+
+	return pruned, err
 }

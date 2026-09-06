@@ -1,0 +1,34 @@
+# Two branches each add a different user. The audit-log merge driver rebases
+# theirs' user.tell onto ours, so the merged log holds both users, records a
+# merge entry, and chain-verifies.
+
+sesam-repo
+
+# OURS: add bob.
+exec git checkout -b ours
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'ours: add bob'
+
+# THEIRS: branch off the init commit and add carol.
+exec git checkout -b theirs ours~1
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'theirs: add carol'
+
+# Merge THEIRS into OURS. The audit-log driver merges the log but always reports
+# a conflict (exit 1) so git stops before committing - the user must seal and
+# commit, which runs the pre-commit verify. (sesam.yml also conflicts; that is a
+# known, accepted gap for now.)
+exec git checkout ours
+! exec git merge theirs
+
+# The merged audit log is in the worktree: it chain-verifies, and holds both
+# user.tell entries plus a merge entry. (State is asserted via the log, not
+# `sesam user list`, because that reads the still-conflicted sesam.yml.)
+exec sesam verify --verify-mode no-disk
+
+exec sesam show .sesam/audit/log.jsonl
+stdout '"user": "bob"'
+stdout '"user": "carol"'
+stdout '"operation": "merge"'

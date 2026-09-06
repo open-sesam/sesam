@@ -1,0 +1,87 @@
+# A stash cannot take revealed plaintext along (gitignored), and a pop runs the
+# drivers without MERGE_HEAD, so no finalize. Nothing breaks, but a stash is only
+# half a stash here - pinned down below.
+
+sesam-repo admin base.txt wip.txt other.txt merged.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add secret'
+
+# Edit and seal, but do not commit: the tracked object is dirty.
+cp $TMPDIR/wip.txt s
+exec sesam seal
+exec git status --short
+stdout '\.sesam/objects/s\.sesam'
+
+exec git stash
+
+# CAVEAT: the stash parked the OBJECT, but the revealed plaintext is gitignored
+# and stays behind. The worktree is not clean in sesam terms - the plaintext still
+# holds the work that was supposedly stashed away.
+exec cat s
+stdout 'WIP'
+exec sesam status
+stdout 'out of sync'
+
+# Commit a different change to the same secret, so the pop has to three-way.
+cp $TMPDIR/other.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'other change'
+
+# The pop runs both drivers. The secret conflict lands as markers in the revealed
+# file, exactly as it would in a merge.
+! exec git stash pop
+stderr 'automatically merging revealed file s; 1 conflict'
+grep '^<<<<<<< ' s
+exec sesam status
+stdout 'conflicted'
+stdout 'in progress'
+
+# CAVEAT: the audit-log driver ran too, so a stash pop leaves a semantically
+# merged log (with a merge entry) staged - a change the user never asked for.
+exec git status --short
+stdout 'M  \.sesam/audit/log\.jsonl'
+stdout 'UU \.sesam/objects/s\.sesam'
+
+# The committed object is untouched (ours) and git keeps the stash entry, so the
+# stashed work is still recoverable.
+exec sesam show .sesam/objects/s.sesam
+stdout 'OTHER'
+exec git stash list
+stdout 'stash@\{0\}'
+
+# Resolving is the same as anywhere else: fix the revealed file, seal, add.
+cp $TMPDIR/merged.txt s
+exec sesam seal
+exec git add -A
+exec sesam show .sesam/objects/s.sesam
+stdout 'MERGED'
+
+# The repo is consistent again and nothing is left in progress.
+exec sesam verify
+stderr 'Integrity: ok'
+exec sesam status
+! stdout 'in progress'
+exec git commit -m 'resolve stash pop'
+exec sesam verify
+stderr 'Integrity: ok'
+
+-- base.txt --
+line one
+line two
+line three
+-- wip.txt --
+line one
+WIP
+line three
+-- other.txt --
+line one
+OTHER
+line three
+-- merged.txt --
+line one
+MERGED
+line three

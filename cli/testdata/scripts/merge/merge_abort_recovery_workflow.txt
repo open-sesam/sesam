@@ -1,0 +1,52 @@
+# `git merge --abort` after a sesam merge: git restores the objects, but the
+# gitignored revealed file is left as the driver's merged output until re-revealed.
+# `sesam open` recovers ours' content and the repo verifies. (No auto re-reveal on
+# abort - see A8.)
+
+sesam-repo admin base.txt ours.txt theirs.txt
+
+cp $TMPDIR/base.txt secret.txt
+exec sesam add secret.txt --group admin
+exec git add -A
+exec git commit -m 'add secret'
+
+exec git checkout -b ours
+cp $TMPDIR/ours.txt secret.txt
+exec sesam seal
+exec git add -A
+exec git commit -m 'ours: first line'
+
+exec git checkout -b theirs ours~1
+cp $TMPDIR/theirs.txt secret.txt
+exec sesam seal
+exec git add -A
+exec git commit -m 'theirs: last line'
+
+exec git checkout ours
+! exec git merge theirs
+
+# Abort: the pending merge is gone.
+exec git merge --abort
+! exec git rev-parse -q --verify MERGE_HEAD
+
+# Re-reveal recovers ours' content and the repo verifies.
+exec sesam open
+grep 'first = OURS' secret.txt
+grep 'last = BASE' secret.txt
+! grep 'THEIRS' secret.txt
+exec sesam verify
+
+-- base.txt --
+first = BASE
+middle = BASE
+last = BASE
+
+-- ours.txt --
+first = OURS
+middle = BASE
+last = BASE
+
+-- theirs.txt --
+first = BASE
+middle = BASE
+last = THEIRS

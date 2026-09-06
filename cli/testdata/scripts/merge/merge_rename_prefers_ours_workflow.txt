@@ -1,0 +1,37 @@
+# Two branches rename the same user to different names. Rename is single-valued,
+# so ours wins and theirs' rename is dropped (with a warning).
+
+sesam-repo
+
+# Base: bob in dev.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'add bob'
+
+# OURS: rename bob -> dave.
+exec git checkout -b ours
+exec sesam user rename bob dave
+exec git add -A
+exec git commit -m 'ours: bob -> dave'
+
+# THEIRS: rename bob -> erin.
+exec git checkout -b theirs ours~1
+exec sesam user rename bob erin
+exec git add -A
+exec git commit -m 'theirs: bob -> erin'
+
+# Merge: the driver merges the log and reports a conflict (exit 1) so git stops.
+# NOTE: git additionally raises a rename/rename tree conflict on the signkey file
+# (bob.age -> dave.age vs erin.age) - see the report; reconciling that from the
+# log is still open.
+exec git checkout ours
+! exec git merge theirs
+
+# ours' rename to dave is applied; theirs' rename is dropped and the merge entry
+# records that decision (so "erin" appears only in the drop record, not as a
+# live rename).
+exec sesam verify --verify-mode no-disk
+exec sesam show .sesam/audit/log.jsonl
+stdout '"new_name": "dave"'
+stdout 'rename source bob'
+! stdout '"new_name": "erin"'

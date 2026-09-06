@@ -52,7 +52,10 @@ func (sm *SecretManager) SetBase(base string) { sm.base = base }
 
 // BuildSecretManager uses the passed facilities to build a new SecretManager.
 // root confines all file I/O to the repository; sesamDir is its absolute path,
-// kept for the directory swap and git interop.
+// kept for the directory swap and git interop. `base` is the sesam-internal
+// prefix the manager works under ("" for the live tree, a stage's fork dir
+// otherwise) - it has to be known here because the scratch dir is scrubbed
+// below, and a fork must not empty the live one.
 func BuildSecretManager(
 	sesamDir string,
 	root *os.Root,
@@ -61,6 +64,7 @@ func BuildSecretManager(
 	keyring Keyring,
 	log *AuditLog,
 	state *VerifiedState,
+	base string,
 ) (*SecretManager, error) {
 	mgr := &SecretManager{
 		SesamDir:   sesamDir,
@@ -70,10 +74,11 @@ func BuildSecretManager(
 		Keyring:    keyring,
 		AuditLog:   log,
 		State:      state,
+		base:       base,
 	}
 
 	// Clear tmp dir before continuing:
-	tmpDir := SesamTmpDir()
+	tmpDir := sesamTmpDir(base)
 	_ = root.RemoveAll(tmpDir)
 	_ = root.MkdirAll(tmpDir, 0o700)
 
@@ -334,14 +339,36 @@ func (sm *SecretManager) readSecretFooter(path string) (*secretFooter, error) {
 	return footer, nil
 }
 
-// Reveal reveals all known secrets.
+// Reveal reveals all known secrets. Unless `all` is set, secrets already in
+// sync with their object are left alone.
 func (sm *SecretManager) Reveal(all bool) error {
+	return sm.reveal(all, nil)
+}
+
+// RevealPaths reveals only the named secrets. Unknown or inaccessible paths are
+// skipped, so callers can pass a raw list from git.
+func (sm *SecretManager) RevealPaths(paths []string) error {
+	want := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		want[p] = true
+	}
+
+	return sm.reveal(true, want)
+}
+
+// reveal writes out every secret in want, or all of them when want is nil. The
+// nil case stays in here: an empty RevealPaths must reveal nothing, not everything.
+func (sm *SecretManager) reveal(all bool, want map[string]bool) error {
 	parallelJobs := 4 * runtime.GOMAXPROCS(0)
 	g := new(errgroup.Group)
 	g.SetLimit(parallelJobs)
 
 	for _, vsecret := range sm.State.Secrets {
 		g.Go(func() error {
+			if want != nil && !want[vsecret.RevealedPath] {
+				return nil
+			}
+
 			if !sm.State.UserHasAccess(sm.Signer.UserName(), vsecret.AccessGroups) {
 				// ignore files we can't decrypt:
 				return nil
@@ -474,7 +501,7 @@ func ShowSecret(root *os.Root, ids Identities, path string, dst io.Writer) (bool
 
 	defer closeLogged(srcFd)
 
-	_, _, _, err = revealStream(srcFd, dst, ids.AgeIdentities())
+	_, _, _, err = RevealStream(srcFd, dst, ids.AgeIdentities())
 	return true, err
 }
 

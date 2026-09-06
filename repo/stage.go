@@ -117,12 +117,12 @@ func (r *Repo) buildStage() (*Stage, error) {
 		keyring,
 		audit,
 		vstate,
+		forkSuffix,
 	)
 	if err != nil {
 		_ = audit.Close()
 		return nil, fmt.Errorf("build fork secret manager: %w", err)
 	}
-	secret.SetBase(forkSuffix)
 
 	user, err := core.BuildUserManager(
 		r.root,
@@ -159,6 +159,39 @@ func (r *Repo) buildStage() (*Stage, error) {
 	}
 
 	return &Stage{View: fork, repo: r}, nil
+}
+
+// PruneUnusedAfterMerge removes secrets and signkeys that are not present in the vstate anymore.
+func (s *Stage) PruneUnusedAfterMerge() error {
+	users := make(map[string]bool, len(s.vstate.Users))
+	for _, u := range s.vstate.Users {
+		users[u.Name] = true
+	}
+
+	secrets := make(map[string]bool, len(s.vstate.Secrets))
+	for _, sec := range s.vstate.Secrets {
+		secrets[sec.RevealedPath] = true
+	}
+
+	prunedKeys, err := core.PruneOrphanSignKeys(s.root, forkSuffix, users)
+	if err != nil {
+		return fmt.Errorf("reconcile signkeys: %w", err)
+	}
+
+	prunedObjs, err := core.PruneOrphanObjects(s.root, forkSuffix, secrets)
+	if err != nil {
+		return fmt.Errorf("reconcile objects: %w", err)
+	}
+
+	if len(prunedKeys) > 0 || len(prunedObjs) > 0 {
+		slog.Info(
+			"merge reconcile: pruned derived files to match the merged log",
+			slog.Any("signkeys", prunedKeys),
+			slog.Any("objects", prunedObjs),
+		)
+	}
+
+	return nil
 }
 
 // materializeFork builds .sesam-tmp as a hardlink mirror of .sesam. The
@@ -218,7 +251,7 @@ func (s *Stage) Commit() error {
 	// Promote: the fork's managers already hold the committed in-memory state
 	// and their fds follow the swapped-in inodes. Re-base them to the live tree
 	// and make the fork View the Repo's live View. No reopen, no replay.
-	_ = s.repo.closeState()
+	_ = s.repo.closeStateQuiet(false)
 
 	s.auditLog.SetBase("")
 	s.secret.SetBase("")
@@ -263,7 +296,7 @@ func (s *Stage) Rollback() error {
 	}
 	s.done = true
 
-	_ = s.closeState()
+	_ = s.closeStateQuiet(false)
 	s.repo.stage = nil
 
 	// Repo's live state was never touched, so nothing to restore.
