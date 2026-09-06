@@ -228,7 +228,7 @@ var flagsMove = []cli.Flag{
 var flagsEdit = []cli.Flag{
 	&cli.StringFlag{
 		Name:  "editor",
-		Usage: "Editor command to use instead of $EDITOR",
+		Usage: "Editor executable to use instead of $VISUAL or $EDITOR",
 	},
 	flagSeal,
 }

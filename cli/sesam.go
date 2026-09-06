@@ -178,7 +178,7 @@ func Main(args []string) error {
 				ArgsUsage:     "<path>",
 				ShellComplete: completeSecrets,
 				Action:        commands.WithRepo(commands.HandleEditSecret),
-				Usage:         "Open secret in $EDITOR and immediately seal it afterwards",
+				Usage:         "Open secret in $VISUAL or $EDITOR and immediately seal it afterwards",
 			},
 			{
 				Name:     "seal",

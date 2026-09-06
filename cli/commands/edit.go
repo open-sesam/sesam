@@ -23,16 +23,22 @@ func HandleEditSecret(ctx context.Context, cmd *cli.Command, r *repo.Repo) error
 
 	editor := cmd.String("editor")
 	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
+	if editor == "" {
 		editor = os.Getenv("EDITOR")
 	}
 	if editor == "" {
-		return fmt.Errorf("EDITOR is not set")
+		return fmt.Errorf("neither VISUAL nor EDITOR is set")
 	}
-	// TODO: ADD SUPPORT FOR $VISUAL
-	// TODO: look up that the path of the $EDITOR
+	editorPath, err := exec.LookPath(editor)
+	if err != nil {
+		return fmt.Errorf("find editor %q: %w", editor, err)
+	}
+
 	return r.EditSecret(paths[0], func(path string) error {
-		editorCmd := exec.CommandContext(ctx, "exec $EDITOR \"$1\"", "sesam-editor", path)
-		editorCmd.Env = append(os.Environ(), "EDITOR="+editor)
+		// #nosec G204,G702 -- editorPath was explicitly configured and resolved with LookPath.
+		editorCmd := exec.CommandContext(ctx, editorPath, path)
 		editorCmd.Stdin = os.Stdin
 		editorCmd.Stdout = os.Stdout
 		editorCmd.Stderr = os.Stderr
