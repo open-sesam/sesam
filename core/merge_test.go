@@ -584,15 +584,11 @@ func TestAuditMergeZeroAdminDeclined(t *testing.T) {
 	theirs := cloneLog(base)
 	feed(t, theirs, alice.Signer, "alice", &DetailUserKill{User: "admin"})
 
-	_, cr, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
-	require.NoError(t, err) // never blocks: the offending kill is declined
-
-	rec, ok := findResolution(cr, OpUserKill)
-	require.True(t, ok)
-	require.Equal(t, MergeDropped, rec.Action)
-	// theirs kills the merger, which the merger-preserve rule declines first (it
-	// front-runs the generic last-admin guard). Either way the merge keeps an admin.
-	require.Contains(t, rec.Reason, "merging admin")
+	// theirs kills the merger, which the merger-preserve rule catches before the
+	// generic last-admin guard - and refuses, because git has already removed the
+	// merger's sign key from the tree.
+	_, _, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
+	require.ErrorContains(t, err, "removes the merging admin admin")
 }
 
 // TestAuditMergeRevertedTwinIsNotDropped guards the base-relative new-entry
@@ -625,9 +621,11 @@ func TestAuditMergeRevertedTwinIsNotDropped(t *testing.T) {
 		"theirs added ops and ours made no net change vs base; merge must keep ops")
 }
 
-// TestAuditMergePreservesMerger checks that theirs' kill of the merging admin is
-// dropped (not applied), so the merge completes instead of aborting mid-replay
-// when the merger re-signs the terminal record. The merger must always survive.
+// TestAuditMergePreservesMerger checks that theirs' kill of the merging admin
+// stops the merge. The entry cannot be applied (the merger re-signs everything
+// that follows), and it cannot be dropped either: git has already deleted
+// .sesam/signkeys/<merger>.age, so a merged log that still lists the merger
+// would not load.
 func TestAuditMergePreservesMerger(t *testing.T) {
 	base, admin, _ := mergeBase(t)
 
@@ -643,20 +641,9 @@ func TestAuditMergePreservesMerger(t *testing.T) {
 	theirs := cloneLog(base)
 	feed(t, theirs, carol.Signer, "carol", &DetailUserKill{User: "admin"}) // theirs removes the merger
 
-	merged, cr, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
-	require.NoError(t, err, "merge must not abort when theirs kills the merger")
-
-	state, err := VerifyChain(merged, EmptyKeyring(), nil)
-	require.NoError(t, err)
-
-	u, ok := state.UserExists("admin")
-	require.True(t, ok, "the merging admin must survive the merge")
-	require.True(t, u.IsAdmin())
-
-	rec, ok := findResolution(cr, OpUserKill)
-	require.True(t, ok)
-	require.Equal(t, MergeDropped, rec.Action)
-	require.Contains(t, rec.Reason, "merging admin")
+	_, _, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
+	require.ErrorContains(t, err, "removes the merging admin admin")
+	require.ErrorContains(t, err, "signkeys/admin.age")
 }
 
 func TestHasConflictMarkers(t *testing.T) {
@@ -866,9 +853,10 @@ func TestAuditMergeReissuedKillNotDropped(t *testing.T) {
 	require.False(t, ok, "theirs' re-issued kill of zoe must survive the base-diff")
 }
 
-// TestAuditMergePreservesMergerRename pins Finding 2: theirs renaming the merging
-// admin must be dropped, not applied - applying it would strand the terminal merge
-// entry (authored under the old name) and abort the whole merge.
+// TestAuditMergePreservesMergerRename covers theirs renaming the merging admin.
+// Applying it would strand the terminal merge entry (authored under the old
+// name); dropping it is no better, because git has meanwhile renamed
+// .sesam/signkeys/admin.age one-sidedly. The merge is refused instead.
 func TestAuditMergePreservesMergerRename(t *testing.T) {
 	base, admin, _ := mergeBase(t)
 
@@ -878,18 +866,8 @@ func TestAuditMergePreservesMergerRename(t *testing.T) {
 	theirs := cloneLog(base)
 	feed(t, theirs, admin.Signer, "admin", &DetailUserRename{OldName: "admin", NewName: "root"})
 
-	merged, cr, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
-	require.NoError(t, err, "renaming the merger must not abort the merge")
-
-	state, err := VerifyChain(merged, EmptyKeyring(), nil)
-	require.NoError(t, err)
-	u, ok := state.UserExists("admin")
-	require.True(t, ok, "the merging admin must survive")
-	require.True(t, u.IsAdmin())
-
-	rec, ok := findResolution(cr, OpUserRename)
-	require.True(t, ok)
-	require.Equal(t, MergeDropped, rec.Action)
+	_, _, err := AuditMerge(ours, theirs, base, admin.Signer, nil)
+	require.ErrorContains(t, err, "renames the merging admin admin")
 }
 
 // TestAuditMergeForgedTheirsRejected guards the merge's trust boundary: theirs
@@ -1048,28 +1026,32 @@ func mergeState(users []VerifiedUser, secrets []VerifiedSecret) *VerifiedState {
 }
 
 // The merging admin has to survive whatever theirs did to them: they are the one
-// re-signing the rebased entries, so a merge that removes or re-keys them mid-way
-// cannot complete.
+// re-signing the rebased entries. The three operations that also rewrite their
+// sign key file are fatal (git applied that side already), a demotion is not.
 func TestIsMergeAdminKill(t *testing.T) {
 	tests := []struct {
-		name  string
-		their *AuditEntrySigned
-		want  string
+		name      string
+		their     *AuditEntrySigned
+		want      string
+		wantFatal bool
 	}{
 		{
-			name:  "kill of the merger",
-			their: signed("carol", &DetailUserKill{User: "admin"}),
-			want:  "cannot merge yourself away",
+			name:      "kill of the merger",
+			their:     signed("carol", &DetailUserKill{User: "admin"}),
+			want:      "removes the merging admin",
+			wantFatal: true,
 		},
 		{
-			name:  "re-keying the merger",
-			their: signed("carol", &DetailUserRegenerateSignKey{User: "admin", NewSignPubKey: "k"}),
-			want:  "would re-key the merging admin",
+			name:      "re-keying the merger",
+			their:     signed("carol", &DetailUserRegenerateSignKey{User: "admin", NewSignPubKey: "k"}),
+			want:      "re-keys the merging admin",
+			wantFatal: true,
 		},
 		{
-			name:  "renaming the merger",
-			their: signed("carol", &DetailUserRename{OldName: "admin", NewName: "root"}),
-			want:  "would rename the merging admin",
+			name:      "renaming the merger",
+			their:     signed("carol", &DetailUserRename{OldName: "admin", NewName: "root"}),
+			want:      "renames the merging admin",
+			wantFatal: true,
 		},
 		{
 			name:  "stripping admin from the merger",
@@ -1091,7 +1073,8 @@ func TestIsMergeAdminKill(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isMergeAdminKill(tt.their, "admin")
+			got, fatal := isMergeAdminKill(tt.their, "admin")
+			require.Equal(t, tt.wantFatal, fatal)
 			if tt.want == "" {
 				require.Empty(t, got)
 				return

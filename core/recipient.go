@@ -136,20 +136,23 @@ func (rs Recipients) Strings() []string {
 	return strs
 }
 
-// Equal reports whether rs and o hold the same recipients, ignoring order. Keys
-// are unique per user, so set equality is the right notion.
+// Equal reports whether rs and o hold the same recipients, ignoring order.
+// Duplicates count: an incoming DetailUserTell is not validated for uniqueness,
+// and a "found somewhere" check would let [K1,K1] equal [K1,K2]
 func (rs Recipients) Equal(o Recipients) bool {
 	if len(rs) != len(o) {
 		return false
 	}
 
+	used := make([]bool, len(o))
 	for _, a := range rs {
 		found := false
-		for _, b := range o {
-			if a.Equal(b) {
-				found = true
-				break
+		for i, b := range o {
+			if used[i] || !a.Equal(b) {
+				continue
 			}
+			used[i], found = true, true
+			break
 		}
 
 		if !found {

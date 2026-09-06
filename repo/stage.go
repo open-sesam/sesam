@@ -117,12 +117,12 @@ func (r *Repo) buildStage() (*Stage, error) {
 		keyring,
 		audit,
 		vstate,
+		forkSuffix,
 	)
 	if err != nil {
 		_ = audit.Close()
 		return nil, fmt.Errorf("build fork secret manager: %w", err)
 	}
-	secret.SetBase(forkSuffix)
 
 	user, err := core.BuildUserManager(
 		r.root,
@@ -251,7 +251,7 @@ func (s *Stage) Commit() error {
 	// Promote: the fork's managers already hold the committed in-memory state
 	// and their fds follow the swapped-in inodes. Re-base them to the live tree
 	// and make the fork View the Repo's live View. No reopen, no replay.
-	_ = s.repo.closeState()
+	_ = s.repo.closeStateQuiet(false)
 
 	s.auditLog.SetBase("")
 	s.secret.SetBase("")
@@ -296,7 +296,7 @@ func (s *Stage) Rollback() error {
 	}
 	s.done = true
 
-	_ = s.closeState()
+	_ = s.closeStateQuiet(false)
 	s.repo.stage = nil
 
 	// Repo's live state was never touched, so nothing to restore.

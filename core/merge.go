@@ -2,6 +2,7 @@ package core
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -247,12 +248,20 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		}
 
 		orphanName := isOrphaned(their, orphanedUsers, orphanedSecrets)
+		adminKill, adminKillFatal := isMergeAdminKill(their, merger)
+		if adminKillFatal {
+			return nil, nil, fmt.Errorf(
+				"theirs %s and git already applied that to %s - the merged audit log and the sign key tree would disagree, "+
+					"leaving the repository unloadable; abort the merge and let another admin merge instead",
+				adminKill, signKeyPath("", merger),
+			)
+		}
 
 		var r resolution
 		switch revoked := authorRevoked(their, mergedState, theirsState); {
-		case isMergeAdminKill(their, merger) != "":
+		case adminKill != "":
 			// The merging admin must survive - see isMergeAdminKill.
-			r = dropWith(isMergeAdminKill(their, merger), true)
+			r = dropWith(adminKill, true)
 			r.Target = merger
 		case orphanName != "":
 			r = dropWith("references "+orphanName+", whose rename/move was dropped on merge; skipped", true)
@@ -269,7 +278,9 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 			// Re-attribute to the merging admin, then feed onto the running state
 			// via the normal path. A rejection is a conflict the rules missed.
 			r.entry.ChangedBy = merger
-			r.entry.ChangedByBeforeMerge = their.ChangedBy
+			// An entry rebased twice keeps its first author: overwriting would
+			// record the previous merger instead of who actually made the change.
+			r.entry.ChangedByBeforeMerge = cmp.Or(their.ChangedByBeforeMerge, their.ChangedBy)
 
 			if err := mergedState.FeedEntry(signer, r.entry); err != nil {
 				r.Action = MergeDropped
@@ -290,7 +301,7 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		// by the resolver itself.
 		if r.conflict {
 			r.Operation = their.Operation
-			r.ChangedByBeforeMerge = their.ChangedBy
+			r.ChangedByBeforeMerge = cmp.Or(their.ChangedByBeforeMerge, their.ChangedBy)
 			resolutions = append(resolutions, r.ConflictResolutionEntry)
 			cr.Resolutions = append(cr.Resolutions, r.ConflictResolutionEntry)
 		}
@@ -360,28 +371,33 @@ func checkDanglingGroups(state *VerifiedState) []ConflictResolutionEntry {
 	return out
 }
 
-// isMergeAdminKill checks if `merger` (i.e. us) gets demoted or killed by the change described in `their`.
-func isMergeAdminKill(their *AuditEntrySigned, merger string) string {
+// isMergeAdminKill checks if `merger` (i.e. us) gets demoted or killed by the
+// change described in `their`. The bool marks the operations that also rewrote
+// .sesam/signkeys/<merger>.age on their branch: git applies such a one-sided
+// change on its own, so dropping only the log entry would leave the log and the
+// key tree disagreeing - those have to stop the merge instead of being kept.
+func isMergeAdminKill(their *AuditEntrySigned, merger string) (string, bool) {
 	if entryUserTarget(their) != merger {
-		return ""
+		return "", false
 	}
 
 	switch their.Operation {
 	case OpUserKill:
-		return "would remove the merging admin " + merger + "; kept (cannot merge yourself away)"
+		return "removes the merging admin " + merger, true
 	case OpUserRegenerateSignKey:
-		return "would re-key the merging admin " + merger + " mid-merge; kept ours"
+		return "re-keys the merging admin " + merger, true
 	case OpUserRename:
-		return "would rename the merging admin " + merger + " mid-merge; kept ours"
+		return "renames the merging admin " + merger, true
 	case OpUserChangeGroups:
 		// Only a problem when it takes admin away; other group edits are fine.
+		// This one leaves the sign key alone, so keeping ours is consistent.
 		if d, err := parseDetail[DetailUserChangeGroups](their); err == nil &&
 			!slices.Contains(d.NewGroups, "admin") {
-			return "would strip admin from the merging user " + merger + "; kept ours"
+			return "would strip admin from the merging user " + merger + "; kept ours", false
 		}
 	}
 
-	return ""
+	return "", false
 }
 
 // authorRevoked reports why theirs' author may no longer perform the entry's
@@ -482,9 +498,12 @@ func recordOrphanedRename(their *AuditEntrySigned, merged *VerifiedState, orphan
 		if err != nil {
 			return
 		}
-		_, src := merged.UserExists(d.OldName)
+		// Whatever the reason the rename was dropped, theirs' later entries still
+		// address the user by NewName. If something else already sits there it is
+		// a different user, so those entries must not land on it - regardless of
+		// whether the rename source survived on our side.
 		_, dst := merged.UserExists(d.NewName)
-		if orphanedUsers[d.OldName] || (src && dst) {
+		if orphanedUsers[d.OldName] || dst {
 			orphanedUsers[d.NewName] = true
 		}
 	case OpSecretMove:
@@ -492,9 +511,8 @@ func recordOrphanedRename(their *AuditEntrySigned, merged *VerifiedState, orphan
 		if err != nil {
 			return
 		}
-		_, src := merged.SecretExists(d.OldRevealedPath)
 		_, dst := merged.SecretExists(d.NewRevealedPath)
-		if orphanedSecrets[d.OldRevealedPath] || (src && dst) {
+		if orphanedSecrets[d.OldRevealedPath] || dst {
 			orphanedSecrets[d.NewRevealedPath] = true
 		}
 	}
@@ -1071,10 +1089,10 @@ func stringSetEqual(a, b []string) bool {
 	return maps.Equal(am, bm)
 }
 
-// conflictMarkerMin is the minimum run length of a git conflict marker. git's
-// default marker size is 7; a custom size (git's %L) is always >= 7, so requiring
-// at least 7 never misses a real marker.
-const conflictMarkerMin = 7
+// ConflictMarkerMin is the minimum run length of a git conflict marker. git's
+// default marker size is 7, but a `conflict-marker-size` attribute may set %L
+// below that, we therefore use that as minimum when calling git ourselves.
+const ConflictMarkerMin = 7
 
 // hasConflictMarkers reports whether r contains an unresolved git conflict: both
 // a start line ("<<<<<<< …") and an end line (">>>>>>> …"). Requiring the pair
@@ -1118,7 +1136,7 @@ func hasConflictMarkers(r io.Reader) (bool, error) {
 	}
 }
 
-// isMarkerLine reports whether line begins with >= conflictMarkerMin copies of c
+// isMarkerLine reports whether line begins with >= ConflictMarkerMin copies of c
 // followed by a space or end of line - i.e. "<<<<<<< label" or ">>>>>>>". `line`
 // may be the head of a longer line; a run filling all of it then counts as a
 // marker, which is the fail-closed direction for a gate that refuses to seal.
@@ -1128,7 +1146,7 @@ func isMarkerLine(line []byte, c byte) bool {
 		n++
 	}
 
-	if n < conflictMarkerMin {
+	if n < ConflictMarkerMin {
 		return false
 	}
 

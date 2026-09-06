@@ -56,11 +56,6 @@ type View struct {
 	secret   *core.SecretManager
 	user     *core.UserManager
 
-	// merging records whether a git merge was in progress at load time. During a
-	// merge the on-disk state is intentionally unsealed until the finalize commit,
-	// so we verify no-disk and suppress the pending-seal nudge.
-	merging bool
-
 	config *sesamConf.Config
 }
 
@@ -86,6 +81,10 @@ func (v *View) cfg() (*sesamConf.Config, error) {
 // closeState closes the audit log and verified state. The root and lock are
 // shared/owned by the Repo and are not touched here.
 func (v *View) closeState() error {
+	return v.closeStateQuiet(true)
+}
+
+func (v *View) closeStateQuiet(warnPendingSeal bool) error {
 	var errs []error
 	if v.auditLog != nil {
 		if err := v.auditLog.Close(); err != nil {
@@ -97,7 +96,7 @@ func (v *View) closeState() error {
 		// A pending seal means unsealed changes sit on disk; nudge the user to
 		// seal before committing. Suppressed mid-merge, where the seal is
 		// intentionally deferred to the finalize pre-commit.
-		if srs := v.vstate.SealRequiredSeqID; srs > 0 && !v.merging {
+		if srs := v.vstate.SealRequiredSeqID; warnPendingSeal && srs > 0 && !v.opts.InMerge {
 			slog.Warn(
 				"a seal is pending - please run `sesam seal` before committing!",
 				slog.Uint64("seq_id", srs),
@@ -536,7 +535,7 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 			continue
 		}
 
-		if conflicted[revealedPath] || binaryConflicts[revealedPath] {
+		if conflicted[revealedPath] {
 			add(SecretStateConflicted)
 			continue
 		}

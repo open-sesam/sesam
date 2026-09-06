@@ -71,6 +71,7 @@ func (f *historyFixture) tellUser(t *testing.T, newUser *testUser, groups []stri
 
 	secMgr, err := BuildSecretManager(
 		f.SesamDir, f.AuditLog.root, Identities{f.Admin.Identity}, f.Admin.Signer, kr, f.AuditLog, state,
+		"",
 	)
 	require.NoError(t, err)
 

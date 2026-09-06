@@ -320,7 +320,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 	r.vstate = vstate
 
-	r.secret, err = core.BuildSecretManager(resolvedDir, root, identities, signer, r.keyring, auditLog, vstate)
+	r.secret, err = core.BuildSecretManager(resolvedDir, root, identities, signer, r.keyring, auditLog, vstate, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to build secret manager: %w", err)
 	}
@@ -481,10 +481,8 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	r.auditLog = auditLog
 
 	// Disable a couple checks if we're mid-merge.
-	r.merging = opts.InMerge
-
 	verifyFn := core.Verify
-	if opts.VerifyMode == VerifyModeNoDisk || r.merging {
+	if opts.VerifyMode == VerifyModeNoDisk || opts.InMerge {
 		verifyFn = core.VerifyChain
 	}
 
@@ -505,7 +503,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 		return nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
 	}
 
-	r.secret, err = core.BuildSecretManager(resolvedDir, root, identities, signer, r.keyring, auditLog, vstate)
+	r.secret, err = core.BuildSecretManager(resolvedDir, root, identities, signer, r.keyring, auditLog, vstate, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to build secret manager: %w", err)
 	}

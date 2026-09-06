@@ -60,8 +60,11 @@ func auditLogHistory(sesamDir string, repo *git.Repository, ids Identities, from
 	if err != nil {
 		return nil, fmt.Errorf("read init tree at %s: %w", initCommitRev, err)
 	}
-	if _, err := initTree.File(auditPathRel); errors.Is(err, object.ErrFileNotFound) {
+	switch _, err := initTree.File(auditPathRel); {
+	case errors.Is(err, object.ErrFileNotFound):
 		return func(yield func(*auditLogSnapshot, error) bool) {}, nil
+	case err != nil:
+		return nil, fmt.Errorf("read audit log at init commit %s: %w", initCommitRev, err)
 	}
 
 	return func(yield func(*auditLogSnapshot, error) bool) {

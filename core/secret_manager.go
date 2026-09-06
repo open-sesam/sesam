@@ -52,7 +52,10 @@ func (sm *SecretManager) SetBase(base string) { sm.base = base }
 
 // BuildSecretManager uses the passed facilities to build a new SecretManager.
 // root confines all file I/O to the repository; sesamDir is its absolute path,
-// kept for the directory swap and git interop.
+// kept for the directory swap and git interop. `base` is the sesam-internal
+// prefix the manager works under ("" for the live tree, a stage's fork dir
+// otherwise) - it has to be known here because the scratch dir is scrubbed
+// below, and a fork must not empty the live one.
 func BuildSecretManager(
 	sesamDir string,
 	root *os.Root,
@@ -61,6 +64,7 @@ func BuildSecretManager(
 	keyring Keyring,
 	log *AuditLog,
 	state *VerifiedState,
+	base string,
 ) (*SecretManager, error) {
 	mgr := &SecretManager{
 		SesamDir:   sesamDir,
@@ -70,10 +74,11 @@ func BuildSecretManager(
 		Keyring:    keyring,
 		AuditLog:   log,
 		State:      state,
+		base:       base,
 	}
 
 	// Clear tmp dir before continuing:
-	tmpDir := SesamTmpDir()
+	tmpDir := sesamTmpDir(base)
 	_ = root.RemoveAll(tmpDir)
 	_ = root.MkdirAll(tmpDir, 0o700)
 

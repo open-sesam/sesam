@@ -17,7 +17,17 @@ import (
 // non-sesam repo.
 func silentWithRepo(verifyMode repo.VerifyMode, action RepoAction) cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) (err error) {
-		sesamDir := cmd.String("sesam-dir")
+		// Resolve up front: repo.Load/IsInitialized walk up to the nearest .sesam,
+		// while the git helpers below only take Abs() of what they are given. Run
+		// from a subdirectory the two would name different trees, and the git
+		// pathspec would then match nothing.
+		sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+		if err != nil {
+			slog.Warn("sesam hook: failed to resolve sesam dir", slog.Any("err", err))
+			// do not abort the git operation!
+			return nil
+		}
+
 		exists, err := repo.IsInitialized(sesamDir)
 		if err != nil {
 			slog.Warn(
@@ -63,7 +73,8 @@ func silentWithRepo(verifyMode repo.VerifyMode, action RepoAction) cli.ActionFun
 func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 	return silentWithRepo(repo.VerifyModeNoDisk, func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		// If we're in a merge, then we need to straighten a few things before we can really commit.
-		kind := mergeState(cmd.String("sesam-dir"))
+		sesamDir := r.SesamDir()
+		kind := mergeState(sesamDir)
 		merging := kind.InProgress()
 
 		// Refuse to seal markers into the ciphertext - git can't see them, since
@@ -84,7 +95,7 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 
 			// Refresh the plaintext of objects the merge changed, or the seal below
 			// writes our stale version back over them and reverts the merge.
-			merged, err := stagedSecretPaths(cmd.String("sesam-dir"))
+			merged, err := stagedSecretPaths(sesamDir)
 			if err != nil {
 				return err
 			}
@@ -147,6 +158,14 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 	// no-disk verify: a checkout may have changed sealed objects on disk, so the
 	// on-disk root hash is expected to differ from the log until we reveal.
 	return silentWithRepo(repo.VerifyModeNoDisk, func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+		// Mid-merge the revealed files hold merged content that is not sealed yet,
+		// so neither branch below may run: both reveal from the objects and would
+		// throw the resolution away. `git checkout -b` is allowed with an unmerged
+		// index, so this has to gate the branch path too.
+		if mergeState(r.SesamDir()).InProgress() {
+			return nil
+		}
+
 		if branchCheckout {
 			// Branch switch/clone: the objects and audit log arrived together and
 			// are consistent. Aggressively drop stale plaintext under .sesam
@@ -158,15 +177,6 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 			if err := r.Reveal(false); err != nil {
 				slog.Warn("failed to reveal secrets after checkout", slog.Any("err", err))
 			}
-			return nil
-		}
-
-		// If we're in mid merge we would automatically re-reveal all secrets,
-		// even if they have merged content that was just not sealed yet.
-		// As a safety measure we disable the post-checkout in this case.
-		// Checking out secrets (or other files) will still work on normal git-level,
-		// but it's probably not something that is being done all the time.
-		if mergeState(cmd.String("sesam-dir")).InProgress() {
 			return nil
 		}
 
@@ -197,14 +207,16 @@ func HandleHookPostMerge(ctx context.Context, cmd *cli.Command) error {
 	squash := cmd.Args().Get(0) == "1"
 
 	return silentWithRepo(repo.VerifyModeNoDisk, func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-		sesamDir := cmd.String("sesam-dir")
+		sesamDir := r.SesamDir()
 
 		// Only git knows which objects the merge brought in. Revealing everything
 		// instead would overwrite plaintext edits the user has not sealed yet.
-		paths, err := mergedSecretPaths(sesamDir)
+		listPaths := mergedSecretPaths
 		if squash {
-			paths, err = stagedSecretPaths(sesamDir)
+			listPaths = stagedSecretPaths
 		}
+
+		paths, err := listPaths(sesamDir)
 		if err != nil {
 			slog.Warn("failed to list merged secrets", slog.Any("err", err))
 			return nil

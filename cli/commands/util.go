@@ -31,8 +31,13 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 			return err
 		}
 
+		sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+		if err != nil {
+			return err
+		}
+
 		r, err := repo.Load(
-			cmd.String("sesam-dir"),
+			sesamDir,
 			cmd.StringSlice("identity"),
 			repo.RepoOpts{
 				Interactive:     true,
@@ -40,7 +45,7 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 				AskpassRequired: askpassRequired(),
 				LockTimeout:     cmd.Duration("lock-timeout"),
 				VerifyMode:      verifyMode,
-				InMerge:         mergeState(cmd.String("sesam-dir")).InProgress(),
+				InMerge:         mergeState(sesamDir).InProgress(),
 			},
 		)
 		if err != nil {

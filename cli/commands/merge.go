@@ -96,6 +96,12 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
+	// %A is still ours in both unsealed cases, so the object has to be sealed
+	// before the operation is finished. Only an operation that ends in `git
+	// commit` runs the pre-commit hook that would do it for them.
+	kind := mergeState(drv.sesamDir)
+	unsealed := res.Seal != repo.MergeSealDone && !kind.RunsPreCommit()
+
 	switch res.Seal {
 	case repo.MergeSealDone:
 		fmt.Fprintf(os.Stderr, "sesam: automatically merging revealed file %s; no conflicts, resealed\n", revealedPath)
@@ -103,21 +109,42 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 		fmt.Fprintf(
 			os.Stderr,
 			"sesam: automatically merging revealed file %s; no conflicts, but access to it changed on both sides\n"+
-				"sesam: it will be sealed with the merged recipients when you commit\n",
-			revealedPath,
+				"sesam: %s\n",
+			revealedPath, sealAdvice(kind, "it will be sealed with the merged recipients when you commit"),
 		)
 	default:
-		// %A is still ours, so someone has to seal before committing. A plain merge
-		// has the finalize hook for that, a rebase or cherry-pick has nothing.
 		fmt.Fprintf(
 			os.Stderr,
 			"sesam: automatically merging revealed file %s; no conflicts, but it could not be resealed\n"+
-				"sesam: run `sesam seal` before finishing, or the merged content will not be committed\n",
-			revealedPath,
+				"sesam: %s\n",
+			revealedPath, sealAdvice(kind, "run `sesam seal` before finishing, or the merged content will not be committed"),
 		)
 	}
 
+	// Nothing downstream will seal this one. Report it as a conflict rather than
+	// exiting 0: git would otherwise take %A - the pre-merge object - as the
+	// result and the merged content would be silently dropped.
+	if unsealed {
+		return &ExitCodeError{err: nil, print: false, code: 1}
+	}
+
 	return nil
+}
+
+// sealAdvice tells the user how the pending seal gets done. `whenHooked` applies
+// when the finalize hook will run; otherwise the object is left conflicted and
+// the seal has to be run by hand before the operation can continue.
+func sealAdvice(kind mergeKind, whenHooked string) string {
+	if kind.RunsPreCommit() {
+		return whenHooked
+	}
+
+	advice := "run `sesam seal`, then `git add` the object"
+	if cont := kind.ContinueCmd(); cont != "" {
+		advice += " and `" + cont + "` (it runs no hook that could seal for you)"
+	}
+
+	return advice
 }
 
 func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {

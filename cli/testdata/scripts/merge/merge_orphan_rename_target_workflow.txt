@@ -1,0 +1,31 @@
+# A rename theirs made is dropped because its source is gone on our side. If the
+# name it renamed TO is occupied by an unrelated user of ours, theirs' follow-up
+# entries must not land on that user - they mean a different person.
+
+sesam-repo
+
+exec sesam tell --user alice --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'add alice'
+
+# OURS: alice is killed and an unrelated user that happens to be called bob joins.
+exec git checkout -b ours
+exec sesam kill --user alice
+exec sesam tell --user bob --recipient $CAROL_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'ours: alice out, unrelated bob in'
+
+# THEIRS: alice is renamed to bob and made an admin.
+exec git checkout -b theirs ours~1
+exec sesam user rename alice bob
+exec sesam user change-groups --user bob --group-add admin
+exec git add -A
+exec git commit -m 'theirs: alice -> bob, bob += admin'
+
+exec git checkout ours
+! exec git merge theirs
+
+# The rename is dropped, and the group change that rides on it is skipped rather
+# than making OUR bob an admin.
+stderr 'rename source alice gone on our side'
+stderr 'references bob, whose rename/move was dropped on merge'

@@ -58,6 +58,14 @@ func (k mergeKind) InProgress() bool    { return k != mergeKindNone }
 func (k mergeKind) ContinueCmd() string { return mergeKinds[k].cont }
 func (k mergeKind) AbortCmd() string    { return mergeKinds[k].abort }
 
+// RunsPreCommit reports whether this operation ends in a `git commit`, the only
+// thing that fires the pre-commit hook - and with it everything the drivers
+// defer to the finalize. `git rebase|cherry-pick|revert --continue` commit
+// without running any hook, so there the user has to seal by hand.
+func (k mergeKind) RunsPreCommit() bool {
+	return mergeKinds[k].cont == "git commit"
+}
+
 // mergeState reports which merge-like operation is in progress. Refs are checked
 // before the index, since a rebase or cherry-pick also leaves unmerged entries.
 func mergeState(sesamDir string) mergeKind {
@@ -282,6 +290,9 @@ func gitOutputRaw(dir string, args ...string) (string, error) {
 
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
+	// Without this git's diagnostics go to /dev/null and callers can only report
+	// "exit status N". Our probes pass -q, so a healthy repo stays quiet.
+	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return "", err
 	}
@@ -307,7 +318,13 @@ func rebasePickedCommit(gitDir string) string {
 		case 1:
 			return fields[0] // a bare sha, as in stopped-sha
 		default:
-			return fields[1] // "<command> <sha> # subject"
+			// "<command> <sha> # subject", but `fixup -C <sha>` and (with
+			// --rebase-merges) `merge -C <sha> <label>` put a flag in the middle.
+			if strings.HasPrefix(fields[1], "-") && len(fields) > 2 {
+				return fields[2]
+			}
+
+			return fields[1]
 		}
 	}
 

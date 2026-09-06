@@ -26,6 +26,7 @@ func buildTestUserManager(t *testing.T) (*UserManager, *testUser) {
 	secMgr, err := BuildSecretManager(
 		sesamDir,
 		testRoot(t, sesamDir), Identities{admin.Identity}, admin.Signer, kr, al, state,
+		"",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +52,7 @@ func TestBuildUserManagerUnknownSigner(t *testing.T) {
 	secMgr, err := BuildSecretManager(
 		sesamDir,
 		testRoot(t, sesamDir), Identities{admin.Identity}, admin.Signer, kr, al, state,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -92,6 +94,7 @@ func TestUserTellNonAdmin(t *testing.T) {
 	secMgr, err := BuildSecretManager(
 		sesamDir,
 		testRoot(t, sesamDir), Identities{bob.Identity}, bob.Signer, kr, al, state,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -155,6 +158,7 @@ func TestUserKillNonAdmin(t *testing.T) {
 	secMgr, err := BuildSecretManager(
 		sesamDir,
 		testRoot(t, sesamDir), Identities{bob.Identity}, bob.Signer, kr, al, state,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -182,6 +186,7 @@ func TestTellThenSealGivesNewRecipientAccess(t *testing.T) {
 	secMgr, err := BuildSecretManager(
 		sesamDir,
 		testRoot(t, sesamDir), Identities{admin.Identity}, admin.Signer, kr, al, state,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -233,6 +238,7 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 	secMgr, err := BuildSecretManager(
 		sesamDir,
 		testRoot(t, sesamDir), Identities{admin.Identity}, admin.Signer, kr, al, state,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -290,6 +296,7 @@ func nonAdminUserManager(t *testing.T) *UserManager {
 	secMgr, err := BuildSecretManager(
 		sesamDir,
 		testRoot(t, sesamDir), Identities{bob.Identity}, bob.Signer, kr, al, state,
+		"",
 	)
 	require.NoError(t, err)
 

@@ -151,7 +151,7 @@ func objectPath(base, revealedPath string) string {
 // not a sealed object, which is how callers tell a stray file from one of ours.
 func RevealedPath(objectPath string) (string, bool) {
 	rel, err := filepath.Rel(SesamObjectsDir(), filepath.Clean(objectPath))
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", false
 	}
 

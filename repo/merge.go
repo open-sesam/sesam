@@ -29,7 +29,7 @@ func runGitMerge(ctx context.Context, revealedPath, ourPath, theirPath, originPa
 		"git",
 		"merge-file",
 		"--stdout",
-		"--marker-size", strconv.Itoa(conflictMarkerSize),
+		"--marker-size", strconv.Itoa(max(conflictMarkerSize, core.ConflictMarkerMin)),
 		"-L", "ours/"+revealedPath,
 		"-L", "origin/"+revealedPath,
 		"-L", "theirs/"+revealedPath,
@@ -98,18 +98,20 @@ var errBinaryMerge = errors.New("cannot line-merge (binary content)")
 
 // decryptBaseToBuf decrypts the merge base (%O), tolerating an empty file: for an
 // add/add of the same path there is no common ancestor, so git hands us a 0-byte base.
-func decryptBaseToBuf(path string, ids []age.Identity) (*bytes.Buffer, error) {
+func decryptBaseToBuf(path, revealedPath string, ids []age.Identity) (*bytes.Buffer, error) {
 	if info, err := os.Stat(path); err == nil && info.Size() == 0 {
 		return &bytes.Buffer{}, nil
 	}
 
-	buf, _, err := decryptSecretToBuf(path, ids)
+	buf, _, err := decryptSecretToBuf(path, revealedPath, ids)
 	return buf, err
 }
 
 // decryptSecretToBuf also returns the footer's recipients hash, which is how the
-// caller notices that the two sides were sealed for different people.
-func decryptSecretToBuf(path string, ids []age.Identity) (*bytes.Buffer, string, error) {
+// caller notices that the two sides were sealed for different people. The
+// footer's own path is checked against revealedPath: an object swapped between
+// two paths would otherwise be line-merged into the wrong secret.
+func decryptSecretToBuf(path, revealedPath string, ids []age.Identity) (*bytes.Buffer, string, error) {
 	var buf bytes.Buffer
 
 	// we're opening git paths here, so regular ShowSecret won't work.
@@ -124,6 +126,10 @@ func decryptSecretToBuf(path string, ids []age.Identity) (*bytes.Buffer, string,
 	_, _, footer, err := core.RevealStream(fd, &buf, ids)
 	if err != nil {
 		return nil, "", fmt.Errorf("decrypt %s: %w", path, err)
+	}
+
+	if revealedPath != "" && footer.RevealedPath != revealedPath {
+		return nil, "", fmt.Errorf("object for %s is sealed for %s", revealedPath, footer.RevealedPath)
 	}
 
 	return &buf, footer.RecipientsHash, nil
@@ -266,11 +272,11 @@ func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, reveal
 
 	// Decrypt all three sides up front; the plaintext feeds the text merge and, on
 	// a binary refusal, the .ours/.theirs side files.
-	originBuf, err := decryptBaseToBuf(originPath, ageIds)
+	originBuf, err := decryptBaseToBuf(originPath, revealedPath, ageIds)
 	if err != nil {
 		return res, fmt.Errorf("decrypt origin side of %s: %w", revealedPath, err)
 	}
-	ourBuf, ourRecps, err := decryptSecretToBuf(ourPath, ageIds)
+	ourBuf, ourRecps, err := decryptSecretToBuf(ourPath, revealedPath, ageIds)
 	if err != nil {
 		return res, fmt.Errorf("decrypt ours side of %s: %w", revealedPath, err)
 	}
@@ -295,28 +301,32 @@ func MergeSecret(ctx context.Context, root *os.Root, ids core.Identities, reveal
 		return rel, filepath.Join(root.Name(), rel), nil
 	}
 
+	// The decrypted sides are only needed for the merge itself; each cleanup is
+	// deferred the moment its file exists, so a failure while staging the next
+	// one cannot leave plaintext behind in .sesam/tmp.
 	originRel, originAbs, err := stageBuf("origin", originBuf)
+	if originRel != "" {
+		defer func() { _ = root.Remove(originRel) }()
+	}
 	if err != nil {
 		return res, err
 	}
 
 	ourRel, ourAbs, err := stageBuf("ours", ourBuf)
+	if ourRel != "" {
+		defer func() { _ = root.Remove(ourRel) }()
+	}
 	if err != nil {
 		return res, err
 	}
 
 	theirRel, theirAbs, err := stageBuf("theirs", theirBuf)
+	if theirRel != "" {
+		defer func() { _ = root.Remove(theirRel) }()
+	}
 	if err != nil {
 		return res, err
 	}
-
-	// The decrypted sides are only needed for the merge itself; drop the
-	// plaintext copies afterwards, whatever the outcome.
-	defer func() {
-		_ = root.Remove(originRel)
-		_ = root.Remove(ourRel)
-		_ = root.Remove(theirRel)
-	}()
 
 	mergedReader, conflicts, err := runGitMerge(
 		ctx,
@@ -390,7 +400,7 @@ func sealMergedSecret(root *os.Root, ids core.Identities, revealedPath, destPath
 	defer func() { _ = auditLog.Close() }()
 
 	kr := core.EmptyKeyring()
-	state, err := core.VerifyChain(auditLog, kr, nil)
+	state, err := core.VerifyChain(auditLog, kr, core.NewNonInteractivePluginUI())
 	if err != nil {
 		return fmt.Errorf("verify audit log: %w", err)
 	}
@@ -405,13 +415,20 @@ func sealMergedSecret(root *os.Root, ids core.Identities, revealedPath, destPath
 		return err
 	}
 
-	//nolint:gosec // git hands us the %A blob temp path to write.
-	fd, err := os.OpenFile(destPath, os.O_RDWR|os.O_TRUNC, 0o600)
+	// Seal into a pending file and only replace %A once it is complete: a failed
+	// seal is reported as a warning with the driver still exiting 0, so a
+	// half-written %A would be committed as the merge result. destPath is git's
+	// temp file, outside our os.Root, hence no WithRoot here.
+	fd, err := renameio.NewPendingFile(
+		destPath,
+		renameio.WithTempDir(filepath.Dir(destPath)),
+		renameio.WithPermissions(0o600),
+	)
 	if err != nil {
-		return fmt.Errorf("open %s: %w", destPath, err)
+		return fmt.Errorf("create pending file for %s: %w", destPath, err)
 	}
 
-	defer func() { _ = fd.Close() }()
+	defer func() { _ = fd.Cleanup() }()
 
 	if _, err := core.SealStream(
 		bytes.NewReader(data),
@@ -425,7 +442,7 @@ func sealMergedSecret(root *os.Root, ids core.Identities, revealedPath, destPath
 		return fmt.Errorf("seal %s: %w", revealedPath, err)
 	}
 
-	return fd.Close()
+	return fd.CloseAtomicallyReplace()
 }
 
 // writeRevealedFile atomically writes data to a revealed (root-relative) path.
@@ -471,7 +488,7 @@ func resolveMergeSigner(root *os.Root, ids core.Identities, ourLog *core.AuditLo
 	}
 
 	kr := core.EmptyKeyring()
-	if _, err := core.VerifyChain(ourLog, kr, nil); err != nil {
+	if _, err := core.VerifyChain(ourLog, kr, core.NewNonInteractivePluginUI()); err != nil {
 		return nil, fmt.Errorf("verify ours for merger resolution: %w", err)
 	}
 
@@ -533,7 +550,9 @@ func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourP
 		theirAuditLog,
 		originAuditLog,
 		signer,
-		nil, // no interactive plugin UI inside the merge driver (no TTY)
+		// The driver has no TTY, so plugins must never prompt - but they still
+		// have to be able to parse a plugin recipient (nil refuses outright).
+		core.NewNonInteractivePluginUI(),
 	)
 	if err != nil {
 		return nil, err
@@ -541,7 +560,7 @@ func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourP
 
 	// verify the log is correct before writing it back.
 	kr := core.EmptyKeyring()
-	if _, err := core.VerifyChain(mergedAuditLog, kr, nil); err != nil {
+	if _, err := core.VerifyChain(mergedAuditLog, kr, core.NewNonInteractivePluginUI()); err != nil {
 		return nil, fmt.Errorf("verify merged audit log: %w", err)
 	}
 
