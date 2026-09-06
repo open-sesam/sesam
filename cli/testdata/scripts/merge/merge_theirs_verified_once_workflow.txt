@@ -45,8 +45,11 @@ stdout '^theirs$'
 # It really is the incoming branch's state: it knows the secrets, and it is
 # readable as plain json.
 exec sh -c 'cat .sesam/tmp/theirs-vstate-*.json'
-stdout '"RevealedPath":"a"'
+stdout '"revealed_path":"a"'
 stdout '"name":"admin"'
+stdout '"verified_until":'
+# Same snake_case contract as the --json commands, see json_output_workflow.
+! stdout '"[A-Za-z_]*[A-Z][A-Za-z_]*":'
 
 
 # Finishing the merge still works and leaves a repo that verifies.

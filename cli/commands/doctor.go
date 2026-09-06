@@ -60,6 +60,9 @@ type doctorEnv struct {
 	lockTimeout   time.Duration
 	version       string // full version banner, as shown to the user
 	versionShort  string // bare semver, e.g. "0.1.2" - for the update check
+
+	clipboardCopyCmd  string
+	clipboardPasteCmd string
 }
 
 type genericCheck struct {
@@ -103,7 +106,7 @@ func buildCategories(ctx context.Context, env doctorEnv) []doctorCategory {
 		{"System", []DoctorCheck{osCheck()}},
 		{"Installation", []DoctorCheck{sesamInPathCheck(), versionCheck(ctx, env)}},
 		{"Identity", []DoctorCheck{identityCheck(env)}},
-		{"Environment", []DoctorCheck{askpassCheck(), editorCheck(), completionCheck()}},
+		{"Environment", []DoctorCheck{askpassCheck(), editorCheck(), clipboardCheck(ctx, env), completionCheck()}},
 		{"Git", []DoctorCheck{gitRepoCheck(), gitCheck(ctx, env)}},
 		{"Repository", []DoctorCheck{sesamDirCheck(env)}},
 	}
@@ -440,6 +443,24 @@ func editorCheck() DoctorCheck {
 			"neither EDITOR nor VISUAL is set",
 			"export EDITOR=<your editor> so `sesam edit` knows what to launch",
 		)
+	}}
+}
+
+func clipboardCheck(ctx context.Context, env doctorEnv) DoctorCheck {
+	return &genericCheck{name: "clipboard", run: func() DoctorDiagnosis {
+		// newClipboardBackend is the same selection `sesam show --clip` runs
+		// through, so this reports what that command would actually do - and
+		// the "what to install" text comes from the clipboard library itself.
+		cb, err := newClipboardBackend(ctx, env.clipboardCopyCmd, env.clipboardPasteCmd)
+		if err != nil {
+			return docWarn("`sesam show --clip` has no way to reach the clipboard", err.Error())
+		}
+
+		if _, ok := cb.(commandClipboard); ok {
+			return docHealthy(fmt.Sprintf("using --%s and --%s", flagClipboardCopyCmd, flagClipboardPasteCmd))
+		}
+
+		return docHealthy("clipboard helper found")
 	}}
 }
 
@@ -917,6 +938,9 @@ func HandleDoctor(ctx context.Context, cmd *cli.Command) error {
 		lockTimeout:   cmd.Duration("lock-timeout"),
 		version:       version,
 		versionShort:  firstField(version),
+
+		clipboardCopyCmd:  cmd.String(flagClipboardCopyCmd),
+		clipboardPasteCmd: cmd.String(flagClipboardPasteCmd),
 	})
 }
 

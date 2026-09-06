@@ -564,7 +564,7 @@ func (r *Repo) Close() error {
 
 type SecretInfo struct {
 	core.VerifiedSecret
-	Config sesamConf.Secret
+	Config sesamConf.Secret `json:"config"`
 }
 
 // VerifyOptions selects which verification checks Verify should run.

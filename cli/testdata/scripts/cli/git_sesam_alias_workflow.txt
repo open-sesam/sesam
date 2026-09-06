@@ -30,4 +30,4 @@ stderr 'Integrity: ok$'
 
 # Extra flags pass through the alias intact.
 exec git sesam ls --json
-stdout '"RevealedPath": "README.md"'
+stdout '"revealed_path": "README.md"'

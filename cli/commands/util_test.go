@@ -2,10 +2,17 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/core"
+	"opensesam.org/sesam/repo"
 )
 
 func TestResolveGroups(t *testing.T) {
@@ -69,4 +76,106 @@ func TestAskpassRequired(t *testing.T) {
 
 	t.Setenv("SESAM_ASKPASS_REQUIRED", "prefer")
 	require.Equal(t, "prefer", askpassRequired())
+}
+
+// snakeCase matches the field naming every `--json` payload must use.
+var snakeCase = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)
+
+// jsonSurrogates maps types with a custom MarshalJSON to the struct they
+// actually emit, so the walk can keep checking through them.
+var jsonSurrogates = map[reflect.Type]reflect.Type{
+	reflect.TypeFor[core.Recipient](): reflect.TypeFor[core.UserPubKey](),
+}
+
+// TestJSONOutputIsSnakeCase walks every type reachable from a `--json` code
+// path and fails on any field that does not serialize as snake_case. Adding a
+// PascalCase field anywhere below these roots breaks the machine-readable
+// output contract, which is easy to do by accident since Go's default is the
+// field name itself.
+func TestJSONOutputIsSnakeCase(t *testing.T) {
+	roots := []struct {
+		command string
+		typ     reflect.Type
+	}{
+		{command: "ls --json", typ: reflect.TypeFor[[]repo.SecretInfo]()},
+		{command: "user list --json", typ: reflect.TypeFor[[]repo.UserInfo]()},
+		{command: "id --json", typ: reflect.TypeFor[repo.UserInfo]()},
+		{command: "verify --json", typ: reflect.TypeFor[repo.VerifyReport]()},
+		{command: "status --json", typ: reflect.TypeFor[repo.Status]()},
+		{command: "log --json", typ: reflect.TypeFor[core.AuditEntrySigned]()},
+
+		// Not a --json flag, but the same contract: the merge driver parks the
+		// incoming branch's state as json under .sesam/tmp for its sibling runs.
+		{command: "merge theirs-vstate", typ: reflect.TypeFor[core.VerifiedState]()},
+	}
+
+	for _, root := range roots {
+		t.Run(root.command, func(t *testing.T) {
+			for _, bad := range findNonSnakeCaseFields(root.typ, map[reflect.Type]bool{}, "") {
+				t.Errorf("%s serializes %s; use a snake_case json tag", root.command, bad)
+			}
+		})
+	}
+}
+
+// findNonSnakeCaseFields returns a "path.Field" description for every field
+// below typ whose JSON key is not snake_case.
+func findNonSnakeCaseFields(typ reflect.Type, seen map[reflect.Type]bool, path string) []string {
+	for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice || typ.Kind() == reflect.Array {
+		typ = typ.Elem()
+	}
+	if typ.Kind() == reflect.Map {
+		typ = typ.Elem()
+	}
+
+	if surrogate, ok := jsonSurrogates[typ]; ok {
+		typ = surrogate
+	} else if typ.Kind() != reflect.Struct ||
+		typ.Implements(reflect.TypeFor[json.Marshaler]()) ||
+		reflect.PointerTo(typ).Implements(reflect.TypeFor[json.Marshaler]()) {
+		// Anything with its own marshaller (time.Time, json.RawMessage,
+		// SecretState) decides its own shape; treat it as a leaf.
+		return nil
+	}
+
+	if seen[typ] {
+		return nil
+	}
+	seen[typ] = true
+
+	var bad []string
+	for field := range typ.NumField() {
+		f := typ.Field(field)
+		if !f.IsExported() {
+			continue
+		}
+
+		tag, hasTag := f.Tag.Lookup("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "-" {
+			continue
+		}
+
+		// An embedded struct without a name is inlined into the parent object.
+		if f.Anonymous && name == "" {
+			bad = append(bad, findNonSnakeCaseFields(f.Type, seen, path)...)
+			continue
+		}
+
+		if name == "" {
+			name = f.Name
+		}
+
+		if !snakeCase.MatchString(name) {
+			missing := ""
+			if !hasTag {
+				missing = " (no json tag)"
+			}
+			bad = append(bad, fmt.Sprintf("%s%s as %q%s", path, f.Name, name, missing))
+		}
+
+		bad = append(bad, findNonSnakeCaseFields(f.Type, seen, path+f.Name+".")...)
+	}
+
+	return bad
 }

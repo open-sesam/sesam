@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 
 	"github.com/urfave/cli/v3"
@@ -45,10 +46,20 @@ func Main(args []string) error {
 	}
 
 	app := &cli.Command{
-		Name:                   "sesam",
-		Usage:                  "Manage encrypted secrets in git repositories",
-		Version:                resolveBuildInfo().String(),
-		Flags:                  flagsGeneral,
+		Name:  "sesam",
+		Usage: "Manage encrypted secrets in git repositories",
+		Description: `
+See https://opensesam.org for the documentation.
+
+If no sub-command is given, but the first argument is a path,
+we assume 'sesam show path/to/secret' as convenience.`,
+		Version: resolveBuildInfo().String(),
+		Flags:   slices.Concat(flagsGeneral, flagsShowRoot),
+		// pass-style shorthand: an argument that is not a subcommand falls
+		// through to `show`, so `sesam -c path/to/secret` works. With no
+		// arguments at all this lands in show with no object, which prints
+		// the help - see HandleShow.
+		DefaultCommand:         "show",
 		EnableShellCompletion:  true,
 		UseShortOptionHandling: true,
 		Commands: []*cli.Command{
@@ -269,6 +280,14 @@ func Main(args []string) error {
 						UsageText: "<object>",
 					},
 				},
+			},
+			{
+				Name:     "unclip",
+				Hidden:   true,
+				Category: catSecrets,
+				Flags:    flagsUnclip,
+				Action:   commands.HandleUnclip,
+				Usage:    "Clear the clipboard (spawned by `sesam show --clip`)",
 			},
 			{
 				Name:     "ls",

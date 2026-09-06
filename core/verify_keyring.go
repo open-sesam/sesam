@@ -10,11 +10,11 @@ import (
 
 type SharedPublicKey struct {
 	// PubKey is the string version of the key
-	PubKey string
+	PubKey string `json:"pub_key"`
 
 	// Users sharing this key.
 	// If it's only a single user, then the key is listed more than once.
-	Users []string
+	Users []string `json:"users"`
 }
 
 func VerifyKeyReuse(kr Keyring) []SharedPublicKey {
