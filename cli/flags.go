@@ -225,6 +225,22 @@ var flagsMove = []cli.Flag{
 	},
 }
 
+var flagsRun = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "all",
+		Aliases: []string{"a"},
+		Usage:   "Inject all secrets accessible to the current user",
+	},
+	&cli.StringSliceFlag{
+		Name:  "secret",
+		Usage: "Inject an exact secret file as SESAM_SECRET_<PATH> (repeatable)",
+	},
+	&cli.StringSliceFlag{
+		Name:  "env-file",
+		Usage: "Inject variables from an exact dotenv secret file (repeatable)",
+	},
+}
+
 var flagsEdit = []cli.Flag{
 	&cli.StringFlag{
 		Name:  "editor",

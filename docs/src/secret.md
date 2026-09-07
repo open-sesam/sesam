@@ -125,6 +125,59 @@ except if you pass `--no-seal`.
 If you want to change the access groups of a user, then just pass a different set of `--group / -g` flags.
 Note that this will overwrite the existing groups. If you would rather like to append, then use `--group-add / -G`.
 
+## Running commands with secrets
+
+`sesam run` decrypts selected objects into memory, adds their values to a child
+environment, and replaces itself with the command. It does not reveal the
+selected files into the worktree.
+
+```bash
+sesam run \
+  --secret postgres/backup/password.txt \
+  --env-file deploy/production.env \
+  -- ./deploy --region eu-west-1
+```
+
+Both explicit selectors are repeatable and name one exact managed file. Paths
+are interpreted relative to the current directory when it is inside the sesam
+repository, just like `sesam add`. Directories, globs, regular expressions, and
+suffix inference are not supported.
+
+Use `--all` instead of `--secret` to inject every verified secret accessible to
+the current user. Paths are processed in sorted order. An explicit `--env-file`
+may be combined with `--all`; that path is parsed as dotenv instead of also
+being injected as a `SESAM_SECRET_` value.
+
+```bash
+sesam run --all --env-file deploy/production.env -- ./deploy
+```
+
+A `--secret` value receives a name starting with `SESAM_SECRET_`. ASCII
+lowercase letters in its canonical repository-relative path become uppercase;
+ASCII uppercase letters and digits are retained; every other path byte becomes
+an underscore. Underscores are not collapsed or trimmed. For example:
+
+```text
+postgres/backup/password.txt -> SESAM_SECRET_POSTGRES_BACKUP_PASSWORD_TXT
+```
+
+An `--env-file` is parsed as strict dotenv, not as a shell script. It supports
+blank lines, full-line `#` comments, optional `export`, ASCII variable names,
+empty values, and literal single- or double-quoted values. It does not support
+escapes, interpolation, expansion, command substitution, continuations, or
+inline comments. Unquoted values cannot contain whitespace, quotes, backslashes,
+or `#`.
+
+Preparation fails before the command starts if a selector is invalid or
+unauthorized, verification or parsing fails, a value contains NUL, a fixed size
+limit is exceeded, or any injected name collides with another selected value or
+the inherited environment. `run` always uses full on-disk verification; it
+rejects `--verify-mode=no-disk`, `--cpuprofile`, and `--memprofile`.
+
+The command is executed directly without a shell. Its arguments, working
+directory, standard streams, PID, signals, and exit status therefore behave as
+they would for a normal process invocation.
+
 ### Getting an overview
 
 If you need to see which files were modified but not yet sealed you can use `sesam status`:

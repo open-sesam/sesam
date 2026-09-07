@@ -299,6 +299,7 @@ func revealSecretToPath(sm *SecretManager, revealedPath, dstPath string) error {
 		ids,
 		sm.Keyring,
 		sm.State.SealerAuthorized,
+		revealedPath,
 	); err != nil {
 		return err
 	}
@@ -344,10 +345,14 @@ func revealStreamAndVerify(
 	ageIds []age.Identity,
 	kr Keyring,
 	authorize func(user, path string) bool,
+	expectedPath string,
 ) error {
 	cipherTextHash, contentHashBytes, footer, err := revealStream(srcFd, dstFd, ageIds)
 	if err != nil {
 		return err
+	}
+	if footer.RevealedPath != expectedPath {
+		return fmt.Errorf("secret footer path %q does not match expected path %q", footer.RevealedPath, expectedPath)
 	}
 
 	// Verify the signature, but check before if hashes are the same at all as quick check:
@@ -357,6 +362,13 @@ func revealStreamAndVerify(
 	}
 	if !ok {
 		return fmt.Errorf("encrypted file changed for %s", footer.RevealedPath)
+	}
+	ok, err = hashEqual(footer.HMACContentHash, contentHashBytes)
+	if err != nil {
+		return fmt.Errorf("failed to check content hash for %s: %w", footer.RevealedPath, err)
+	}
+	if !ok {
+		return fmt.Errorf("decrypted content hash changed for %s", footer.RevealedPath)
 	}
 
 	recipientsHashBytes, _, err := multicodeDecode(footer.RecipientsHash)

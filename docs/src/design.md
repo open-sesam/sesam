@@ -251,6 +251,34 @@ outside `.sesam`. This also gives us the guarantee (well, if the user is not
 really doing weird stuff) that we're on the same partition, which makes
 renaming files atomically easier.
 
+## In-memory command execution
+
+`sesam run` is a read-only repository operation. The CLI canonicalizes each
+explicit selector to a sesam-relative path; repo and core code never consult the
+working directory. `--all` instead derives a sorted selection from verified
+state, filtered by the current user's access. Explicit dotenv selectors override
+the raw projection of the same path. While holding the normal repository lock,
+loading performs the full audit-log and on-disk verification. Core then reads
+only the selected encrypted objects and returns plaintext through a 64 KiB
+bounded memory sink after checking the expected footer path, ciphertext and
+content hashes, signature, current sealer authorization, and current user's
+access.
+
+Repo code parses selected dotenv documents and builds the complete environment
+atomically. Duplicate selectors, generated-name collisions, dotenv collisions,
+inherited-environment collisions, NUL values, and fixed count/size budgets are
+hard errors. The implementation permits at most 64 KiB per selector, 64 KiB of
+total decrypted selector plaintext, 64 KiB per final value, 64 KiB of encoded
+injected entries, 256 injected variables, and 96 KiB for the complete argument
+and environment vectors including terminators and pointer overhead.
+
+The CLI resolves the target with the inherited `PATH`, explicitly closes the
+repository and releases its lock, restores signal defaults, then replaces the
+sesam process with `execve` semantics. No shell or supervised child is involved,
+and selected plaintext is never written to a file. Full verification cannot be
+disabled for this operation, and profiling flags are rejected because process
+replacement cannot safely finish their output.
+
 ## Cryptography
 
 ### Short facts
@@ -279,6 +307,7 @@ renaming files atomically easier.
 | Compromise of forge public-key directory (e.g. github:user)   | Partial      | Resolved keys + alias pinned in audit log ([TOFU](https://en.wikipedia.org/wiki/Trust_on_first_use)); manual exchange is safer |
 | Force-push that rewrites history                              | Out of scope | User must disable force-push at the forge                     |
 | Local machine compromise / identity-key extraction            | Out of scope | User responsibility (e.g. encrypted fs)                                           |
+| Inspection of a running command's environment by the same user or host administrator | Out of scope | `run` intentionally passes selected plaintext to the target process |
 | Removed user reading secrets they previously had access to    | Out of scope | Requires explicit `rotate`; see Confidentiality section       |
 | Social engineering of an admin (e.g. `sesam tell attacker`)   | Out of scope | -                                                             |
 

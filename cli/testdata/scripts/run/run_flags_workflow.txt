@@ -1,0 +1,36 @@
+# run refuses weakened verification and profiling before loading plaintext or
+# creating profile files.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam init --user admin
+cp raw-fixture raw.txt
+exec sesam add raw.txt
+rm raw.txt
+
+! exec sesam --verify-mode no-disk run --secret raw.txt -- runprobe mark started-no-disk
+stderr 'sesam run does not support --verify-mode=no-disk'
+! exists started-no-disk
+
+! exec sesam --cpuprofile cpu.pprof run --secret raw.txt -- runprobe mark started-cpu
+stderr 'sesam run does not support --cpuprofile'
+! exists cpu.pprof
+! exists started-cpu
+
+! exec sesam run --secret raw.txt --cpuprofile cpu-after.pprof -- runprobe mark started-cpu-after
+stderr 'sesam run does not support --cpuprofile'
+! exists cpu-after.pprof
+! exists started-cpu-after
+
+! exec sesam --memprofile mem.pprof run --secret raw.txt -- runprobe mark started-mem
+stderr 'sesam run does not support --memprofile'
+! exists mem.pprof
+! exists started-mem
+
+! exec sesam run --secret raw.txt --verify-mode no-disk -- runprobe mark started-no-disk-after
+stderr 'sesam run does not support --verify-mode=no-disk'
+! exists started-no-disk-after
+
+-- raw-fixture --
+raw

@@ -1,0 +1,66 @@
+# Preparation failures are atomic: the target never starts.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam init --user admin
+
+cp raw-fixture raw.txt
+cp malformed-fixture malformed.env
+exec runprobe write-size oversize.txt 65537
+exec sesam add raw.txt malformed.env oversize.txt
+rm raw.txt malformed.env oversize.txt
+
+! exec sesam run --env-file malformed.env -- runprobe mark started-malformed
+stderr 'invalid byte in unquoted value'
+! exists started-malformed
+! exists malformed.env
+
+! exec sesam run --secret oversize.txt -- runprobe mark started-oversize
+stderr 'exceeds 65536 bytes'
+! exists started-oversize
+! exists oversize.txt
+
+! exec sesam run --secret raw.txt -- command-that-does-not-exist
+stderr 'find command.*using inherited PATH'
+
+exec chmod +x bad-exec
+! exec sesam run --secret raw.txt -- ./bad-exec
+stderr 'exec command.*exec format error'
+exec sesam id
+stdout '^admin$'
+
+exec runprobe status sesam run --secret raw.txt -- runprobe exit 23
+stdout 'exit=23 signal=0'
+
+exec runprobe status sesam run --secret raw.txt -- runprobe signal
+stdout 'exit=-1 signal=15'
+
+! exec sesam run -- runprobe mark started-no-selector
+stderr 'at least one --secret, --env-file, or --all is required'
+! exists started-no-selector
+
+! exec sesam run --all --secret raw.txt -- runprobe mark started-conflicting-selection
+stderr '--all and --secret cannot be used together'
+! exists started-conflicting-selection
+
+! exec sesam run --secret raw.txt --
+stderr 'a command is required after --'
+
+! exec sesam run --secret raw.txt runprobe mark started-no-separator
+stderr 'a command is required after --'
+! exists started-no-separator
+
+# Inherited names are never overwritten.
+env SESAM_SECRET_RAW_TXT=parent
+! exec sesam run --secret raw.txt -- runprobe mark started-collision
+stderr 'SESAM_SECRET_RAW_TXT.*collides with inherited environment'
+! exists started-collision
+
+-- raw-fixture --
+raw
+-- malformed-fixture --
+GOOD=value
+BAD=two words
+-- bad-exec --
+not an executable format

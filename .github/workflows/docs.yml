@@ -46,7 +46,7 @@ jobs:
         with:
           # go is needed by scripts/gen-vanity-imports.sh (`go list`) and by
           # `task docgen`; task runs the docgen targets.
-          install_args: "task go mdbook cargo:mdbook-admonish cargo:mdbook-pagetoc cargo:mdbook-gitinfo"
+          install_args: "task go mdbook cargo-binstall cargo:mdbook-admonish cargo:mdbook-pagetoc cargo:mdbook-gitinfo"
 
       - name: Cache Go modules and build
         uses: actions/cache@v4

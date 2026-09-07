@@ -206,6 +206,18 @@ Decrypt all secrets available to the current user
 
 **--help, -h**: show help
 
+## run
+
+Run a command with selected secrets in its environment
+
+**--all, -a**: Inject all secrets accessible to the current user
+
+**--env-file**="": Inject variables from an exact dotenv secret file (repeatable)
+
+**--help, -h**: show help
+
+**--secret**="": Inject an exact secret file as SESAM_SECRET_<PATH> (repeatable)
+
 ## status, s
 
 Show overview over repo state (revealed, sealed, unmanaged, ...)

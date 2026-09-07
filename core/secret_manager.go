@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -43,6 +44,26 @@ type SecretManager struct {
 	State *VerifiedState
 
 	base string
+}
+
+type boundedBuffer struct {
+	buf      bytes.Buffer
+	limit    int
+	overflow bool
+}
+
+// MaxInMemorySecretSize bounds plaintext returned directly from a manager.
+const MaxInMemorySecretSize = 64 * 1024
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	remaining := b.limit - b.buf.Len()
+	if remaining > 0 {
+		_, _ = b.buf.Write(p[:min(len(p), remaining)])
+	}
+	if len(p) > remaining {
+		b.overflow = true
+	}
+	return len(p), nil
 }
 
 // SetBase points the manager's sesam-internal paths at base (a stage's fork
@@ -332,6 +353,40 @@ func (sm *SecretManager) readSecretFooter(path string) (*secretFooter, error) {
 		return nil, fmt.Errorf("read footer of %s: %w", path, err)
 	}
 	return footer, nil
+}
+
+// RevealSecretBytes verifies and decrypts one known secret into bounded memory.
+func (sm *SecretManager) RevealSecretBytes(revealedPath string) ([]byte, error) {
+	secret, exists := sm.State.SecretExists(revealedPath)
+	if !exists {
+		return nil, fmt.Errorf("no such secret: %s", revealedPath)
+	}
+	if !sm.State.UserHasAccess(sm.Signer.UserName(), secret.AccessGroups) {
+		return nil, fmt.Errorf("user %s has no access to %s", sm.Signer.UserName(), revealedPath)
+	}
+
+	srcFd, err := sm.root.Open(sm.cryptPath(revealedPath))
+	if err != nil {
+		return nil, fmt.Errorf("opening secret file failed: %w", err)
+	}
+	defer closeLogged(srcFd)
+
+	dst := &boundedBuffer{limit: MaxInMemorySecretSize}
+	if err := revealStreamAndVerify(
+		srcFd,
+		dst,
+		sm.Identities.AgeIdentities(),
+		sm.Keyring,
+		sm.State.SealerAuthorized,
+		revealedPath,
+	); err != nil {
+		return nil, err
+	}
+	if dst.overflow {
+		return nil, fmt.Errorf("secret %s exceeds %d bytes", revealedPath, MaxInMemorySecretSize)
+	}
+
+	return dst.buf.Bytes(), nil
 }
 
 // Reveal reveals all known secrets.
