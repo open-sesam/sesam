@@ -1,0 +1,60 @@
+# Raw and dotenv values are injected from verified ciphertext without revealing
+# either selected file. Arguments are passed literally and the inherited
+# environment is preserved.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam init --user admin
+
+cp raw-fixture raw.txt
+cp env-fixture vars.env
+exec sesam add raw.txt vars.env
+rm raw.txt vars.env
+
+env INHERITED=kept
+exec sesam run --secret raw.txt --env-file vars.env -- runprobe env INHERITED SESAM_SECRET_RAW_TXT TOKEN EMPTY LITERAL
+stdout 'INHERITED="kept" exists=true'
+stdout 'SESAM_SECRET_RAW_TXT="raw-value\\n" exists=true'
+stdout 'TOKEN="dotenv value" exists=true'
+stdout 'EMPTY="" exists=true'
+stdout 'LITERAL="\$\(touch_owned\)" exists=true'
+! exists raw.txt
+! exists vars.env
+! exists touch_owned
+
+exec sesam run --secret raw.txt -- runprobe args 'hello world' ';touch-owned' '$HOME'
+stdout '0="hello world"'
+stdout '1=";touch-owned"'
+stdout '2="\$HOME"'
+! exists touch-owned
+
+# --all exports every accessible secret as raw values, except explicit
+# --env-file paths which are parsed instead.
+exec sesam run --all --env-file vars.env -- runprobe env SESAM_SECRET_RAW_TXT TOKEN SESAM_SECRET_VARS_ENV
+stdout 'SESAM_SECRET_RAW_TXT="raw-value\\n" exists=true'
+stdout 'TOKEN="dotenv value" exists=true'
+stdout 'SESAM_SECRET_VARS_ENV="" exists=false'
+
+# The repository lock is closed before exec, so the replacement can invoke
+# sesam against the same repository.
+exec sesam run --secret raw.txt -- runprobe reenter
+stdout '^admin$'
+
+# Cwd-relative selectors become canonical sesam-relative paths before repo use.
+mkdir sub
+cp raw-fixture sub/nested.txt
+exec sesam add sub/nested.txt
+rm sub/nested.txt
+cd sub
+exec sesam run --secret ./nested.txt -- runprobe env SESAM_SECRET_SUB_NESTED_TXT
+stdout 'SESAM_SECRET_SUB_NESTED_TXT="raw-value\\n" exists=true'
+! exists nested.txt
+
+-- raw-fixture --
+raw-value
+-- env-fixture --
+# strict dotenv fixture
+export TOKEN = 'dotenv value'
+EMPTY=
+LITERAL=$(touch_owned)

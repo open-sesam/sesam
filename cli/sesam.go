@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 
 	"github.com/urfave/cli/v3"
@@ -192,6 +193,21 @@ func Main(args []string) error {
 				Action:        commands.WithRepo(commands.HandleOpen),
 				ShellComplete: completeSecrets,
 				Usage:         "Decrypt all secrets available to the current user",
+			},
+			{
+				Name:      "run",
+				Category:  catSecrets,
+				Flags:     flagsRun,
+				ArgsUsage: "-- <command> [args...]",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					if !hasArgumentSeparator(args, cmd.Args().Slice()) {
+						return fmt.Errorf("a command is required after --")
+					}
+					return commands.HandleRun(ctx, cmd)
+				},
+				ShellComplete:             completeFiles,
+				DisableSliceFlagSeparator: true,
+				Usage:                     "Run a command with selected secrets in its environment",
 			},
 			{
 				Name:          "status",
@@ -420,9 +436,23 @@ func Main(args []string) error {
 	}
 
 	var activeProfile *profileState
+	var runInvocation bool
 
 	app.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-		if cmd.Bool("no-color") {
+		runInvocation = cmd.Args().First() == "run"
+		if runInvocation {
+			if mode := cmd.String("verify-mode"); mode != "all" {
+				return ctx, fmt.Errorf("sesam run does not support --verify-mode=%s", mode)
+			}
+			if cmd.String("cpuprofile") != "" {
+				return ctx, fmt.Errorf("sesam run does not support --cpuprofile")
+			}
+			if cmd.String("memprofile") != "" {
+				return ctx, fmt.Errorf("sesam run does not support --memprofile")
+			}
+		}
+
+		if cmd.Bool("no-color") && !runInvocation {
 			// hack to make sure color is always ignored without passing it to everywhere we use termenv.
 			_ = os.Setenv("NO_COLOR", "1")
 		}
@@ -448,9 +478,12 @@ func Main(args []string) error {
 		return ctx, nil
 	}
 
-	// After runs like a deferred cleanup (also on a failed action), so the CPU
-	// profile is always flushed and the heap profile captured at exit.
+	// After runs like a deferred cleanup (also on a failed action). Run rejects
+	// profiles because a successful process replacement cannot flush them.
 	app.After = func(_ context.Context, cmd *cli.Command) error {
+		if runInvocation {
+			return nil
+		}
 		return activeProfile.stop(cmd.String("memprofile"))
 	}
 
@@ -462,4 +495,13 @@ func Main(args []string) error {
 	defer cancel()
 
 	return app.Run(ctx, args)
+}
+
+func hasArgumentSeparator(args, commandArgs []string) bool {
+	for i, arg := range args {
+		if arg == "--" && slices.Equal(args[i+1:], commandArgs) {
+			return true
+		}
+	}
+	return false
 }

@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"syscall"
 	"testing"
 
 	"filippo.io/age"
@@ -24,6 +27,7 @@ func TestMain(m *testing.M) {
 			}
 		},
 		"age-plugin-sesamtest": RunMockPlugin,
+		"runprobe":             runProbe,
 	})
 }
 
@@ -168,4 +172,92 @@ func writeEncryptedIdentity(path string, plaintext []byte, passphrase string) er
 	}
 
 	return os.WriteFile(path, buf.Bytes(), 0o600)
+}
+
+func runProbe() {
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "runprobe: missing operation")
+		os.Exit(2)
+	}
+
+	switch os.Args[1] {
+	case "args":
+		for idx, arg := range os.Args[2:] {
+			fmt.Printf("%d=%q\n", idx, arg)
+		}
+	case "env":
+		for _, name := range os.Args[2:] {
+			value, exists := os.LookupEnv(name)
+			fmt.Printf("%s=%q exists=%t\n", name, value, exists)
+		}
+	case "exit":
+		code, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		os.Exit(code)
+	case "mark":
+		if err := os.WriteFile(os.Args[2], []byte("started"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	case "reenter":
+		command := exec.Command("sesam", "id")
+		command.Stdin = os.Stdin
+		command.Stdout = os.Stdout
+		command.Stderr = os.Stderr
+		if err := command.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	case "signal":
+		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		os.Exit(97)
+	case "status":
+		command := exec.Command(os.Args[2], os.Args[3:]...)
+		command.Stdin = os.Stdin
+		command.Stdout = os.Stdout
+		command.Stderr = os.Stderr
+		err := command.Run()
+		if err == nil {
+			fmt.Println("exit=0 signal=0")
+			return
+		}
+		exitErr, ok := err.(*exec.ExitError)
+		if !ok {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		status, ok := exitErr.Sys().(syscall.WaitStatus)
+		if !ok {
+			fmt.Fprintln(os.Stderr, "runprobe: unavailable wait status")
+			os.Exit(2)
+		}
+		exitStatus := -1
+		if status.Exited() {
+			exitStatus = status.ExitStatus()
+		}
+		signalStatus := 0
+		if status.Signaled() {
+			signalStatus = int(status.Signal())
+		}
+		fmt.Printf("exit=%d signal=%d\n", exitStatus, signalStatus)
+	case "write-size":
+		size, err := strconv.Atoi(os.Args[3])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if err := os.WriteFile(os.Args[2], bytes.Repeat([]byte{'x'}, size), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "runprobe: unknown operation %q\n", os.Args[1])
+		os.Exit(2)
+	}
 }

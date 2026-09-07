@@ -225,6 +225,22 @@ var flagsMove = []cli.Flag{
 	},
 }
 
+var flagsRun = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "all",
+		Aliases: []string{"a"},
+		Usage:   "Inject all secrets accessible to the current user",
+	},
+	&cli.StringSliceFlag{
+		Name:  "secret",
+		Usage: "Inject an exact secret file as SESAM_SECRET_<PATH> (repeatable)",
+	},
+	&cli.StringSliceFlag{
+		Name:  "env-file",
+		Usage: "Inject variables from an exact dotenv secret file (repeatable)",
+	},
+}
+
 // flagsTell contains controls for adding or updating users.
 var flagsTell = []cli.Flag{
 	userFlag(false, "User name to add or update"),
