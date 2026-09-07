@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -153,6 +154,130 @@ func TestSealAndRevealAll(t *testing.T) {
 
 	got, _ := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/test"))
 	require.Equal(t, "secret-content", string(got))
+}
+
+func TestRevealSecretBytes(t *testing.T) {
+	tests := []struct {
+		name    string
+		content []byte
+	}{
+		{name: "empty"},
+		{name: "trailing newline", content: []byte("token\n")},
+		{name: "binary bytes", content: []byte{0x01, 0x02, 0xfe, 0xff, '\n'}},
+		{name: "at limit", content: bytes.Repeat([]byte{'x'}, MaxInMemorySecretSize)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := testSecretManager(t)
+			path := testSecret(t, mgr, "secrets/value", string(tc.content))
+			_, err := sealSecret(mgr, path, mgr.recipientsFor(path), mgr.cryptPath(path), mgr.Signer.UserName())
+			require.NoError(t, err)
+			require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, path)))
+
+			got, err := mgr.RevealSecretBytes(path)
+			require.NoError(t, err)
+			require.Equal(t, tc.content, got)
+			require.NoFileExists(t, filepath.Join(mgr.SesamDir, path))
+		})
+	}
+}
+
+func TestRevealSecretBytesRejectsOversize(t *testing.T) {
+	mgr := testSecretManager(t)
+	path := testSecret(t, mgr, "secrets/large", string(bytes.Repeat([]byte{'x'}, MaxInMemorySecretSize+1)))
+	_, err := sealSecret(mgr, path, mgr.recipientsFor(path), mgr.cryptPath(path), mgr.Signer.UserName())
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, path)))
+
+	_, err = mgr.RevealSecretBytes(path)
+	require.ErrorContains(t, err, "exceeds 65536 bytes")
+	require.NoFileExists(t, filepath.Join(mgr.SesamDir, path))
+}
+
+func TestRevealSecretBytesRejectsUnknownAndUnauthorized(t *testing.T) {
+	t.Run("unknown", func(t *testing.T) {
+		mgr := testSecretManager(t)
+		_, err := mgr.RevealSecretBytes("secrets/unknown")
+		require.ErrorContains(t, err, "no such secret")
+	})
+
+	t.Run("unauthorized", func(t *testing.T) {
+		mgr := testSecretManager(t)
+		mgr.State.Users[0].Groups = []string{"dev"}
+		writeSecret(t, mgr.SesamDir, "secrets/admin", "payload")
+		mgr.State.addSecret(VerifiedSecret{
+			RevealedPath: "secrets/admin",
+			AccessGroups: []string{"admin"},
+		})
+		_, err := sealSecret(
+			mgr,
+			"secrets/admin",
+			mgr.Keyring.Recipients([]string{mgr.Signer.UserName()}),
+			mgr.cryptPath("secrets/admin"),
+			mgr.Signer.UserName(),
+		)
+		require.NoError(t, err)
+
+		_, err = mgr.RevealSecretBytes("secrets/admin")
+		require.ErrorContains(t, err, "has no access")
+	})
+}
+
+func TestRevealSecretBytesRejectsCorruption(t *testing.T) {
+	mgr := testSecretManager(t)
+	path := testSecret(t, mgr, "secrets/value", "payload")
+	_, err := sealSecret(mgr, path, mgr.recipientsFor(path), mgr.cryptPath(path), mgr.Signer.UserName())
+	require.NoError(t, err)
+
+	objectPath := filepath.Join(mgr.SesamDir, mgr.cryptPath(path))
+	object, err := os.ReadFile(objectPath)
+	require.NoError(t, err)
+	object[len(object)/3] ^= 0xff
+	require.NoError(t, os.WriteFile(objectPath, object, 0o600))
+
+	_, err = mgr.RevealSecretBytes(path)
+	require.Error(t, err)
+}
+
+func TestRevealSecretBytesRejectsChangedFooterContentHash(t *testing.T) {
+	mgr := testSecretManager(t)
+	path := testSecret(t, mgr, "secrets/value", "payload")
+	_, err := sealSecret(mgr, path, mgr.recipientsFor(path), mgr.cryptPath(path), mgr.Signer.UserName())
+	require.NoError(t, err)
+
+	objectPath := filepath.Join(mgr.SesamDir, mgr.cryptPath(path))
+	object, err := os.ReadFile(objectPath)
+	require.NoError(t, err)
+	footerStart := bytes.LastIndexByte(object, '\n')
+	require.GreaterOrEqual(t, footerStart, 0)
+	var footer secretFooter
+	require.NoError(t, json.Unmarshal(object[footerStart+1:], &footer))
+	footer.HMACContentHash = footer.CipherTextHash
+	encodedFooter, err := json.Marshal(footer)
+	require.NoError(t, err)
+	object = append(object[:footerStart+1], encodedFooter...)
+	require.NoError(t, os.WriteFile(objectPath, object, 0o600))
+
+	_, err = mgr.RevealSecretBytes(path)
+	require.ErrorContains(t, err, "content hash changed")
+}
+
+func TestRevealSecretBytesRejectsFooterPathMismatch(t *testing.T) {
+	mgr := testSecretManager(t)
+	source := testSecret(t, mgr, "secrets/source", "payload")
+	target := testSecret(t, mgr, "secrets/target", "unused")
+	_, err := sealSecret(mgr, source, mgr.recipientsFor(source), mgr.cryptPath(source), mgr.Signer.UserName())
+	require.NoError(t, err)
+
+	object, err := os.ReadFile(filepath.Join(mgr.SesamDir, mgr.cryptPath(source)))
+	require.NoError(t, err)
+	targetObject := filepath.Join(mgr.SesamDir, mgr.cryptPath(target))
+	require.NoError(t, os.MkdirAll(filepath.Dir(targetObject), 0o700))
+	require.NoError(t, os.WriteFile(targetObject, object, 0o600))
+
+	_, err = mgr.RevealSecretBytes(target)
+	require.ErrorContains(t, err, "does not match expected path")
 }
 
 func TestSealFailsMissingPlaintext(t *testing.T) {
