@@ -239,7 +239,8 @@ var flagsRun = []cli.Flag{
 		Name:  "env-file",
 		Usage: "Inject variables from an exact dotenv secret file (repeatable)",
 	},
-  
+}
+
 var flagsEdit = []cli.Flag{
 	&cli.StringFlag{
 		Name:  "editor",
