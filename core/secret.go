@@ -263,6 +263,10 @@ func readFooter(fd io.ReadSeeker) (io.ReadSeeker, *secretFooter, error) {
 // detached signature. No error is only returned if the reveal has been
 // fully successful.
 func revealSecret(sm *SecretManager, revealedPath string) error {
+	return revealSecretToPath(sm, revealedPath, revealedPath)
+}
+
+func revealSecretToPath(sm *SecretManager, revealedPath, dstPath string) error {
 	cryptPath := sm.cryptPath(revealedPath)
 
 	srcFd, err := sm.root.Open(cryptPath)
@@ -273,12 +277,12 @@ func revealSecret(sm *SecretManager, revealedPath string) error {
 
 	defer closeLogged(srcFd)
 
-	if err := sm.root.MkdirAll(filepath.Dir(revealedPath), 0o700); err != nil {
+	if err := sm.root.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
 		return fmt.Errorf("failed to create revealed dir: %w", err)
 	}
 
 	// Write revealed file to a temp file first, so we can get rid of it later easily:
-	dstFd, err := renameio.NewPendingFile(revealedPath, renameio.WithRoot(sm.root), renameio.WithTempDir(sesamTmpDir(sm.base)), renameio.WithPermissions(0o600))
+	dstFd, err := renameio.NewPendingFile(dstPath, renameio.WithRoot(sm.root), renameio.WithTempDir(sesamTmpDir(sm.base)), renameio.WithPermissions(0o600))
 	if err != nil {
 		return fmt.Errorf("failed to create revealed file: %w", err)
 	}

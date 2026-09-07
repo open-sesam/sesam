@@ -173,10 +173,13 @@ func Main(args []string) error {
 				},
 			},
 			{
-				Name:     "edit",
-				Category: catSecrets,
-				Action:   commands.HandleStub,
-				Usage:    "Open secret in $EDITOR and immediately seal it afterwards",
+				Name:          "edit",
+				Category:      catSecrets,
+				Flags:         flagsEdit,
+				ArgsUsage:     "<path>",
+				ShellComplete: completeSecrets,
+				Action:        commands.WithRepo(commands.HandleEditSecret),
+				Usage:         "Open secret in $VISUAL or $EDITOR and immediately seal it afterwards",
 			},
 			{
 				Name:     "seal",

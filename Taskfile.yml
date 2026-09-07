@@ -97,7 +97,7 @@ tasks:
   vuln:
     desc: Scan dependencies and stdlib usage for known vulnerabilities (govulncheck)
     cmds:
-      - go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 -show verbose ./...
+      - go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 -show verbose ./...
 
   docs:
     desc: Builds docs

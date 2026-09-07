@@ -424,6 +424,11 @@ func (sm *SecretManager) Reveal(all bool) error {
 	return g.Wait()
 }
 
+// RevealTo reveals one known secret to dstPath.
+func (sm *SecretManager) RevealTo(revealedPath, dstPath string) error {
+	return revealSecretToPath(sm, revealedPath, dstPath)
+}
+
 // SecretRemove removes a secret from sesam's management.
 // The encrypted files (+associated) are deleted, but the original file is not touched.
 func (sm *SecretManager) SecretRemove(revealedPath string) error {
