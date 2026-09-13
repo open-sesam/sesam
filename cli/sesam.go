@@ -345,8 +345,9 @@ func Main(args []string) error {
 					},
 					{
 						Name:   "diff",
-						Usage:  "Show the diff between config and actual state",
-						Action: commands.HandleStub,
+						Flags:  flagsConfigDiff,
+						Usage:  "Show the diff between config and actual state (extra args are passed to git)",
+						Action: commands.WithRepo(commands.HandleConfigDiff),
 					},
 					{
 						Name:   "get",

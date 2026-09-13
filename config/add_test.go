@@ -311,3 +311,35 @@ func TestSecretAdd_PreservesCommentsAndIndentation(t *testing.T) {
 	require.Contains(t, got, "  - path: beta.txt\n    access:\n      - group2\n",
 		"added entry has unexpected indentation:\n%s", got)
 }
+
+// TestSecretAddIntoEmptySecretsList covers the shape a hand-edited config ends
+// up with once its last secret is gone: `secrets: []`. That empty list is a
+// flow node, which cannot take block items - appending into it used to render
+// invalid YAML ("secrets: [   path: a.txt]").
+func TestSecretAddIntoEmptySecretsList(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "flow style", body: "secrets: []\n"},
+		{name: "with other keys", body: "version: 1\nsecrets: []\n"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			main := filepath.Join(dir, "sesam.yml")
+			require.NoError(t, os.WriteFile(main, []byte(tc.body), 0o644))
+
+			cfg, err := loadConfig(t, main)
+			require.NoError(t, err)
+			require.NoError(t, cfg.SecretAdd("a.txt", false, []string{"dev"}))
+			require.NoError(t, cfg.Save())
+
+			// Re-loading is the real assertion: it validates against the schema
+			// and would fail outright on the broken rendering.
+			require.Equal(t, []string{"a.txt"}, resolvedPaths(t, main))
+			require.Equal(t, []string{"dev"}, accessFor(t, main, "a.txt"))
+		})
+	}
+}

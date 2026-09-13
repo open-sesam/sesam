@@ -287,6 +287,9 @@ var flagsLog = []cli.Flag{
 
 var flagsID = []cli.Flag{flagJSON}
 
+// flagsConfigDiff contains output controls for the config/audit-log diff.
+var flagsConfigDiff = []cli.Flag{flagJSON}
+
 var flagsStatus = []cli.Flag{
 	&cli.BoolFlag{
 		Name:    "diff",

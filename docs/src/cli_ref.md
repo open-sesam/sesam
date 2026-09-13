@@ -352,9 +352,11 @@ Apply config differences to audit log and metadata
 
 ### diff
 
-Show the diff between config and actual state
+Show the diff between config and actual state (extra args are passed to git)
 
 **--help, -h**: show help
+
+**--json**: Print output as JSON
 
 ### get
 

@@ -17,8 +17,15 @@ import (
 )
 
 func printDirectoryDiff(ctx context.Context, status *repo.Status, extraGitArgs []string) error {
+	return runGitDiff(ctx, status.DiffDir, []string{"sealed/", "revealed/"}, extraGitArgs)
+}
+
+// runGitDiff shows two trees inside diffDir with `git diff --no-index`,
+// removing diffDir afterwards. targets are the paths to compare, relative to
+// diffDir.
+func runGitDiff(ctx context.Context, diffDir string, targets, extraGitArgs []string) error {
 	defer func() {
-		if err := os.RemoveAll(status.DiffDir); err != nil {
+		if err := os.RemoveAll(diffDir); err != nil {
 			slog.Error("failed to remove diff dir", slog.Any("err", err))
 		}
 	}()
@@ -27,37 +34,24 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status, extraGitArgs [
 		return fmt.Errorf("failed to find git in PATH - required for this command")
 	}
 
-	// We have to call git directly here, as the user might have configured git tooling of his liking.
-	// go-git offers no comparable diff viewing capabilities (just basic uncolored diffs)
 	args := []string{
 		"diff",
 		"--no-index",
 		"--color=auto",
 	}
 
-	targetDirs := []string{
-		"--",
-		"sealed/",
-		"revealed/",
-	}
-
-	//nolint:gocritic
-	allArgs := append(
-		args,
-		append(
-			extraGitArgs,
-			targetDirs...,
-		)...,
-	)
+	args = append(args, extraGitArgs...)
+	args = append(args, "--")
+	args = append(args, targets...)
 
 	// gosec complains about extra args coming from the command line.
 	//nolint:gosec
 	cmd := exec.CommandContext(
 		ctx,
 		"git",
-		allArgs...,
+		args...,
 	)
-	cmd.Dir = status.DiffDir
+	cmd.Dir = diffDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

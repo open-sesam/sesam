@@ -648,6 +648,19 @@ func appendSecretsItems(src *FileSource, items []Secret) error {
 		return appendRootKey(src, map[string][]Secret{"secrets": items})
 	}
 
+	// An empty secrets list is written as the flow node `secrets: []`, which
+	// cannot absorb block items: Merge would splice them into the flow node and
+	// render invalid YAML ("secrets: [   path: a.txt]"). Swap the whole value
+	// for a fresh block sequence instead.
+	if len(seq.Values) == 0 {
+		mv, err := findRootValue(src.RootNode, "secrets")
+		if err != nil {
+			return err
+		}
+
+		return replaceRootValue(mv, map[string][]Secret{"secrets": items})
+	}
+
 	newSeq, err := marshalSeq(items)
 	if err != nil {
 		return err
@@ -656,6 +669,32 @@ func appendSecretsItems(src *FileSource, items []Secret) error {
 	// SequenceNode.Merge aligns the new subtree's columns to the existing
 	// sequence's indentation and appends its values.
 	seq.Merge(newSeq)
+	return nil
+}
+
+// replaceRootValue swaps the value of a root-level key for a freshly marshaled
+// one, aligning it to the key's column.
+//
+// MappingValueNode.Replace aligns to the *old value's* column, which is wrong
+// when that value sat on the same line as its key (`secrets: []`): the
+// replacement would be indented to wherever the "[]" started. v is marshaled as
+// a whole mapping so the new value arrives already laid out for a key at
+// column one.
+func replaceRootValue(mv *ast.MappingValueNode, v any) error {
+	body, err := marshalBody(v)
+	if err != nil {
+		return err
+	}
+
+	fresh := rootMappingValues(body)
+	if len(fresh) != 1 {
+		return fmt.Errorf("expected a single root key, got %d", len(fresh))
+	}
+
+	value := fresh[0].Value
+	value.AddColumn(mv.GetToken().Position.Column - fresh[0].GetToken().Position.Column)
+	mv.Value = value
+
 	return nil
 }
 
