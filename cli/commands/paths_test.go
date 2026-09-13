@@ -37,11 +37,12 @@ func TestToRepoPath(t *testing.T) {
 	const sesamDir = "/repo"
 
 	tests := []struct {
-		name    string
-		cwd     string
-		arg     string
-		want    string
-		wantErr bool
+		name     string
+		sesamDir string
+		cwd      string
+		arg      string
+		want     string
+		wantErr  bool
 	}{
 		{name: "abs inside", cwd: "/repo", arg: "/repo/sub/local", want: "sub/local"},
 		{name: "abs equals root", cwd: "/repo", arg: "/repo", want: "."},
@@ -53,11 +54,63 @@ func TestToRepoPath(t *testing.T) {
 		{name: "rel dotdot escapes", cwd: "/repo/sub", arg: "../../etc", wantErr: true},
 		{name: "cwd outside treats arg as repo-relative", cwd: "/outside", arg: "sub/local", want: "sub/local"},
 		{name: "cwd outside single segment", cwd: "/outside", arg: "local", want: "local"},
+		// When the cwd is an ancestor of sesamDir (e.g. add/mv from the worktree
+		// root with a nested --sesam-dir) the arg is taken as already
+		// sesam-relative — it must NOT be reinterpreted against the cwd, which
+		// would retarget it to the wrong object.
+		{name: "cwd ancestor keeps arg sesam-relative", cwd: "/", arg: "repo/.sesam/objects/x.sesam", want: "repo/.sesam/objects/x.sesam"},
+		{name: "cwd ancestor nested sesam-dir", cwd: "/repo", sesamDir: "/repo/secrets", arg: "secrets/db.env", want: "secrets/db.env"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := toRepoPath(sesamDir, tc.cwd, tc.arg)
+			dir := sesamDir
+			if tc.sesamDir != "" {
+				dir = tc.sesamDir
+			}
+			got, err := toRepoPath(dir, tc.cwd, tc.arg)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestToShowPath covers the show-only reinterpretation: git invokes show as a
+// textconv from the worktree root (an ancestor of sesamDir) with a worktree-
+// relative path, which must resolve back to a sesam-relative one. All other
+// cases delegate to toRepoPath.
+func TestToShowPath(t *testing.T) {
+	const sesamDir = "/repo"
+
+	tests := []struct {
+		name     string
+		sesamDir string
+		cwd      string
+		arg      string
+		want     string
+		wantErr  bool
+	}{
+		// git textconv from the worktree root: worktree-relative arg resolves back in.
+		{name: "cwd ancestor, worktree-relative arg", cwd: "/", arg: "repo/.sesam/objects/x.sesam", want: ".sesam/objects/x.sesam"},
+		{name: "cwd ancestor nested sesam-dir", cwd: "/repo", sesamDir: "/repo/secrets", arg: "secrets/db.env", want: "db.env"},
+		// cwd outside and arg does not resolve back: treated as sesam-relative.
+		{name: "cwd outside unrelated arg", cwd: "/outside", arg: "sub/local", want: "sub/local"},
+		// inside the subtree and absolute args behave exactly like toRepoPath.
+		{name: "rel in subdir", cwd: "/repo/sub", arg: "local", want: "sub/local"},
+		{name: "abs inside", cwd: "/repo", arg: "/repo/sub/local", want: "sub/local"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := sesamDir
+			if tc.sesamDir != "" {
+				dir = tc.sesamDir
+			}
+			got, err := toShowPath(dir, tc.cwd, tc.arg)
 			if tc.wantErr {
 				require.Error(t, err)
 				return

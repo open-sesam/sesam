@@ -429,15 +429,15 @@ func askpassCheck() DoctorCheck {
 
 func editorCheck() DoctorCheck {
 	return &genericCheck{name: "editor", run: func() DoctorDiagnosis {
+		if e := os.Getenv("VISUAL"); e != "" {
+			return docHealthy("VISUAL=" + e)
+		}
 		if e := os.Getenv("EDITOR"); e != "" {
 			return docHealthy("EDITOR=" + e)
 		}
-		if e := os.Getenv("VISUAL"); e != "" {
-			return docHealthy("$VISUAL=" + e)
-		}
 		return docWarn(
 			"neither EDITOR nor VISUAL is set",
-			"export EDITOR=<your editor> so `sesam edit` knows what to launch",
+			"export VISUAL=<your editor> or EDITOR=<your editor> so `sesam edit` knows what to launch",
 		)
 	}}
 }

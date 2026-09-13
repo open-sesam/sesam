@@ -25,6 +25,16 @@ func newRecipient(t *testing.T, source core.KeySource) *core.Recipient {
 	return recp
 }
 
+// verifiedState builds a state the way core hands one out: with its lookup
+// indexes in place. A bare literal answers "not found" to every lookup, so
+// every hand-built state in these tests goes through here.
+func verifiedState(users []core.VerifiedUser, secrets []core.VerifiedSecret) *core.VerifiedState {
+	state := &core.VerifiedState{Users: users, Secrets: secrets}
+	state.BuildIndexes()
+
+	return state
+}
+
 // admin is the verified admin every scenario needs: killing or demoting the
 // last admin is rejected, so a declaration without one is not appliable.
 func admin(t *testing.T) core.VerifiedUser {
@@ -58,12 +68,10 @@ func ops(d *Diff) []core.Operation {
 
 func TestComputeInSync(t *testing.T) {
 	alice := admin(t)
-	vstate := &core.VerifiedState{
-		Users: []core.VerifiedUser{alice},
-		Secrets: []core.VerifiedSecret{
-			{RevealedPath: "db.env", AccessGroups: []string{"dev", "admin"}},
-		},
-	}
+	vstate := verifiedState(
+		[]core.VerifiedUser{alice},
+		[]core.VerifiedSecret{{RevealedPath: "db.env", AccessGroups: []string{"dev", "admin"}}},
+	)
 
 	declared := &config.State{
 		Users: []config.StateUser{declaredAdmin()},
@@ -161,10 +169,11 @@ func TestComputeUsers(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			vstate := &core.VerifiedState{Users: []core.VerifiedUser{admin(t)}}
+			users := []core.VerifiedUser{admin(t)}
 			if tc.user != nil {
-				vstate.Users = append(vstate.Users, *tc.user)
+				users = append(users, *tc.user)
 			}
+			vstate := verifiedState(users, nil)
 
 			declared := &config.State{Users: []config.StateUser{declaredAdmin()}}
 			if tc.declared != nil {
@@ -230,10 +239,11 @@ func TestComputeSecrets(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			vstate := &core.VerifiedState{Users: []core.VerifiedUser{admin(t)}}
+			var secrets []core.VerifiedSecret
 			if tc.secret != nil {
-				vstate.Secrets = append(vstate.Secrets, *tc.secret)
+				secrets = append(secrets, *tc.secret)
 			}
+			vstate := verifiedState([]core.VerifiedUser{admin(t)}, secrets)
 
 			declared := &config.State{Users: []config.StateUser{declaredAdmin()}}
 			if tc.declared != nil {
@@ -297,10 +307,10 @@ func TestComputeRecipientMatching(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			vstate := &core.VerifiedState{Users: []core.VerifiedUser{
+			vstate := verifiedState([]core.VerifiedUser{
 				admin(t),
 				{Name: "bob", Groups: []string{"dev"}, Recps: tc.recps},
-			}}
+			}, nil)
 
 			declared := &config.State{Users: []config.StateUser{
 				declaredAdmin(),
@@ -319,8 +329,8 @@ func TestComputeRecipientMatching(t *testing.T) {
 // told before the old one is demoted and killed, and secrets are added before
 // the users losing access disappear.
 func TestComputeOrdering(t *testing.T) {
-	vstate := &core.VerifiedState{
-		Users: []core.VerifiedUser{
+	vstate := verifiedState(
+		[]core.VerifiedUser{
 			{
 				Name:   "alice",
 				Groups: []string{"admin"},
@@ -332,11 +342,11 @@ func TestComputeOrdering(t *testing.T) {
 				Recps:  core.Recipients{newRecipient(t, "github:mallory")},
 			},
 		},
-		Secrets: []core.VerifiedSecret{
+		[]core.VerifiedSecret{
 			{RevealedPath: "old.env", AccessGroups: []string{"dev", "admin"}},
 			{RevealedPath: "db.env", AccessGroups: []string{"dev", "admin"}},
 		},
-	}
+	)
 
 	declared := &config.State{
 		Users: []config.StateUser{
@@ -366,10 +376,10 @@ func TestComputeOrdering(t *testing.T) {
 // user.change_groups itself: whoever gains admin must gain it before the
 // current admin drops it, or the audit log rejects the demotion.
 func TestComputeOrderingPromotionBeforeDemotion(t *testing.T) {
-	vstate := &core.VerifiedState{Users: []core.VerifiedUser{
+	vstate := verifiedState([]core.VerifiedUser{
 		{Name: "alice", Groups: []string{"admin"}, Recps: core.Recipients{newRecipient(t, "github:alice")}},
 		{Name: "bob", Groups: []string{"dev"}, Recps: core.Recipients{newRecipient(t, "github:bob")}},
-	}}
+	}, nil)
 
 	declared := &config.State{Users: []config.StateUser{
 		{Name: "alice", Groups: []string{"dev"}, Keys: []string{"github:alice"}},
@@ -445,7 +455,7 @@ func TestComputeErrors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			vstate := &core.VerifiedState{Users: []core.VerifiedUser{admin(t)}}
+			vstate := verifiedState([]core.VerifiedUser{admin(t)}, nil)
 
 			_, err := Compute(vstate, tc.declared)
 			require.ErrorContains(t, err, tc.want)
@@ -457,7 +467,7 @@ func TestComputeErrors(t *testing.T) {
 // reported in full rather than one problem at a time.
 func TestComputeErrorsReportEveryProblem(t *testing.T) {
 	_, err := Compute(
-		&core.VerifiedState{Users: []core.VerifiedUser{admin(t)}},
+		verifiedState([]core.VerifiedUser{admin(t)}, nil),
 		&config.State{Users: []config.StateUser{
 			{Name: "bob", Keys: []string{"github:bob"}},
 			{Name: "eve", Groups: []string{"dev"}},
@@ -526,6 +536,10 @@ func applyTo(t *testing.T, vstate *core.VerifiedState, c Change) {
 	default:
 		t.Fatalf("unexpected core.Operation: %#v", c.Op)
 	}
+
+	// Appending and deleting move entries, so the lookup indexes have to be
+	// rebuilt - exactly what core does after each of its own modifications.
+	vstate.BuildIndexes()
 }
 
 // TestComputeConverges is the property the whole module hinges on: applying a
@@ -534,16 +548,16 @@ func applyTo(t *testing.T, vstate *core.VerifiedState, c Change) {
 // that never matches the recipient it produced - shows up here as a change that
 // keeps being proposed forever.
 func TestComputeConverges(t *testing.T) {
-	vstate := &core.VerifiedState{
-		Users: []core.VerifiedUser{
+	vstate := verifiedState(
+		[]core.VerifiedUser{
 			{Name: "alice", Groups: []string{"admin"}, Recps: core.Recipients{newRecipient(t, "github:alice")}},
 			{Name: "mallory", Groups: []string{"dev"}, Recps: core.Recipients{newRecipient(t, "github:mallory")}},
 		},
-		Secrets: []core.VerifiedSecret{
+		[]core.VerifiedSecret{
 			{RevealedPath: "old.env", AccessGroups: []string{"dev", "admin"}},
 			{RevealedPath: "db.env", AccessGroups: []string{"dev", "admin"}},
 		},
-	}
+	)
 
 	declared := &config.State{
 		Users: []config.StateUser{

@@ -144,7 +144,7 @@ func (r *Repo) resetConfig(root *os.Root, out *ConfigReset) (*sesamConf.Config, 
 	out.Discarded = changes.Changes
 
 	if changes.IsEmpty() {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil config means config fits audit log (no error and nothing to reset)
 	}
 
 	if err := diff.Revert(cfg, r.vstate, changes); err != nil {
@@ -223,6 +223,7 @@ func (r *Repo) scratchConfigTree() (root *os.Root, cleanup func(), err error) {
 			return nil, nil, fmt.Errorf("make dir for %s: %w", dst, err)
 		}
 
+		//nolint:gosec
 		if err := os.WriteFile(dst, data, 0o600); err != nil {
 			return nil, nil, fmt.Errorf("write %s: %w", dst, err)
 		}

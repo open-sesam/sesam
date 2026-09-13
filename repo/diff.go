@@ -165,6 +165,7 @@ func (v *View) copyConfigTree(
 			return nil, nil, fmt.Errorf("make dir for %s: %w", dst, err)
 		}
 
+		//nolint:gosec
 		if err := os.WriteFile(dst, data, 0o600); err != nil {
 			return nil, nil, fmt.Errorf("write %s: %w", dst, err)
 		}

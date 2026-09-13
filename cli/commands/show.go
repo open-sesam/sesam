@@ -31,33 +31,15 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	if filepath.Base(object) == "log.jsonl" {
-		ok, err := core.ShowAuditLog(ids, object, os.Stdout)
-		if ok {
-			return err
-		}
-		return fmt.Errorf("cannot open audit log: %s", object)
-	}
-
 	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}
 
-	// Absolute paths are an explicit exception: show decrypts any .sesam file
-	// directly (like `age -d`), and git's diff textconv also hands us an
-	// absolute temp-file path for an extracted blob. Either way it is passed
-	// through untouched - ShowSecret opens it directly.
-	//
-	// A relative argument is translated into a sesam-relative path. toRepoPath
-	// only errors when the arg escapes the sesam dir (e.g. `../outside`), so
-	// surface that rather than silently reading a bad path and ending up at the
-	// misleading user-name fallback. Plain names (no escape) resolve fine and
-	// still fall through to the user lookup when they aren't a secret.
 	showPath := object
 	if !filepath.IsAbs(object) {
 		cwd, _ := os.Getwd()
-		rel, relErr := toRepoPath(sesamDir, cwd, object)
+		rel, relErr := toShowPath(sesamDir, cwd, object)
 		if relErr != nil {
 			return relErr
 		}
@@ -68,9 +50,19 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 	if rootErr != nil {
 		return rootErr
 	}
+	defer func() { _ = root.Close() }()
+
+	// Both the audit log and secrets are read through root, so an in-repo
+	// path is sandbox-confined regardless of which branch handles it.
+	if filepath.Base(object) == "log.jsonl" {
+		ok, err := core.ShowAuditLog(root, ids, showPath, os.Stdout)
+		if ok {
+			return err
+		}
+		return fmt.Errorf("cannot open audit log: %s", object)
+	}
 
 	ok, showErr := core.ShowSecret(root, ids, showPath, os.Stdout)
-	_ = root.Close()
 	if ok {
 		return showErr
 	}

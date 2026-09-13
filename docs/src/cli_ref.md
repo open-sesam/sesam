@@ -160,7 +160,7 @@ Add a secret file or directory at `PATH`
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--seal-all**: When we seal, seal also files that did not change
+**--seal-all, --all**: When we seal, seal also files that did not change
 
 ## rm
 
@@ -180,9 +180,13 @@ Move a secret file or directory to a new name
 
 ## edit
 
-Open secret in $EDITOR and immediately seal it afterwards
+Open secret in $VISUAL or $EDITOR and immediately seal it afterwards
+
+**--editor**="": Editor executable to use instead of $VISUAL or $EDITOR
 
 **--help, -h**: show help
+
+**--seal-all, --all**: When we seal, seal also files that did not change
 
 ## seal
 
@@ -192,11 +196,13 @@ Encrypt and sign changed secrets
 
 **--help, -h**: show help
 
-**--seal-all**: When we seal, seal also files that did not change
+**--seal-all, --all**: When we seal, seal also files that did not change
 
 ## open, reveal
 
 Decrypt all secrets available to the current user
+
+**--all, -a**: Reveal all files, even those that did not change
 
 **--help, -h**: show help
 
@@ -248,7 +254,7 @@ Add a person to a group and re-encrypt files
 
 **--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
 
-**--seal-all**: When we seal, seal also files that did not change
+**--seal-all, --all**: When we seal, seal also files that did not change
 
 **--user, -u**="": User name to add or update
 
@@ -260,7 +266,7 @@ Remove a person from the sesam repo entirely
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--seal-all**: When we seal, seal also files that did not change
+**--seal-all, --all**: When we seal, seal also files that did not change
 
 **--user, -u**="": User name to remove
 
@@ -290,7 +296,7 @@ Change the groups a user is in
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--seal-all**: When we seal, seal also files that did not change
+**--seal-all, --all**: When we seal, seal also files that did not change
 
 **--user, -u**="": Which user should be changed
 
@@ -304,7 +310,7 @@ Add a recipient to an existing user
 
 **--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
 
-**--seal-all**: When we seal, seal also files that did not change
+**--seal-all, --all**: When we seal, seal also files that did not change
 
 **--user, -u**="": Which user receives the new recipient
 
@@ -320,7 +326,7 @@ Remove a recipient from an existing user (may not be the last one)
 
 **--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
 
-**--seal-all**: When we seal, seal also files that did not change
+**--seal-all, --all**: When we seal, seal also files that did not change
 
 **--user, -u**="": Which user looses the specified recipient
 
@@ -356,7 +362,7 @@ Apply config differences to audit log and metadata
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--seal-all**: When we seal, seal also files that did not change
+**--seal-all, --all**: When we seal, seal also files that did not change
 
 ### diff
 
@@ -400,7 +406,7 @@ alias for `sesam config apply`
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--seal-all**: When we seal, seal also files that did not change
+**--seal-all, --all**: When we seal, seal also files that did not change
 
 ## id
 

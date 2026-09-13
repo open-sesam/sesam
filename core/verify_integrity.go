@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-
-	"golang.org/x/crypto/sha3"
 )
 
 // IntegrityError describes a single integrity issue found during deep verification.
@@ -92,20 +90,27 @@ func verifyIntegritySingleSecret(
 		return
 	}
 
-	h := sha3.New256()
+	newHash, _, err := hasherForStored(sig.CipherTextHash)
+	if err != nil {
+		report.add(vs.RevealedPath, fmt.Sprintf("bad footer: %v", err))
+		return
+	}
+
+	h := newHash()
 	if _, err := io.Copy(h, ageRd); err != nil {
 		report.add(vs.RevealedPath, fmt.Sprintf("failed to hash .sesam file: %v", err))
 		return
 	}
 
 	_, _ = h.Write([]byte(vs.RevealedPath))
-	computedHash := MulticodeEncode(h.Sum(nil), MhSHA3_256)
 
-	if computedHash != sig.CipherTextHash {
-		report.add(vs.RevealedPath, fmt.Sprintf(
-			"hash mismatch: footer says %s, computed says %s",
-			sig.CipherTextHash, computedHash,
-		))
+	ok, err := hashEqual(sig.CipherTextHash, h.Sum(nil))
+	if err != nil {
+		report.add(vs.RevealedPath, fmt.Sprintf("failed to check ciphertext hash: %v", err))
+		return
+	}
+	if !ok {
+		report.add(vs.RevealedPath, fmt.Sprintf("hash mismatch for footer %s", sig.CipherTextHash))
 	}
 
 	cipherTextHashBytes, _, err := multicodeDecode(sig.CipherTextHash)
@@ -178,11 +183,12 @@ func VerifyIntegrity(root *os.Root, state *VerifiedState, kr Keyring) *Integrity
 	}
 
 	if state.LastSealRootHash != "" {
-		diskRootHash := buildRootHash(diskSigs)
-		if diskRootHash != state.LastSealRootHash {
+		ok, err := hashedDataEqual(state.LastSealRootHash, rootHashInput(diskSigs))
+		if err != nil {
+			report.add("", fmt.Sprintf("failed to check root hash: %v", err))
+		} else if !ok {
 			report.add("", fmt.Sprintf(
-				"root hash mismatch: log says %s, disk says %s",
-				state.LastSealRootHash, diskRootHash,
+				"root hash mismatch: log says %s does not match disk", state.LastSealRootHash,
 			))
 		}
 	}

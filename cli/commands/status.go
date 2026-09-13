@@ -44,8 +44,6 @@ func runGitDiff(ctx context.Context, diffDir string, targets, extraGitArgs []str
 	args = append(args, "--")
 	args = append(args, targets...)
 
-	// gosec complains about extra args coming from the command line.
-	//nolint:gosec
 	cmd := exec.CommandContext(
 		ctx,
 		"git",

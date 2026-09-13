@@ -41,17 +41,17 @@ func TestRevertDescribesVerifiedState(t *testing.T) {
 	carolKey := newRecipient(t, core.KeySourceManual)
 	newKey := newRecipient(t, core.KeySourceManual)
 
-	vstate := &core.VerifiedState{
-		Users: []core.VerifiedUser{
+	vstate := verifiedState(
+		[]core.VerifiedUser{
 			{Name: "admin", Groups: []string{"admin"}, Recps: core.Recipients{adminKey}},
 			{Name: "bob", Groups: []string{"dev"}, Recps: core.Recipients{bobKey}},
 			{Name: "carol", Groups: []string{"dev", "ops"}, Recps: core.Recipients{carolKey}},
 		},
-		Secrets: []core.VerifiedSecret{
+		[]core.VerifiedSecret{
 			{RevealedPath: "README.md", AccessGroups: []string{"admin"}},
 			{RevealedPath: "db.env", AccessGroups: []string{"admin", "dev"}},
 		},
-	}
+	)
 
 	cfg := loadTestConfig(t, "users:\n"+
 		"  - name: admin\n"+
@@ -108,15 +108,15 @@ func TestRevertDescribesVerifiedState(t *testing.T) {
 func TestRevertChange(t *testing.T) {
 	bobKey := newRecipient(t, "github:bob")
 
-	vstate := &core.VerifiedState{
-		Users: []core.VerifiedUser{
+	vstate := verifiedState(
+		[]core.VerifiedUser{
 			{Name: "admin", Groups: []string{"admin"}, Recps: core.Recipients{newRecipient(t, "github:admin")}},
 			{Name: "bob", Groups: []string{"dev"}, Recps: core.Recipients{bobKey}},
 		},
-		Secrets: []core.VerifiedSecret{
+		[]core.VerifiedSecret{
 			{RevealedPath: "db.env", AccessGroups: []string{"admin", "dev"}},
 		},
-	}
+	)
 
 	const declared = "users:\n" +
 		"  - name: admin\n" +
@@ -190,9 +190,9 @@ func TestRevertChange(t *testing.T) {
 // verified state does not hold is an error, not a silently skipped revert -
 // the rendered config would otherwise misrepresent the audit log.
 func TestRevertUnknownVerifiedEntry(t *testing.T) {
-	vstate := &core.VerifiedState{Users: []core.VerifiedUser{
+	vstate := verifiedState([]core.VerifiedUser{
 		{Name: "admin", Groups: []string{"admin"}, Recps: core.Recipients{newRecipient(t, "github:admin")}},
-	}}
+	}, nil)
 
 	cfg := loadTestConfig(t, "users:\n"+
 		"  - name: admin\n"+

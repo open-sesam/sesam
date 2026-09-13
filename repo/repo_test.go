@@ -443,10 +443,10 @@ func TestRepo_SealReveal_RoundTrip(t *testing.T) {
 	require.NoError(t, os.Remove(revealed))
 	require.False(t, fileExists(t, revealed), "plaintext removed before reveal")
 
-	require.NoError(t, r.RevealAll())
+	require.NoError(t, r.Reveal(true))
 	got, err := os.ReadFile(revealed)
 	require.NoError(t, err)
-	require.Equal(t, original, got, "RevealAll restores the original plaintext")
+	require.Equal(t, original, got, "Reveal restores the original plaintext")
 
 	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }), "Seal on an already-sealed tree is a no-op")
 }

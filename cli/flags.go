@@ -30,8 +30,9 @@ var flagNoSeal = &cli.BoolFlag{
 }
 
 var flagSeal = &cli.BoolFlag{
-	Name:  "seal-all",
-	Usage: "When we seal, seal also files that did not change",
+	Name:    "seal-all",
+	Aliases: []string{"all"},
+	Usage:   "When we seal, seal also files that did not change",
 }
 
 // userFlag builds the --user flag. Required-ness and help text differ per
@@ -189,7 +190,13 @@ var flagsClean = []cli.Flag{
 }
 
 // flagsReveal contains optional controls for reveal.
-var flagsReveal = []cli.Flag{}
+var flagsReveal = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "all",
+		Aliases: []string{"a"},
+		Usage:   "Reveal all files, even those that did not change",
+	},
+}
 
 // flagsAdd contains controls for adding secrets.
 var flagsAdd = []cli.Flag{
@@ -216,6 +223,14 @@ var flagsMove = []cli.Flag{
 		Name:  "nested",
 		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file",
 	},
+}
+
+var flagsEdit = []cli.Flag{
+	&cli.StringFlag{
+		Name:  "editor",
+		Usage: "Editor executable to use instead of $VISUAL or $EDITOR",
+	},
+	flagSeal,
 }
 
 // flagsTell contains controls for adding or updating users.

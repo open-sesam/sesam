@@ -34,6 +34,7 @@ while a secret manager is focused on sharing selected secrets with other users i
 - Fast encryption and decryption.
 - Almost zero dependencies.
 - Support for rotation and exchange of secrets.
+- Somewhat¹ fast.
 - Per-secret integrity checks with root-hash verification.
 
 In short, `sesam` fits well the [GitOps model](https://about.gitlab.com/topics/gitops/) of infrastructure.
