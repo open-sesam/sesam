@@ -26,6 +26,18 @@ func TestDecryptTheirSecretRefusesWithoutState(t *testing.T) {
 	require.ErrorContains(t, err, "never verified")
 }
 
+// An add/add of the same path has no common ancestor, so git hands the driver a
+// zero-byte %O. Without the shortcut that would be read as a corrupt object and
+// fail the merge instead of merging the two additions.
+func TestDecryptBaseToBufEmptyBase(t *testing.T) {
+	emptyBase := filepath.Join(t.TempDir(), "origin")
+	require.NoError(t, os.WriteFile(emptyBase, nil, 0o600))
+
+	buf, err := decryptBaseToBuf(emptyBase, "s", nil)
+	require.NoError(t, err)
+	require.Zero(t, buf.Len())
+}
+
 func TestClearTmp(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, core.SesamTmpDir(), "theirs", ".sesam"), 0o700))

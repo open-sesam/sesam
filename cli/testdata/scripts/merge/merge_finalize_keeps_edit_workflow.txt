@@ -1,0 +1,78 @@
+# A merge deliberately stops before the commit so the result can be reviewed, and
+# the finalize refreshes the plaintext of everything the merge staged - otherwise
+# a stale pre-merge file would be sealed back over what the merge brought in.
+#
+# That refresh must not reach a file the user edited in the very window the merge
+# handed them. It tells the two apart by what the plaintext matches: the staged
+# object (already the merge result), HEAD's object (never touched, stale), or
+# neither (written by the user). Only the middle case is revealed.
+
+sesam-repo admin base.txt ours.txt theirs.txt edited.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+
+# THEIRS changes the last line.
+exec git checkout -b topic
+cp $TMPDIR/theirs.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change last line'
+
+# OURS changes the first line - a different region, so the driver merges both
+# sides cleanly and reseals %A itself.
+exec git checkout master
+cp $TMPDIR/ours.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'ours: change first line'
+
+! exec git merge topic
+stderr 'no conflicts, resealed'
+stderr 'merge changed the vault - run `git commit` to finalize'
+
+# Both sides survived and there is nothing left to resolve - which status now says
+# without inventing conflict markers to go and fix.
+exec cat s
+stdout 'OURS'
+stdout 'THEIRS'
+exec sesam status
+stdout 'nothing to show - everything in sync'
+stdout 'nothing left to resolve'
+! stdout 'resolve the conflicted'
+
+# The user tweaks the merged secret while reviewing, then finalizes.
+cp $TMPDIR/edited.txt s
+exec git commit -m 'merge topic'
+stderr 'you changed 1 secret after the merge; sealing your version'
+stderr 'sesam:   s'
+
+# Their edit is what got sealed, not the driver's merge.
+exec cat s
+stdout 'MY-EDIT'
+exec sesam show .sesam/objects/s.sesam
+stdout 'MY-EDIT'
+
+exec sesam verify
+stderr 'Integrity: ok'
+exec git status --short
+! stdout .
+
+-- base.txt --
+line one
+line two
+line three
+-- ours.txt --
+OURS
+line two
+line three
+-- theirs.txt --
+line one
+line two
+THEIRS
+-- edited.txt --
+OURS
+MY-EDIT
+THEIRS

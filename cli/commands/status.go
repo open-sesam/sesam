@@ -262,20 +262,35 @@ func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	}
 
 	printStatusTree(r.SesamDir(), status, cmd.Bool("all"), cmd.Bool("users"))
-	printMergeHint(mergeState(cmd.String("sesam-dir")))
+	printMergeHint(mergeState(cmd.String("sesam-dir")), countConflicted(status))
 	return nil
+}
+
+func countConflicted(status *repo.Status) int {
+	n := 0
+	for _, f := range status.Files {
+		if f.State == repo.SecretStateConflicted {
+			n++
+		}
+	}
+
+	return n
 }
 
 // printMergeHint names the half-finished git operation and how to finish it.
 // git status shows none of sesam's share of the work: revealed files are
 // gitignored.
-func printMergeHint(kind mergeKind) {
+func printMergeHint(kind mergeKind, conflicted int) {
 	if !kind.InProgress() {
 		return
 	}
 
 	fmt.Printf("\na %s is in progress.\n", kind)
-	fmt.Printf("resolve the conflicted (U) secrets above, then run `sesam seal`\n")
+	if conflicted > 0 {
+		fmt.Printf("resolve the conflicted (U) secrets above, then run `sesam seal`\n")
+	} else {
+		fmt.Printf("nothing left to resolve - review the merged secrets\n")
+	}
 
 	if cont := kind.ContinueCmd(); cont != "" {
 		fmt.Printf("and finish with `%s`\n", cont)

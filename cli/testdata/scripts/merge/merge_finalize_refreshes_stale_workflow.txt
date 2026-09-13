@@ -1,0 +1,56 @@
+# The other half of merge_finalize_keeps_edit: a secret only THEY changed. git
+# resolves the object by taking their blob wholesale, so no merge driver ever runs
+# for it and the revealed file is left holding our pre-merge plaintext.
+#
+# Nothing but the finalize will notice. If it skipped the reveal here, the seal
+# that follows would encrypt the stale plaintext straight back over the object and
+# quietly undo the merge for that secret.
+
+sesam-repo admin base.txt theirs.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+
+# THEIRS changes the secret.
+exec git checkout -b topic
+cp $TMPDIR/theirs.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change s'
+
+# OURS leaves the secret alone and only touches the audit log, so the merge has
+# something to do without the two sides ever meeting on the object.
+exec git checkout master
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'ours: add bob'
+
+! exec git merge topic
+! stderr 'automatically merging revealed file s'
+
+# The object is theirs already, but the plaintext beside it is still ours - this
+# is the window the finalize's reveal exists for.
+exec cat s
+stdout 'BASE'
+! stdout 'THEIRS'
+
+exec git commit -m 'merge topic'
+! stderr 'you changed'
+
+# Refreshed, sealed, and their change survived the commit.
+exec cat s
+stdout 'THEIRS'
+exec sesam show .sesam/objects/s.sesam
+stdout 'THEIRS'
+
+exec sesam verify
+stderr 'Integrity: ok'
+exec git status --short
+! stdout .
+
+-- base.txt --
+BASE
+-- theirs.txt --
+THEIRS

@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -15,7 +16,9 @@ import (
 	"strings"
 	"sync"
 
+	"filippo.io/age"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/sahib/renameio/v2"
 	sesamConf "opensesam.org/sesam/config"
 	"opensesam.org/sesam/core"
@@ -387,6 +390,158 @@ func (v *View) ConflictedSecrets() ([]core.ConflictedSecret, error) {
 	}
 
 	return core.ConflictedSecrets(v.root, v.vstate.Secrets)
+}
+
+// MergedSecretSplit sorts the secrets a merge staged by what has to happen to
+// their revealed file before the finalize seals.
+type MergedSecretSplit struct {
+	// Stale plaintext: still the pre-merge content, so it has to be replaced or
+	// the seal would write it back over what the merge brought in.
+	Stale []string
+
+	// Edited by the user after the merge stopped. Revealing would discard that
+	// silently, so their version is kept and sealed instead.
+	Edited []string
+}
+
+// SplitMergedSecrets decides, for each secret a merge staged, whether its
+// revealed file may be refreshed from the object. It compares the plaintext
+// against two objects: the one the merge staged, and the one at HEAD
+//
+//   - equal to the staged object: already the merge result, nothing to do
+//   - equal to HEAD's object: never touched, now stale => reveal
+//   - equal to neither: the user wrote it themselves => keep
+//
+// A path that cannot be read is reported stale. RevealPaths skips whatever
+// it has no access to.
+func (v *View) SplitMergedSecrets(paths []string) (*MergedSecretSplit, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return nil, ErrClosed
+	}
+
+	prefix, err := core.SesamGitPrefix(v.gitRepo, v.sesamDir)
+	if err != nil {
+		return nil, err
+	}
+
+	headTree, err := v.headTree()
+	if err != nil {
+		return nil, err
+	}
+
+	ageIds := v.identities.AgeIdentities()
+
+	split := &MergedSecretSplit{}
+	for _, revealedPath := range paths {
+		objectPath := core.ObjectPath(revealedPath)
+
+		revealed, err := fs.ReadFile(v.root.FS(), revealedPath)
+		if err != nil {
+			// No plaintext to lose; the reveal writes it out.
+			split.Stale = append(split.Stale, revealedPath)
+			continue
+		}
+
+		staged, err := decryptRootObject(v.root, objectPath, ageIds)
+		if err != nil {
+			slog.Debug(
+				"merge finalize: cannot read the staged object",
+				slog.String("path", revealedPath), slog.Any("err", err),
+			)
+			split.Stale = append(split.Stale, revealedPath)
+			continue
+		}
+
+		if bytes.Equal(revealed, staged) {
+			continue // already holds the merge result
+		}
+
+		head, err := decryptTreeObject(headTree, path.Join(prefix, filepath.ToSlash(objectPath)), ageIds)
+		switch {
+		case errors.Is(err, object.ErrFileNotFound):
+			// The merge added this secret, so the plaintext beside it predates it
+			// and is nobody's but the user's. Keep it.
+			split.Edited = append(split.Edited, revealedPath)
+		case err != nil:
+			slog.Debug(
+				"merge finalize: cannot read the pre-merge object",
+				slog.String("path", revealedPath), slog.Any("err", err),
+			)
+			split.Stale = append(split.Stale, revealedPath)
+		case bytes.Equal(revealed, head):
+			split.Stale = append(split.Stale, revealedPath)
+		default:
+			split.Edited = append(split.Edited, revealedPath)
+		}
+	}
+
+	return split, nil
+}
+
+// headTree is the tree of the commit the worktree is on. During a merge that is
+// still the pre-merge state: the merge commit is only written after the finalize.
+func (v *View) headTree() (*object.Tree, error) {
+	head, err := v.gitRepo.Head()
+	if err != nil {
+		return nil, fmt.Errorf("resolve HEAD: %w", err)
+	}
+
+	commit, err := v.gitRepo.CommitObject(head.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("read HEAD commit %s: %w", head.Hash(), err)
+	}
+
+	return commit.Tree()
+}
+
+// decryptRootObject decrypts a sealed object from the worktree.
+func decryptRootObject(root *os.Root, objectPath string, ageIds []age.Identity) ([]byte, error) {
+	fd, err := root.Open(objectPath)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = fd.Close() }()
+
+	return decryptObjectBytes(fd, ageIds)
+}
+
+// decryptTreeObject decrypts a sealed object out of a git tree. The blob has to
+// be buffered: reading the footer seeks, and go-git hands out a plain reader.
+func decryptTreeObject(tree *object.Tree, treePath string, ageIds []age.Identity) ([]byte, error) {
+	file, err := tree.File(treePath)
+	if err != nil {
+		return nil, err
+	}
+
+	rd, err := file.Reader()
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = rd.Close() }()
+
+	blob, err := io.ReadAll(rd)
+	if err != nil {
+		return nil, err
+	}
+
+	return decryptObjectBytes(bytes.NewReader(blob), ageIds)
+}
+
+// decryptObjectBytes decrypts a sealed object into memory. The signature is not
+// checked: the plaintext is only ever compared against another one, never
+// written anywhere.
+func decryptObjectBytes(rd io.ReadSeeker, ageIds []age.Identity) ([]byte, error) {
+	var buf bytes.Buffer
+	if _, _, _, err := core.RevealStream(rd, &buf, ageIds); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
 
 // noGitIntegrationWarningFile is the opt-out sentinel: if present under the

@@ -186,7 +186,7 @@ $ sesam status
   2 out of sync
 
 a merge is in progress.
-  resolve the conflicted (U) secrets above, then run `sesam seal`
+  nothing left to resolve - review the merged secrets
   and finish with `git commit`
   or start over with `git merge --abort` followed by `sesam reveal --all`
 
@@ -218,6 +218,8 @@ $ git commit -am 'merge'
 - Merging without the git integration is not possible. Doing so will likely result in a repository state that does not survive `sesam verify`.
 - If you have a secret that is binary in nature, we can't merge it with conflict markers. In this case we'll add a TODO `.theirs` version next to it and inform you.
 - A rebase or cherry-pick uses the same machinery, but `git` runs no hook when they finish. Check `sesam status` afterwards: it names the operation and what is left to do.
+- Both sides of a secret are checked against the audit log of the branch they come from before anything is merged. This matters most in a rebase, where your commits are replayed on top of the other branch and "ours" is therefore the side you did not write: an object nobody was allowed to seal stops the rebase instead of being merged in and resealed under your key.
+- Secrets you edit yourself between the merge and the commit are kept: the finalize refreshes only the plaintext that is still the pre-merge one. `sesam` says which files it kept, and their version is what gets sealed - so the merged content is dropped for those.
 
 ### Internal flow
 

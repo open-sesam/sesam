@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"filippo.io/age"
 	"filippo.io/age/armor"
 	"github.com/rogpeppe/go-internal/testscript"
+	"opensesam.org/sesam/cli/commands"
 )
 
 const askpassTestPassphrase = "askpass-test-passphrase"
@@ -19,10 +21,24 @@ const askpassTestPassphrase = "askpass-test-passphrase"
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
 		"sesam": func() {
-			if err := Main(os.Args); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
+			err := Main(os.Args)
+			if err == nil {
+				return
 			}
+
+			// Mirror main.go: the merge drivers talk to git through exit codes,
+			// so a harness that collapses them to 1 would not be testing them.
+			exitErr := new(commands.ExitCodeError)
+			if errors.As(err, &exitErr) {
+				if exitErr.Print() {
+					fmt.Fprintln(os.Stderr, exitErr.Message())
+				}
+
+				os.Exit(exitErr.Code())
+			}
+
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		},
 		"age-plugin-sesamtest": RunMockPlugin,
 	})
