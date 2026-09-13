@@ -307,7 +307,7 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 	if ver.GreaterThanEqual(semver.MustParse("2.54.0")) {
 		gitSupportsConfigHooks = true
 	} else {
-		slog.Warn("not installing hooks, because git >= 2.54.0 is needed")
+		slog.Warn("hooks require git >= 2.54.0")
 	}
 
 	if gitSupportsConfigHooks {
