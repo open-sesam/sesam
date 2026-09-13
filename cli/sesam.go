@@ -340,8 +340,9 @@ func Main(args []string) error {
 				Commands: []*cli.Command{
 					{
 						Name:   "apply",
+						Flags:  flagsConfigApply,
 						Usage:  "Apply config differences to audit log and metadata",
-						Action: commands.HandleStub,
+						Action: commands.WithRepo(commands.HandleConfigApply),
 					},
 					{
 						Name:   "diff",
@@ -361,15 +362,17 @@ func Main(args []string) error {
 					},
 					{
 						Name:   "reset",
+						Flags:  flagsConfigReset,
 						Usage:  "Derive config from audit log",
-						Action: commands.HandleStub,
+						Action: commands.WithRepo(commands.HandleConfigReset),
 					},
 				},
 			},
 			{
 				Name:     "apply",
 				Category: catConfig,
-				Action:   commands.HandleStub,
+				Flags:    flagsConfigApply,
+				Action:   commands.WithRepo(commands.HandleConfigApply),
 				Usage:    "alias for `sesam config apply`",
 			},
 

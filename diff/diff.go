@@ -90,6 +90,17 @@ func (c Change) String() string {
 	}
 }
 
+// Equal reports whether two changes describe the same step. Old is left out of
+// the comparison: it records what the step replaces, which both sides read from
+// the same verified state, and carries no intent of its own.
+func (c Change) Equal(other Change) bool {
+	return c.Op == other.Op &&
+		c.User == other.User &&
+		c.Path == other.Path &&
+		sameSet(c.Groups, other.Groups) &&
+		sameSet(c.Keys, other.Keys)
+}
+
 // IsEmpty reports whether the declared and the verified state agree.
 func (d *Diff) IsEmpty() bool {
 	return len(d.Changes) == 0
@@ -123,10 +134,27 @@ func Compute(vstate *core.VerifiedState, declared *config.State) (*Diff, error) 
 		return nil, err
 	}
 
-	changes := append(userChanges(vstate, declared), secretChanges(vstate, declared)...)
+	return Delta(vstate, declared), nil
+}
+
+// Delta returns how the two states differ, without judging whether the
+// declaration could be applied - Compute is Delta plus that judgement.
+//
+// A caller that rewrites the declaration instead of the audit log (`sesam
+// config reset`) wants an answer even for a declaration no apply would accept:
+// a config that lost its last admin is exactly the one that needs resetting.
+func Delta(vstate *core.VerifiedState, declared *config.State) *Diff {
+	users := userChanges(vstate, declared)
+	secrets := secretChanges(vstate, declared)
+
+	// Built rather than appended onto one of the two, so the result is never
+	// nil: "no changes" renders as [] and not null for the JSON callers.
+	changes := make([]Change, 0, len(users)+len(secrets))
+	changes = append(changes, users...)
+	changes = append(changes, secrets...)
 	slices.SortStableFunc(changes, compareChanges)
 
-	return &Diff{Changes: changes}, nil
+	return &Diff{Changes: changes}
 }
 
 // validate rejects declarations that cannot be applied at all, in the terms the

@@ -102,6 +102,26 @@ func Load(root *os.Root, path string) (*Config, error) {
 	return configRepo, nil
 }
 
+// Create returns an empty config for path, held in memory only - nothing is
+// read from or written to disk until Save. It exists for the callers that
+// build a config from another source of truth rather than parse one, namely
+// `sesam config reset` when sesam.yml is gone or too broken to read.
+func Create(root *os.Root, path string) (*Config, error) {
+	sch, err := compileSchema()
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile json schema: %w", err)
+	}
+
+	c := &Config{
+		SourceFiles: map[string]*FileSource{},
+		JSONSchema:  sch,
+		root:        root,
+	}
+	c.MainFile = c.newFile(filepath.Clean(path))
+
+	return c, nil
+}
+
 var (
 	schemaOnce   sync.Once
 	cachedSchema *jsonschema.Schema
@@ -658,7 +678,7 @@ func appendSecretsItems(src *FileSource, items []Secret) error {
 			return err
 		}
 
-		return replaceRootValue(mv, map[string][]Secret{"secrets": items})
+		return replaceValue(mv, map[string][]Secret{"secrets": items})
 	}
 
 	newSeq, err := marshalSeq(items)
@@ -672,15 +692,15 @@ func appendSecretsItems(src *FileSource, items []Secret) error {
 	return nil
 }
 
-// replaceRootValue swaps the value of a root-level key for a freshly marshaled
-// one, aligning it to the key's column.
+// replaceValue swaps the value of a mapping key for a freshly marshaled one,
+// aligning it to the key's column.
 //
 // MappingValueNode.Replace aligns to the *old value's* column, which is wrong
 // when that value sat on the same line as its key (`secrets: []`): the
 // replacement would be indented to wherever the "[]" started. v is marshaled as
 // a whole mapping so the new value arrives already laid out for a key at
 // column one.
-func replaceRootValue(mv *ast.MappingValueNode, v any) error {
+func replaceValue(mv *ast.MappingValueNode, v any) error {
 	body, err := marshalBody(v)
 	if err != nil {
 		return err
@@ -703,6 +723,18 @@ func replaceRootValue(mv *ast.MappingValueNode, v any) error {
 // normalized to a mapping first. Used to create a secrets:/users:/groups:
 // section that did not exist on disk.
 func appendRootKey(src *FileSource, v any) error {
+	// A file that only exists in memory has no document yet: build it from v,
+	// the way appendSecretsItems does for a brand-new file.
+	if src.RootNode == nil {
+		root, err := marshalBody(v)
+		if err != nil {
+			return err
+		}
+
+		src.RootNode = root
+		return nil
+	}
+
 	rootMN, ok := src.RootNode.(*ast.MappingNode)
 	if !ok {
 		mv, ok := src.RootNode.(*ast.MappingValueNode)

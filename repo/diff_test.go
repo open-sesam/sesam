@@ -77,12 +77,12 @@ func TestConfigDiffHandEdited(t *testing.T) {
 	// file with those changes backed out.
 	t.Cleanup(func() { _ = os.RemoveAll(changes.DiffDir) })
 
-	declared := readDiffFile(t, changes.DiffDir, declaredTreeDir, configFileName)
+	declared := readDiffFile(t, changes.DiffDir, DeclaredTreeDir, configFileName)
 	require.Contains(t, declared, "bob")
 	require.Contains(t, declared, "db.env")
 	require.NotContains(t, declared, "README.md")
 
-	verified := readDiffFile(t, changes.DiffDir, verifiedTreeDir, configFileName)
+	verified := readDiffFile(t, changes.DiffDir, VerifiedTreeDir, configFileName)
 	require.NotContains(t, verified, "bob")
 	require.NotContains(t, verified, "db.env")
 	require.Contains(t, verified, "README.md")
@@ -113,8 +113,8 @@ func TestConfigDiffKeepsComments(t *testing.T) {
 
 	require.Equal(t, []core.Operation{core.OpSecretChangeAccess}, opsOf(changes.Changes))
 
-	declared := readDiffFile(t, changes.DiffDir, declaredTreeDir, configFileName)
-	verified := readDiffFile(t, changes.DiffDir, verifiedTreeDir, configFileName)
+	declared := readDiffFile(t, changes.DiffDir, DeclaredTreeDir, configFileName)
+	verified := readDiffFile(t, changes.DiffDir, VerifiedTreeDir, configFileName)
 
 	// Both sides still carry the generated file's comments, so a differ has
 	// only the access list to report.
@@ -164,9 +164,9 @@ func TestConfigDiffLeavesLiveTreeAlone(t *testing.T) {
 
 	// In the copies, the declared side keeps it and the verified side has it
 	// pruned - including the include that pointed at it.
-	require.Contains(t, readDiffFile(t, changes.DiffDir, declaredTreeDir, "svc/sesam.yml"), "token")
-	require.NoFileExists(t, filepath.Join(changes.DiffDir, verifiedTreeDir, "svc", configFileName))
-	require.NotContains(t, readDiffFile(t, changes.DiffDir, verifiedTreeDir, configFileName), "include")
+	require.Contains(t, readDiffFile(t, changes.DiffDir, DeclaredTreeDir, "svc/sesam.yml"), "token")
+	require.NoFileExists(t, filepath.Join(changes.DiffDir, VerifiedTreeDir, "svc", configFileName))
+	require.NotContains(t, readDiffFile(t, changes.DiffDir, VerifiedTreeDir, configFileName), "include")
 }
 
 // TestConfigDiffRejectsUnappliable checks that a declaration the audit log

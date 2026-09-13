@@ -52,7 +52,7 @@ func revert(cfg *config.Config, vstate *core.VerifiedState, c Change) error {
 		if err != nil {
 			return err
 		}
-		return cfg.UserTell(user.Name, recordedSpecs(user.Recps), user.Groups)
+		return cfg.UserTell(user.Name, user.Recps.Specs(), user.Groups)
 
 	case core.OpUserChangeGroups:
 		return cfg.UserChangeGroups(c.User, c.Old)
@@ -97,29 +97,6 @@ func verifiedUser(vstate *core.VerifiedState, name string) (*core.VerifiedUser, 
 	return user, nil
 }
 
-// recordedSpec is how a recipient would be written in the config: the spec it
-// was resolved from, or the key material itself when it was given verbatim.
-func recordedSpec(recp *core.Recipient) string {
-	if recp.Source == core.KeySourceManual {
-		return recp.String()
-	}
-
-	return string(recp.Source)
-}
-
-// recordedSpecs is recordedSpec over a whole key list, deduplicated - one forge
-// id can have produced several recorded keys, and the config declares it once.
-func recordedSpecs(recps core.Recipients) []string {
-	specs := make([]string, 0, len(recps))
-	for _, recp := range recps {
-		if spec := recordedSpec(recp); !slices.Contains(specs, spec) {
-			specs = append(specs, spec)
-		}
-	}
-
-	return specs
-}
-
 // specsForKeys maps recorded key material back to the spec form of the
 // recipient holding it, leaving anything it cannot find as it came in.
 func specsForKeys(recps core.Recipients, keys []string) []string {
@@ -129,7 +106,7 @@ func specsForKeys(recps core.Recipients, keys []string) []string {
 		if idx := slices.IndexFunc(recps, func(r *core.Recipient) bool {
 			return r.String() == key
 		}); idx >= 0 {
-			spec = recordedSpec(recps[idx])
+			spec = recps[idx].Spec()
 		}
 
 		if !slices.Contains(specs, spec) {

@@ -47,6 +47,17 @@ func (c *Config) appendUser(u User) error {
 		return appendRootKey(src, map[string][]User{"users": {u}})
 	}
 
+	// An empty list is written as the flow node `users: []`, which cannot take
+	// block items (see appendSecretsItems): swap the value instead of merging.
+	if len(seq.Values) == 0 {
+		mv, err := findRootValue(src.RootNode, "users")
+		if err != nil {
+			return err
+		}
+
+		return replaceValue(mv, map[string][]User{"users": {u}})
+	}
+
 	newSeq, err := marshalSeq([]User{u})
 	if err != nil {
 		return fmt.Errorf("%s: building user %q: %w", src.Path, u.Name, err)
@@ -67,6 +78,16 @@ func (c *Config) addGroupMember(group, member string) error {
 	if err != nil {
 		// No groups: key yet — add the whole mapping.
 		return appendRootKey(src, map[string]map[string][]string{"groups": {group: {member}}})
+	}
+
+	// `groups: {}` is a flow mapping and cannot take block entries either.
+	if len(groups.Values) == 0 {
+		mv, err := findRootValue(src.RootNode, "groups")
+		if err != nil {
+			return err
+		}
+
+		return replaceValue(mv, map[string]map[string][]string{"groups": {group: {member}}})
 	}
 
 	mv := findMappingValue(groups, group)

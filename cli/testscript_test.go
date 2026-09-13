@@ -136,11 +136,34 @@ func TestWorkflows(t *testing.T) {
 			testscript.Run(t, testscript.Params{
 				Dir:   filepath.Join(root, category),
 				Setup: setup,
+				Cmds: map[string]func(*testscript.TestScript, bool, []string){
+					"envsubst": cmdEnvsubst,
+				},
 			})
 		})
 	}
 	if !ran {
 		t.Fatalf("no testscript categories found under %s", root)
+	}
+}
+
+// cmdEnvsubst expands $VAR references inside the named files, in place.
+// Txtar bodies are copied verbatim (only their names are expanded), so a
+// fixture that has to carry a generated value - a real public key, say -
+// needs this.
+func cmdEnvsubst(ts *testscript.TestScript, neg bool, args []string) {
+	if neg || len(args) == 0 {
+		ts.Fatalf("usage: envsubst file...")
+	}
+
+	for _, arg := range args {
+		path := ts.MkAbs(arg)
+
+		data, err := os.ReadFile(path)
+		ts.Check(err)
+
+		expanded := os.Expand(string(data), ts.Getenv)
+		ts.Check(os.WriteFile(path, []byte(expanded), 0o644))
 	}
 }
 

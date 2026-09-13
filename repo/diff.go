@@ -13,10 +13,11 @@ import (
 )
 
 // Names of the two config trees written into a diff dir. They double as the
-// labels `git diff` prints, so they read as the two states being compared.
+// labels `git diff` prints, so they read as the two states being compared, and
+// are exported because the caller has to name them when invoking the differ.
 const (
-	verifiedTreeDir = "verified"
-	declaredTreeDir = "declared"
+	VerifiedTreeDir = "verified"
+	DeclaredTreeDir = "declared"
 )
 
 // ConfigDiffOpts controls what ConfigDiff produces besides the change list.
@@ -44,6 +45,11 @@ func (cd *ConfigDiff) IsEmpty() bool {
 	return len(cd.Changes) == 0
 }
 
+// String renders the difference as one plain line per change.
+func (cd *ConfigDiff) String() string {
+	return (&diff.Diff{Changes: cd.Changes}).String()
+}
+
 // ConfigDiff compares the state declared in sesam.yml against the verified
 // state replayed from the audit log.
 func (v *View) ConfigDiff(opts ConfigDiffOpts) (*ConfigDiff, error) {
@@ -54,6 +60,12 @@ func (v *View) ConfigDiff(opts ConfigDiffOpts) (*ConfigDiff, error) {
 		return nil, ErrClosed
 	}
 
+	return v.configDiff(opts)
+}
+
+// configDiff is the lock-free body of ConfigDiff, also used by apply, which
+// holds the lock across the whole transaction.
+func (v *View) configDiff(opts ConfigDiffOpts) (*ConfigDiff, error) {
 	// Read sesam.yml fresh rather than through the cached view: the whole
 	// point of the diff is to answer what the file says *now*, and the user
 	// may well have edited it since this repo was opened.
@@ -106,13 +118,13 @@ func (v *View) writeConfigDiffDir(cfg *sesamConf.Config, changes *diff.Diff) (di
 	// Sorted, so the copy order does not depend on map iteration.
 	paths := slices.Sorted(maps.Keys(cfg.SourceFiles))
 
-	declaredCfg, declaredClose, err := v.copyConfigTree(tmpDir, declaredTreeDir, paths)
+	declaredCfg, declaredClose, err := v.copyConfigTree(tmpDir, DeclaredTreeDir, paths)
 	if err != nil {
 		return "", err
 	}
 	defer declaredClose()
 
-	verifiedCfg, verifiedClose, err := v.copyConfigTree(tmpDir, verifiedTreeDir, paths)
+	verifiedCfg, verifiedClose, err := v.copyConfigTree(tmpDir, VerifiedTreeDir, paths)
 	if err != nil {
 		return "", err
 	}

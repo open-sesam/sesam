@@ -110,11 +110,16 @@ func (sm *SecretManager) SecretAdd(revealedPath string, groups []string, additiv
 }
 
 // SecretChangeGroups changes the access groups for the secret at `revealedPath`.
+//
+// Unlike SecretAdd, an empty list is a meaningful value here, meaning "admin only"
+// so the change is always recorded. It also does not require the plaintext to be on disk:
+// who may read a secret is independent of whether this machine has it revealed.
 func (sm *SecretManager) SecretChangeGroups(revealedPath string, groups []string) error {
-	if _, err := sm.addOrChangeSecret(revealedPath, groups, false); err != nil {
-		return err
+	if err := validSecretPathFormat(revealedPath); err != nil {
+		return fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
 	}
-	return nil
+
+	return sm.changeAccess(revealedPath, groups)
 }
 
 // addOrChangeSecret emits a secret.add entry for a new secret and a
@@ -127,15 +132,8 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string,
 		return nil, fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
 	}
 
-	var auditEntry *AuditEntry
 	existing, exists := sm.State.SecretExists(revealedPath)
-	if !exists {
-		// Secret does not exist yet: this is an add.
-		auditEntry = newAuditEntry(sm.Signer.UserName(), &DetailSecretAdd{
-			RevealedPath: revealedPath,
-			AccessGroups: groups,
-		})
-	} else {
+	if exists {
 		if additive {
 			// "admin" is implicit for secrets, so strip it from the current
 			// list before merging to keep it out of the persisted set.
@@ -143,23 +141,39 @@ func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string,
 		}
 
 		if len(groups) == 0 {
-			// if no groups were given, there is nothing to change.
+			// if no groups were given, there is nothing to change. Saying
+			// "admin only" explicitly goes through SecretChangeGroups.
 			return existing, nil
 		}
 
-		// Secret already exists: this is an access-list change.
-		auditEntry = newAuditEntry(sm.Signer.UserName(), &DetailSecretChangeAccess{
+		if err := sm.changeAccess(revealedPath, groups); err != nil {
+			return nil, err
+		}
+	} else if err := sm.State.FeedEntry(
+		sm.Signer,
+		newAuditEntry(sm.Signer.UserName(), &DetailSecretAdd{
 			RevealedPath: revealedPath,
 			AccessGroups: groups,
-		})
-	}
-
-	if err := sm.State.FeedEntry(sm.Signer, auditEntry); err != nil {
+		}),
+	); err != nil {
 		return nil, err
 	}
 
 	vs, _ := sm.State.SecretExists(revealedPath)
 	return vs, nil
+}
+
+// changeAccess records a secret.change_access entry for an already tracked
+// secret. The verification layer rejects an unknown path or an author without
+// access to it.
+func (sm *SecretManager) changeAccess(revealedPath string, groups []string) error {
+	return sm.State.FeedEntry(
+		sm.Signer,
+		newAuditEntry(sm.Signer.UserName(), &DetailSecretChangeAccess{
+			RevealedPath: revealedPath,
+			AccessGroups: groups,
+		}),
+	)
 }
 
 // Seal (re-)seals the known secrets. With all=false only secrets whose plaintext

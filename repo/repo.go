@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -527,9 +528,23 @@ func (r *Repo) SesamDir() string {
 
 // Close releases the on-disk lock and closes the audit log. Safe to call
 // multiple times. The first non-nil error is returned.
+//
+// This is also where a still pending seal is reported: only the state that is
+// live on disk owes one. A stage that was rolled back, or the state a commit
+// superseded, never reached the user's repository and must not nag about it.
 func (r *Repo) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.vstate != nil {
+		if seqID, pending := r.vstate.SealPending(); pending {
+			// Not a hard error: sesam may have been interrupted legitimately.
+			slog.Warn(
+				"verify: a seal is pending - please run `sesam seal` before committing!",
+				slog.Uint64("seq_id", seqID),
+			)
+		}
+	}
 
 	errs := []error{r.closeState()}
 

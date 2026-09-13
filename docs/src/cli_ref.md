@@ -348,7 +348,15 @@ Config management commands
 
 Apply config differences to audit log and metadata
 
+**--force, -f**: Also apply changes that arrived already committed (see the docs on modified configs)
+
 **--help, -h**: show help
+
+**--json**: Print output as JSON
+
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
+
+**--seal-all**: When we seal, seal also files that did not change
 
 ### diff
 
@@ -374,13 +382,25 @@ Set specific config keys
 
 Derive config from audit log
 
+**--dry-run**: Report what would be reset without writing anything
+
 **--help, -h**: show help
+
+**--json**: Print output as JSON
 
 ## apply
 
 alias for `sesam config apply`
 
+**--force, -f**: Also apply changes that arrived already committed (see the docs on modified configs)
+
 **--help, -h**: show help
+
+**--json**: Print output as JSON
+
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
+
+**--seal-all**: When we seal, seal also files that did not change
 
 ## id
 

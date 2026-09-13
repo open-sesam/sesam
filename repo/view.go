@@ -80,8 +80,8 @@ func (v *View) cfg() (*sesamConf.Config, error) {
 	return v.config, nil
 }
 
-// closeState closes the audit log and verified state. The root and lock are
-// shared/owned by the Repo and are not touched here.
+// closeState closes the audit log and drops the verified state. The root and
+// lock are shared/owned by the Repo and are not touched here.
 func (v *View) closeState() error {
 	var errs []error
 	if v.auditLog != nil {
@@ -90,12 +90,8 @@ func (v *View) closeState() error {
 		}
 		v.auditLog = nil
 	}
-	if v.vstate != nil {
-		if err := v.vstate.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close vstate: %w", err))
-		}
-		v.vstate = nil
-	}
+	v.vstate = nil
+
 	return errors.Join(errs...)
 }
 

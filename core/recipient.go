@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -80,6 +81,30 @@ func (rs Recipients) UserPubKeys() []UserPubKey {
 	}
 
 	return upks
+}
+
+// Spec is how a recipient would be written in a config: the spec it was
+// resolved from (a forge id, a URL, a file path), or the key material itself
+// when it was given verbatim.
+func (r *Recipient) Spec() string {
+	if r.Source == KeySourceManual {
+		return r.String()
+	}
+
+	return string(r.Source)
+}
+
+// Specs is Spec over the whole list, deduplicated - one forge id can have
+// produced several recorded keys, and a config declares it once.
+func (rs Recipients) Specs() []string {
+	specs := make([]string, 0, len(rs))
+	for _, recp := range rs {
+		if spec := recp.Spec(); !slices.Contains(specs, spec) {
+			specs = append(specs, spec)
+		}
+	}
+
+	return specs
 }
 
 func (rs Recipients) Strings() []string {
@@ -158,11 +183,12 @@ func ResolveRecipient(ctx context.Context, root *os.Root, pubKeySpec string) ([]
 	return keys, KeySource(pubKeySpec), err
 }
 
+// splitByLine returns one key per line, dropping blank lines and comments.
 func splitByLine(s string) []string {
 	lines := []string{}
 	for _, line := range strings.Split(s, "\n") {
 		line = strings.TrimSpace(line)
-		if len(line) == 0 {
+		if len(line) == 0 || strings.HasPrefix(line, "#") {
 			continue
 		}
 		lines = append(lines, line)
@@ -256,7 +282,18 @@ func ParseRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
 
 		r, s = sr, string(ssh.MarshalAuthorizedKey(sshPub))
 	default:
-		return nil, fmt.Errorf("unknown recipient type: %s", arg)
+		// A private key where a public one belongs is an easy mistake: it is
+		// the same file `sesam init -i` takes. Name it, and do not echo the
+		// value - it would put the secret in the terminal and the logs.
+		if kind := IdentityType(arg); kind != "unknown" {
+			return nil, fmt.Errorf(
+				"this is a private key (%s), not a public one - "+
+					"use the recipient from its `# public key:` line instead",
+				kind,
+			)
+		}
+
+		return nil, errors.New("unknown recipient type")
 	}
 
 	spk := newStringPubKey(s)
@@ -306,9 +343,16 @@ func ParseAndResolveRecipients(ctx context.Context, root *os.Root, pubKeySpecs [
 			return nil, fmt.Errorf("failed to resolve recipient %s (#%d): %w", pubKeySpec, idx, err)
 		}
 
+		if len(rawPubKeys) == 0 {
+			return nil, fmt.Errorf("recipient %q (#%d) holds no public key", pubKeySpec, idx)
+		}
+
+		// The spec is what the user typed, so it is safe to quote back. The
+		// material behind it is not: a spec pointing at the wrong file can
+		// resolve to a private key.
 		subRecps, err := ParseRecipients(rawPubKeys, pluginUI)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse recipient %s (#%d): %w", rawPubKeys, idx, err)
+			return nil, fmt.Errorf("failed to parse recipient %q (#%d): %w", pubKeySpec, idx, err)
 		}
 
 		for i := range subRecps {

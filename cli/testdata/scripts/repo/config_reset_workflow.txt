@@ -1,0 +1,103 @@
+# `sesam config reset` rewrites sesam.yml to describe the audit log again,
+# throwing away whatever the file declared on top of it. It is the opposite of
+# `sesam config apply` and never touches the log.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Nothing to do when the two already agree.
+exec sesam config reset
+stdout 'nothing to reset'
+
+# Hand edits are discarded, and the diff is empty afterwards.
+cp edited.yml sesam.yml
+envsubst sesam.yml
+exec sesam config diff
+stdout '\+  - name: carol'
+
+# --dry-run reports the same outcome and writes nothing.
+exec sesam config reset --dry-run
+stdout '\+ user carol \(groups: dev'
+stdout 'would discard 2 declared changes'
+stdout 'was not touched'
+exec sesam config diff
+stdout '\+  - name: carol'
+
+exec sesam config reset
+stdout '\+ user carol \(groups: dev'
+stdout '~ secret README.md access: admin -> dev'
+stdout 'discarded 2 declared changes'
+exec sesam config diff
+stdout 'in sync'
+
+# The audit log is untouched by all of this.
+exec sesam user list
+stdout 'bob'
+! stdout 'carol'
+exec sesam verify
+
+# A config too broken to read is rewritten from the audit log instead. Here the
+# file is not YAML at all.
+cp broken.yml sesam.yml
+exec sesam config reset --dry-run
+stdout 'cannot be reused'
+stdout 'would be lost'
+grep 'valid yaml at all' sesam.yml
+
+exec sesam config reset
+stdout 'cannot be reused'
+stdout 'comments and descriptions are gone'
+
+# What it wrote describes the log exactly, so apply has nothing to do.
+exec sesam config diff
+stdout 'in sync'
+exec sesam apply
+stdout 'nothing to apply'
+exec sesam verify
+
+# Even a deleted sesam.yml is recoverable.
+rm sesam.yml
+exec sesam config reset
+stdout 'cannot be reused'
+exists sesam.yml
+exec sesam config diff
+stdout 'in sync'
+
+# The rewritten file has every user and secret the log knows.
+grep 'name: admin' sesam.yml
+grep 'name: bob' sesam.yml
+grep 'README.md' sesam.yml
+
+-- edited.yml --
+users:
+  - name: admin
+    key:
+      - $ADMIN_PUBKEY
+  - name: bob
+    key:
+      - $BOB_PUBKEY
+  - name: carol
+    key:
+      - $CAROL_PUBKEY
+
+groups:
+  admin:
+    - admin
+  dev:
+    - bob
+    - carol
+
+secrets:
+  - path: README.md
+    access:
+      - dev
+
+-- broken.yml --
+this is: [not
+  valid yaml at all

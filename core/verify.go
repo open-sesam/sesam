@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"slices"
 )
 
@@ -936,15 +935,9 @@ func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 	}
 }
 
-func (s *VerifiedState) Close() error {
-	// NOTE: Not a hard error for now, there might be valid reasons this happened.
-	// Could be that sesam was legit interrupted during operation.
-	if srs := s.SealRequiredSeqID; srs > 0 {
-		slog.Warn(
-			"verify: a seal is pending - please run `sesam seal` before committing!",
-			slog.Uint64("seq_id", srs),
-		)
-	}
-
-	return nil
+// SealPending reports the entry that still owes a seal, if any. Whether that
+// is worth telling the user about depends on the state: one that was rolled
+// back or superseded owes nothing, because it never reached disk.
+func (s *VerifiedState) SealPending() (uint64, bool) {
+	return s.SealRequiredSeqID, s.SealRequiredSeqID > 0
 }
