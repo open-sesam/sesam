@@ -29,13 +29,17 @@ type logLine struct {
 	desc  string
 }
 
+// shortIDLen is how much of an id a shortened rendering keeps.
+const shortIDLen = 12
+
 // shortID truncates long ids (audit root hashes, init UUIDs) to a git-style
-// prefix, unless full output was requested.
+// prefix, unless full output was requested. Anything already at most that long
+// is returned as is - key specs like "github:bob" are shorter than the cut.
 func shortID(s string, full bool) string {
-	if full || len(s) <= 8 {
+	if full || len(s) <= shortIDLen {
 		return s
 	}
-	return s[:12]
+	return s[:shortIDLen]
 }
 
 func formatLogTime(t time.Time, full bool) string {

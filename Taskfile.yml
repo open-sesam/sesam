@@ -16,6 +16,10 @@ tasks:
       - ./*.go
       - ./**/*.go
       - Taskfile.yml
+      # go:embed'ed assets — they change the binary without any .go file changing.
+      - config/sesam_schema.json
+      - cli/commands/docgen_cfg_template.md
+      - repo/assets/*.default
     generates:
       - ./sesam
     method: checksum

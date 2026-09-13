@@ -1,0 +1,168 @@
+# `sesam config apply` records what a hand-edited sesam.yml declares in the
+# audit log. It is a transaction: either every step lands or none does, and
+# sesam.yml itself is never rewritten.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Nothing declared beyond what the log already knows.
+exec sesam apply
+stdout 'nothing to apply'
+
+# Hand-edit: a new user, a new secret and a wider access list for README.md.
+cp secret.txt db.env
+cp declared.yml sesam.yml
+envsubst sesam.yml
+exec sesam config diff
+stdout '\+  - name: bob'
+
+exec sesam config apply
+stdout '\+ user bob \(groups: dev'
+stdout '\+ secret db.env \(access: dev\)'
+stdout '~ secret README.md access: admin -> dev'
+stdout 'applied 3 changes'
+
+# The audit log has it now, and the diff is empty again.
+exec sesam log
+stdout 'told bob into dev'
+exec sesam config diff
+stdout 'in sync'
+
+# Applying twice is a no-op - the plan really closed the gap.
+exec sesam config apply
+stdout 'nothing to apply'
+
+# sesam.yml was read, not written: the comment survives verbatim.
+grep 'a comment that apply must not eat' sesam.yml
+
+# A step that cannot be carried out aborts the whole plan. Here carol is told
+# first (that would work), then a secret with no file on disk is added.
+cp broken.yml sesam.yml
+envsubst sesam.yml
+! exec sesam config apply
+stderr 'missing.env'
+
+# Nothing was applied: carol never made it into the log.
+exec sesam user list
+! stdout 'carol'
+exec sesam log
+! stdout 'carol'
+exec sesam verify
+
+# The config is still the one that failed, so the diff keeps reporting it.
+exec sesam config diff --json
+stdout '"user": "carol"'
+
+# An apply that would strip its own author of admin is refused up front.
+cp self_demote.yml sesam.yml
+envsubst sesam.yml
+! exec sesam config apply
+stderr 'who is applying it'
+
+# A declaration that arrived committed was not written by whoever runs apply,
+# so it is refused: pushing a config must not be enough to get it applied.
+cp broken.yml sesam.yml
+envsubst sesam.yml
+cp secret.txt missing.env
+exec git add -A
+exec git commit -m 'declare carol'
+! exec sesam config apply
+stderr 'already committed'
+stderr 'user carol'
+stderr '--force'
+
+# Nothing happened, and the log still knows nothing about carol.
+exec sesam log
+! stdout 'carol'
+
+# --force is the way through, once the change has been vouched for.
+exec sesam config apply --force
+stdout '\+ user carol'
+exec sesam user list
+stdout 'carol'
+exec sesam verify
+
+-- declared.yml --
+users:
+  - name: admin
+    # a comment that apply must not eat
+    key:
+      - $ADMIN_PUBKEY
+  - name: bob
+    key:
+      - $BOB_PUBKEY
+
+groups:
+  admin:
+    - admin
+  dev:
+    - bob
+
+secrets:
+  - path: README.md
+    access:
+      - dev
+  - path: db.env
+    access:
+      - dev
+
+-- broken.yml --
+users:
+  - name: admin
+    key:
+      - $ADMIN_PUBKEY
+  - name: bob
+    key:
+      - $BOB_PUBKEY
+  - name: carol
+    key:
+      - $CAROL_PUBKEY
+
+groups:
+  admin:
+    - admin
+  dev:
+    - bob
+    - carol
+
+secrets:
+  - path: README.md
+    access:
+      - dev
+  - path: db.env
+    access:
+      - dev
+  - path: missing.env
+    access:
+      - dev
+
+-- self_demote.yml --
+users:
+  - name: admin
+    key:
+      - $ADMIN_PUBKEY
+  - name: bob
+    key:
+      - $BOB_PUBKEY
+
+groups:
+  admin:
+    - bob
+  dev:
+    - admin
+
+secrets:
+  - path: README.md
+    access:
+      - dev
+  - path: db.env
+    access:
+      - dev
+
+-- secret.txt --
+super secret content

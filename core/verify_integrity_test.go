@@ -25,7 +25,7 @@ func integritySetup(t *testing.T) (*SecretManager, *VerifiedState) {
 		},
 		LastSealRootHash: buildRootHash([]*secretFooter{sig}),
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	return mgr, state
 }
@@ -100,7 +100,7 @@ func TestIntegrityMultipleSecrets(t *testing.T) {
 		Secrets:          secrets,
 		LastSealRootHash: buildRootHash(sigs),
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	report := VerifyIntegrity(mgr.root, state, mgr.Keyring)
 	require.True(t, report.OK(), "all good with 3 secrets: %s", report.String())
@@ -176,7 +176,7 @@ func TestIntegrityRejectsUnauthorizedSealer(t *testing.T) {
 			{RevealedPath: "secrets/admin-only", AccessGroups: []string{"admin"}},
 		},
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	// Bob is a recipient of the file (so he can derive the content-hash key
 	// and seal) but not an authorized sealer of admin-only per the policy.

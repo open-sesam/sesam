@@ -122,3 +122,9 @@ func (c *Config) newFile(path string) *FileSource {
 func (c *Config) appendInclude(src *FileSource, includePath string) error {
 	return appendSecretsItems(src, []Secret{{Include: includePath}})
 }
+
+// sameDir reports whether a and b refer to the same directory.
+func sameDir(a, b string) bool {
+	rel, err := filepath.Rel(a, b)
+	return err == nil && rel == "."
+}

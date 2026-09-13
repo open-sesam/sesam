@@ -9,7 +9,8 @@ At the time you created your repo, you would see something like this in your con
 users:
   - name: bob
     desc: Bob the Builder
-    key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
 groups:
   admin:
     - bob
@@ -23,13 +24,16 @@ deployment. We can do so by adding some more users and a new group:
    users:
      - name: bob
        desc: Bob the Builder
-       key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
+       key:
+         - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN6VzKY/HxjYdIjBnRi6Nq7/0ydsKpX3uk1gu/ywUDJj
 +    - name: alice
 +      desc: Mrs. Wonderland
-+      key: github:alice
++      key:
++        - github:alice
 +    - name: peter
 +      desc: Peter Lustig
-+      key: file://keys/peter.txt
++      key:
++        - file://keys/peter.txt
    groups:
      admin:
        - bob
@@ -48,20 +52,33 @@ The public key will be fetched only once initially and the result is cached. Apa
 * Peter on the other hand might not have an forge account. Maybe he also has an awful long RSA key that you don't want to put in the config verbatim. In this case you can just create a file in the repo and add it there. We recommend adding an exception to `.gitignore` if you want to push those public keys.
 * The key of `bob` was derived from the identity used during init. If you use the same public key for (e.g.) your GitHub account you can also write something like `github:bob` there.
 
-```admonish warning
-The `sesam apply` feature is not yet implemented.
-Please see here to view the [plan](https://github.com/open-sesam/sesam/issues/62).
-
-The documentation here is just a preview. Use the imperative workflow for now.
-```
+## Applying a changed config
 
 Once we've changed the config we can use this command, which should be familiar by now. This will then adjust the repository state accordingly:
 
 ```bash
 sesam apply
-- added user `alice`
-- added user `peter`
++ user alice (groups: deployment, keys: github:alice)
++ user peter (groups: deployment, keys: file://keys/peter.pub)
+applied 2 changes
 ```
+
+Every step is recorded in the audit log, or none of them is: if one cannot be
+carried out, nothing is written and the reason is printed. `sesam.yml` itself is
+never rewritten by `apply` - your comments and descriptions stay as you wrote
+them. To see what would happen first, run `sesam config diff`.
+
+```admonish warning title="Changes have to come from your working tree"
+`sesam apply` refuses steps that are already committed.
+
+A config that arrived with a `git pull` was not written by you, and applying it
+because someone asked you to "just run `sesam apply`" is how a pushed
+`sesam.yml` turns into real access to secrets. Check where the change came from
+(`git log -p -- sesam.yml`) and pass `--force` once you are happy with it.
+```
+
+Went too far while editing? `sesam config reset` rewrites `sesam.yml` from the
+audit log, throwing your edits away - `--dry-run` shows what it would discard.
 
 Changing groups later works the same way.
 

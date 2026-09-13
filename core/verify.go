@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 
 	"github.com/hdevalence/ed25519consensus"
@@ -84,13 +83,15 @@ func (s *VerifiedState) rebuildSecretIndex() {
 	}
 }
 
-// buildIndexes (re)builds both lookup indexes from Users and Secrets. verify
+// BuildIndexes (re)builds both lookup indexes from Users and Secrets. verify
 // calls it after replay, and every later modification keeps the indexes in sync
 // incrementally, so the read accessors (UserExists, SecretExists, ...) never
 // write and are safe to call concurrently on an unchanging state. Code that
-// constructs a VerifiedState by hand must call this before reading it.
+// constructs or modifies a VerifiedState by hand - outside this package there
+// is no other way - must call this before reading it, or every lookup answers
+// "not found".
 // It is not safe against concurrent modification; that would need a mutex.
-func (s *VerifiedState) buildIndexes() {
+func (s *VerifiedState) BuildIndexes() {
 	s.rebuildUserIndex()
 	s.rebuildSecretIndex()
 }
@@ -952,7 +953,7 @@ func replay(state *VerifiedState, batched bool) error {
 	newState := *state
 	newState.Users = cloneVerifiedUsers(state.Users)
 	newState.Secrets = cloneVerifiedSecrets(state.Secrets)
-	newState.buildIndexes()
+	newState.BuildIndexes()
 
 	var previousEntry *AuditEntrySigned
 	var checks []SigCheck
@@ -1094,19 +1095,13 @@ func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 		keyring:           kr,
 		pluginUI:          s.pluginUI,
 	}
-	cloned.buildIndexes()
+	cloned.BuildIndexes()
 	return cloned
 }
 
-func (s *VerifiedState) Close() error {
-	// NOTE: Not a hard error for now, there might be valid reasons this happened.
-	// Could be that sesam was legit interrupted during operation.
-	if srs := s.SealRequiredSeqID; srs > 0 {
-		slog.Warn(
-			"verify: a seal is pending - please run `sesam seal` before committing!",
-			slog.Uint64("seq_id", srs),
-		)
-	}
-
-	return nil
+// SealPending reports the entry that still owes a seal, if any. Whether that
+// is worth telling the user about depends on the state: one that was rolled
+// back or superseded owes nothing, because it never reached disk.
+func (s *VerifiedState) SealPending() (uint64, bool) {
+	return s.SealRequiredSeqID, s.SealRequiredSeqID > 0
 }

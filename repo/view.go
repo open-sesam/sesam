@@ -66,9 +66,12 @@ func (v *View) isClosed() bool {
 // Caller must hold v.mu (matching expandSecretFiles/secretsUnder). This is the
 // canonical config access point for staged writes today and read paths (apply,
 // the config commands) later.
+// configFileName is the declared state's entry file, relative to the sesam dir.
+const configFileName = "sesam.yml"
+
 func (v *View) cfg() (*sesamConf.Config, error) {
 	if v.config == nil {
-		c, err := sesamConf.Load(v.root, "sesam.yml")
+		c, err := sesamConf.Load(v.root, configFileName)
 		if err != nil {
 			return nil, fmt.Errorf("load config: %w", err)
 		}
@@ -77,8 +80,8 @@ func (v *View) cfg() (*sesamConf.Config, error) {
 	return v.config, nil
 }
 
-// closeState closes the audit log and verified state. The root and lock are
-// shared/owned by the Repo and are not touched here.
+// closeState closes the audit log and drops the verified state. The root and
+// lock are shared/owned by the Repo and are not touched here.
 func (v *View) closeState() error {
 	var errs []error
 	if v.auditLog != nil {
@@ -87,12 +90,8 @@ func (v *View) closeState() error {
 		}
 		v.auditLog = nil
 	}
-	if v.vstate != nil {
-		if err := v.vstate.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close vstate: %w", err))
-		}
-		v.vstate = nil
-	}
+	v.vstate = nil
+
 	return errors.Join(errs...)
 }
 
