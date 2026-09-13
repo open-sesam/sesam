@@ -298,33 +298,6 @@ func conflictedSecretHints(conflicted []core.ConflictedSecret) []string {
 	return lines
 }
 
-// warnKeptMergeEdits names the secrets the finalize left alone because the user
-// changed them after the merge stopped. Their version is what gets sealed, so the
-// merged content is dropped for those paths - worth saying out loud, since git's
-// own output mentions none of it and the revealed files are gitignored.
-func warnKeptMergeEdits(paths []string, kind mergeKind) {
-	if len(paths) == 0 {
-		return
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(
-		&b,
-		"sesam: you changed %d %s after the merge; sealing your version, not the merged one:\n",
-		len(paths), pluralize("secret", len(paths)),
-	)
-
-	for _, p := range paths {
-		b.WriteString("sesam:   " + p + "\n")
-	}
-
-	if abort := kind.AbortCmd(); abort != "" {
-		b.WriteString("sesam: to take the merged content instead, start over with `" + abort + "`.\n")
-	}
-
-	fmt.Fprint(os.Stderr, b.String())
-}
-
 // mergeDecisionLines renders each noteworthy merge decision as a "- ..." bullet.
 // Shared by the merge driver (live, during git merge) and `sesam log` (history)
 // so both explain a semantic merge the same way.

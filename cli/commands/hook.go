@@ -94,22 +94,13 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 			}
 
 			// Refresh the plaintext of objects the merge changed, or the seal below
-			// writes our stale version back over them and reverts the merge. Only
-			// the ones that are actually stale: the same reveal would otherwise
-			// overwrite whatever the user edited while reviewing the merge.
+			// writes our stale version back over them and reverts the merge.
 			merged, err := stagedSecretPaths(sesamDir)
 			if err != nil {
 				return err
 			}
 
-			split, err := r.SplitMergedSecrets(merged)
-			if err != nil {
-				return err
-			}
-
-			warnKeptMergeEdits(split.Edited, kind)
-
-			if err := r.RevealPaths(split.Stale); err != nil {
+			if err := r.RevealPaths(merged); err != nil {
 				return err
 			}
 		}
