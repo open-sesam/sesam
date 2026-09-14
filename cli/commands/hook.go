@@ -3,6 +3,7 @@ package commands
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -92,17 +93,19 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 					cmp.Or(kind.ContinueCmd(), "git commit"),
 				)
 			}
+		}
 
-			// Refresh the plaintext of objects the merge changed, or the seal below
-			// writes our stale version back over them and reverts the merge.
-			merged, err := stagedSecretPaths(sesamDir)
-			if err != nil {
-				return err
-			}
+		states, err := r.SyncStates(syncOpts(sesamDir))
+		if err != nil {
+			return err
+		}
 
-			if err := r.RevealPaths(merged); err != nil {
-				return err
-			}
+		if diverged := states.Paths(repo.SecretStateDiverged); len(diverged) > 0 {
+			return divergedError(diverged, kind)
+		}
+
+		if err := refreshStale(r, states, false); err != nil {
+			return err
 		}
 
 		if err := r.Update(func(s *repo.Stage) error {
@@ -113,7 +116,9 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 					return err
 				}
 			}
-			return s.Seal(false)
+
+			_, err := s.Seal(repo.SealOpts{States: states})
+			return err
 		}); err != nil {
 			return err
 		}
@@ -146,10 +151,34 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 	})(ctx, cmd)
 }
 
+// divergedError explains a secret that was edited here while the operation
+// replaced its object. Neither side can be picked for the user.
+func divergedError(paths []string, kind mergeKind) error {
+	where := "in git"
+	if kind.InProgress() {
+		where = "in this " + kind.String()
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d %s changed both here and %s:\n", len(paths), pluralize("secret", len(paths)), where)
+	for _, p := range paths {
+		b.WriteString("  " + p + "\n")
+	}
+
+	b.WriteString(waysOut)
+	if abort := kind.AbortCmd(); abort != "" {
+		b.WriteString(", `" + abort + "` starts over")
+	}
+
+	return errors.New(b.String())
+}
+
 func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 	// git passes (prev-HEAD, new-HEAD, is-branch-checkout). The flag is "1" for a
 	// branch switch (and clone), "0" for a file checkout (git checkout -- path).
-	// git does not tell us which files changed, so we cannot reveal selectively.
+	// git does not tell us which files changed, but prev-HEAD says where the
+	// objects came from, which is enough to tell stale plaintext from edited.
+	prev := cmd.Args().Get(0)
 	branchCheckout := cmd.Args().Get(2) != "0"
 
 	// Run clean and open (only if .sesam exists) - is also run on git clone.
@@ -166,15 +195,35 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 			return nil
 		}
 
+		sync := syncOpts(r.SesamDir())
+		if branchCheckout && isCommitHash(prev) {
+			sync.Before = prev
+		}
+
+		states, err := r.SyncStates(sync)
+		if err != nil {
+			slog.Warn("failed to compare secrets after checkout", slog.Any("err", err))
+			return nil
+		}
+
+		// Edited plaintext survives the checkout, whatever the new branch holds;
+		// git would refuse to overwrite it were it tracked.
+		printKeptEdits(states)
+
 		if branchCheckout {
-			// Branch switch/clone: the objects and audit log arrived together and
-			// are consistent. Aggressively drop stale plaintext under .sesam
-			// (secrets removed or now inaccessible on the new branch), then reveal
-			// the new set. Aggressive clean is confined to the sesam dir.
-			if err := r.Clean(ctx, repo.CleanOpts{Aggressive: true}); err != nil {
+			// Branch switch/clone: drop plaintext that has no readable secret on
+			// the new branch, and any other untracked file under the sesam dir.
+			// Current secrets stay - revealed below when stale or missing, kept
+			// when edited. Aggressive clean is confined to the sesam dir.
+			current := currentSecrets(states)
+			_, err := r.Clean(ctx, repo.CleanOpts{
+				Aggressive: true,
+				CheckFunc:  func(path string) (bool, error) { return !current[path], nil },
+			})
+			if err != nil {
 				slog.Warn("failed to clean up previous revealed secrets", slog.Any("err", err))
 			}
-			if err := r.Reveal(false); err != nil {
+			if err := refreshStale(r, states, true); err != nil {
 				slog.Warn("failed to reveal secrets after checkout", slog.Any("err", err))
 			}
 			return nil
@@ -182,17 +231,39 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 
 		// File checkout (git checkout -- path): a single sealed object may have
 		// been restored without its audit log, leaving the on-disk root hash
-		// stale. Reveal from the checked-out object, then seal to record it in the
-		// log so the repo is consistent again (a no-op when nothing drifted).
-		if err := r.Reveal(false); err != nil {
+		// stale. Take the checked-out object where the plaintext is still the
+		// previous version, then seal to record it in the log so the repo is
+		// consistent again (a no-op when nothing drifted).
+		if err := refreshStale(r, states, true); err != nil {
 			slog.Warn("failed to reveal secrets after checkout", slog.Any("err", err))
 		}
-		if err := r.Update(func(s *repo.Stage) error { return s.Seal(false) }); err != nil {
+		if err := r.Update(func(s *repo.Stage) error {
+			_, err := s.Seal(repo.SealOpts{States: states})
+			return err
+		}); err != nil {
 			slog.Warn("failed to reseal after file checkout", slog.Any("err", err))
 		}
 
 		return nil
 	})(ctx, cmd)
+}
+
+// currentSecrets is the plaintext a branch switch must not clean: every secret
+// the user can read on the new branch. Leftovers of secrets they lost access to
+// are not in it and go.
+func currentSecrets(states repo.SyncStates) map[string]bool {
+	current := make(map[string]bool, len(states))
+	for _, p := range states.Paths(
+		repo.SecretStateInSync,
+		repo.SecretStateNotInSync,
+		repo.SecretStateStale,
+		repo.SecretStateDiverged,
+		repo.SecretStateNoSealedPath,
+	) {
+		current[p] = true
+	}
+
+	return current
 }
 
 // HandleHookPostMerge refreshes the plaintext of secrets a completed merge changed.
@@ -209,11 +280,11 @@ func HandleHookPostMerge(ctx context.Context, cmd *cli.Command) error {
 	return silentWithRepo(repo.VerifyModeNoDisk, func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		sesamDir := r.SesamDir()
 
-		// Only git knows which objects the merge brought in. Revealing everything
-		// instead would overwrite plaintext edits the user has not sealed yet.
-		listPaths := mergedSecretPaths
+		// Only git knows which objects the merge brought in, and where the
+		// worktree was before it: ORIG_HEAD, or HEAD itself for a squash.
+		listPaths, before := mergedSecretPaths, "ORIG_HEAD"
 		if squash {
-			listPaths = stagedSecretPaths
+			listPaths, before = stagedSecretPaths, "HEAD"
 		}
 
 		paths, err := listPaths(sesamDir)
@@ -221,16 +292,26 @@ func HandleHookPostMerge(ctx context.Context, cmd *cli.Command) error {
 			slog.Warn("failed to list merged secrets", slog.Any("err", err))
 			return nil
 		}
-
-		// A conflicted squash merge fires this hook too, and those files hold the
-		// driver's merge result - revealing would throw it away.
-		conflicted, err := r.ConflictedSecrets()
-		if err != nil {
-			slog.Warn("failed to check for conflicted secrets", slog.Any("err", err))
+		if len(paths) == 0 {
 			return nil
 		}
 
-		if err := r.RevealPaths(withoutConflicted(paths, conflicted)); err != nil {
+		sync := syncOpts(sesamDir)
+		sync.Paths = paths
+		sync.Before = resolveRev(sesamDir, before)
+
+		states, err := r.SyncStates(sync)
+		if err != nil {
+			slog.Warn("failed to compare merged secrets", slog.Any("err", err))
+			return nil
+		}
+
+		// Plaintext edited before the merge stays, also where the merge replaced
+		// the object (conflicted secrets included: their plaintext is the
+		// driver's, waiting to be resolved). Only the untouched one is refreshed.
+		printKeptEdits(states)
+
+		if err := refreshStale(r, states, true); err != nil {
 			slog.Warn("failed to reveal secrets after merge", slog.Any("err", err))
 		}
 

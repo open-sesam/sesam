@@ -1,0 +1,53 @@
+# An unsealed local edit made BEFORE the merge starts, to a secret the merge
+# then replaces. The finalize used to pick a side on its own - first the merge's
+# (overwriting the edit), later the user's (dropping theirs). Now it refuses,
+# and taking the merge's version is an explicit step.
+
+sesam-repo admin base.txt ours.txt changed.txt local.txt
+
+cp $TMPDIR/base.txt s
+cp $TMPDIR/base.txt t
+exec sesam add s --group admin
+exec sesam add t --group admin
+exec git add -A
+exec git commit -m 'add secrets'
+
+exec git checkout -b topic
+cp $TMPDIR/changed.txt t
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change t'
+
+exec git checkout master
+cp $TMPDIR/ours.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'master: change s'
+
+# The unsealed edit, then the merge.
+cp $TMPDIR/local.txt t
+! exec git merge topic
+exec cat t
+stdout 'LOCAL-UNSEALED'
+
+! exec git commit --no-edit
+stderr 'changed both here and in this merge'
+stderr '  t'
+
+exec sesam reveal --all
+exec git commit --no-edit
+exec sesam show .sesam/objects/t.sesam
+stdout 'CHANGED'
+exec cat t
+stdout 'CHANGED'
+exec sesam verify
+stderr 'Integrity: ok'
+
+-- base.txt --
+BASE
+-- ours.txt --
+OURS
+-- changed.txt --
+CHANGED
+-- local.txt --
+LOCAL-UNSEALED

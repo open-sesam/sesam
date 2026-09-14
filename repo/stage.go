@@ -362,15 +362,53 @@ func (s *Stage) UserKill(user string) error {
 	return cfg.UserKill(user)
 }
 
-// Seal re-encrypts all revealed content into the staged sealed storage.
-func (s *Stage) Seal(all bool) error {
+// Seal writes edited plaintext into the objects. Stale plaintext - older than
+// its object - is left out and reported; a secret that changed on both sides
+// is refused with a DivergedError, unless opts.All says to take the plaintext
+// as it is everywhere.
+func (s *Stage) Seal(opts SealOpts) (*SealResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.secret.Seal(all); err != nil {
-		return fmt.Errorf("failed to seal secrets: %w", err)
+	if opts.All {
+		if err := s.secret.Seal(true, nil); err != nil {
+			return nil, fmt.Errorf("failed to seal secrets: %w", err)
+		}
+
+		return &SealResult{}, nil
 	}
-	return nil
+
+	states := opts.States
+	if states == nil {
+		var err error
+		if states, err = s.syncStates(opts.Sync); err != nil {
+			return nil, err
+		}
+	}
+
+	if diverged := states.Paths(SecretStateDiverged); len(diverged) > 0 {
+		return nil, &DivergedError{Paths: diverged}
+	}
+
+	advice := make(map[string]core.SealAdvice, len(states))
+	for p, state := range states {
+		switch state {
+		case SecretStateInSync, SecretStateRecipientsChanged:
+			advice[p] = core.AdviceUnchanged
+		case SecretStateNotInSync, SecretStateNoSealedPath:
+			advice[p] = core.AdviceChanged
+		case SecretStateStale:
+			advice[p] = core.AdviceKeep
+		default:
+			// missing plaintext, no access: sealOrPreserve preserves the object.
+		}
+	}
+
+	if err := s.secret.Seal(false, advice); err != nil {
+		return nil, fmt.Errorf("failed to seal secrets: %w", err)
+	}
+
+	return &SealResult{Stale: states.Paths(SecretStateStale)}, nil
 }
 
 // SecretAdd starts tracking the secret(s) at each path. Paths are sesam-relative.

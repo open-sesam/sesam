@@ -23,7 +23,7 @@ exec git stash
 exec cat s
 stdout 'WIP'
 exec sesam status
-stdout 'out of sync'
+stdout 'modified'
 
 # Commit a different change to the same secret, so the pop has to three-way.
 cp $TMPDIR/other.txt s

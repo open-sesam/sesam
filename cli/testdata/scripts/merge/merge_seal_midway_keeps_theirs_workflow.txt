@@ -1,0 +1,78 @@
+# A merge with a conflict on s and a change only THEY made to t. `sesam status`
+# sends the user to resolve s and seal. That seal must not touch t: its
+# plaintext is still ours, its object already theirs, and sealing it would
+# quietly undo their change for that secret.
+
+sesam-repo admin base.txt ours.txt theirs.txt changed.txt resolved.txt
+
+cp $TMPDIR/base.txt s
+cp $TMPDIR/base.txt t
+exec sesam add s --group admin
+exec sesam add t --group admin
+exec git add -A
+exec git commit -m 'add secrets'
+
+exec git checkout -b topic
+cp $TMPDIR/theirs.txt s
+cp $TMPDIR/changed.txt t
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change s and t'
+
+exec git checkout master
+cp $TMPDIR/ours.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'master: change s'
+
+! exec git merge topic
+stderr 'automatically merging revealed file s; 1 conflict'
+
+# Status tells the two apart: s needs a hand, t just lags behind its object.
+exec sesam status
+stdout 'U s'
+stdout 'S t'
+stdout 'the stale \(S\) secrets take the incoming version when you finish'
+
+# Resolve s and seal, as the hint says. t is left alone and named.
+cp $TMPDIR/resolved.txt s
+exec sesam seal
+stderr 'not sealed - the object is newer than the plaintext'
+stderr 'sesam:   t'
+exec sesam show .sesam/objects/s.sesam
+stdout 'RESOLVED'
+exec sesam show .sesam/objects/t.sesam
+stdout 'CHANGED'
+
+# The finalize refreshes t and both changes survive the merge.
+exec git add -A
+exec git commit --no-edit
+exec cat t
+stdout 'CHANGED'
+exec sesam show .sesam/objects/t.sesam
+stdout 'CHANGED'
+exec sesam show .sesam/objects/s.sesam
+stdout 'RESOLVED'
+exec sesam verify
+stderr 'Integrity: ok'
+
+-- base.txt --
+line one
+BASE
+line three
+-- ours.txt --
+line one
+OURS
+line three
+-- theirs.txt --
+line one
+THEIRS
+line three
+-- changed.txt --
+line one
+CHANGED
+line three
+-- resolved.txt --
+line one
+RESOLVED
+line three

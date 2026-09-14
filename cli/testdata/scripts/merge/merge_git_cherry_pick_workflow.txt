@@ -37,11 +37,11 @@ exec sesam verify
 stderr 'Integrity: ok'
 stderr 'a seal is pending'
 exec sesam status
-stdout 'out of sync'
+stdout 'stale'
 
 # Reveal before sealing: the object git installed is the authoritative one, our
-# plaintext is the pre-pick version. (Sealing straight away is the trap that
-# merge_seal_over_merge_warns covers.)
+# plaintext is the pre-pick version - which status could tell from the reflog.
+# (Sealing straight away is what merge_seal_skips_stale covers.)
 exec sesam reveal
 exec cat s
 stdout 'CHANGED'

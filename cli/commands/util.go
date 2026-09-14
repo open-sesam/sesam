@@ -146,6 +146,22 @@ func printInfo(format string, args ...any) {
 	slog.Info(fmt.Sprintf(format, args...))
 }
 
+// waysOut is the one sentence every "pick a side" message ends with.
+const waysOut = "`sesam reveal --all` takes the incoming version, `sesam seal --all` keeps yours"
+
+// printNote is sesam's "left these alone" notice on stderr: a headline, the
+// paths, and how to get on. git shows nothing of it, the plaintext is gitignored.
+func printNote(headline string, lines []string, hint string) {
+	var b strings.Builder
+	b.WriteString("sesam: " + headline + "\n")
+	for _, l := range lines {
+		b.WriteString("sesam:   " + l + "\n")
+	}
+
+	b.WriteString("sesam: " + hint + "\n")
+	fmt.Fprint(os.Stderr, b.String())
+}
+
 func pluralize(s string, n int) string {
 	if n == 1 {
 		return s

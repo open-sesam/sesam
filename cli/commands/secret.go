@@ -38,7 +38,7 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 			return nil
 		}
 
-		return s.Seal(cmd.Bool("seal-all"))
+		return sealStage(cmd, r, s)
 	})
 }
 
@@ -58,7 +58,7 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if err := s.SecretRemove(paths); err != nil {
 			return err
 		}
-		return s.Seal(cmd.Bool("seal-all"))
+		return sealStage(cmd, r, s)
 	}); err != nil {
 		return err
 	}
@@ -90,6 +90,6 @@ func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if err := s.SecretMove(paths[0], paths[1], nested); err != nil {
 			return err
 		}
-		return s.Seal(cmd.Bool("seal-all"))
+		return sealStage(cmd, r, s)
 	})
 }

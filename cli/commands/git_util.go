@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -162,6 +163,82 @@ func inspectMerge(sesamDir string) (mergeKind, string) {
 	}
 
 	return mergeKindNone, ""
+}
+
+// isCommitHash reports whether rev is a full object id git could have handed
+// us: 40 (sha1) or 64 (sha256) hex digits, and not the all-zero id git uses for
+// "no such commit", e.g. as the previous HEAD on a clone.
+func isCommitHash(rev string) bool {
+	if len(rev) != 40 && len(rev) != 64 {
+		return false
+	}
+
+	if _, err := hex.DecodeString(rev); err != nil {
+		return false
+	}
+
+	return strings.Trim(rev, "0") != ""
+}
+
+// syncOpts tells the repo which object versions a plaintext may still be the
+// decryption of. Inside a git operation, Before is the commit the worktree held
+// when it started - HEAD for a stopped merge, ORIG_HEAD for a rebase (there HEAD
+// has moved) - so objects the operation replaced can be told from plaintext the
+// user edited. ORIG_HEAD and the last reflog positions are always offered as
+// candidates: after a hookless pull or a cherry-pick they are the only trace of
+// what the plaintext was revealed from.
+func syncOpts(sesamDir string) repo.SyncOpts {
+	worktreeRoot, err := repo.GitWorktreeRoot(sesamDir)
+	if err != nil {
+		return repo.SyncOpts{}
+	}
+
+	var opts repo.SyncOpts
+	if out, ok := gitProbe(worktreeRoot, "rev-list", "-g", "-n", "4", "HEAD"); ok {
+		opts.Candidates = strings.Fields(out)
+	}
+	if sha, ok := gitProbe(worktreeRoot, "rev-parse", "--verify", "ORIG_HEAD^{commit}"); ok {
+		opts.Candidates = append(opts.Candidates, sha)
+	}
+
+	if kind := mergeState(sesamDir); kind.InProgress() {
+		ref := "HEAD"
+		if kind == mergeKindRebase {
+			ref = "ORIG_HEAD"
+		}
+
+		opts.Before = resolveRev(sesamDir, ref)
+	}
+
+	return opts
+}
+
+// resolveRev returns the commit ref names, or "" when it names none.
+func resolveRev(sesamDir, ref string) string {
+	worktreeRoot, err := repo.GitWorktreeRoot(sesamDir)
+	if err != nil {
+		return ""
+	}
+
+	sha, _ := gitProbe(worktreeRoot, "rev-parse", "--verify", ref+"^{commit}")
+	return sha
+}
+
+// gitProbe is gitOutput for questions git may well answer with an error - a ref
+// that does not exist, an unborn HEAD. Its stderr is dropped, and an empty
+// answer counts as none.
+func gitProbe(dir string, args ...string) (string, bool) {
+	//nolint:gosec // fixed git subcommands; args are constants from this file.
+	cmd := exec.CommandContext(context.Background(), "git", args...)
+	cmd.Dir = dir
+
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+
+	sha := strings.TrimSpace(string(out))
+	return sha, sha != ""
 }
 
 // mergeTouchedSesam reports whether an in-progress merge changed anything under

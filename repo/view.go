@@ -208,10 +208,9 @@ func (v *View) ListSecrets(paths []string) ([]SecretInfo, error) {
 	return out, nil
 }
 
-// Reveal reveals all secrets to the worktree.
-// If `all` is false we will check the hmac of each file
-// before starting to decrypt as an optimization.
-func (v *View) Reveal(all bool) error {
+// RevealAll writes out every secret the user can read, whatever the plaintext
+// holds. The selective variant is RevealPaths fed by SyncStates.
+func (v *View) RevealAll() error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -219,13 +218,15 @@ func (v *View) Reveal(all bool) error {
 		return ErrClosed
 	}
 
-	if err := v.secret.Reveal(all); err != nil {
+	if err := v.secret.RevealAll(); err != nil {
 		return fmt.Errorf("failed to reveal secrets: %w", err)
 	}
+
 	return nil
 }
 
-// RevealPaths reveals only the named secrets to the worktree.
+// RevealPaths writes out the named secrets from their objects, whatever their
+// plaintext holds. Callers decide; SyncStates tells them what is safe.
 func (v *View) RevealPaths(paths []string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -265,29 +266,58 @@ func (v *View) ClearTmp() error {
 	return ClearTmp(v.root)
 }
 
-// Clean removes stale plaintext from the worktree. See CleanOpts for modes.
-func (v *View) Clean(ctx context.Context, opts CleanOpts) error {
+// Clean removes revealed plaintext. Unless told to, it keeps what was edited
+// since it was last sealed or never sealed - the only copy of that content -
+// and names it in the result. The aggressive mode walks the whole worktree
+// without that check; opts.CheckFunc is the caller's only say there.
+func (v *View) Clean(ctx context.Context, opts CleanOpts) (*CleanResult, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
 	if v.isClosed() {
-		return ErrClosed
+		return nil, ErrClosed
 	}
 
 	if opts.Aggressive {
-		return CleanAggressive(ctx, v.sesamDir, v.identityPaths, opts)
+		return &CleanResult{}, CleanAggressive(ctx, v.sesamDir, v.identityPaths, opts)
 	}
 
-	if err := deleteRevealedSecrets(v.root, v.secret.State.Secrets, opts.CheckFunc); err != nil {
-		return fmt.Errorf("failed to delete revealed secrets: %w", err)
+	res := &CleanResult{}
+	check := opts.CheckFunc
+	if !opts.CleanEditedOrUnsealed {
+		states, err := v.syncStates(opts.Sync)
+		if err != nil {
+			return nil, err
+		}
+
+		res.Kept = states.Paths(SecretStateNotInSync, SecretStateDiverged, SecretStateNoSealedPath)
+		keep := make(map[string]bool, len(res.Kept))
+		for _, p := range res.Kept {
+			keep[p] = true
+		}
+
+		check = func(path string) (bool, error) {
+			if keep[path] {
+				return false, nil
+			}
+			if opts.CheckFunc != nil {
+				return opts.CheckFunc(path)
+			}
+
+			return true, nil
+		}
+	}
+
+	if err := deleteRevealedSecrets(v.root, v.secret.State.Secrets, check); err != nil {
+		return nil, fmt.Errorf("failed to delete revealed secrets: %w", err)
 	}
 
 	_, err := core.PruneEmptyDirs(v.root, ".", map[string]bool{
 		sesamSuffix: true,
 		gitSuffix:   true,
-	}, opts.CheckFunc)
+	}, check)
 
-	return err
+	return res, err
 }
 
 // ShowUser writes a JSON description of the named user to out. The bool is true
@@ -480,6 +510,11 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 		}
 	}
 
+	states, err := v.syncStates(opts.Sync)
+	if err != nil {
+		return nil, err
+	}
+
 	if !opts.IgnoreUnmanaged {
 		allPaths, err := v.cleanablePaths()
 		if err != nil {
@@ -512,50 +547,21 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 			continue
 		}
 
-		add := func(state SecretState) {
-			sff := StatusForFile{
-				RevealedPath: revealedPath,
-				State:        state,
-				AccessGroups: slices.Clone(secret.AccessGroups),
-				AccessUsers:  v.vstate.UserForGroups(secret.AccessGroups),
-			}
-
-			sort.Strings(sff.AccessGroups)
-			sort.Strings(sff.AccessUsers)
-			status.Files = append(status.Files, sff)
+		state := states[revealedPath]
+		if conflicted[revealedPath] && state != SecretStateUserHasNoAccess {
+			state = SecretStateConflicted
 		}
 
-		if !v.vstate.UserHasAccess(v.whoami, secret.AccessGroups) {
-			add(SecretStateUserHasNoAccess)
-			continue
+		sff := StatusForFile{
+			RevealedPath: revealedPath,
+			State:        state,
+			AccessGroups: slices.Clone(secret.AccessGroups),
+			AccessUsers:  v.vstate.UserForGroups(secret.AccessGroups),
 		}
 
-		if _, err := v.root.Stat(revealedPath); err != nil {
-			add(SecretStateNoRevealedPath)
-			continue
-		}
-
-		if conflicted[revealedPath] {
-			add(SecretStateConflicted)
-			continue
-		}
-
-		sealedPath := v.secret.SealedPath(revealedPath)
-		if _, err := v.root.Stat(sealedPath); err != nil {
-			add(SecretStateNoSealedPath)
-			continue
-		}
-
-		needsSeal, _, err := v.secret.NeedsSeal(revealedPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compare %s and %s: %w", revealedPath, sealedPath, err)
-		}
-
-		if needsSeal {
-			add(SecretStateNotInSync)
-		} else {
-			add(SecretStateInSync)
-		}
+		sort.Strings(sff.AccessGroups)
+		sort.Strings(sff.AccessUsers)
+		status.Files = append(status.Files, sff)
 	}
 
 	sort.Slice(status.Files, func(i, j int) bool {

@@ -106,10 +106,6 @@ func signKeyPath(base, user string) string {
 	return filepath.Join(sesamBase(base), "signkeys", user+".age")
 }
 
-func GenerateSignKey(root *os.Root, user string, userRecipient []age.Recipient) (Signer, error) {
-	return GenerateSignKeyAt(root, "", user, userRecipient)
-}
-
 // GenerateSignKeyAt will generate a new ed25519 signing key only accessible to
 // `userRecipient`, written to signKeyPath(base, user)
 func GenerateSignKeyAt(root *os.Root, base, user string, userRecipient []age.Recipient) (Signer, error) {

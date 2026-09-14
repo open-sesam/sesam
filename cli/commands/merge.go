@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -196,23 +195,6 @@ func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-// withoutConflicted drops the secrets a merge left unresolved from paths.
-func withoutConflicted(paths []string, conflicted []core.ConflictedSecret) []string {
-	skip := make(map[string]bool, len(conflicted))
-	for _, c := range conflicted {
-		skip[c.Path] = true
-	}
-
-	kept := make([]string, 0, len(paths))
-	for _, p := range paths {
-		if !skip[p] {
-			kept = append(kept, p)
-		}
-	}
-
-	return kept
-}
-
 // mergeDriver is everything git hands a merge driver, resolved once: both of
 // ours take the same %O/%A/%B/%L arguments and need the same repo handles.
 type mergeDriver struct {
@@ -383,7 +365,7 @@ func theirStateFunc(ctx context.Context, cmd *cli.Command, drv *mergeDriver) rep
 		}
 
 		// The revision becomes a file name below, so insist it is an object id.
-		if _, err := hex.DecodeString(rev); rev == "" || err != nil {
+		if !isCommitHash(rev) {
 			return nil, fmt.Errorf("%q is not a commit id", rev)
 		}
 

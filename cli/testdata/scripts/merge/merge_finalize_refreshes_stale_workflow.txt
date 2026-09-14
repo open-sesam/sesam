@@ -1,4 +1,4 @@
-# The other half of merge_finalize_keeps_edit: a secret only THEY changed. git
+# A secret only THEY changed. git
 # resolves the object by taking their blob wholesale, so no merge driver ever runs
 # for it and the revealed file is left holding our pre-merge plaintext.
 #
@@ -37,7 +37,6 @@ stdout 'BASE'
 ! stdout 'THEIRS'
 
 exec git commit -m 'merge topic'
-! stderr 'you changed'
 
 # Refreshed, sealed, and their change survived the commit.
 exec cat s

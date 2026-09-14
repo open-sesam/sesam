@@ -34,8 +34,12 @@ every new clone.
 When you check out an older state you likely want also the revealed files to have the content committed at this time.
 This hook does the following:
 
-- If we're checking out a branch, tag or other ref: We clean all revealed secrets and reveal freshly after `git` checked out the old state.
-- If we're checking out a single file or directory: We reveal all secrets and re-seal the newly checked out secrets so they get added to the audit log.
+- If we're checking out a branch, tag or other ref: revealed secrets that no longer exist on the new state are removed, and the ones the checkout replaced are revealed freshly.
+- If we're checking out a single file or directory: the checked-out secrets are revealed and re-sealed, so they get added to the audit log.
+
+Plaintext you edited but did not seal is never touched by either. `git` cannot
+warn about it (revealed files are gitignored), so the hook tells you what it kept:
+`sesam seal` keeps your version, `sesam reveal --all` takes the checked-out one.
 
 ```admonish note
 This is not being called when running `git reset`. If you do this, you should probably run `sesam open` explicitly.
@@ -48,16 +52,18 @@ This is not being called when running `git reset`. If you do this, you should pr
 files would keep the pre-merge content while the sealed objects moved on - and
 the next `sesam seal` would write the stale plaintext back over what you pulled.
 
-This hook reveals the secrets whose objects the merge changed. It stays out of
-the way while conflicts are still unresolved in the index, so a merge you are
-mid-way through resolving is never overwritten.
+This hook reveals the secrets whose objects the merge changed, as long as their
+plaintext still holds the pre-merge version. Edited plaintext stays and is named,
+a conflict you are mid-way through resolving included.
 
 ### `pre-commit`
 
 When you commit you most likely want to make sure that all files you've edited in the worktree are sealed (i.e. `sesam status` shows nothing)
 and no accidental tampering was done. This is done by this hook before every commit:
 
-- Seal all files that have diffs with the current revealed secrets.
+- Reveal secrets whose object changed while their plaintext did not (might happen on merge or single-file checkout)
+- Seal all files you edited.
+- Refuse when a secret changed on both sides - you edited it and `git` replaced its object - and name both ways out.
 - Run `sesam verify --all`.
 
 If errors happen the commit will be aborted and you can check if there is indeed something wrong.
@@ -169,10 +175,10 @@ $ sesam status
 .
 ├─ M README.md (admin)
 ╰─ U secret.txt (admin)
-  1 conflicted · 1 out of sync
+  1 conflicted · 1 modified
 
 a merge is in progress.
-  resolve the conflicted (U) secrets above, then run `sesam seal`
+  resolve the conflicted (U) secrets above
   and finish with `git commit`
   or start over with `git merge --abort` followed by `sesam reveal --all`
 
@@ -183,7 +189,7 @@ $ sesam status
 .
 ├─ M README.md (admin)
 ╰─ M secret.txt (admin)
-  2 out of sync
+  2 modified
 
 a merge is in progress.
   nothing left to resolve - review the merged secrets
@@ -217,7 +223,8 @@ $ git commit -am 'merge'
 - The `sesam.yml` files will always be resetted to the merged state. Any additional change will be lost.
 - Merging without the git integration is not possible. Doing so will likely result in a repository state that does not survive `sesam verify`.
 - If you have a secret that is binary in nature, we can't merge it with conflict markers. In this case we'll add a TODO `.theirs` version next to it and inform you.
-- A rebase or cherry-pick uses the same machinery, but `git` runs no hook when they finish. Check `sesam status` afterwards: it names the operation and what is left to do.
+- Secrets only the other side changed keep your plaintext until you finish: `sesam status` lists them as stale (S) and the finalize takes the incoming version. Edit one of them before finishing and it is diverged (!) - the finalize refuses, and you pick: `sesam reveal --all` takes the incoming version, `sesam seal --all` keeps yours.
+- A rebase or cherry-pick uses the same machinery, but `git` runs no hook when they finish. Check `sesam status` afterwards: it names the operation and what is left to do. Secrets that lag behind show as stale there; `sesam reveal` refreshes them and `sesam seal` leaves them alone until you do.
 
 ### Internal flow
 

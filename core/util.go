@@ -287,14 +287,6 @@ func closeLogged(fd io.Closer) {
 	}
 }
 
-// PathExists reports whether `p` is reachable via os.Stat. It does not
-// distinguish between "missing" and "permission denied" - it simply
-// answers "can I see something there?".
-func PathExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
-}
-
 // CopyFile materializes `dst` with the same contents as `src`. When tryLink is
 // set it attempts a hardlink first (zero-copy when src and dst sit on the same
 // filesystem and the FS supports it - Linux/macOS/BSD via link(2), Windows on
