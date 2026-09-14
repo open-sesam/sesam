@@ -41,12 +41,13 @@ jobs:
         with:
           fetch-depth: 0 # needed for mdbook-gitinfo
 
-      - name: Set up Go, mdBook and preprocessors
+      # Everything from mise.toml, as in ci.yml: go for scripts/gen-vanity-imports.sh
+      # and `task docgen`, mdbook and its preprocessors for the book. Listing
+      # tools here would have to repeat their dependencies too (the cargo: tools
+      # need cargo-binstall installed first); the action's cache is keyed on
+      # mise.toml, so the extra tools cost nothing once CI has installed them.
+      - name: Set up tools
         uses: jdx/mise-action@v4
-        with:
-          # go is needed by scripts/gen-vanity-imports.sh (`go list`) and by
-          # `task docgen`; task runs the docgen targets.
-          install_args: "task go mdbook cargo:mdbook-admonish cargo:mdbook-pagetoc cargo:mdbook-gitinfo"
 
       - name: Cache Go modules and build
         uses: actions/cache@v4
