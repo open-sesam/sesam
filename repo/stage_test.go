@@ -160,7 +160,7 @@ func TestStageSealOnlyLeavesConfigUntouched(t *testing.T) {
 	before, err := os.Stat(cfgPath)
 	require.NoError(t, err)
 
-	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }))
+	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(SealOpts{All: true}); return err }))
 
 	after, err := os.Stat(cfgPath)
 	require.NoError(t, err)
@@ -226,7 +226,8 @@ func TestStageSecretMoveRejectsForbiddenDestination(t *testing.T) {
 				if err := s.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}, false, false); err != nil {
 					return err
 				}
-				return s.Seal(false)
+				_, err := s.Seal(SealOpts{})
+				return err
 			}))
 
 			err := r.Update(func(s *Stage) error {

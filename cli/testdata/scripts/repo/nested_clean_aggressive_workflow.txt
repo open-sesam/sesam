@@ -1,0 +1,40 @@
+# `sesam clean --aggressive` must find the sesam dir like every other command:
+# walk up from the cwd (or --sesam-dir) to the nearest `.sesam/`. Run from a
+# subdirectory of a nested sesam dir it has to clean the whole sesam tree
+# instead of failing with "not a sesam directory".
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+mkdir vault
+exec sesam init --user admin --sesam-dir vault
+exec git add -A
+exec git commit -m 'init sesam'
+
+mkdir vault/sub
+cp leaked vault/sub/leaked.txt
+cp leaked vault/leaked.txt
+
+# The soft clean resolves upward from vault/sub...
+cd vault/sub
+exec sesam clean --dry-run
+stdout 'README\.md'
+
+# ...and so must the aggressive one. It lists the untracked files of the whole
+# sesam dir (paths are sesam-relative, as for the soft clean) instead of erroring.
+exec sesam clean --aggressive --dry-run
+stdout 'sub/leaked\.txt'
+stdout '^leaked\.txt$'
+exists leaked.txt
+exists ../leaked.txt
+
+exec sesam clean --aggressive --quiet
+! exists leaked.txt
+! exists ../leaked.txt
+# Tracked files of the sesam dir survive.
+exists ../sesam.yml
+exists ../.gitignore
+
+-- leaked --
+leaked plaintext

@@ -117,12 +117,12 @@ func (r *Repo) buildStage() (*Stage, error) {
 		keyring,
 		audit,
 		vstate,
+		forkSuffix,
 	)
 	if err != nil {
 		_ = audit.Close()
 		return nil, fmt.Errorf("build fork secret manager: %w", err)
 	}
-	secret.SetBase(forkSuffix)
 
 	user, err := core.BuildUserManager(
 		r.root,
@@ -159,6 +159,39 @@ func (r *Repo) buildStage() (*Stage, error) {
 	}
 
 	return &Stage{View: fork, repo: r}, nil
+}
+
+// PruneUnusedAfterMerge removes secrets and signkeys that are not present in the vstate anymore.
+func (s *Stage) PruneUnusedAfterMerge() error {
+	users := make(map[string]bool, len(s.vstate.Users))
+	for _, u := range s.vstate.Users {
+		users[u.Name] = true
+	}
+
+	secrets := make(map[string]bool, len(s.vstate.Secrets))
+	for _, sec := range s.vstate.Secrets {
+		secrets[sec.RevealedPath] = true
+	}
+
+	prunedKeys, err := core.PruneOrphanSignKeys(s.root, forkSuffix, users)
+	if err != nil {
+		return fmt.Errorf("reconcile signkeys: %w", err)
+	}
+
+	prunedObjs, err := core.PruneOrphanObjects(s.root, forkSuffix, secrets)
+	if err != nil {
+		return fmt.Errorf("reconcile objects: %w", err)
+	}
+
+	if len(prunedKeys) > 0 || len(prunedObjs) > 0 {
+		slog.Info(
+			"merge reconcile: pruned derived files to match the merged log",
+			slog.Any("signkeys", prunedKeys),
+			slog.Any("objects", prunedObjs),
+		)
+	}
+
+	return nil
 }
 
 // materializeFork builds .sesam-tmp as a hardlink mirror of .sesam. The
@@ -218,7 +251,7 @@ func (s *Stage) Commit() error {
 	// Promote: the fork's managers already hold the committed in-memory state
 	// and their fds follow the swapped-in inodes. Re-base them to the live tree
 	// and make the fork View the Repo's live View. No reopen, no replay.
-	_ = s.repo.closeState()
+	_ = s.repo.closeStateQuiet(false)
 
 	s.auditLog.SetBase("")
 	s.secret.SetBase("")
@@ -263,7 +296,7 @@ func (s *Stage) Rollback() error {
 	}
 	s.done = true
 
-	_ = s.closeState()
+	_ = s.closeStateQuiet(false)
 	s.repo.stage = nil
 
 	// Repo's live state was never touched, so nothing to restore.
@@ -329,15 +362,53 @@ func (s *Stage) UserKill(user string) error {
 	return cfg.UserKill(user)
 }
 
-// Seal re-encrypts all revealed content into the staged sealed storage.
-func (s *Stage) Seal(all bool) error {
+// Seal writes edited plaintext into the objects. Stale plaintext - older than
+// its object - is left out and reported; a secret that changed on both sides
+// is refused with a DivergedError, unless opts.All says to take the plaintext
+// as it is everywhere.
+func (s *Stage) Seal(opts SealOpts) (*SealResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.secret.Seal(all); err != nil {
-		return fmt.Errorf("failed to seal secrets: %w", err)
+	if opts.All {
+		if err := s.secret.Seal(true, nil); err != nil {
+			return nil, fmt.Errorf("failed to seal secrets: %w", err)
+		}
+
+		return &SealResult{}, nil
 	}
-	return nil
+
+	states := opts.States
+	if states == nil {
+		var err error
+		if states, err = s.syncStates(opts.Sync); err != nil {
+			return nil, err
+		}
+	}
+
+	if diverged := states.Paths(SecretStateDiverged); len(diverged) > 0 {
+		return nil, &DivergedError{Paths: diverged}
+	}
+
+	advice := make(map[string]core.SealAdvice, len(states))
+	for p, state := range states {
+		switch state {
+		case SecretStateInSync, SecretStateRecipientsChanged:
+			advice[p] = core.AdviceUnchanged
+		case SecretStateNotInSync, SecretStateNoSealedPath:
+			advice[p] = core.AdviceChanged
+		case SecretStateStale:
+			advice[p] = core.AdviceKeep
+		default:
+			// missing plaintext, no access: sealOrPreserve preserves the object.
+		}
+	}
+
+	if err := s.secret.Seal(false, advice); err != nil {
+		return nil, fmt.Errorf("failed to seal secrets: %w", err)
+	}
+
+	return &SealResult{Stale: states.Paths(SecretStateStale)}, nil
 }
 
 // SecretAdd starts tracking the secret(s) at each path. Paths are sesam-relative.

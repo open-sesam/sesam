@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 
 	"github.com/hdevalence/ed25519consensus"
@@ -64,6 +63,23 @@ func (vu *VerifiedUser) IsAdmin() bool {
 // the set to persist in the config, where admin membership stays implicit.
 func (vs *VerifiedSecret) DeclaredGroups() []string {
 	return withoutAdmin(vs.AccessGroups)
+}
+
+// UnmarshalJSON restores a state that was written out as JSON. The lookup
+// indexes are derived rather than serialized, so they are rebuilt here: a
+// decoded state without them answers "no such user" to every question.
+func (s *VerifiedState) UnmarshalJSON(data []byte) error {
+	type plain VerifiedState
+
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	*s = VerifiedState(decoded)
+	s.rebuildUserIndex()
+	s.rebuildSecretIndex()
+	return nil
 }
 
 // rebuildUserIndex rebuilds userIdx from Users. Called after verify and after a
@@ -232,6 +248,32 @@ outer:
 	}
 
 	return users
+}
+
+// KeyringFromState rebuilds the keyring a state implies. Replay normally fills
+// both together; this is for the callers that have a state read back from disk.
+func KeyringFromState(state *VerifiedState) (Keyring, error) {
+	kr := EmptyKeyring()
+	for idx := range state.Users {
+		user := &state.Users[idx]
+
+		signPubKey, err := decodeSignPubKey(user.SignPubKey)
+		if err != nil {
+			return nil, fmt.Errorf("sign key of %s: %w", user.Name, err)
+		}
+
+		if err := kr.SetSignPubKey(user.Name, signPubKey); err != nil {
+			return nil, fmt.Errorf("keyring entry for %s: %w", user.Name, err)
+		}
+
+		for _, recp := range user.Recps {
+			if _, err := kr.AddRecipient(user.Name, recp); err != nil {
+				return nil, fmt.Errorf("recipient of %s: %w", user.Name, err)
+			}
+		}
+	}
+
+	return kr, nil
 }
 
 func (s *VerifiedState) RequireAdmin(entry *AuditEntrySigned) (*VerifiedUser, error) {
@@ -763,6 +805,25 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 	return nil
 }
 
+// verifyMerge validates the informational OpMerge entry. It records a merge's
+// provenance and per-entry resolutions but carries no state of its own; the
+// only requirement is that it was authored by an admin (the merging user).
+func verifyMerge(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
+	if _, err := state.RequireAdmin(entry); err != nil {
+		return err
+	}
+
+	if _, err := parseDetail[DetailMerge](entry); err != nil {
+		return fmt.Errorf("parse merge detail: %w", err)
+	}
+
+	// The last seal's root hash describes neither merged side, so drop the claim
+	// rather than carry a wrong one until someone reseals.
+	state.LastSealRootHash = ""
+	state.SealRequiredSeqID = entry.SeqID
+	return nil
+}
+
 func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) error {
 	sealDetails, err := parseDetail[DetailSeal](entry)
 	if err != nil {
@@ -789,15 +850,34 @@ func verifySeal(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) er
 // and is consulted at seal-time if the plugin asks for user interaction. Pass
 // nil to default to a non-interactive UI (plugins will refuse to prompt).
 func VerifyChain(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, error) {
+	return VerifyChainUntil(log, kr, pluginUI, replayToEnd)
+}
+
+// VerifyChainUntil is VerifyChain, stopping after seq id `upTo`. Pass 0 to get
+// a state that has verified nothing yet and walk it forward with
+// [VerifiedState.AdvanceTo].
+func VerifyChainUntil(log *AuditLog, kr Keyring, pluginUI *PluginUI, upTo uint64) (*VerifiedState, error) {
 	state := VerifiedState{
 		auditLog: log,
 		keyring:  kr,
 		pluginUI: pluginUI,
 	}
-	if err := verify(&state); err != nil {
+	if err := verifyUntil(&state, upTo); err != nil {
 		return nil, err
 	}
 	return &state, nil
+}
+
+// AdvanceTo verifies the entries between where the state stands and seq id
+// `seqID`, leaving the state as of that entry. It only moves forward: a seq id
+// already reached is a no-op (a projection cannot be rewound). Several states
+// may walk the same log this way, since replay only reads it.
+func (s *VerifiedState) AdvanceTo(seqID uint64) error {
+	if s.VerifiedUntil >= seqID {
+		return nil
+	}
+
+	return verifyUntil(s, seqID)
 }
 
 // Verify is like VerifyChain but additionally checks the trust-anchor file
@@ -922,23 +1002,37 @@ func entrySigCheck(entry *AuditEntrySigned, kr Keyring) SigCheck {
 	}
 }
 
+// replayToEnd asks for an unbounded replay (up to the last entry in the log).
+const replayToEnd = ^uint64(0)
+
+// errReplayBound stops the log iteration at the requested bound. It is not a
+// failure, so the replayed state is still committed.
+var errReplayBound = errors.New("replay bound reached")
+
 // verify checks the audit-log chain. It first tries the batched signature path
 // (one ed25519 batch over all entries) and falls back to serial per-entry
 // verification only to name the failing entry when the batch is rejected.
 func verify(state *VerifiedState) error {
-	if err := replay(state, true); err == nil || !errors.Is(err, errBatchSignatureRejected) {
+	return verifyUntil(state, replayToEnd)
+}
+
+// verifyUntil is verify, stopping after seq id `upTo`. Entries the state has
+// already verified are skipped, so walking a log in steps costs the same as
+// verifying it once.
+func verifyUntil(state *VerifiedState, upTo uint64) error {
+	if err := replay(state, true, upTo); err == nil || !errors.Is(err, errBatchSignatureRejected) {
 		return err
 	}
 
 	// The batch rejected the log; re-run serially to name the offending entry.
-	return replay(state, false)
+	return replay(state, false, upTo)
 }
 
 // replay verifies the audit-log chain. When batched is true, per-entry
 // signatures are collected and checked in a single batch after the replay (fast
 // path). When false, each signature is verified inline so the failing entry can
 // be named (serial path and batch fallback).
-func replay(state *VerifiedState, batched bool) error {
+func replay(state *VerifiedState, batched bool, upTo uint64) error {
 	log := state.auditLog
 	kr := state.keyring
 
@@ -962,6 +1056,10 @@ func replay(state *VerifiedState, batched bool) error {
 			return nil
 		}
 
+		if entry.SeqID > upTo {
+			return errReplayBound
+		}
+
 		// first do the logical checks & then the signature check.
 		// operations like init, tell etc. add keys to the keyring which can be required
 		// to verify signatures.
@@ -979,6 +1077,8 @@ func replay(state *VerifiedState, batched bool) error {
 			err = verifyUserRmRecipients(log, &newState, entry, kr)
 		case OpSeal:
 			err = verifySeal(log, &newState, entry)
+		case OpMerge:
+			err = verifyMerge(log, &newState, entry)
 		case OpSecretAdd:
 			err = verifySecretAdd(log, &newState, entry)
 		case OpSecretRemove:
@@ -1048,7 +1148,7 @@ func replay(state *VerifiedState, batched bool) error {
 		newState.VerifiedUntil = entry.SeqID
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errReplayBound) {
 		// Roll the keyring back to its pre-replay contents (in place, so the
 		// repo's and managers' pointers stay valid). newState is simply
 		// discarded, leaving the caller's state untouched.
@@ -1096,17 +1196,4 @@ func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 	}
 	cloned.buildIndexes()
 	return cloned
-}
-
-func (s *VerifiedState) Close() error {
-	// NOTE: Not a hard error for now, there might be valid reasons this happened.
-	// Could be that sesam was legit interrupted during operation.
-	if srs := s.SealRequiredSeqID; srs > 0 {
-		slog.Warn(
-			"verify: a seal is pending - please run `sesam seal` before committing!",
-			slog.Uint64("seq_id", srs),
-		)
-	}
-
-	return nil
 }

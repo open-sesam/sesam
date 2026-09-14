@@ -203,6 +203,15 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 			d.FilesSealed, pluralize("secret", d.FilesSealed), sid(d.RootHash),
 		)}
 
+	case core.OpMerge:
+		d, ok := e.RawDetail().(*core.DetailMerge)
+		if !ok {
+			return unknown
+		}
+		return logLine{"⋈", repoColor, fmt.Sprintf(
+			"merged audit log (%d applied, %d dropped)", d.Applied, d.Dropped,
+		)}
+
 	default:
 		return unknown
 	}
@@ -246,6 +255,20 @@ func HandleLog(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 			out.String(e.ChangedBy).Foreground(userColor).String(),
 			line.desc,
 		})
+
+		// A merge entry carries the noteworthy decisions it made; list them
+		// indented beneath so a merge commit explains itself in the log.
+		if e.Operation == core.OpMerge {
+			if d, ok := e.RawDetail().(*core.DetailMerge); ok {
+				for _, decision := range mergeDecisionLines(d.Resolutions) {
+					t.AppendRow(table.Row{
+						"", "", "", "",
+						out.String("  " + decision).Foreground(dim).String(),
+					})
+				}
+			}
+		}
+
 		return nil
 	}); err != nil {
 		return err

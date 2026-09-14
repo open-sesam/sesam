@@ -273,7 +273,7 @@ func (um *UserManager) UserRegenerateSignKey(user string) error {
 		return fmt.Errorf("need to be admin for regnerating signing keys")
 	}
 
-	// Validate up front: GenerateSignKey writes a key file, so bail before any
+	// Validate up front: GenerateSignKeyAt writes a key file, so bail before any
 	// disk I/O if the user is unknown (otherwise the empty recipient list fails
 	// later with a confusing "no recipients" error).
 	if _, exists := um.state.UserExists(user); !exists {

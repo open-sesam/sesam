@@ -1,6 +1,7 @@
 package core
 
 import (
+	"os"
 	"testing"
 
 	"filippo.io/age"
@@ -106,4 +107,38 @@ func TestSignCrossDomain(t *testing.T) {
 	// Has to fail, different domain.
 	_, err = kr.Verify(SesamDomainSignAuditTag, data, sig, "alice")
 	require.Error(t, err)
+}
+
+func TestPruneOrphanSignKeys(t *testing.T) {
+	root, err := os.OpenRoot(t.TempDir())
+	require.NoError(t, err)
+	defer func() { _ = root.Close() }()
+
+	require.NoError(t, root.MkdirAll(".sesam/signkeys", 0o700))
+	for _, u := range []string{"alice", "bob", "carol"} {
+		f, err := root.Create(".sesam/signkeys/" + u + ".age")
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+	}
+
+	pruned, err := PruneOrphanSignKeys(root, "", map[string]bool{"alice": true, "carol": true})
+	require.NoError(t, err)
+	require.Equal(t, []string{"bob"}, pruned)
+
+	_, err = root.Stat(".sesam/signkeys/bob.age")
+	require.True(t, os.IsNotExist(err), "orphan signkey must be removed")
+	_, err = root.Stat(".sesam/signkeys/alice.age")
+	require.NoError(t, err, "kept signkey must remain")
+	_, err = root.Stat(".sesam/signkeys/carol.age")
+	require.NoError(t, err)
+}
+
+func TestPruneOrphanSignKeysMissingDir(t *testing.T) {
+	root, err := os.OpenRoot(t.TempDir())
+	require.NoError(t, err)
+	defer func() { _ = root.Close() }()
+
+	pruned, err := PruneOrphanSignKeys(root, "", map[string]bool{})
+	require.NoError(t, err)
+	require.Empty(t, pruned)
 }

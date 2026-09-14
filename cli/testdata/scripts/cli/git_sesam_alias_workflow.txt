@@ -13,7 +13,7 @@ exec git commit -m 'init sesam'
 
 # Alias must be written to the local config (init never touches ~/.gitconfig).
 exec git config --local alias.sesam
-stdout '^!sesam$'
+stdout '^!cd -- "\$\{GIT_PREFIX:-\.\}" && exec sesam$'
 
 # `git sesam id` resolves through the alias and prints the current user.
 exec git sesam id

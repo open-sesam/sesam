@@ -1,0 +1,33 @@
+# Only admins can merge (decrypt + re-sign the rebased entries). When the merging
+# identity is a non-admin, the audit-log driver aborts and the merge fails.
+
+sesam-repo
+
+# bob is a dev (non-admin) but a recipient of the audit key, so he can decrypt
+# the log - he just may not merge it.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'add bob'
+
+# Two log-only divergences so the audit-log driver is invoked on merge.
+exec git checkout -b ours
+exec sesam user change-groups --user bob --group-add ops
+exec git add -A
+exec git commit -m 'ours: bob += ops'
+
+exec git checkout -b theirs ours~1
+exec sesam user change-groups --user bob --group-add sec
+exec git add -A
+exec git commit -m 'theirs: bob += sec'
+
+# Merge as bob (non-admin): the driver decrypts the log but refuses to merge.
+exec git checkout ours
+env SESAM_ID=$BOB_KEY
+! exec git merge theirs
+stderr 'not an admin'
+
+# The refusal leaves the repo untouched: aborting restores a fully valid state.
+exec git merge --abort
+env SESAM_ID=$ADMIN_KEY
+exec sesam verify
+stderr 'Integrity: ok'

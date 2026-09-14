@@ -443,12 +443,12 @@ func TestRepo_SealReveal_RoundTrip(t *testing.T) {
 	require.NoError(t, os.Remove(revealed))
 	require.False(t, fileExists(t, revealed), "plaintext removed before reveal")
 
-	require.NoError(t, r.Reveal(true))
+	require.NoError(t, r.RevealAll())
 	got, err := os.ReadFile(revealed)
 	require.NoError(t, err)
 	require.Equal(t, original, got, "Reveal restores the original plaintext")
 
-	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }), "Seal on an already-sealed tree is a no-op")
+	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(SealOpts{All: true}); return err }), "Seal on an already-sealed tree is a no-op")
 }
 
 // --- Clean (method dispatch) ----------------------------------------------
@@ -463,7 +463,8 @@ func TestRepo_Clean_SoftRemovesOnlyTrackedRevealed(t *testing.T) {
 	leaked := filepath.Join(dir, "leaked.txt")
 	require.NoError(t, os.WriteFile(leaked, []byte("noise"), 0o600))
 
-	require.NoError(t, r.Clean(context.Background(), CleanOpts{Aggressive: false}))
+	_, err := r.Clean(context.Background(), CleanOpts{Aggressive: false})
+	require.NoError(t, err)
 	require.False(t, fileExists(t, revealed), "known revealed plaintext is removed")
 	require.True(t, fileExists(t, leaked), "untracked unknown file survives soft clean")
 }
@@ -475,7 +476,8 @@ func TestRepo_Clean_AggressiveAlsoWipesUnknownUntracked(t *testing.T) {
 	leaked := filepath.Join(dir, "leaked.txt")
 	require.NoError(t, os.WriteFile(leaked, []byte("noise"), 0o600))
 
-	require.NoError(t, r.Clean(context.Background(), CleanOpts{Aggressive: true}))
+	_, err := r.Clean(context.Background(), CleanOpts{Aggressive: true})
+	require.NoError(t, err)
 	require.False(t, fileExists(t, leaked), "aggressive walks the worktree index")
 }
 
@@ -589,7 +591,7 @@ func TestRepoStatusStates(t *testing.T) {
 	add("secrets/unsealed", "seal-removed")
 
 	// Add only records the audit entry; seal writes the ciphertext objects.
-	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }))
+	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(SealOpts{All: true}); return err }))
 	require.NoError(t, r.Close())
 
 	// Reload so the runtime user (whoami) is resolved - Status needs it to
@@ -629,8 +631,8 @@ func TestRepoStatusStates(t *testing.T) {
 
 // A recipient change (a user told into a secret's group) makes the secret
 // drift even though its plaintext is untouched: it must be re-sealed to add the
-// new recipient. Status compares the recipient set, so it must surface this as
-// not-in-sync until a re-seal happens.
+// new recipient. Status compares the recipient set, so it must surface this -
+// and not as an edit, which reveal would then keep and clean would spare.
 func TestRepoStatusRecipientDrift(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	bob := writeTestIdentity(t, "bob")
@@ -638,7 +640,7 @@ func TestRepoStatusRecipientDrift(t *testing.T) {
 
 	writeRepoFile(t, dir, "secrets/dev", "dev-content")
 	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/dev"}, []string{"dev"}, false, false) }))
-	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }))
+	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(SealOpts{All: true}); return err }))
 	require.Equal(t, SecretStateInSync, statusStates(t, r, StatusOpts{})["secrets/dev"])
 
 	// Tell bob into "dev" but do not seal: the recipient set now differs from
@@ -647,8 +649,8 @@ func TestRepoStatusRecipientDrift(t *testing.T) {
 		return s.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"dev"}, false)
 	}))
 
-	require.Equal(t, SecretStateNotInSync, statusStates(t, r, StatusOpts{})["secrets/dev"],
-		"a user added to the group must show the secret out of sync until re-sealed")
+	require.Equal(t, SecretStateRecipientsChanged, statusStates(t, r, StatusOpts{})["secrets/dev"],
+		"a user added to the group must show the secret as needing a reseal")
 }
 
 // A user without access to a secret must see it reported as no-access, and
@@ -682,7 +684,7 @@ func TestRepoStatusDiffDir(t *testing.T) {
 
 	writeRepoFile(t, dir, "secrets/diff", "v1-sealed")
 	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/diff"}, []string{"admin"}, false, false) }))
-	require.NoError(t, r.Update(func(s *Stage) error { return s.Seal(true) }))
+	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(SealOpts{All: true}); return err }))
 	require.NoError(t, r.Close())
 
 	// Reload so whoami is resolved (Init does not set it).

@@ -1,0 +1,32 @@
+# Recipient remove-wins across a merge: ours revokes a recipient key that theirs
+# removes and then re-adds. The re-add must not resurrect the revoked key, so the
+# revoked identity stays locked out after the merge.
+
+sesam-repo
+
+# bob has two recipient keys; carol's key can decrypt the log via bob.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --recipient $CAROL_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'add bob with two keys'
+exec sesam --identity $CAROL_KEY show .sesam/audit/log.jsonl
+
+# OURS revokes carol's key.
+exec git checkout -b ours
+exec sesam user remove-recipient --user bob --recipient $CAROL_PUBKEY
+exec git add -A
+exec git commit -m 'ours: revoke carol key'
+
+# THEIRS revokes then re-adds carol's key (net: still present on theirs).
+exec git checkout -b theirs ours~1
+exec sesam user remove-recipient --user bob --recipient $CAROL_PUBKEY
+exec sesam user add-recipient --user bob --recipient $CAROL_PUBKEY
+exec git add -A
+exec git commit -m 'theirs: churn carol key'
+
+exec git checkout ours
+! exec git merge theirs
+exec git commit --no-edit
+
+# Remove wins: theirs' re-add was dropped, so carol stays locked out.
+exec sesam verify
+! exec sesam --identity $CAROL_KEY show .sesam/audit/log.jsonl

@@ -1,0 +1,33 @@
+# Theirs renames (or kills, or re-keys) the admin doing the merge. The entry can
+# neither be applied - the merger signs everything that follows - nor be dropped:
+# git has already moved .sesam/signkeys/admin.age one-sidedly, so a merged log
+# still naming "admin" would not load. The merge is refused instead.
+
+sesam-repo
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'add bob'
+
+# OURS: an unrelated change, so the audit-log driver runs at all.
+exec git checkout -b ours
+exec sesam user change-groups --user bob --group-add ops
+exec git add -A
+exec git commit -m 'ours: bob += ops'
+
+# THEIRS: rename the admin who will be doing the merge.
+exec git checkout -b theirs ours~1
+exec sesam user rename admin boss
+exec git add -A
+exec git commit -m 'theirs: admin -> boss'
+
+exec git checkout ours
+! exec git merge theirs
+stderr 'renames the merging admin admin'
+stderr 'abort the merge'
+
+# The refusal has to be reachable: the repo still loads, and aborting restores it.
+exec git merge --abort
+exec sesam verify
+exec sesam show .sesam/audit/log.jsonl
+! stdout 'boss'

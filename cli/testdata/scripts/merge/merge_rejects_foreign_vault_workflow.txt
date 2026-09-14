@@ -1,0 +1,59 @@
+# An extracted vault verifies against its own trust anchor, so a fabricated one
+# verifies as happily as the real thing. An attacker needs no key of ours to build
+# one: our recipients are public (sesam.yml), so they can tell a user with our
+# public key into their own repo, seal whatever they like at our path, and push
+# that .sesam as a branch. The incoming vault is therefore pinned to this repo
+# before anything is decrypted out of it.
+
+sesam-repo admin real.txt ours.txt evil.txt
+
+cp $TMPDIR/real.txt app.env
+exec sesam add app.env --group admin
+exec git add -A
+exec git commit -m 'add app.env'
+
+# The attacker's own repo, with a secret at the same path. ADMIN_PUBKEY stands in
+# for what they would scrape out of our committed sesam.yml.
+mkdir $TMPDIR/evil
+cd $TMPDIR/evil
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+env SESAM_ID=$BOB_KEY
+exec sesam init --user mallory
+exec sesam tell --user admin --recipient $ADMIN_PUBKEY --group admin
+cp $TMPDIR/evil.txt app.env
+exec sesam add app.env --group admin
+cd $WORK
+env SESAM_ID=$ADMIN_KEY
+
+# Push the fabricated vault as a branch.
+exec git checkout -b evil
+exec rm -r .sesam
+exec cp -r $TMPDIR/evil/.sesam .sesam
+cp $TMPDIR/evil/sesam.yml sesam.yml
+exec git add -A
+exec git commit --no-verify -m 'evil: fabricated vault'
+
+# Our own change to the same secret, so git has to invoke the driver.
+exec git checkout master
+cp $TMPDIR/ours.txt app.env
+exec sesam seal
+exec git add -A
+exec git commit -m 'ours: rotate'
+
+! exec git merge evil
+stderr 'belongs to a different repository'
+stderr 'refusing to merge it'
+
+# Refused before decrypting, so our plaintext was never touched.
+exec cat app.env
+stdout 'OURS'
+! stdout 'PWNED'
+
+-- real.txt --
+REAL
+-- ours.txt --
+OURS
+-- evil.txt --
+PWNED

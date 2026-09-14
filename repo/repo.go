@@ -94,6 +94,16 @@ type RepoOpts struct {
 
 	// VerifyMode defines how the on-disk state is verified
 	VerifyMode VerifyMode
+
+	// Identities, when set, are used instead of unlocking identityPaths again.
+	// A process that already holds them would otherwise ask for the passphrase
+	// a second time whenever the keyring cache is unavailable.
+	Identities core.Identities
+
+	// InMerge relaxes the checks that cannot hold while a merge-like operation
+	// has the tree half-merged. The caller decides: only the CLI knows what git
+	// is doing, and finding out costs a subprocess we do not want on every Load.
+	InMerge bool
 }
 
 type GitConfigOpts struct {
@@ -310,7 +320,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 	r.vstate = vstate
 
-	r.secret, err = core.BuildSecretManager(resolvedDir, root, identities, signer, r.keyring, auditLog, vstate)
+	r.secret, err = core.BuildSecretManager(resolvedDir, root, identities, signer, r.keyring, auditLog, vstate, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to build secret manager: %w", err)
 	}
@@ -344,7 +354,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 
 	opts.PrintStep(eggs[rand.IntN(len(eggs))]) //nolint:gosec
-	if err := r.secret.Seal(true); err != nil {
+	if err := r.secret.Seal(true, nil); err != nil {
 		return nil, err
 	}
 
@@ -412,7 +422,7 @@ func Setup(sesamDir string, idPaths []string, opts RepoInitOpts) error {
 
 	who, _ := r.Whoami()
 	opts.PrintStep("Revealing secrets available to »%s«…", who)
-	if err := r.Reveal(true); err != nil {
+	if err := r.RevealAll(); err != nil {
 		opts.PrintStep("Could not reveal yet (%v) - run `sesam reveal` once your access is set up.", err)
 	}
 
@@ -453,9 +463,12 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 		return nil, fmt.Errorf("reap stale stage fork: %w", err)
 	}
 
-	identities, err := LoadIdentities(ids, opts)
-	if err != nil {
-		return nil, err
+	identities := opts.Identities
+	if identities == nil {
+		identities, err = LoadIdentities(ids, opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 	r.identities = identities
 
@@ -467,8 +480,9 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	}
 	r.auditLog = auditLog
 
+	// Disable a couple checks if we're mid-merge.
 	verifyFn := core.Verify
-	if opts.VerifyMode == VerifyModeNoDisk {
+	if opts.VerifyMode == VerifyModeNoDisk || opts.InMerge {
 		verifyFn = core.VerifyChain
 	}
 
@@ -489,7 +503,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 		return nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
 	}
 
-	r.secret, err = core.BuildSecretManager(resolvedDir, root, identities, signer, r.keyring, auditLog, vstate)
+	r.secret, err = core.BuildSecretManager(resolvedDir, root, identities, signer, r.keyring, auditLog, vstate, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to build secret manager: %w", err)
 	}
@@ -605,6 +619,15 @@ func (rep *VerifyReport) OK() bool {
 type CleanOpts struct {
 	Aggressive bool
 
+	// CleanEditedOrUnsealed removes plaintext even when it was edited since it
+	// was last sealed, or never sealed at all - content nothing else holds.
+	// Only the repo-backed, non-aggressive clean checks this; the aggressive
+	// walk deletes whatever CheckFunc allows.
+	CleanEditedOrUnsealed bool
+
+	// Sync scopes the edit check above.
+	Sync SyncOpts
+
 	// CheckFunc is called for every path that should be cleaned.
 	// Return true to allow, false to disallow.
 	// Return errors immediately stops cleaning.
@@ -613,6 +636,47 @@ type CleanOpts struct {
 	CheckFunc func(path string) (bool, error)
 }
 
+// CleanResult names what Clean left in place.
+type CleanResult struct {
+	// Kept is plaintext that was edited or never sealed; CleanEditedOrUnsealed removes it.
+	Kept []string
+}
+
+// SealOpts controls one seal.
+type SealOpts struct {
+	// All reseals every readable secret from its plaintext as it is, stale and
+	// diverged ones included.
+	All bool
+
+	// Sync scopes the classification Seal runs when States is nil.
+	Sync SyncOpts
+
+	// States is a classification the caller already ran; nil makes Seal run
+	// its own. Paths missing from it are compared with their object.
+	States SyncStates
+}
+
+// SealResult names what Seal left alone.
+type SealResult struct {
+	// Stale objects are newer than their plaintext and were kept as they are;
+	// a reveal refreshes the plaintext.
+	Stale []string
+}
+
+// DivergedError refuses a seal that would have to pick a side: the plaintext
+// was edited here and a git operation replaced the object underneath it.
+type DivergedError struct {
+	Paths []string
+}
+
+func (e *DivergedError) Error() string {
+	return fmt.Sprintf(
+		"%d secret(s) changed both here and in git since they were last in sync: %s",
+		len(e.Paths), strings.Join(e.Paths, ", "),
+	)
+}
+
+// SecretState is how a secret's plaintext relates to its sealed object.
 type SecretState int
 
 const (
@@ -621,8 +685,29 @@ const (
 	SecretStateNoRevealedPath
 	SecretStateUserHasNoAccess
 	SecretStateInSync
+
+	// SecretStateNotInSync: the plaintext was edited since it was last sealed
+	// or revealed. A seal takes it.
 	SecretStateNotInSync
 	SecretStateUnmanaged
+
+	// SecretStateConflicted marks a revealed secret whose plaintext still holds
+	// git conflict markers from a merge. git can't see it (the tracked object is
+	// ciphertext, the plaintext is gitignored), so sesam surfaces it here.
+	SecretStateConflicted
+
+	// SecretStateStale: the object moved on (a pull, checkout or merge) and the
+	// plaintext is still the decryption of an earlier version. A reveal takes it.
+	SecretStateStale
+
+	// SecretStateDiverged: both happened - the plaintext was edited and a git
+	// operation replaced the object. Somebody has to pick a side.
+	SecretStateDiverged
+
+	// SecretStateRecipientsChanged: plaintext and object agree, but the secret's
+	// recipients changed since it was sealed (a user told into its group). A
+	// seal re-encrypts it.
+	SecretStateRecipientsChanged
 )
 
 func (s SecretState) String() string {
@@ -637,9 +722,17 @@ func (s SecretState) String() string {
 	case SecretStateInSync:
 		desc = "in_sync"
 	case SecretStateNotInSync:
-		desc = "out_of_sync"
+		desc = "modified"
 	case SecretStateUnmanaged:
 		desc = "unmanaged"
+	case SecretStateConflicted:
+		desc = "conflicted"
+	case SecretStateStale:
+		desc = "stale"
+	case SecretStateDiverged:
+		desc = "diverged"
+	case SecretStateRecipientsChanged:
+		desc = "recipients_changed"
 	default:
 		desc = "undefined"
 	}
@@ -689,6 +782,9 @@ type StatusOpts struct {
 
 	// IgnoreUnmanaged will ignore files not managed by sesam.
 	IgnoreUnmanaged bool
+
+	// Sync scopes the classification behind the per-secret states.
+	Sync SyncOpts
 }
 
 // Uninstall removes the git integration of sesam from the git repo,
