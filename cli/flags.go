@@ -32,7 +32,7 @@ var flagNoSeal = &cli.BoolFlag{
 var flagSeal = &cli.BoolFlag{
 	Name:    "seal-all",
 	Aliases: []string{"all"},
-	Usage:   "When we seal, seal also files that did not change",
+	Usage:   "Seal every secret from its plaintext as it is, stale and diverged ones included",
 }
 
 // userFlag builds the --user flag. Required-ness and help text differ per
@@ -184,6 +184,10 @@ var flagsClean = []cli.Flag{
 		Usage: "Also delete other untracked files (similar to `git clean -fdx`)",
 	},
 	&cli.BoolFlag{
+		Name:  "unsealed",
+		Usage: "Also delete plaintext whose content is not sealed: edited since, or never",
+	},
+	&cli.BoolFlag{
 		Name:  "dry-run",
 		Usage: "Do not actually delete, just print what would be deleted",
 	},
@@ -194,7 +198,7 @@ var flagsReveal = []cli.Flag{
 	&cli.BoolFlag{
 		Name:    "all",
 		Aliases: []string{"a"},
-		Usage:   "Reveal all files, even those that did not change",
+		Usage:   "Reveal every secret, overwriting plaintext you edited",
 	},
 }
 
