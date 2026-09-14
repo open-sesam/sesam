@@ -36,12 +36,14 @@ func HandleClean(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if cmd.Bool("aggressive") {
-		return repo.CleanAggressive(
-			ctx,
-			cmd.String("sesam-dir"),
-			cmd.StringSlice("identity"),
-			opts,
-		)
+		// Walk up to the nearest .sesam like WithRepo does; the raw flag value
+		// would only work from the sesam dir itself.
+		sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+		if err != nil {
+			return err
+		}
+
+		return repo.CleanAggressive(ctx, sesamDir, cmd.StringSlice("identity"), opts)
 	}
 
 	return WithRepo(HandleCleanWithRepo)(ctx, cmd)

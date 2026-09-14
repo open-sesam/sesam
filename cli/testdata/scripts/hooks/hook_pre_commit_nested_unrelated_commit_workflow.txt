@@ -1,0 +1,41 @@
+# Documents current behavior in a nested layout: git fires the pre-commit hook
+# for EVERY commit in the repository, not only for commits touching the sesam
+# dir. An unsealed plaintext edit under vault/ is therefore sealed and staged
+# into whatever commit comes next - here one that only touches app/.
+#
+# In a standalone secrets repo this is the intended auto-seal. In a monorepo it
+# means unrelated commits silently carry vault changes. If that is not wanted,
+# the hook should only seal+stage when the index already touches the sesam dir
+# and otherwise just warn about the pending seal; flip the assertions below.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+mkdir app
+cp appfile app/index.js
+mkdir vault
+exec sesam init --user admin --sesam-dir vault
+exec git add -A
+exec git commit -m 'init monorepo with nested sesam'
+
+# Half-edited secret (not sealed), plus a staged change elsewhere in the monorepo.
+cp changed vault/README.md
+cp appfile2 app/index.js
+exec git add app/index.js
+
+# git would run this from the worktree root with the baked-in --sesam-dir.
+exec sesam --sesam-dir vault hook pre-commit
+
+# The hook sealed the drifted secret and staged it next to the app change.
+exec git diff --cached --name-only
+stdout 'app/index\.js'
+stdout 'vault/\.sesam/objects/README\.md\.sesam'
+stdout 'vault/\.sesam/audit/log\.jsonl'
+
+-- appfile --
+console.log(1)
+-- appfile2 --
+console.log(2)
+-- changed --
+# changed readme

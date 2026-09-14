@@ -234,6 +234,13 @@ type gitConfigEntry struct {
 	report     bool
 }
 
+// gitAliasCmd is what `git sesam` runs. git executes `!` aliases from the
+// worktree root, so with a nested sesam dir a bare `!sesam` would look for
+// `.sesam/` at the root and resolve relative arguments against it. git exports
+// the caller's subdirectory as GIT_PREFIX (empty at the root), so go back there
+// first: `git sesam` then behaves exactly like `sesam` run where the user is.
+const gitAliasCmd = `!cd -- "${GIT_PREFIX:-.}" && exec sesam`
+
 // expectedGitConfig returns the git-config entries `sesam init` installs for the
 // repository at sesamDir. It is the single source of truth for both writing the
 // config (ensureGitConfig) and checking it (CheckGitConfig); the driver command
@@ -294,7 +301,7 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 		{"merge.sesam-merge.driver", "merge", "sesam-merge-log" + suffix, "driver", mergeLogCmd, false},
 		{"merge.sesam-ours.driver", "merge", "sesam-ours", "driver", "true", false},
 		{"diff.sesam-diff.textconv", "diff", "sesam-diff" + suffix, "textconv", textconvCmd, true},
-		{"alias.sesam", "alias", "", "sesam", "!sesam", true},
+		{"alias.sesam", "alias", "", "sesam", gitAliasCmd, true},
 	}
 
 	var gitSupportsConfigHooks bool
