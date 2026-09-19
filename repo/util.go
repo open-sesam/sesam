@@ -116,6 +116,11 @@ func openGitRepo(sesamDir string) (*git.Repository, error) {
 	return repo, nil
 }
 
+// MinGitVersion is the oldest git that supports config-based hooks, which is
+// what sesam installs its hooks as.
+// See: https://github.blog/open-source/git/highlights-from-git-2-54/#h-config-based-hooks
+var MinGitVersion = semver.MustParse("2.54.0")
+
 // ReadGitVersion runs `git --version` and parses the result into a semver.
 func ReadGitVersion(ctx context.Context) (*semver.Version, error) {
 	out, err := exec.CommandContext(ctx, "git", "--version").Output()
