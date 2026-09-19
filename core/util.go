@@ -169,10 +169,23 @@ func ValidUserName(name string) error {
 	return validName("user", name)
 }
 
-// ValidGroupName applies the same character and length rules ValidUserName
-// does.
+// ValidGroupName checks a group name by the same rules as ValidUserName. An
+// access list holds both kinds of name and the two are matched against each
+// other, so a name that is legal as one must be legal as the other.
 func ValidGroupName(name string) error {
 	return validName("group", name)
+}
+
+// ValidGroupNames checks every name of a membership or access list, naming the
+// one that is wrong.
+func ValidGroupNames(groups []string) error {
+	for _, group := range groups {
+		if err := ValidGroupName(group); err != nil {
+			return fmt.Errorf("invalid group %q: %w", group, err)
+		}
+	}
+
+	return nil
 }
 
 // validName is the shared check behind ValidUserName and ValidGroupName: only
@@ -194,7 +207,7 @@ func validName(kind, name string) error {
 	}
 
 	if strings.Contains(name, "..") {
-		return fmt.Errorf("name may not include '..': %s", name)
+		return fmt.Errorf("%s name may not include '..': %s", kind, name)
 	}
 
 	return nil
