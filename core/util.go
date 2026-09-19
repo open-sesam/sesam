@@ -166,22 +166,45 @@ func RevealedPath(objectPath string) (string, bool) {
 // Only alphanumeric characters (mixed case), hyphens, underscores, '@' and '.'
 // are allowed. The name must not be empty and must not exceed 64 characters.
 func ValidUserName(name string) error {
+	return validName("user name", name)
+}
+
+// ValidGroupName checks a group name by the same rules as ValidUserName. An
+// access list holds both kinds of name and the two are matched against each
+// other, so a name that is legal as one must be legal as the other.
+func ValidGroupName(name string) error {
+	return validName("group name", name)
+}
+
+// ValidGroupNames checks every name of a membership or access list, naming the
+// one that is wrong.
+func ValidGroupNames(groups []string) error {
+	for _, group := range groups {
+		if err := ValidGroupName(group); err != nil {
+			return fmt.Errorf("invalid group %q: %w", group, err)
+		}
+	}
+
+	return nil
+}
+
+func validName(kind, name string) error {
 	if name == "" {
-		return fmt.Errorf("user name must not be empty")
+		return fmt.Errorf("%s must not be empty", kind)
 	}
 
 	if len(name) > 64 {
-		return fmt.Errorf("user name too long: %d characters (max 64)", len(name))
+		return fmt.Errorf("%s too long: %d characters (max 64)", kind, len(name))
 	}
 
 	for _, r := range name {
 		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' && r != '@' && r != '.' {
-			return fmt.Errorf("user name contains invalid character: %q", r)
+			return fmt.Errorf("%s contains invalid character: %q", kind, r)
 		}
 	}
 
 	if strings.Contains(name, "..") {
-		return fmt.Errorf("name may not include '..': %s", name)
+		return fmt.Errorf("%s may not include '..': %s", kind, name)
 	}
 
 	return nil

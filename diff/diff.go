@@ -176,6 +176,12 @@ func validate(vstate *core.VerifiedState, declared *config.State) error {
 			}
 		}
 
+		// Unlike the name, membership changes for users that exist already, so
+		// this is checked for every declaration.
+		if err := core.ValidGroupNames(du.Groups); err != nil {
+			problems = append(problems, fmt.Errorf("user %q: %w", du.Name, err))
+		}
+
 		// The audit log refuses to register a user without a group and refuses
 		// to change an existing user to zero groups, so an ungrouped user is
 		// never appliable - not even as a no-op.
@@ -202,6 +208,12 @@ func validate(vstate *core.VerifiedState, declared *config.State) error {
 	}
 
 	for _, ds := range declared.Secrets {
+		// Access lists change on tracked secrets too, so they are checked
+		// before the "already known" shortcut below.
+		if err := core.ValidGroupNames(ds.Access); err != nil {
+			problems = append(problems, fmt.Errorf("secret %q: %w", ds.Path, err))
+		}
+
 		if _, exists := vstate.SecretExists(ds.Path); exists {
 			// Already tracked, so it passed these checks when it was added.
 			continue

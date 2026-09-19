@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -79,6 +80,37 @@ func TestValidUserNameRejects(t *testing.T) {
 			require.Error(t, ValidUserName(tc.input), "should reject %q", tc.input)
 		})
 	}
+}
+
+// Group names are held to the user-name rules - an access list mixes the two
+// and matches them against each other - so the two validators have to agree on
+// every name, and the list form has to name the entry it rejects.
+func TestValidGroupName(t *testing.T) {
+	names := []string{
+		"dev", "ops-team", "team_42", "a", "Admin", "svc@host", "a.b",
+		"", "..", "../admin", "a..b", "dev/ops", `dev\ops`, "dev ops", "dev:ops",
+		"dévs", strings.Repeat("g", 65),
+	}
+
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			groupErr := ValidGroupName(name)
+			require.Equal(t, ValidUserName(name) == nil, groupErr == nil,
+				"group and user rules must agree on %q", name)
+
+			listErr := ValidGroupNames([]string{"dev", name, "ops"})
+			if groupErr == nil {
+				require.NoError(t, listErr)
+				return
+			}
+
+			require.ErrorContains(t, groupErr, "group name")
+			require.ErrorContains(t, listErr, "invalid group")
+		})
+	}
+
+	// The list form names the offender, not just the rule it broke.
+	require.ErrorContains(t, ValidGroupNames([]string{"dev", "bad group"}), "bad group")
 }
 
 type failCloser struct{}

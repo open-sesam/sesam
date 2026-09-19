@@ -1,0 +1,38 @@
+# Group names follow the same rules as user names: an access list holds both
+# kinds of name and matches them against each other, so anything illegal as a
+# user name is illegal as a group name too.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# Telling a user into a group git would never accept as a name.
+! exec sesam tell --user bob --recipient $BOB_PUBKEY --group 'dev ops'
+stderr 'group name'
+! exec sesam tell --user bob --recipient $BOB_PUBKEY --group 'dev/ops'
+stderr 'group name'
+
+# The refused tell left nothing behind - the stage rolled its fork back.
+exec sesam user list
+! stdout 'bob'
+! exists .sesam/signkeys/bob.age
+
+# The same for an access list on a secret.
+cp secret db.env
+! exec sesam add db.env --group 'dev ops'
+stderr 'group name'
+exec sesam ls
+! stdout 'db\.env'
+
+# A name that follows the rules still works, for both.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev-ops
+exec sesam add db.env --group dev-ops
+exec sesam ls
+stdout 'db\.env'
+
+-- secret --
+top secret

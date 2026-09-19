@@ -3,6 +3,7 @@ package core
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -220,6 +221,62 @@ func TestVerifyForbiddenSecretPath(t *testing.T) {
 // keyring is shared by pointer with the repo and managers, so a failed replay
 // must roll its contents back in place rather than leak partial mutations; the
 // state is replayed into a deep copy that is discarded on error.
+// TestVerifyRejectsInvalidGroupName is the group-name counterpart to
+// TestVerifyForbiddenSecretPath: group names follow the user-name rules, and a
+// hand-crafted log must not be able to introduce one that does not - every
+// place a group reaches the verified state has to check.
+func TestVerifyRejectsInvalidGroupName(t *testing.T) {
+	kinds := []struct {
+		name  string
+		craft func(t *testing.T, al *AuditLog, admin, bob *testUser, group string)
+	}{
+		{"user.tell", func(t *testing.T, al *AuditLog, admin, bob *testUser, group string) {
+			tellUser(t, al, admin, bob, []string{group})
+		}},
+		{"user.change_groups", func(t *testing.T, al *AuditLog, admin, bob *testUser, group string) {
+			tellUser(t, al, admin, bob, []string{"dev"})
+			_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserChangeGroups{
+				User: bob.Name, NewGroups: []string{group},
+			}), nil)
+			require.NoError(t, err)
+		}},
+		{"secret.add", func(t *testing.T, al *AuditLog, admin, bob *testUser, group string) {
+			_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+				RevealedPath: "secrets/db", AccessGroups: []string{group},
+			}), nil)
+			require.NoError(t, err)
+		}},
+		{"secret.change_access", func(t *testing.T, al *AuditLog, admin, bob *testUser, group string) {
+			_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+				RevealedPath: "secrets/db", AccessGroups: []string{"dev"},
+			}), nil)
+			require.NoError(t, err)
+
+			_, err = al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretChangeAccess{
+				RevealedPath: "secrets/db", AccessGroups: []string{group},
+			}), nil)
+			require.NoError(t, err)
+		}},
+	}
+
+	bad := []string{"bad group", "dev/ops", "..", "ops:prod", strings.Repeat("g", 65)}
+
+	for _, kind := range kinds {
+		for _, group := range bad {
+			t.Run(kind.name+"/"+group, func(t *testing.T) {
+				sesamDir := testRepo(t)
+				admin := newTestUser(t, "admin")
+				bob := newTestUser(t, "bob")
+				al := initAuditLog(t, sesamDir, admin)
+
+				kind.craft(t, al, admin, bob, group)
+				require.Error(t, verifyStateFail(t, al, EmptyKeyring()),
+					"verify must reject group %q in %s", group, kind.name)
+			})
+		}
+	}
+}
+
 func TestVerifyFeedEntryRollback(t *testing.T) {
 	t.Run("keyring not polluted by partial registerUser", func(t *testing.T) {
 		sesamDir := testRepo(t)
