@@ -31,12 +31,19 @@ type prettyHandler struct {
 	warnPrefix  string
 }
 
+// ErrorPrefix is the marker every error line starts with, colored for out.
+// Both the slog handler below and main's top-level printError use it, so the
+// two cannot drift apart.
+func ErrorPrefix(out *termenv.Output) string {
+	return out.String("●").Foreground(out.Color("#800000")).String()
+}
+
 func newPrettyHandler(w io.Writer, level slog.Level) *prettyHandler {
 	out := termenv.NewOutput(w)
 	return &prettyHandler{
 		w:           w,
 		level:       level,
-		errPrefix:   out.String("✘ ").Foreground(out.Color("#800000")).String(),
+		errPrefix:   ErrorPrefix(out) + " ",
 		warnPrefix:  out.String("‼ ").Foreground(out.Color("#808000")).String(),
 		infoPrefix:  out.String("ℹ ").Foreground(termenv.ANSIBrightBlue).String(),
 		debugPrefix: out.String("» ").Foreground(termenv.ANSIBrightMagenta).String(),
