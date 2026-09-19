@@ -156,6 +156,7 @@ func TestWorkflows(t *testing.T) {
 				Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
 					"sesam-repo": sesamRepoCmd,
 					"envsubst":   cmdEnvsubst,
+					"hide-git":   cmdHideGit,
 				},
 			})
 		})
@@ -183,6 +184,27 @@ func cmdEnvsubst(ts *testscript.TestScript, neg bool, args []string) {
 		expanded := os.Expand(string(data), ts.Getenv)
 		ts.Check(os.WriteFile(path, []byte(expanded), 0o644))
 	}
+}
+
+// cmdHideGit trims $PATH down to the directory testscript.Main put the command
+// binaries in, so `git` is gone while `sesam` itself stays runnable. That is
+// the "git is not installed" case; everything sesam does through go-git has to
+// keep working.
+func cmdHideGit(ts *testscript.TestScript, neg bool, args []string) {
+	if neg || len(args) > 0 {
+		ts.Fatalf("usage: hide-git")
+	}
+
+	for _, dir := range filepath.SplitList(ts.Getenv("PATH")) {
+		if _, err := os.Stat(filepath.Join(dir, "sesam")); err != nil {
+			continue
+		}
+
+		ts.Setenv("PATH", dir)
+		return
+	}
+
+	ts.Fatalf("no $PATH entry holds the sesam test binary")
 }
 
 func writeEncryptedIdentity(path string, plaintext []byte, passphrase string) error {
