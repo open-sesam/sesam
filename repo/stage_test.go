@@ -171,6 +171,9 @@ func TestStageSealOnlyLeavesConfigUntouched(t *testing.T) {
 		"a seal-only commit must not rewrite sesam.yml")
 }
 
+// Stages do not nest. Handing out the already-open stage made the second
+// Commit finalize the first transaction: its half-finished work went live and
+// the first Commit then failed with ErrStageFinalized.
 func TestStageSingleInFlight(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	_, r := bootstrapRepo(t, admin)
@@ -178,10 +181,36 @@ func TestStageSingleInFlight(t *testing.T) {
 	s1, err := r.Stage()
 	require.NoError(t, err)
 
+	_, err = r.Stage()
+	require.ErrorIs(t, err, ErrStageOpen)
+
+	// Finishing the first one frees the repo for the next.
+	require.NoError(t, s1.Rollback())
+
 	s2, err := r.Stage()
 	require.NoError(t, err)
+	require.NoError(t, s2.Rollback())
+}
 
-	require.Equal(t, s1, s2)
+// The same through Update, which is how commands reach a stage: the inner
+// Update fails and takes the outer one down with it, rather than committing
+// the outer transaction behind its back.
+func TestStageNestedUpdateAborts(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	_, r := bootstrapRepo(t, admin)
+
+	err := r.Update(func(s *Stage) error {
+		if err := s.UserTell(context.Background(), "bob", []string{bob.Recipient}, []string{"admin"}, false); err != nil {
+			return err
+		}
+
+		return r.Update(func(*Stage) error { return nil })
+	})
+	require.ErrorIs(t, err, ErrStageOpen)
+
+	// The outer transaction rolled back, so bob never reached the live view.
+	require.False(t, hasUser(t, r, "bob"))
 }
 
 // An explicitly named forbidden path must be rejected by add rather than
