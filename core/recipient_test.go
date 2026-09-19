@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"filippo.io/age"
@@ -245,6 +246,63 @@ func TestResolveLinkNonHTTPS(t *testing.T) {
 	_, err := resolveLink(context.Background(), "http://example.com")
 	require.Error(t, err, "should reject non-https URLs")
 	require.Contains(t, err.Error(), "unsupported protocol")
+}
+
+// A forge answering with a redirect to http:// must not get the key material
+// fetched in the clear: net/http follows such a hop by default, and whatever
+// comes back would become a recipient on the next `tell`.
+func TestResolveLinkRefusesHTTPSToHTTPRedirect(t *testing.T) {
+	var plainHits atomic.Int32
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		plainHits.Add(1)
+		fmt.Fprintln(w, "age1attackerkey")
+	}))
+	defer plain.Close()
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+"/keys", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	got, err := resolveLink(context.Background(), srv.URL+"/keys", srv.Client())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "non-https")
+	require.Empty(t, got)
+	require.Zero(t, plainHits.Load(), "the plaintext server must never be contacted")
+}
+
+// Staying on https is still allowed - the policy is about the scheme, not
+// about redirects as such.
+func TestResolveLinkFollowsHTTPSRedirect(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/moved" {
+			http.Redirect(w, r, "/moved", http.StatusFound)
+			return
+		}
+
+		fmt.Fprintln(w, "age1keydata")
+	}))
+	defer srv.Close()
+
+	got, err := resolveLink(context.Background(), srv.URL+"/keys", srv.Client())
+	require.NoError(t, err)
+	require.Equal(t, []string{"age1keydata"}, got)
+}
+
+// Our CheckRedirect replaces net/http's own limit, so the chain has to be
+// capped here - an endless redirect loop must end in an error, not a hang.
+func TestResolveLinkTooManyRedirects(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.Redirect(w, r, fmt.Sprintf("/keys-%d", hits.Load()), http.StatusFound)
+	}))
+	defer srv.Close()
+
+	_, err := resolveLink(context.Background(), srv.URL+"/keys", srv.Client())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "redirects")
+	require.LessOrEqual(t, hits.Load(), int32(maxKeyRedirects))
 }
 
 func TestResolveLinkHTTP4xx(t *testing.T) {

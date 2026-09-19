@@ -269,6 +269,21 @@ func splitByLine(s string) []string {
 	return lines
 }
 
+const maxKeyRedirects = 5
+
+// httpsOnlyRedirect makes sure that redirects do not degrade to http only
+func httpsOnlyRedirect(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("refused redirect to non-https url: %s", req.URL.Redacted())
+	}
+
+	if len(via) >= maxKeyRedirects {
+		return fmt.Errorf("refused to follow more than %d redirects", maxKeyRedirects)
+	}
+
+	return nil
+}
+
 // resolveLink downloads the public-key material at the given https URL.
 func resolveLink(ctx context.Context, url string, client ...*http.Client) ([]string, error) {
 	if !strings.HasPrefix(url, "https://") {
@@ -282,12 +297,14 @@ func resolveLink(ctx context.Context, url string, client ...*http.Client) ([]str
 		return nil, fmt.Errorf("failed to build request: %w", err)
 	}
 
-	var hc *http.Client
+	// A caller-supplied client is copied, not modified: the redirect policy
+	// has to hold for it as well, and the client is not ours to change.
+	hc := &http.Client{Timeout: 30 * time.Second}
 	if len(client) > 0 && client[0] != nil {
-		hc = client[0]
-	} else {
-		hc = &http.Client{Timeout: 30 * time.Second}
+		copied := *client[0]
+		hc = &copied
 	}
+	hc.CheckRedirect = httpsOnlyRedirect
 
 	resp, err := hc.Do(req)
 	if err != nil {
