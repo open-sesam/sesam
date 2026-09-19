@@ -21,10 +21,20 @@ type auditLogSnapshot struct {
 	Log    *AuditLog
 }
 
-func auditLogHistory(sesamDir string, repo *git.Repository, ids Identities, fromRev string) (iter.Seq2[*auditLogSnapshot, error], error) {
-	initCommitRev, err := verifyInitFileUnchangedWithRepo(sesamDir, repo)
-	if err != nil {
-		return nil, fmt.Errorf("verify init file: %w", err)
+func auditLogHistory(
+	sesamDir string,
+	repo *git.Repository,
+	ids Identities,
+	fromRev string,
+	initCommitRev string,
+) (iter.Seq2[*auditLogSnapshot, error], error) {
+	if initCommitRev == "" {
+		// No anchor handed down, so the init-file check has not run for this
+		// state (VerifyChain, or a caller without one): walk history for it.
+		var err error
+		if initCommitRev, err = verifyInitFileUnchangedWithRepo(sesamDir, repo); err != nil {
+			return nil, fmt.Errorf("verify init file: %w", err)
+		}
 	}
 
 	if initCommitRev == "" {
@@ -239,15 +249,26 @@ func auditLogIsPrefix(new, old *AuditLog) error {
 // drops mainline entries is correctly reported as truncation - fix it by
 // re-merging through sesam so the log is rebased instead of overwritten.
 //
+// initCommitRev is the trust anchor commit from Verify (VerifiedState.InitCommit):
+// finding it walks the whole history, and Verify already did that. Pass "" to
+// have it determined here, which also re-runs the init-file check.
+//
 // CAVEAT: Right now we do not recognize renames: If the sesam repo was moved from secret/ to secrets/
 // then this function does not find the old audit log before that rename. We could use git's renames,
 // but there will edge cases too if the file was renamed and a user was rotated (git looks for 50% matching content).
-func VerifyHistory(sesamDir string, repo *git.Repository, ids Identities, pluginUI *PluginUI) error {
+func VerifyHistory(
+	sesamDir string,
+	repo *git.Repository,
+	ids Identities,
+	pluginUI *PluginUI,
+	initCommitRev string,
+) error {
 	auditLogIter, err := auditLogHistory(
 		sesamDir,
 		repo,
 		ids,
 		"HEAD",
+		initCommitRev,
 	)
 	if err != nil {
 		return fmt.Errorf("build audit log history: %w", err)
