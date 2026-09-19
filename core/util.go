@@ -196,12 +196,20 @@ var forbiddenBasenames = map[string]bool{
 	defaultSesamBase + ".lock": true,
 }
 
+// pathSegments splits a revealed path into its components. Revealed paths are
+// logical, slash-separated ones, so splitting on the OS separator alone would
+// see all of "a/.sesam/b" as a single segment on Windows - and wave it through.
+// ToSlash keeps an OS-native path working as well.
+func pathSegments(revealedPath string) []string {
+	return strings.Split(filepath.ToSlash(revealedPath), "/")
+}
+
 func IsForbiddenPath(revealedPath string) error {
 	if b := filepath.Base(revealedPath); forbiddenBasenames[b] {
 		return fmt.Errorf("you can't seal %s", b)
 	}
 
-	for _, elem := range strings.Split(revealedPath, string(filepath.Separator)) {
+	for _, elem := range pathSegments(revealedPath) {
 		if elem == ".sesam" {
 			return fmt.Errorf("encrypting files in .sesam/ is not allowed")
 		}
@@ -223,13 +231,14 @@ func validSecretPathFormat(revealedPath string) error {
 		return fmt.Errorf("empty file path not allowed: %s", revealedPath)
 	}
 
-	if revealedPath[0] == filepath.Separator {
+	// Both forms: a logical "/etc/passwd" and, on Windows, "\etc" or "C:\etc".
+	if strings.HasPrefix(filepath.ToSlash(revealedPath), "/") || filepath.IsAbs(revealedPath) {
 		return fmt.Errorf("absolute paths not allowed in revealed path: %s", revealedPath)
 	}
 
 	// Reject path traversal, but only a real ".." path segment - the substring
 	// ".." appears legitimately inside filenames (e.g. "s.a.r..geojson").
-	for _, elem := range strings.Split(revealedPath, string(filepath.Separator)) {
+	for _, elem := range pathSegments(revealedPath) {
 		if elem == ".." {
 			return fmt.Errorf("path may not include a '..' segment: %s", revealedPath)
 		}

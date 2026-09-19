@@ -89,7 +89,7 @@ func (fc failCloser) Close() error {
 
 func TestIsForbiddenPathSesamSubdir(t *testing.T) {
 	// A relative path that points inside .sesam/ must be rejected.
-	err := IsForbiddenPath(filepath.Join(".sesam", "signkeys", "admin.age"))
+	err := IsForbiddenPath(".sesam/signkeys/admin.age")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), ".sesam")
 }
@@ -114,6 +114,10 @@ func TestValidSecretPathFormat(t *testing.T) {
 		{name: "absolute", path: "/etc/passwd", wantErr: "absolute paths"},
 		{name: "traversal segment", path: "../secret", wantErr: "'..' segment"},
 		{name: "traversal in middle", path: "a/../../etc/passwd", wantErr: "'..' segment"},
+		// Same two, spelled the way the OS would - on Windows these are the
+		// ones a split on "/" alone would miss.
+		{name: "traversal os separator", path: filepath.Join("..", "secret"), wantErr: "'..' segment"},
+		{name: "absolute os separator", path: string(filepath.Separator) + "etc", wantErr: "absolute paths"},
 	}
 
 	for _, tc := range tests {
@@ -133,7 +137,8 @@ func TestValidSecretPathFormat(t *testing.T) {
 func TestIsForbiddenPathRejectsSesamYml(t *testing.T) {
 	cases := []string{
 		"sesam.yml",
-		filepath.Join("config", "sesam.yml"),
+		"config/sesam.yml",
+		"a/b/sesam.yml",
 		filepath.Join("a", "b", "sesam.yml"),
 	}
 
@@ -149,15 +154,21 @@ func TestIsForbiddenPathRejectsSesamYml(t *testing.T) {
 // Anything living inside a .sesam directory must be rejected no matter where
 // the component appears in the path.
 func TestIsForbiddenPathRejectsDotSesam(t *testing.T) {
+	// Revealed paths are stored slash-separated, so that form has to be
+	// rejected on every platform - splitting on the OS separator would let it
+	// pass on Windows. The filepath.Join rows keep the native form covered.
 	cases := []struct {
 		name        string
 		revealed    string
 		wantMessage string
 	}{
-		{"leading", filepath.Join(".sesam", "secret"), ".sesam"},
-		{"signkey", filepath.Join(".sesam", "signkeys", "admin.age"), ".sesam"},
-		{"nested component", filepath.Join("a", ".sesam", "b"), ".sesam"},
+		{"leading", ".sesam/secret", ".sesam"},
+		{"signkey", ".sesam/signkeys/admin.age", ".sesam"},
+		{"nested component", "a/.sesam/b", ".sesam"},
 		{"bare", ".sesam", ".sesam"},
+		{"git dir", "a/.git/config", ".git"},
+		{"tmp dir", "a/.sesam-tmp/x", ".sesam-tmp"},
+		{"os separator", filepath.Join("a", ".sesam", "b"), ".sesam"},
 	}
 
 	for _, tc := range cases {
