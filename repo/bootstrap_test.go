@@ -226,3 +226,28 @@ func TestShellQuote(t *testing.T) {
 		})
 	}
 }
+
+// Without git on $PATH there is no version to gate the config-based hooks on.
+// expectedGitConfig has to drop them and keep the rest: it also runs on the
+// read-only doctor/nudge path, where every repo-backed command would otherwise
+// die on the nil version.
+func TestExpectedGitConfigWithoutGitBinary(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir := bootstrappedDir(t, admin)
+
+	gitRepo, err := openGitRepo(dir)
+	require.NoError(t, err)
+
+	t.Setenv("PATH", "")
+
+	entries, err := expectedGitConfig(gitRepo, dir)
+	require.NoError(t, err)
+
+	var sections []string
+	for _, e := range entries {
+		sections = append(sections, e.section)
+	}
+	require.NotContains(t, sections, "hook", "hook entries require a known git version")
+	require.Contains(t, sections, "merge", "version-independent entries must survive")
+	require.Contains(t, sections, "alias")
+}
