@@ -1,7 +1,10 @@
 package core
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"sync"
 	"testing"
 
 	"filippo.io/age"
@@ -30,6 +33,55 @@ func TestGenerateAndLoadSignKey(t *testing.T) {
 	who, err := kr.Verify(SesamDomainSignSecretTag, data, sig, "alice")
 	require.NoError(t, err)
 	require.Equal(t, "alice", who)
+}
+
+// Signing and verifying must not write through the domain tag. The tags are
+// package-level slices, so a tag carrying spare capacity - one edit away -
+// would have Seal's parallel workers write their payload into one shared
+// backing array. Run under `task test-race`: the append-based version reports
+// a write/write race on the tag (and mis-signs on top of it).
+func TestSignDomainWithSpareCapacityIsNotShared(t *testing.T) {
+	user := newTestUser(t, "alice")
+
+	kr := EmptyKeyring()
+	require.NoError(t, kr.SetSignPubKey(user.Name, user.Signer.PublicKey()))
+
+	// Same bytes as the real tag, but with room after them.
+	domain := make(SignDomain, 0, 64)
+	domain = append(domain, SesamDomainSignSecretTag...)
+
+	const workers = 8
+	errs := make([]error, workers)
+
+	var wg sync.WaitGroup
+	for i := range workers {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			data := fmt.Appendf(nil, "payload-%d", i)
+			sig, err := user.Signer.Sign(domain, data)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+
+			who, err := kr.Verify(domain, data, sig, user.Name)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+
+			if who != user.Name {
+				errs[i] = fmt.Errorf("signature attributed to %q, want %q", who, user.Name)
+			}
+		}()
+	}
+
+	wg.Wait()
+	require.NoError(t, errors.Join(errs...))
+	require.Equal(t, SesamDomainSignSecretTag, domain, "the tag itself must come back untouched")
 }
 
 func TestLoadSignKeyMissing(t *testing.T) {

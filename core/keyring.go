@@ -203,7 +203,8 @@ func (mk *MemoryKeyring) verifySingle(domain SignDomain, key, data []byte, signa
 		return fmt.Errorf("invalid ed25519 public key length: %d", len(key))
 	}
 
-	ok := ed25519.Verify(key, append(domain, data...), sigData)
+	// Concat, not append - see ed25519Signer.Sign.
+	ok := ed25519.Verify(key, slices.Concat([]byte(domain), data), sigData)
 	if !ok {
 		return fmt.Errorf("could not validate signature '%s'", signature)
 	}

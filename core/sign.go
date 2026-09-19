@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"filippo.io/age"
@@ -37,7 +38,10 @@ type ed25519Signer struct {
 }
 
 func (es *ed25519Signer) Sign(domain SignDomain, data []byte) (string, error) {
-	sig, err := es.priv.Sign(rand.Reader, append(domain, data...), &ed25519.Options{})
+	// Concat, not append: the domain tags are package-level slices, and one
+	// byte of spare capacity in one of them would have parallel Seal workers
+	// write their data into the same backing array.
+	sig, err := es.priv.Sign(rand.Reader, slices.Concat([]byte(domain), data), &ed25519.Options{})
 	if err != nil {
 		return "", err
 	}
