@@ -1,0 +1,41 @@
+# The honest shape of the topology verify_truncate_orphan_merge_workflow.txt
+# attacks: a repository whose mainline never had a vault merges one in from a
+# branch. The log's history hangs off the merge's second parent, so the walk
+# crosses over there - and has to find nothing wrong, all the way down to the
+# trust anchor.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+# A mainline without any vault.
+cp note note.txt
+exec git add note.txt
+exec git commit -m 'no vault here'
+
+# The vault is born on a branch and grows there.
+exec git switch -c vault
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'sesam init'
+exec sesam add s.txt --group dev
+exec git add -A
+exec git commit -m 'add secret'
+
+# Back on the mainline, merged in with a real merge commit.
+exec git switch -
+# sesam's pre-merge-commit hook hands the finalize back to `git commit`, which
+# is the flow it tells the user to follow.
+! exec git merge --no-ff --no-edit vault
+exec git commit --no-edit
+
+exec git rev-list --first-parent HEAD
+stdout -count=2 '^[0-9a-f]{40}$'
+
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+-- s.txt --
+top secret
+-- note --
+unrelated file
