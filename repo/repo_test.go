@@ -101,6 +101,19 @@ func TestLoad_Negative(t *testing.T) {
 	}
 }
 
+// The load-time Verify walks the whole history to check .sesam/audit/init, and
+// View.Verify hands that anchor down to VerifyHistory rather than having it
+// walked again. A missing anchor would cost nothing but the walk - i.e. nothing
+// visible - so pin that Load actually carries one.
+func TestLoad_CarriesInitCommitAnchor(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir := bootstrappedDir(t, admin)
+	gitCommitAll(t, dir, "init sesam")
+
+	r := reloadSesamRepo(t, dir, admin)
+	require.NotEmpty(t, r.vstate.InitCommit())
+}
+
 func TestRepo_SesamDir(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	dir, r := bootstrapRepo(t, admin)
