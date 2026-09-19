@@ -29,4 +29,4 @@ grep 'diff=sesam-diff-sub-b' sub-b/.gitattributes
 
 # The alias is a plain shim, shared and harmless across repos.
 exec git config --local alias.sesam
-stdout '^!sesam$'
+stdout '^!cd -- "\$\{GIT_PREFIX:-\.\}" && exec sesam$'

@@ -1,0 +1,30 @@
+# A merge that does not touch the sesam vault must auto-commit like any git merge -
+# pre-merge-commit only stops the auto-commit when .sesam actually changed. Here a
+# force-tracked plain file is merged; sesam stays out of the way (no finalize nag).
+
+sesam-repo
+
+# Force-track a plain file (the sesam gitignore would otherwise ignore it).
+exec sh -c 'printf "l1\nl2\nl3\n" > notes.txt'
+exec git add -f notes.txt
+exec git commit -m 'add notes'
+
+exec git checkout -b ours
+exec sh -c 'printf "OURS\nl2\nl3\n" > notes.txt'
+exec git add notes.txt
+exec git commit -m 'ours: first line'
+
+exec git checkout -b theirs ours~1
+exec sh -c 'printf "l1\nl2\nTHEIRS\n" > notes.txt'
+exec git add notes.txt
+exec git commit -m 'theirs: last line'
+
+# Disjoint edits, no .sesam change -> git auto-commits the merge (exit 0), no nag.
+exec git checkout ours
+exec git merge theirs
+! stderr 'finalize'
+! exec git rev-parse -q --verify MERGE_HEAD
+
+exec sesam verify
+grep 'OURS' notes.txt
+grep 'THEIRS' notes.txt

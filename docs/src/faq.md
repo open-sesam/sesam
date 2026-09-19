@@ -26,6 +26,22 @@ Only secrets you can actually decrypt are written out. The rest stay sealed
 with no plaintext pendant. That is expected, not an error (see
 [Managing users](./users.md)).
 
+## `sesam` keeps telling me "git-integration is not installed"
+
+You are in a checkout where `sesam init` was never run - most often a fresh clone,
+since the hooks and merge/diff drivers live in local git config, which is not part
+of a clone. Run `sesam init` once to wire everything up (`sesam doctor` shows what
+is missing).
+
+If you deliberately want to work without the integration, silence the nudge for
+this checkout:
+
+```bash
+touch .sesam/no-git-integration-warning
+```
+
+The marker is local and git-ignored, so it stays a per-checkout decision.
+
 ## `git diff` shows my secret in plaintext - is that a leak?
 
 No. On `init`, `sesam` registers a `diff` textconv (`sesam show`) in
@@ -82,6 +98,42 @@ that points at a rewritten history (typically a force-push). `sesam` can only
 detect this by comparing against an older copy — a local clone, a CI checkout, a
 colleague's repo. Compare against a known-good copy before trusting anything, and
 disable force-push at your forge (see [Initialisation](./init.md)).
+
+## `git merge` said "Automatic merge failed" but nothing looks broken
+
+That is by design. When both branches changed the vault, `sesam` merges the audit
+log for you and then stops the automatic merge commit so you can review the result
+before it is written. If there are no leftover conflict markers, just finish the
+merge the normal git way:
+
+```bash
+git commit
+```
+
+Please see the [git integration page](./git_integration.md) for more info.
+
+## Do I have to resolve the encrypted files during a merge?
+
+No. Encrypted objects and the audit log are merged by `sesam` in the background;
+you never hand-resolve ciphertext. What you may have to resolve are the **revealed**
+(plaintext) secrets: if both sides edited the same region of a file, `sesam` writes
+normal git conflict markers into the revealed copy. Fix them like any other
+conflict, then `git commit`.
+
+git cannot see these markers (the tracked object is ciphertext, the plaintext is
+git-ignored), so `sesam status` lists any file still carrying them - shown as `U`
+/ `conflicted` - and the commit is refused until they are resolved.
+
+## Can I merge several branches at once (`git merge A B`)?
+
+No. `git`'s octopus strategy bypasses custom merge drivers, so `sesam` cannot merge
+the vault that way. Merge one branch at a time.
+
+## Who is allowed to merge branches?
+
+Only admins. A merge re-signs the audit log and needs access to every affected
+secret - both of which admins have. A non-admin merge aborts with `not an admin`;
+ask an admin to run it.
 
 ## I ran `sesam uninstall` and now re-`init` fails with "init file check: … has uncommitted changes"
 

@@ -61,7 +61,9 @@ func HandleConfigApply(ctx context.Context, cmd *cli.Command, r *repo.Repo) erro
 		if noSeal || len(applied) == 0 {
 			return nil
 		}
-		return s.Seal(cmd.Bool("seal-all"))
+
+		_, err = s.Seal(repo.SealOpts{All: cmd.Bool("seal-all")})
+		return err
 	}); err != nil {
 		return err
 	}

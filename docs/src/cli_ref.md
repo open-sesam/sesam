@@ -110,6 +110,8 @@ Remove revealed plaintext and other untracked files from the sesam directory
 
 **--help, -h**: show help
 
+**--unsealed**: Also delete plaintext whose content is not sealed: edited since, or never
+
 ## doctor
 
 Check sesam installation for possible problems
@@ -131,6 +133,18 @@ Execute the pre-commit hook - meant to be run by git!
 ### post-checkout
 
 Execute the post-checkout hook - meant to be run by git!
+
+**--help, -h**: show help
+
+### pre-merge-commit
+
+Execute the pre-merge-commit hook - meant to be run by git!
+
+**--help, -h**: show help
+
+### post-merge
+
+Execute the post-merge hook - meant to be run by git!
 
 **--help, -h**: show help
 
@@ -160,7 +174,7 @@ Add a secret file or directory at `PATH`
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--seal-all, --all**: When we seal, seal also files that did not change
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 ## rm
 
@@ -186,7 +200,7 @@ Open secret in $VISUAL or $EDITOR and immediately seal it afterwards
 
 **--help, -h**: show help
 
-**--seal-all, --all**: When we seal, seal also files that did not change
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 ## seal
 
@@ -196,13 +210,13 @@ Encrypt and sign changed secrets
 
 **--help, -h**: show help
 
-**--seal-all, --all**: When we seal, seal also files that did not change
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 ## open, reveal
 
 Decrypt all secrets available to the current user
 
-**--all, -a**: Reveal all files, even those that did not change
+**--all, -a**: Reveal every secret, overwriting plaintext you edited
 
 **--help, -h**: show help
 
@@ -254,7 +268,7 @@ Add a person to a group and re-encrypt files
 
 **--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
 
-**--seal-all, --all**: When we seal, seal also files that did not change
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 **--user, -u**="": User name to add or update
 
@@ -266,7 +280,7 @@ Remove a person from the sesam repo entirely
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--seal-all, --all**: When we seal, seal also files that did not change
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 **--user, -u**="": User name to remove
 
@@ -296,7 +310,7 @@ Change the groups a user is in
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--seal-all, --all**: When we seal, seal also files that did not change
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 **--user, -u**="": Which user should be changed
 
@@ -310,7 +324,7 @@ Add a recipient to an existing user
 
 **--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
 
-**--seal-all, --all**: When we seal, seal also files that did not change
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 **--user, -u**="": Which user receives the new recipient
 
@@ -326,7 +340,7 @@ Remove a recipient from an existing user (may not be the last one)
 
 **--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
 
-**--seal-all, --all**: When we seal, seal also files that did not change
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 **--user, -u**="": Which user looses the specified recipient
 

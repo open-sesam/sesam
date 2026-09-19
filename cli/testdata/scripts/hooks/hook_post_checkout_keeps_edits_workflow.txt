@@ -1,0 +1,59 @@
+# A branch switch used to wipe every revealed file and reveal the new branch's
+# objects - taking unsealed edits with it, and git could not warn because the
+# plaintext is gitignored. Now the post-checkout hook keeps edited plaintext,
+# names it, and refreshes only what still held the previous branch's version.
+
+sesam-repo admin base.txt changed.txt edit.txt
+
+cp $TMPDIR/base.txt s
+cp $TMPDIR/base.txt t
+exec sesam add s --group admin
+exec sesam add t --group admin
+exec git add -A
+exec git commit -m 'add secrets'
+
+# topic changes s; t is the same on both branches.
+exec git checkout -b topic
+cp $TMPDIR/changed.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change s'
+exec git checkout master
+exec cat s
+stdout 'BASE'
+
+# Unsealed edits to both, then the switch.
+cp $TMPDIR/edit.txt s
+cp $TMPDIR/edit.txt t
+exec git checkout topic
+stderr 'kept 2 edited secrets'
+stderr 'sesam:   s \(its object changed in git as well\)'
+stderr 'sesam:   t'
+
+exec cat s
+stdout 'EDIT'
+exec cat t
+stdout 'EDIT'
+
+# Only the hook could tell that s was also replaced by the switch (git handed
+# it the previous HEAD). Afterwards both are simply edits waiting for a decision.
+exec sesam status
+stdout 'M s'
+stdout 'M t'
+stdout '2 modified'
+
+# The way out is explicit: take the branch's objects, or seal the edits.
+exec sesam reveal --all
+exec cat s
+stdout 'CHANGED'
+exec cat t
+stdout 'BASE'
+exec sesam status
+stdout 'everything in sync'
+
+-- base.txt --
+BASE
+-- changed.txt --
+CHANGED
+-- edit.txt --
+EDIT

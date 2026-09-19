@@ -27,7 +27,8 @@ func applyConfig(t *testing.T, r *Repo) ([]diff.Change, error) {
 		if len(applied) == 0 {
 			return nil
 		}
-		return s.Seal(false)
+		_, err = s.Seal(SealOpts{})
+		return err
 	})
 
 	return applied, err
@@ -163,7 +164,7 @@ func TestConfigApplyTellsUser(t *testing.T) {
 	// bob can read what he was given access to.
 	require.NoError(t, r.Close())
 	bobRepo := reloadSesamRepo(t, dir, bob)
-	require.NoError(t, bobRepo.Reveal(true))
+	require.NoError(t, bobRepo.RevealAll())
 }
 
 // TestConfigApplyLeavesConfigAlone is the point of bypassing the Stage

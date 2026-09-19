@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"filippo.io/age"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -45,6 +46,35 @@ type SecretManager struct {
 	base string
 }
 
+// SealAdvice is what a caller already knows about one plaintext, so Seal does
+// not have to compare it with its object again. The zero value compares.
+type SealAdvice int
+
+const (
+	// AdviceCompare decides by comparing plaintext and object (NeedsSeal).
+	AdviceCompare SealAdvice = iota
+
+	// AdviceChanged: the plaintext changed, seal it.
+	AdviceChanged
+
+	// AdviceUnchanged: the plaintext matches the object, reseal only when the
+	// recipients changed.
+	AdviceUnchanged
+
+	// AdviceKeep: the plaintext is older than the object, leave the object alone.
+	AdviceKeep
+)
+
+// ObjectMatch is how the plaintext of a secret relates to one sealed object -
+// not necessarily the one on disk: any version git holds can be asked.
+type ObjectMatch struct {
+	// Content: the plaintext is what this object was sealed from.
+	Content bool
+
+	// Recipients: the object was sealed for the recipients the secret has now.
+	Recipients bool
+}
+
 // SetBase points the manager's sesam-internal paths at base (a stage's fork
 // dir, e.g. ".sesam-tmp"). Worktree (plaintext) paths are unaffected. Must be
 // called before any sealing if the manager operates on a stage.
@@ -52,7 +82,10 @@ func (sm *SecretManager) SetBase(base string) { sm.base = base }
 
 // BuildSecretManager uses the passed facilities to build a new SecretManager.
 // root confines all file I/O to the repository; sesamDir is its absolute path,
-// kept for the directory swap and git interop.
+// kept for the directory swap and git interop. `base` is the sesam-internal
+// prefix the manager works under ("" for the live tree, a stage's fork dir
+// otherwise) - it has to be known here because the scratch dir is scrubbed
+// below, and a fork must not empty the live one.
 func BuildSecretManager(
 	sesamDir string,
 	root *os.Root,
@@ -61,6 +94,7 @@ func BuildSecretManager(
 	keyring Keyring,
 	log *AuditLog,
 	state *VerifiedState,
+	base string,
 ) (*SecretManager, error) {
 	mgr := &SecretManager{
 		SesamDir:   sesamDir,
@@ -70,10 +104,11 @@ func BuildSecretManager(
 		Keyring:    keyring,
 		AuditLog:   log,
 		State:      state,
+		base:       base,
 	}
 
 	// Clear tmp dir before continuing:
-	tmpDir := SesamTmpDir()
+	tmpDir := sesamTmpDir(base)
 	_ = root.RemoveAll(tmpDir)
 	_ = root.MkdirAll(tmpDir, 0o700)
 
@@ -183,7 +218,10 @@ func (sm *SecretManager) changeAccess(revealedPath string, groups []string) erro
 // ciphertext. When nothing was re-sealed or pruned, no audit entry is written,
 // so a no-op seal (e.g. the pre-commit hook on a commit that touched no secrets)
 // does not churn the log.
-func (sm *SecretManager) Seal(all bool) error {
+// Seal writes every secret's plaintext into its object. `all` reseals even what
+// is in sync; otherwise `advice` (may be nil) says per plaintext what is already
+// known about it, and everything else is compared with its object.
+func (sm *SecretManager) Seal(all bool, advice map[string]SealAdvice) error {
 	objects := sm.objectsDir()
 	if err := sm.root.MkdirAll(objects, 0o700); err != nil {
 		return fmt.Errorf("create objects dir: %w", err)
@@ -200,7 +238,7 @@ func (sm *SecretManager) Seal(all bool) error {
 
 	for _, vsecret := range sm.State.Secrets {
 		errg.Go(func() error {
-			sig, err := sm.sealOrPreserve(vsecret.RevealedPath, all)
+			sig, err := sm.sealOrPreserve(vsecret.RevealedPath, all, advice[vsecret.RevealedPath])
 			if err != nil {
 				return fmt.Errorf("seal %s: %w", vsecret.RevealedPath, err)
 			}
@@ -246,7 +284,7 @@ func (sm *SecretManager) Seal(all bool) error {
 // plaintext it re-encrypts (renameio replaces the object); otherwise it leaves
 // the existing ciphertext untouched and reads back its footer. It is an error
 // if there is neither plaintext nor an existing object.
-func (sm *SecretManager) sealOrPreserve(revealedPath string, all bool) (*secretFooter, error) {
+func (sm *SecretManager) sealOrPreserve(revealedPath string, all bool, advice SealAdvice) (*secretFooter, error) {
 	dest := sm.cryptPath(revealedPath)
 	if err := sm.root.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return nil, fmt.Errorf("create objects subdir: %w", err)
@@ -256,17 +294,13 @@ func (sm *SecretManager) sealOrPreserve(revealedPath string, all bool) (*secretF
 	case err == nil:
 		sealer := sm.Signer.UserName()
 		if sm.State.SealerAuthorized(sealer, revealedPath) {
-			// Unless forced (all), skip the reseal when the existing object still
-			// matches both the plaintext and the recipient set. NeedsSeal hands
-			// back the footer it read so we can return it without a second read.
-			if !all {
-				needsSeal, footer, err := sm.NeedsSeal(revealedPath)
-				if err != nil {
-					return nil, fmt.Errorf("failed to check whether reseal is needed: %w", err)
-				}
-				if !needsSeal {
-					return footer, nil
-				}
+			seal, footer, err := sm.decideSeal(revealedPath, all, advice)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check whether reseal is needed: %w", err)
+			}
+
+			if !seal {
+				return footer, nil
 			}
 
 			return sealSecret(sm, revealedPath, sm.recipientsFor(revealedPath), dest, sealer)
@@ -292,6 +326,34 @@ func (sm *SecretManager) sealOrPreserve(revealedPath string, all bool) (*secretF
 	}
 
 	return sm.readSecretFooter(dest)
+}
+
+// decideSeal says whether the plaintext at revealedPath has to be sealed. When
+// it read the existing object's footer on the way, it hands that back so the
+// caller need not read it again.
+func (sm *SecretManager) decideSeal(revealedPath string, all bool, advice SealAdvice) (bool, *secretFooter, error) {
+	switch {
+	case all, advice == AdviceChanged:
+		return true, nil, nil
+	case advice == AdviceKeep, advice == AdviceUnchanged:
+		footer, err := sm.readSecretFooter(sm.cryptPath(revealedPath))
+		if errors.Is(err, os.ErrNotExist) {
+			// Nothing to keep or compare with; the plaintext is all there is.
+			return true, nil, nil
+		}
+		if err != nil {
+			return false, nil, err
+		}
+
+		if advice == AdviceKeep {
+			return false, footer, nil
+		}
+
+		drifted, err := sm.recipientsDrifted(footer, revealedPath)
+		return drifted, footer, err
+	default:
+		return sm.needsSeal(revealedPath)
+	}
 }
 
 // pruneObjects removes object files under objects/ whose sesam-relative path is
@@ -348,28 +410,40 @@ func (sm *SecretManager) readSecretFooter(path string) (*secretFooter, error) {
 	return footer, nil
 }
 
-// Reveal reveals all known secrets.
-func (sm *SecretManager) Reveal(all bool) error {
+// RevealAll writes out every secret the user can read, whatever the plaintext
+// holds right now.
+func (sm *SecretManager) RevealAll() error {
+	return sm.reveal(nil)
+}
+
+// RevealPaths writes out the named secrets, whatever their plaintext holds.
+// Unknown or inaccessible paths are skipped, so callers can pass a raw list
+// from git.
+func (sm *SecretManager) RevealPaths(paths []string) error {
+	want := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		want[p] = true
+	}
+
+	return sm.reveal(want)
+}
+
+// reveal writes out every secret in want, or all of them when want is nil. The
+// nil case stays in here: an empty RevealPaths must reveal nothing, not everything.
+func (sm *SecretManager) reveal(want map[string]bool) error {
 	parallelJobs := 4 * runtime.GOMAXPROCS(0)
 	g := new(errgroup.Group)
 	g.SetLimit(parallelJobs)
 
 	for _, vsecret := range sm.State.Secrets {
 		g.Go(func() error {
-			if !sm.State.UserHasAccess(sm.Signer.UserName(), vsecret.AccessGroups) {
-				// ignore files we can't decrypt:
+			if want != nil && !want[vsecret.RevealedPath] {
 				return nil
 			}
 
-			if !all {
-				needsReveal, _, err := sm.NeedsSeal(vsecret.RevealedPath)
-				if err != nil {
-					return err
-				}
-
-				if !needsReveal {
-					return nil
-				}
+			if !sm.State.UserHasAccess(sm.Signer.UserName(), vsecret.AccessGroups) {
+				// ignore files we can't decrypt:
+				return nil
 			}
 
 			if err := revealSecret(sm, vsecret.RevealedPath); err != nil {
@@ -493,7 +567,7 @@ func ShowSecret(root *os.Root, ids Identities, path string, dst io.Writer) (bool
 
 	defer closeLogged(srcFd)
 
-	_, _, _, err = revealStream(srcFd, dst, ids.AgeIdentities())
+	_, _, _, err = RevealStream(srcFd, dst, ids.AgeIdentities())
 	return true, err
 }
 
@@ -509,17 +583,16 @@ func openForShow(root *os.Root, path string) (*os.File, error) {
 	return root.Open(path)
 }
 
-// NeedsSeal reports whether revealedPath must be (re-)sealed: its recipient set
-// or its plaintext drifted from the sealed object, or either the sealed object
-// or the plaintext is missing. A missing file is reported as "needs seal"
-// rather than an error, so callers (Seal, `sesam status`) can probe freely
-// without pre-checking existence. When the object is read, its footer is
-// returned so the caller can reuse it instead of reading it a second time.
+// needsSeal is the fallback when nothing is known about a plaintext: the object
+// has to be resealed if the recipients changed or the plaintext is not what it
+// was sealed from. A missing plaintext or object counts as "needs seal" rather
+// than an error. When the object is read, its footer is returned so the caller
+// can reuse it instead of reading it again.
 //
 // The recipient check works off the signed footer alone (no decryption), so it
 // holds even when the current sealer cannot read the existing object; only the
 // plaintext comparison decrypts the sealed file's age key.
-func (sm *SecretManager) NeedsSeal(revealedPath string) (bool, *secretFooter, error) {
+func (sm *SecretManager) needsSeal(revealedPath string) (bool, *secretFooter, error) {
 	// TODO: During seal we can get the file key directly without re-reading, should be a parameter here.
 	sealFd, err := sm.root.Open(sm.cryptPath(revealedPath))
 	if errors.Is(err, os.ErrNotExist) {
@@ -530,41 +603,94 @@ func (sm *SecretManager) NeedsSeal(revealedPath string) (bool, *secretFooter, er
 	}
 	defer closeLogged(sealFd)
 
-	plainFd, err := sm.root.Open(revealedPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return true, nil, nil
-	}
-	if err != nil {
+	if _, err := sm.root.Stat(revealedPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return true, nil, nil
+		}
+
 		return false, nil, err
 	}
-	defer closeLogged(plainFd)
 
 	_, footer, err := readFooter(sealFd)
 	if err != nil {
 		return false, nil, err
 	}
 
+	drifted, err := sm.recipientsDrifted(footer, revealedPath)
+	if err != nil || drifted {
+		return drifted, footer, err
+	}
+
+	matches, err := sm.plaintextMatches(revealedPath, sealFd, footer)
+	if err != nil {
+		return false, footer, err
+	}
+
+	return !matches, footer, nil
+}
+
+// MatchObject compares the plaintext at revealedPath with one sealed object,
+// on disk or fished out of git history, and says whether it is what the object
+// was sealed from and whether the object still names the secret's recipients.
+func (sm *SecretManager) MatchObject(revealedPath string, object io.ReadSeeker) (ObjectMatch, error) {
+	_, footer, err := readFooter(object)
+	if err != nil {
+		return ObjectMatch{}, err
+	}
+
+	drifted, err := sm.recipientsDrifted(footer, revealedPath)
+	if err != nil {
+		return ObjectMatch{}, err
+	}
+
+	matches, err := sm.plaintextMatches(revealedPath, object, footer)
+
+	var noIdentity *age.NoIdentityMatchError
+	if errors.As(err, &noIdentity) {
+		return ObjectMatch{Recipients: !drifted}, nil
+	}
+
+	return ObjectMatch{Content: matches, Recipients: !drifted}, err
+}
+
+// plaintextMatches hashes the plaintext the way footer says and compares under
+// the object's age key. `object` has to be positioned at the start of the age
+// stream (readFooter leaves it there).
+func (sm *SecretManager) plaintextMatches(revealedPath string, object io.Reader, footer *secretFooter) (bool, error) {
 	newHash, hashCode, err := hasherForStored(footer.CipherTextHash)
 	if err != nil {
-		return false, footer, err
+		return false, err
 	}
 
-	want := MulticodeEncode(recipientsHash(newHash, sm.recipientsFor(revealedPath)), hashCode)
-	if footer.RecipientsHash != want {
-		return true, footer, nil
-	}
-
-	ageKey, err := readAgeEncryptionKey(sealFd, sm.Identities.AgeIdentities())
+	ageKey, err := readAgeEncryptionKey(object, sm.Identities.AgeIdentities())
 	if err != nil {
-		return false, footer, err
+		return false, err
 	}
+
+	plainFd, err := sm.root.Open(revealedPath)
+	if err != nil {
+		return false, err
+	}
+	defer closeLogged(plainFd)
 
 	plainContentHash := newHash()
 	if _, err := io.Copy(plainContentHash, plainFd); err != nil {
-		return false, footer, err
+		return false, err
 	}
 	_, _ = plainContentHash.Write([]byte(revealedPath))
 
-	plainHmacContentHash := MulticodeEncode(keyContentHash(newHash, ageKey, plainContentHash.Sum(nil)), hashCode)
-	return plainHmacContentHash != footer.HMACContentHash, footer, nil
+	got := MulticodeEncode(keyContentHash(newHash, ageKey, plainContentHash.Sum(nil)), hashCode)
+	return got == footer.HMACContentHash, nil
+}
+
+// recipientsDrifted reports whether the footer was sealed for a different
+// recipient set than revealedPath has now. Footer only, no decryption.
+func (sm *SecretManager) recipientsDrifted(footer *secretFooter, revealedPath string) (bool, error) {
+	newHash, hashCode, err := hasherForStored(footer.CipherTextHash)
+	if err != nil {
+		return false, err
+	}
+
+	want := MulticodeEncode(recipientsHash(newHash, sm.recipientsFor(revealedPath)), hashCode)
+	return footer.RecipientsHash != want, nil
 }

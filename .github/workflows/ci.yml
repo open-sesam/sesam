@@ -43,7 +43,7 @@ jobs:
         run: task lint
 
       - name: Test
-        run: task test
+        run: task test-race
 
       - name: Vulncheck
         run: task vuln

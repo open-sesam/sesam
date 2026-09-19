@@ -52,7 +52,7 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 		},
 		GitConfigOpts: repo.GitConfigOpts{
 			InstallHooks: boolWithDefault(cmd, "install-hooks", true),
-			InstallMerge: boolWithDefault(cmd, "install-merge", false), // TODO: not yet implemented.
+			InstallMerge: boolWithDefault(cmd, "install-merge", true),
 			InstallDiff:  boolWithDefault(cmd, "install-diff", true),
 			InstallAlias: boolWithDefault(cmd, "install-alias", true),
 		},

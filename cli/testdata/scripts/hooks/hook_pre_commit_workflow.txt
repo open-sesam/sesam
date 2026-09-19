@@ -20,7 +20,7 @@ stdout '"in_sync"'
 # Drift the plaintext. The sealed object no longer matches.
 cp modified.env app.env
 exec sesam status --json
-stdout '"out_of_sync"'
+stdout '"modified"'
 
 # The hook re-seals the drift and stages the updated object.
 exec sesam hook pre-commit

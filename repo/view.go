@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -83,6 +84,10 @@ func (v *View) cfg() (*sesamConf.Config, error) {
 // closeState closes the audit log and drops the verified state. The root and
 // lock are shared/owned by the Repo and are not touched here.
 func (v *View) closeState() error {
+	return v.closeStateQuiet(true)
+}
+
+func (v *View) closeStateQuiet(warnPendingSeal bool) error {
 	var errs []error
 	if v.auditLog != nil {
 		if err := v.auditLog.Close(); err != nil {
@@ -90,7 +95,19 @@ func (v *View) closeState() error {
 		}
 		v.auditLog = nil
 	}
-	v.vstate = nil
+
+	if v.vstate != nil {
+		// A pending seal means unsealed changes sit on disk; nudge the user to
+		// seal before committing. Suppressed mid-merge, where the seal is
+		// intentionally deferred to the finalize pre-commit.
+		if srs := v.vstate.SealRequiredSeqID; warnPendingSeal && srs > 0 && !v.opts.InMerge {
+			slog.Warn(
+				"a seal is pending - please run `sesam seal` before committing!",
+				slog.Uint64("seq_id", srs),
+			)
+		}
+		v.vstate = nil
+	}
 
 	return errors.Join(errs...)
 }
@@ -196,10 +213,9 @@ func (v *View) ListSecrets(paths []string) ([]SecretInfo, error) {
 	return out, nil
 }
 
-// Reveal reveals all secrets to the worktree.
-// If `all` is false we will check the hmac of each file
-// before starting to decrypt as an optimization.
-func (v *View) Reveal(all bool) error {
+// RevealAll writes out every secret the user can read, whatever the plaintext
+// holds. The selective variant is RevealPaths fed by SyncStates.
+func (v *View) RevealAll() error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -207,14 +223,44 @@ func (v *View) Reveal(all bool) error {
 		return ErrClosed
 	}
 
-	if err := v.secret.Reveal(all); err != nil {
+	if err := v.secret.RevealAll(); err != nil {
+		return fmt.Errorf("failed to reveal secrets: %w", err)
+	}
+
+	return nil
+}
+
+// RevealPaths writes out the named secrets from their objects, whatever their
+// plaintext holds. Callers decide; SyncStates tells them what is safe.
+func (v *View) RevealPaths(paths []string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return ErrClosed
+	}
+
+	if err := v.secret.RevealPaths(paths); err != nil {
 		return fmt.Errorf("failed to reveal secrets: %w", err)
 	}
 	return nil
 }
 
-// Clean removes stale plaintext from the worktree. See CleanOpts for modes.
-func (v *View) Clean(ctx context.Context, opts CleanOpts) error {
+// VerifiedState is the state the audit log replayed to. Callers must treat it as
+// read-only; it is the same value the view keeps working with.
+func (v *View) VerifiedState() (*core.VerifiedState, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return nil, ErrClosed
+	}
+
+	return v.vstate, nil
+}
+
+// ClearTmp empties the repo's scratch space.
+func (v *View) ClearTmp() error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -222,20 +268,61 @@ func (v *View) Clean(ctx context.Context, opts CleanOpts) error {
 		return ErrClosed
 	}
 
-	if opts.Aggressive {
-		return CleanAggressive(ctx, v.sesamDir, v.identityPaths, opts)
+	return ClearTmp(v.root)
+}
+
+// Clean removes revealed plaintext. Unless told to, it keeps what was edited
+// since it was last sealed or never sealed - the only copy of that content -
+// and names it in the result. The aggressive mode walks the whole worktree
+// without that check; opts.CheckFunc is the caller's only say there.
+func (v *View) Clean(ctx context.Context, opts CleanOpts) (*CleanResult, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return nil, ErrClosed
 	}
 
-	if err := deleteRevealedSecrets(v.root, v.secret.State.Secrets, opts.CheckFunc); err != nil {
-		return fmt.Errorf("failed to delete revealed secrets: %w", err)
+	if opts.Aggressive {
+		return &CleanResult{}, CleanAggressive(ctx, v.sesamDir, v.identityPaths, opts)
+	}
+
+	res := &CleanResult{}
+	check := opts.CheckFunc
+	if !opts.CleanEditedOrUnsealed {
+		states, err := v.syncStates(opts.Sync)
+		if err != nil {
+			return nil, err
+		}
+
+		res.Kept = states.Paths(SecretStateNotInSync, SecretStateDiverged, SecretStateNoSealedPath)
+		keep := make(map[string]bool, len(res.Kept))
+		for _, p := range res.Kept {
+			keep[p] = true
+		}
+
+		check = func(path string) (bool, error) {
+			if keep[path] {
+				return false, nil
+			}
+			if opts.CheckFunc != nil {
+				return opts.CheckFunc(path)
+			}
+
+			return true, nil
+		}
+	}
+
+	if err := deleteRevealedSecrets(v.root, v.secret.State.Secrets, check); err != nil {
+		return nil, fmt.Errorf("failed to delete revealed secrets: %w", err)
 	}
 
 	_, err := core.PruneEmptyDirs(v.root, ".", map[string]bool{
 		sesamSuffix: true,
 		gitSuffix:   true,
-	}, opts.CheckFunc)
+	}, check)
 
-	return err
+	return res, err
 }
 
 // ShowUser writes a JSON description of the named user to out. The bool is true
@@ -322,6 +409,52 @@ func (v *View) Log(fn func(e *core.AuditEntrySigned) error) error {
 	return nil
 }
 
+// ConflictedSecrets returns the secrets a merge left unresolved - text (in-file
+// conflict markers) and binary (.ours/.theirs side files) alike, each tagged via
+// ConflictedSecret.Binary. git cannot catch either (revealed files are gitignored,
+// the object is ciphertext), so the finalize must stop until they are resolved.
+func (v *View) ConflictedSecrets() ([]core.ConflictedSecret, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return nil, ErrClosed
+	}
+
+	return core.ConflictedSecrets(v.root, v.vstate.Secrets)
+}
+
+// noGitIntegrationWarningFile is the opt-out sentinel: if present under the
+// sesam dir, the "git integration not installed" nudge is suppressed.
+const noGitIntegrationWarningFile = ".sesam/no-git-integration-warning"
+
+// GitIntegrationInstalled reports whether `sesam init` has wired this checkout's
+// git integration at least once - i.e. any sesam-managed git-config entry is
+// present. A fresh clone that never ran init has none; that is the case the
+// load-time nudge targets (the integration lives in .git/config, which is not
+// cloned).
+func (v *View) GitIntegrationInstalled() (bool, error) {
+	checks, err := CheckGitConfig(v.sesamDir)
+	if err != nil {
+		return false, err
+	}
+
+	for _, c := range checks {
+		if c.Actual != "" {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// GitIntegrationNudgeSuppressed reports whether the user opted out of the
+// missing-integration nudge via the noGitIntegrationWarningFile sentinel.
+func (v *View) GitIntegrationNudgeSuppressed() bool {
+	_, err := v.root.Stat(noGitIntegrationWarningFile)
+	return err == nil
+}
+
 // GitAddDotSesam is equivalent to `git add .sesam`
 func (v *View) GitAddDotSesam() error {
 	v.mu.Lock()
@@ -366,6 +499,27 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 		secretMap[v.vstate.Secrets[idx].RevealedPath] = &v.vstate.Secrets[idx]
 	}
 
+	// Unresolved merge conflicts (text markers or binary .ours/.theirs) - git can't
+	// see them, so flag the parent secret here (shown even without --all). The
+	// binary set also hides the side files from the unmanaged listing below.
+	conflictedSecrets, err := core.ConflictedSecrets(v.root, v.vstate.Secrets)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan for merge conflicts: %w", err)
+	}
+	conflicted := make(map[string]bool, len(conflictedSecrets))
+	binaryConflicts := make(map[string]bool)
+	for _, c := range conflictedSecrets {
+		conflicted[c.Path] = true
+		if c.Binary {
+			binaryConflicts[c.Path] = true
+		}
+	}
+
+	states, err := v.syncStates(opts.Sync)
+	if err != nil {
+		return nil, err
+	}
+
 	if !opts.IgnoreUnmanaged {
 		allPaths, err := v.cleanablePaths()
 		if err != nil {
@@ -373,9 +527,19 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 		}
 
 		for _, path := range allPaths {
-			if _, ok := secretMap[path]; !ok {
-				secretMap[path] = nil
+			if _, ok := secretMap[path]; ok {
+				continue
 			}
+			// Hide the .ours/.theirs of a binary conflict; they belong to their
+			// parent secret, which is reported as conflicted below.
+			base, ok := strings.CutSuffix(path, ".ours")
+			if !ok {
+				base, ok = strings.CutSuffix(path, ".theirs")
+			}
+			if ok && binaryConflicts[base] {
+				continue
+			}
+			secretMap[path] = nil
 		}
 	}
 
@@ -388,45 +552,21 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 			continue
 		}
 
-		add := func(state SecretState) {
-			sff := StatusForFile{
-				RevealedPath: revealedPath,
-				State:        state,
-				AccessGroups: slices.Clone(secret.AccessGroups),
-				AccessUsers:  v.vstate.UserForGroups(secret.AccessGroups),
-			}
-
-			sort.Strings(sff.AccessGroups)
-			sort.Strings(sff.AccessUsers)
-			status.Files = append(status.Files, sff)
+		state := states[revealedPath]
+		if conflicted[revealedPath] && state != SecretStateUserHasNoAccess {
+			state = SecretStateConflicted
 		}
 
-		if !v.vstate.UserHasAccess(v.whoami, secret.AccessGroups) {
-			add(SecretStateUserHasNoAccess)
-			continue
+		sff := StatusForFile{
+			RevealedPath: revealedPath,
+			State:        state,
+			AccessGroups: slices.Clone(secret.AccessGroups),
+			AccessUsers:  v.vstate.UserForGroups(secret.AccessGroups),
 		}
 
-		if _, err := v.root.Stat(revealedPath); err != nil {
-			add(SecretStateNoRevealedPath)
-			continue
-		}
-
-		sealedPath := v.secret.SealedPath(revealedPath)
-		if _, err := v.root.Stat(sealedPath); err != nil {
-			add(SecretStateNoSealedPath)
-			continue
-		}
-
-		needsSeal, _, err := v.secret.NeedsSeal(revealedPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compare %s and %s: %w", revealedPath, sealedPath, err)
-		}
-
-		if needsSeal {
-			add(SecretStateNotInSync)
-		} else {
-			add(SecretStateInSync)
-		}
+		sort.Strings(sff.AccessGroups)
+		sort.Strings(sff.AccessUsers)
+		status.Files = append(status.Files, sff)
 	}
 
 	sort.Slice(status.Files, func(i, j int) bool {

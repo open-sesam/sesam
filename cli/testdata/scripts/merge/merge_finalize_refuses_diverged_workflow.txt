@@ -1,0 +1,71 @@
+# A merge stops before the commit so the result can be reviewed. During that
+# review the plaintext of a secret only THEY changed is still ours - the finalize
+# refreshes it. If the user edits that file in the meantime, two versions exist
+# and neither can be picked for them: the finalize refuses and names both ways out.
+
+sesam-repo admin base.txt theirs.txt edited.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+
+# THEIRS changes the secret; OURS only touches the audit log.
+exec git checkout -b topic
+cp $TMPDIR/theirs.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change s'
+
+exec git checkout master
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'ours: add bob'
+
+! exec git merge topic
+stderr 'merge changed the vault - run `git commit` to finalize'
+
+# The object is theirs, the plaintext still ours: stale, and status says what
+# the finalize will do about it.
+exec cat s
+stdout 'BASE'
+exec sesam status
+stdout 'S s'
+stdout 'take the incoming version when you finish'
+
+# The user edits it while reviewing.
+cp $TMPDIR/edited.txt s
+exec sesam status
+stdout '! s'
+stdout '1 diverged'
+stdout 'sesam reveal --all. takes the incoming version, .sesam seal --all. keeps yours'
+
+! exec git commit -m 'merge topic'
+stderr '1 secret changed both here and in this merge'
+stderr '  s'
+stderr 'sesam reveal --all. takes the incoming version'
+stderr 'sesam seal --all. keeps yours'
+stderr 'git merge --abort. starts over'
+
+# Nothing was decided for them: the plaintext is untouched, the object theirs.
+exec cat s
+stdout 'MY-EDIT'
+exec sesam show .sesam/objects/s.sesam
+stdout 'THEIRS'
+
+# Keeping the edit is one explicit command away.
+exec sesam seal --all
+exec git commit -m 'merge topic'
+exec sesam show .sesam/objects/s.sesam
+stdout 'MY-EDIT'
+exec sesam verify
+stderr 'Integrity: ok'
+exec git status --short
+! stdout .
+
+-- base.txt --
+BASE
+-- theirs.txt --
+THEIRS
+-- edited.txt --
+MY-EDIT

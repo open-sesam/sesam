@@ -143,11 +143,21 @@ sesam status --all
 ╰─ services/
    ├─ ✓ gateway.env (admin)
    ╰─ ✓ registry.env (admin)
-  1 out of sync · 3 in sync
+  1 modified · 3 in sync
 
 ```
 
 This will show you files you edited directly without calling `sesam add` on them.
+
+The letter says what happened to a secret since its plaintext and its sealed
+object were last written together. `sesam` works that out from the object
+versions `git` holds, so nothing has to be remembered on your machine:
+
+- `M` modified: you edited the plaintext. `sesam seal` takes it.
+- `S` stale: the object moved on (a pull, checkout or merge) and the plaintext is the old version. `sesam reveal` takes it; `sesam seal` leaves it alone.
+- `!` diverged: both at once, seen during a merge or by the hooks. Pick a side with `sesam reveal --all` or `sesam seal --all`.
+- `R` recipients changed: the content agrees, but who may read it changed. `sesam seal` re-encrypts it.
+- `U` conflicted: a merge left conflict markers in the plaintext.
 
 ## Removing secrets
 

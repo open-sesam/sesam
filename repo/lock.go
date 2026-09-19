@@ -32,6 +32,22 @@ func (r *Repo) acquireLock() error {
 	return nil
 }
 
+// TryAcquireMergeLock grabs the repo lock without waiting or fails immediately.
+func TryAcquireMergeLock(sesamDir string) (*flock.Flock, error) {
+	lockPath := filepath.Join(sesamDir, sesamLockName)
+	fl := flock.New(lockPath)
+
+	locked, err := fl.TryLock()
+	if err != nil {
+		return nil, fmt.Errorf("acquire repository lock %s: %w", lockPath, err)
+	}
+	if !locked {
+		return nil, fmt.Errorf("repository is locked by another sesam process (%s); finish or stop it, then retry the merge", lockPath)
+	}
+
+	return fl, nil
+}
+
 func acquireRepoLock(lockPath string, timeout time.Duration) (*flock.Flock, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

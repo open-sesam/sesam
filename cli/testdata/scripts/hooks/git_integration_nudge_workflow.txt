@@ -1,0 +1,45 @@
+# A checkout whose git integration was never wired up (the typical "cloned and
+# forgot `sesam init`" case) gets a gentle load-time nudge. The integration lives
+# in .git/config, which is not cloned, so a fresh clone has none of it even though
+# the tracked .sesam files are present. The nudge can be silenced per checkout.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# In the initialized repo the integration is present, so no nudge.
+exec sesam status
+! stderr 'git-integration is not installed'
+
+# The opt-out marker is a personal, per-checkout decision: gitignored, and it
+# lives under .sesam/ so it survives both the stage swap and `sesam clean`.
+exec touch .sesam/no-git-integration-warning
+exec git check-ignore .sesam/no-git-integration-warning
+stdout 'no-git-integration-warning'
+
+# A mutating command commits a stage (a whole-.sesam directory swap); the marker
+# is carried across.
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exists .sesam/no-git-integration-warning
+
+# An aggressive clean drops stale plaintext but skips the .sesam/ subtree.
+exec sesam clean --aggressive
+exists .sesam/no-git-integration-warning
+
+# Simulate a fresh clone: tracked .sesam files come along, the git-config
+# integration does not.
+exec git clone . theclone
+
+# A command against the clone nudges towards `sesam init`.
+exec sesam --sesam-dir theclone status
+stderr 'git-integration is not installed'
+stderr 'no-git-integration-warning'
+
+# The sentinel opts out per checkout.
+exec touch theclone/.sesam/no-git-integration-warning
+exec sesam --sesam-dir theclone status
+! stderr 'git-integration is not installed'
