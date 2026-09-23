@@ -1,0 +1,134 @@
+# `sesam config diff` reports what a hand-edited sesam.yml declares on top of
+# (or short of) what the audit log records. It only reports - the audit log is
+# left untouched, which `sesam log` confirms afterwards.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec sesam tell --user bob --recipient age1tdy2pxsfwpxxe0c9cuwty8zpsv6uuhf4zyug5f9lfl982lh3tctqrw2ll7 --group dev
+exec git add -A
+exec git commit -m 'init sesam'
+
+# A config written by sesam itself always agrees with the audit log.
+exec sesam config diff
+stdout 'in sync'
+
+# Hand-edit: declare a new user, a new secret, and widen README.md's access.
+# The admin's key is rewritten too, which shows up as a recipient swap.
+cp declared.yml sesam.yml
+exec sesam config diff
+stdout 'verified/sesam.yml'
+stdout 'declared/sesam.yml'
+stdout '\+  - name: carol'
+stdout '\+      - github:carol'
+stdout '\+  - path: db.env'
+
+exec sesam config diff --json
+stdout '"op": "user.tell"'
+stdout '"user": "carol"'
+
+# Reporting is all it does: the audit log still knows nothing about carol.
+exec sesam log
+! stdout 'carol'
+exec sesam user list
+! stdout 'carol'
+
+# A secret or user dropped from the config shows up as removed lines on the
+# declared side - the audit log still has them, the declaration does not.
+cp dropped.yml sesam.yml
+exec sesam config diff
+stdout '-  - name: bob'
+stdout '-  - path: README.md'
+
+# The comparison happens inside a scratch tree, so it works from anywhere in
+# the repo.
+mkdir sub
+cd sub
+exec sesam config diff
+stdout '-  - name: bob'
+cd ..
+
+# git's own flags still work, since they are passed straight through.
+exec sesam config diff -- --stat
+stdout 'sesam.yml'
+! stdout '  - name: bob'
+
+# The diff is a plan, so a declaration that could never be applied is refused
+# rather than reported: dropping the last admin would leave nobody who could
+# change anything afterwards.
+cp no_admin.yml sesam.yml
+! exec sesam config diff
+stderr 'declares no admin user'
+
+# Same for a declaration the audit log would reject entry by entry.
+cp no_group.yml sesam.yml
+! exec sesam config diff
+stderr 'user "bob" is in no group'
+
+-- declared.yml --
+users:
+  - name: admin
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial
+  - name: bob
+    key:
+      - age1tdy2pxsfwpxxe0c9cuwty8zpsv6uuhf4zyug5f9lfl982lh3tctqrw2ll7
+  - name: carol
+    key:
+      - github:carol
+
+groups:
+  admin:
+    - admin
+  dev:
+    - bob
+    - carol
+
+secrets:
+  - path: README.md
+    access:
+      - dev
+  - path: db.env
+    access:
+      - dev
+
+-- dropped.yml --
+users:
+  - name: admin
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial
+
+groups:
+  admin:
+    - admin
+
+secrets: []
+
+-- no_admin.yml --
+users:
+  - name: admin
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial
+
+groups:
+  dev:
+    - admin
+
+secrets: []
+
+-- no_group.yml --
+users:
+  - name: admin
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial
+  - name: bob
+    key:
+      - age1tdy2pxsfwpxxe0c9cuwty8zpsv6uuhf4zyug5f9lfl982lh3tctqrw2ll7
+
+groups:
+  admin:
+    - admin
+
+secrets: []

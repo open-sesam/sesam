@@ -100,13 +100,15 @@ func (s *VerifiedState) rebuildSecretIndex() {
 	}
 }
 
-// buildIndexes (re)builds both lookup indexes from Users and Secrets. verify
+// BuildIndexes (re)builds both lookup indexes from Users and Secrets. verify
 // calls it after replay, and every later modification keeps the indexes in sync
 // incrementally, so the read accessors (UserExists, SecretExists, ...) never
 // write and are safe to call concurrently on an unchanging state. Code that
-// constructs a VerifiedState by hand must call this before reading it.
+// constructs or modifies a VerifiedState by hand - outside this package there
+// is no other way - must call this before reading it, or every lookup answers
+// "not found".
 // It is not safe against concurrent modification; that would need a mutex.
-func (s *VerifiedState) buildIndexes() {
+func (s *VerifiedState) BuildIndexes() {
 	s.rebuildUserIndex()
 	s.rebuildSecretIndex()
 }
@@ -1046,7 +1048,7 @@ func replay(state *VerifiedState, batched bool, upTo uint64) error {
 	newState := *state
 	newState.Users = cloneVerifiedUsers(state.Users)
 	newState.Secrets = cloneVerifiedSecrets(state.Secrets)
-	newState.buildIndexes()
+	newState.BuildIndexes()
 
 	var previousEntry *AuditEntrySigned
 	var checks []SigCheck
@@ -1194,6 +1196,6 @@ func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 		keyring:           kr,
 		pluginUI:          s.pluginUI,
 	}
-	cloned.buildIndexes()
+	cloned.BuildIndexes()
 	return cloned
 }

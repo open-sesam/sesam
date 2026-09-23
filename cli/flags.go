@@ -365,6 +365,30 @@ var flagsLog = []cli.Flag{
 
 var flagsID = []cli.Flag{flagJSON}
 
+// flagsConfigDiff contains output controls for the config/audit-log diff.
+var flagsConfigDiff = []cli.Flag{flagJSON}
+
+// flagsConfigReset contains output controls for resetting the config.
+var flagsConfigReset = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "dry-run",
+		Usage: "Report what would be reset without writing anything",
+	},
+	flagJSON,
+}
+
+// flagsConfigApply contains output and sealing controls for applying the config.
+var flagsConfigApply = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "force",
+		Aliases: []string{"f"},
+		Usage:   "Also apply changes that arrived already committed (see the docs on modified configs)",
+	},
+	flagJSON,
+	flagNoSeal,
+	flagSeal,
+}
+
 var flagsStatus = []cli.Flag{
 	&cli.BoolFlag{
 		Name:    "diff",

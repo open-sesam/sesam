@@ -18,6 +18,12 @@ func writeGroupsMain(t *testing.T, dir string) string {
   - name: axolotl
     key:
       - keyA
+  - name: root
+    key:
+      - keyR
+  - name: bravo
+    key:
+      - keyB
 groups:
   admin:
     - axolotl
@@ -163,6 +169,9 @@ func TestUserChangeGroups_RemovesEmptiedGroup(t *testing.T) {
   - name: axolotl
     key:
       - keyA
+  - name: root
+    key:
+      - keyR
 groups:
   admin:
     - axolotl
@@ -197,6 +206,9 @@ func TestUserChangeGroups_RemovesEmptiedGroupComment(t *testing.T) {
   - name: axolotl
     key:
       - keyA
+  - name: root
+    key:
+      - keyR
 groups:
   admin:
     - axolotl
@@ -277,6 +289,9 @@ func TestUserChangeGroups_RemovesCommentedMember(t *testing.T) {
   - name: axolotl
     key:
       - keyA
+  - name: bravo
+    key:
+      - keyB
 groups:
   admin:
     - axolotl

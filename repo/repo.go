@@ -541,6 +541,10 @@ func (r *Repo) SesamDir() string {
 
 // Close releases the on-disk lock and closes the audit log. Safe to call
 // multiple times. The first non-nil error is returned.
+//
+// closeState is what reports a still pending seal, and only here: a stage that
+// was rolled back, or the state a commit superseded, never reached the user's
+// repository and closes quietly.
 func (r *Repo) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

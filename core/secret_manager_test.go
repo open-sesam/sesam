@@ -68,11 +68,41 @@ func TestSecretChangeGroupsKeepsAdminImplicit(t *testing.T) {
 func TestSecretChangeGroupsNonExistent(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
-	// No plaintext on disk and not tracked in state: path validation rejects
-	// it before any audit entry is written.
+	// Not tracked in state: the verification layer refuses the entry, so
+	// nothing is recorded.
 	err := mgr.SecretChangeGroups("secrets/nope", []string{"dev"})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid secret path")
+	require.Contains(t, err.Error(), "non-existing secret")
+	require.Len(t, mgr.State.Secrets, 1)
+}
+
+// An empty access list is a meaningful value - "admin only" - and must be
+// recorded rather than treated as "nothing was asked for" the way the
+// SecretAdd upsert does. Without this there is no way back from a widened
+// access list.
+func TestSecretChangeGroupsToAdminOnly(t *testing.T) {
+	mgr := sealedSecretManager(t)
+	require.NoError(t, mgr.SecretChangeGroups("secrets/test", []string{"dev"}))
+
+	require.NoError(t, mgr.SecretChangeGroups("secrets/test", nil))
+
+	vs, exists := mgr.State.SecretExists("secrets/test")
+	require.True(t, exists)
+	require.Equal(t, []string{"admin"}, vs.AccessGroups)
+	require.Empty(t, vs.DeclaredGroups())
+}
+
+// Who may read a secret is independent of whether this machine has it
+// revealed, so an access change must not require the plaintext.
+func TestSecretChangeGroupsWithoutPlaintext(t *testing.T) {
+	mgr := sealedSecretManager(t)
+	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/test")))
+
+	require.NoError(t, mgr.SecretChangeGroups("secrets/test", []string{"dev"}))
+
+	vs, exists := mgr.State.SecretExists("secrets/test")
+	require.True(t, exists)
+	require.ElementsMatch(t, []string{"dev", "admin"}, vs.AccessGroups)
 }
 
 // A user without access to a secret must not be able to change its access

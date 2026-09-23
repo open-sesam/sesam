@@ -284,3 +284,98 @@ func TestIdentitiesRecipientStringsMatchesRecipient(t *testing.T) {
 	strs := ids.RecipientStrings()
 	require.Equal(t, []string{id.Recipient().String()}, strs)
 }
+
+// ageKeygenFile is what `age-keygen -o key.age` writes: two header comments
+// and the private key.
+func ageKeygenFile(t *testing.T) (content string, recipient, private string) {
+	t.Helper()
+
+	id, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+
+	return fmt.Sprintf(
+		"# created: 2026-09-13T14:00:52+02:00\n# public key: %s\n%s\n",
+		id.Recipient(), id,
+	), id.Recipient().String(), id.String()
+}
+
+// fileRoot writes content to name in a fresh root and returns the root.
+func fileRoot(t *testing.T, name, content string) *os.Root {
+	t.Helper()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
+
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
+
+	return root
+}
+
+// TestResolveRecipientFileSkipsComments covers key files that carry headers -
+// age-keygen writes them, and so do most hand-kept key files.
+func TestResolveRecipientFileSkipsComments(t *testing.T) {
+	const content = "# created: 2026-09-13T14:00:52+02:00\n" +
+		"# public key: age1testkey\n" +
+		"\n" +
+		"age1testkey\n"
+
+	root := fileRoot(t, "key.pub", content)
+
+	got, _, err := ResolveRecipient(t.Context(), root, "file://key.pub")
+	require.NoError(t, err)
+	require.Equal(t, []string{"age1testkey"}, got)
+}
+
+// TestParseAndResolveRecipientsIdentityFile covers an easy mistake: pointing a
+// recipient at the age-keygen identity file instead of at the public key. The
+// error has to say so - and must never echo the private key, which would leak
+// it into the terminal, the shell history and CI logs.
+func TestParseAndResolveRecipientsIdentityFile(t *testing.T) {
+	content, _, private := ageKeygenFile(t)
+	root := fileRoot(t, "key.age", content)
+
+	_, err := ParseAndResolveRecipients(
+		t.Context(), root, []string{"file://key.age"}, NewNonInteractivePluginUI(),
+	)
+
+	require.ErrorContains(t, err, "private key")
+	require.ErrorContains(t, err, "file://key.age")
+	require.NotContains(t, err.Error(), private, "the private key must not appear in the error")
+}
+
+// TestParseAndResolveRecipientsWithoutKeys covers a file (or forge account)
+// that holds no usable key: without a check the caller would carry on with an
+// empty recipient list and fail much later with something unrelated.
+func TestParseAndResolveRecipientsWithoutKeys(t *testing.T) {
+	root := fileRoot(t, "key.pub", "# public key: age1testkey\n")
+
+	_, err := ParseAndResolveRecipients(
+		t.Context(), root, []string{"file://key.pub"}, NewNonInteractivePluginUI(),
+	)
+	require.ErrorContains(t, err, "no public key")
+}
+
+// TestParseRecipientPrivateKey checks that every private-key form is named as
+// such instead of being reported as an unknown recipient type.
+func TestParseRecipientPrivateKey(t *testing.T) {
+	_, _, private := ageKeygenFile(t)
+
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{name: "age x25519", key: private},
+		{name: "age plugin", key: "AGE-PLUGIN-YUBIKEY-1ABC"},
+		{name: "ssh", key: "-----BEGIN OPENSSH PRIVATE KEY-----"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseRecipient(tc.key, NewNonInteractivePluginUI())
+			require.ErrorContains(t, err, "private key")
+			require.NotContains(t, err.Error(), tc.key, "the key must not appear in the error")
+		})
+	}
+}

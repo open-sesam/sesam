@@ -24,7 +24,7 @@ func testSecretManager(t *testing.T) *SecretManager {
 			Groups: []string{"admin"},
 		}},
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	return &SecretManager{
 		SesamDir:   sesamDir,
@@ -388,7 +388,7 @@ func TestRevealRejectsUnauthorizedSealer(t *testing.T) {
 			{RevealedPath: "secrets/admin-only", AccessGroups: []string{"admin"}},
 		},
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	adminMgr := &SecretManager{
 		SesamDir:   sesamDir,
