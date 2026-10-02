@@ -461,24 +461,19 @@ func Main(args []string) error {
 				Usage:    "Show the audit log of secret changes",
 			},
 			{
-				Name:   "docgen",
-				Hidden: true,
-				Usage:  "Generate reference documentation",
-				Commands: []*cli.Command{
-					{
-						Name:   "cli",
-						Action: commands.HandleDocGenCLI,
-						Usage:  "Write a markdown CLI reference to stdout",
-					},
-					{
-						Name:   "config",
-						Action: commands.HandleDocGenConfig,
-						Usage:  "Write a markdown config reference to stdout",
-					},
-				},
+				Name:      "help",
+				Aliases:   []string{"h"},
+				Category:  catMeta,
+				HideHelp:  true,
+				Flags:     flagsHelp,
+				Action:    commands.HandleHelp,
+				Usage:     "Show help for a command, or the built-in manual",
+				ArgsUsage: "[command]",
 			},
 		},
 	}
+
+	app.Commands = append(app.Commands, docgenCommands()...)
 
 	var activeProfile *profileState
 

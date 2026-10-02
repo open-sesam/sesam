@@ -1,8 +1,10 @@
 # What is Sesam?
 
+<!-- man:skip-start -->
 <div style="text-align: center;">
   <img src="sesam_bg.png" width="400" />
 </div>
+<!-- man:skip-end -->
 
 **`sesam` is a tool for managing secrets in git.**
 
@@ -58,9 +60,11 @@ built another tool](./alternatives.md).
 - Somewhat fast encryption and decryption.¹
 - Almost zero dependencies.
 
+<!-- man:skip-start -->
 <small>
 ¹ <i>somewhat fast</i> is the new <i>🚀 blazingly fast 🚀</i> - benchmarks will follow later.
 </small>
+<!-- man:skip-end -->
 
 ### Git Integration
 
@@ -77,12 +81,16 @@ built another tool](./alternatives.md).
 
 ## Who is it for?
 
+<!-- man:skip -->
+
 - Open source developers wanting to store secrets in their repos and give only their co-developers access.
 - Small to mid-sized teams wanting to have different access levels in their secrets.
 - Individuals wanting to store secrets in their git repos, even if it's just a single user.
 - Machine users that need a scriptable tool.
 
 ## Learning
+
+<!-- man:skip -->
 
 How to use this manual:
 
@@ -92,6 +100,8 @@ How to use this manual:
 - Go to [Reference](./config_ref.md) if you need to look up things later on.
 
 ## The name
+
+<!-- man:skip -->
 
 It is a reference to [Ali Baba and the Forty Thieves](https://en.wikipedia.org/wiki/Ali_Baba_and_the_Forty_Thieves)
 out of the story collection [One Thousand and One Nights](https://en.wikipedia.org/wiki/One_Thousand_and_One_Nights).

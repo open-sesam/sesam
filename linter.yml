@@ -1,6 +1,10 @@
 version: "2"
 
 run:
+  # The two files wiring the doc generator into the CLI live behind this tag;
+  # without it golangci skips them entirely. Package docgen itself is untagged.
+  build-tags:
+    - docgen
   concurrency: 4
   timeout: 5m
   issues-exit-code: 1
