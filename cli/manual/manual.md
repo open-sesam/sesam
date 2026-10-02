@@ -32,7 +32,7 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 
 **`sesam` is a tool for managing secrets in git.**
 
-That's more or less all there is. Let's dismantle that sentence a bit:
+Let's discuss the sentence above some more:
 
 - `secrets`: Are just regular files that contain something precious to you. They are on your filesystem *revealed* (decrypted) and *sealed* (encrypted).
 - `managing`: Making sure *sealed* and *revealed* are in sync and allow the user to define who has access to what secret.
