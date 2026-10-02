@@ -16,6 +16,20 @@ You should then copy the `sesam` binary manually to a directory listed in your P
 This is required so that `git` can find `sesam` - it will call `sesam` as subprocess.
 ```
 
+### Manual page
+
+The archives also ship a `sesam.1` man page. Copy it over if you want `man sesam` to work:
+
+```bash
+sudo install -m644 sesam.1 /usr/local/share/man/man1/
+```
+
+You do not have to. The binary carries the same manual and opens it for you:
+
+```bash
+sesam help --man
+```
+
 ### Signatures
 
 We sign our releases with an [ed25519 key](https://en.wikipedia.org/wiki/EdDSA),

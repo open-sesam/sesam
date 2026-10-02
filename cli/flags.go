@@ -71,6 +71,14 @@ func recipientsFlag(required bool) cli.Flag {
 	}
 }
 
+// flagsHelp control what `sesam help` shows.
+var flagsHelp = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "man",
+		Usage: "Show the built-in manual instead of the command overview",
+	},
+}
+
 // flagsGeneral are shared by most top-level commands.
 //
 // They describe the operator identity and repository/config roots.

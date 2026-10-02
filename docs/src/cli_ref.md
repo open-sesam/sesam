@@ -29,23 +29,23 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 
 # GLOBAL OPTIONS
 
-**--askpass**="": Askpass helper for encrypted identities
+**--askpass**="": Askpass helper for encrypted identities \[$SESAM_ASKPASS, $GIT_ASKPASS, $SSH_ASKPASS\]
 
-**--cpuprofile**="": Write a CPU profile of this invocation to `FILE` (pprof format)
+**--cpuprofile**="": Write a CPU profile of this invocation to `FILE` (pprof format) \[$SESAM_CPUPROFILE\]
 
 **--help, -h**: show help
 
-**--identity, -i**="": Path to the age identity (can be given several times)
+**--identity, -i**="": Path to the age identity (can be given several times) \[$SESAM_ID, $SESAM_IDENTITY\]
 
-**--lock-timeout**="": Repository lock wait timeout (e.g. 5s, 30s, 2m) (default: 5s)
+**--lock-timeout**="": Repository lock wait timeout (e.g. 5s, 30s, 2m) \[$SESAM_LOCK_TIMEOUT\] (default: 5s)
 
-**--memprofile**="": Write a heap profile at exit to `FILE` (pprof format)
+**--memprofile**="": Write a heap profile at exit to `FILE` (pprof format) \[$SESAM_MEMPROFILE\]
 
-**--no-color**: Disable color always
+**--no-color**: Disable color always \[$NO_COLOR, $SESAM_NO_COLOR\]
 
 **--quiet, -q**: Print less log output
 
-**--sesam-dir, -r, --repo**="": Directory where .sesam lives (default: ".")
+**--sesam-dir, -r, --repo**="": Directory where .sesam lives \[$SESAM_DIR\] (default: ".")
 
 **--verbose, -v**: Print more log output
 
@@ -376,7 +376,7 @@ Apply config differences to audit log and metadata
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--seal-all, --all**: When we seal, seal also files that did not change
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 ### diff
 
@@ -420,7 +420,7 @@ alias for `sesam config apply`
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--seal-all, --all**: When we seal, seal also files that did not change
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 ## id
 
@@ -451,4 +451,10 @@ Show the audit log of secret changes
 **--help, -h**: show help
 
 **--json**: Print output as JSON
+
+## help, h
+
+Show help for a command, or the built-in manual
+
+**--man**: Show the built-in manual instead of the command overview
 

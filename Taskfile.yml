@@ -18,7 +18,8 @@ tasks:
       - Taskfile.yml
       # go:embed'ed assets — they change the binary without any .go file changing.
       - config/sesam_schema.json
-      - cli/commands/docgen_cfg_template.md
+      - cli/manual/sesam.1
+      - cli/manual/manual.md
       - repo/assets/*.default
     generates:
       - ./sesam
@@ -51,17 +52,17 @@ tasks:
   test:
     desc: Run go tests
     cmds:
-      - gotestsum --format testname -- ./...
+      - gotestsum --format testname -- -tags docgen ./...
 
   test-race:
     desc: Run go tests
     cmds:
-      - gotestsum --format testname -- -race  ./...
+      - gotestsum --format testname -- -tags docgen -race  ./...
 
   coverage:
     desc: Run go tests with coverage report
     cmds:
-      - go test -coverpkg=./... -coverprofile=coverage.out ./...
+      - go test -tags docgen -coverpkg=./... -coverprofile=coverage.out ./...
       - go tool cover -func=coverage.out
       - go tool cover -html=coverage.out
 
@@ -77,31 +78,68 @@ tasks:
       - gofumpt -w -extra .
 
   docgen:
-    desc: Generate all reference docs (CLI + config)
-    deps: [docgen:cli, docgen:cfg]
+    desc: Generate all reference docs (CLI + config + manual)
+    # Serialized on purpose: all three exec the same freshly built binary, and
+    # running them in parallel races the build into "text file busy".
+    cmds:
+      - task: docgen:cli
+      - task: docgen:cfg
+      - task: docgen:man
+
+  docgen:build:
+    desc: Build the doc generator, which carries cli-docs and go-md2man
+    cmds:
+      - go build -tags docgen -o sesam-docgen .
+    sources:
+      - ./*.go
+      - ./**/*.go
+      - config/sesam_schema.json
+      - cli/docgen/config_template.md
+      - docs/src/*.md
+    generates:
+      - ./sesam-docgen
+    method: checksum
 
   docgen:cli:
     desc: Generate CLI reference markdown from live command tree
-    deps: [build]
+    deps: [docgen:build]
     cmds:
-      - ./sesam docgen cli > docs/src/cli_ref.md
+      - ./sesam-docgen docgen cli > docs/src/cli_ref.md
     sources:
-      - ./sesam
-      - cli/**/*.go
+      - ./sesam-docgen
     generates:
       - docs/src/cli_ref.md
 
   docgen:cfg:
     desc: Generate config reference markdown from sesam_schema.json
-    deps: [build]
+    deps: [docgen:build]
     cmds:
-      - ./sesam docgen config > docs/src/config_ref.md
+      - ./sesam-docgen docgen config > docs/src/config_ref.md
     sources:
-      - ./sesam
+      - ./sesam-docgen
       - config/sesam_schema.json
-      - cli/commands/docgen_cfg_template.md
+      - cli/docgen/config_template.md
     generates:
       - docs/src/config_ref.md
+
+  docgen:man:
+    desc: Generate the manual the binary embeds, as roff and as markdown
+    deps: [docgen:build]
+    cmds:
+      - ./sesam-docgen docgen man --format=roff > cli/manual/sesam.1
+      - ./sesam-docgen docgen man --format=markdown > cli/manual/manual.md
+    sources:
+      - ./sesam-docgen
+      - docs/src/*.md
+    generates:
+      - cli/manual/sesam.1
+      - cli/manual/manual.md
+
+  docgen:check:
+    desc: Fail if the committed generated docs are stale (for CI)
+    deps: [docgen]
+    cmds:
+      - git diff --exit-code -- cli/manual/ docs/src/cli_ref.md docs/src/config_ref.md
 
   vuln:
     desc: Scan dependencies and stdlib usage for known vulnerabilities (govulncheck)

@@ -1,0 +1,47 @@
+# `sesam add --nested` gives a subdirectory its own sesam.yml and includes it
+# from the main file. git never descends into an ignored directory, so the
+# generated .gitignore has to unignore directories (`!*/`) for its `!sesam.yml`
+# to reach one: without that, `git add -A` skipped every sub-config in silence
+# and the file - comments, anchors and all - lived in the worktree only.
+
+sesam-repo
+
+mkdir svc
+cp token svc/token.txt
+exec sesam add --nested svc/token.txt
+exists svc/sesam.yml
+
+# Depth is not the point: the negation is not anchored, so it matches anywhere.
+mkdir deep/nested
+cp token deep/nested/key.txt
+exec sesam add --nested deep/nested/key.txt
+exists deep/nested/sesam.yml
+
+# The sub-configs are committable...
+! exec git check-ignore svc/sesam.yml
+! exec git check-ignore deep/nested/sesam.yml
+
+# ...while the revealed plaintext next to them, and sesam's own scratch dir,
+# stay ignored - that part is what the blanket `*` is there for.
+exec git check-ignore svc/token.txt
+exec git check-ignore deep/nested/key.txt
+exec git check-ignore .sesam/tmp/svc/token.txt.ours
+
+exec git add -A
+exec git commit -m 'add nested secrets'
+
+exec git ls-files
+stdout '^svc/sesam\.yml$'
+stdout '^deep/nested/sesam\.yml$'
+! stdout '^svc/token\.txt$'
+! stdout '^deep/nested/key\.txt$'
+
+# The declaration matches the audit log, so a reset has nothing to discard and
+# leaves both sub-configs where they are.
+exec sesam config reset
+stdout 'nothing to reset'
+exists svc/sesam.yml
+exists deep/nested/sesam.yml
+
+-- token --
+s3cr3t

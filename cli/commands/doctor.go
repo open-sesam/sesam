@@ -505,22 +505,19 @@ func gitCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 	}
 }
 
-// see: https://github.blog/open-source/git/highlights-from-git-2-54/#h-config-based-hooks
-var minGitVersion = semver.MustParse("2.54.0")
-
 func gitVersionCheck(ctx context.Context) DoctorCheck {
 	return &genericCheck{name: "git-version", run: func() DoctorDiagnosis {
 		v, err := repo.ReadGitVersion(ctx)
 		if err != nil {
 			return docFailed(fmt.Sprintf("could not read git version: %v", err))
 		}
-		if v.LessThan(minGitVersion) {
+		if v.LessThan(repo.MinGitVersion) {
 			return docWarn(
-				fmt.Sprintf("git %s (< %s)", v, minGitVersion),
-				fmt.Sprintf("upgrade git to %s+ for git-config-based hook support", minGitVersion),
+				fmt.Sprintf("git %s (< %s)", v, repo.MinGitVersion),
+				fmt.Sprintf("upgrade git to %s+ for git-config-based hook support", repo.MinGitVersion),
 			)
 		}
-		return docHealthy(fmt.Sprintf("%s (>= %s)", v, minGitVersion))
+		return docHealthy(fmt.Sprintf("%s (>= %s)", v, repo.MinGitVersion))
 	}}
 }
 
@@ -640,7 +637,7 @@ func gitHooksCheck(env doctorEnv) DoctorCheck {
 					)
 				}
 			}
-			return docInfo(fmt.Sprintf("requires git >= %s", minGitVersion))
+			return docInfo(fmt.Sprintf("requires git >= %s", repo.MinGitVersion))
 		}}
 	}
 
@@ -656,7 +653,7 @@ func gitHooksCheck(env doctorEnv) DoctorCheck {
 			}
 			if !supported() {
 				return docWarn(
-					fmt.Sprintf("config-based hooks unavailable: git >= %s required", minGitVersion),
+					fmt.Sprintf("config-based hooks unavailable: git >= %s required", repo.MinGitVersion),
 					"upgrade git to auto-seal on commit and auto-reveal on checkout",
 				)
 			}

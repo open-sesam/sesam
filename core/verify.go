@@ -50,9 +50,22 @@ type VerifiedState struct {
 	userIdx   map[string]int
 	secretIdx map[string]int
 
+	// initCommit is the commit that introduced the trust anchor
+	// (.sesam/audit/init), found by Verify's init-file check. Kept so
+	// VerifyHistory does not have to walk all of history a second time for it.
+	// Empty when that check did not run (VerifyChain) or nothing is committed.
+	initCommit string
+
 	auditLog *AuditLog
 	keyring  Keyring
 	pluginUI *PluginUI
+}
+
+// InitCommit returns the commit that introduced .sesam/audit/init, as verified
+// during Verify. Empty when the state was not built by Verify (VerifyChain) or
+// nothing was committed yet; callers then have to determine it themselves.
+func (s *VerifiedState) InitCommit() string {
+	return s.initCommit
 }
 
 func (vu *VerifiedUser) IsAdmin() bool {
@@ -453,6 +466,10 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s should be in at least one group", tell.User)
 	}
 
+	if err := ValidGroupNames(tell.Groups); err != nil {
+		return fmt.Errorf("user %s: %w", tell.User, err)
+	}
+
 	recps, err := resolveRecipients(tell.PubKeys, state.pluginUI)
 	if err != nil {
 		return err
@@ -556,6 +573,10 @@ func verifyUserChangeGroups(log *AuditLog, state *VerifiedState, entry *AuditEnt
 
 	if len(ucg.NewGroups) == 0 {
 		return fmt.Errorf("changing to zero groups is not allowed")
+	}
+
+	if err := ValidGroupNames(ucg.NewGroups); err != nil {
+		return fmt.Errorf("user %s: %w", ucg.User, err)
 	}
 
 	user, err := state.requireUser(ucg.User, "change groups", entry)
@@ -712,6 +733,10 @@ func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigne
 		return err
 	}
 
+	if err := ValidGroupNames(scd.AccessGroups); err != nil {
+		return fmt.Errorf("secret %s: %w", scd.RevealedPath, err)
+	}
+
 	scd.AccessGroups = normalizeAccessGroups(scd.AccessGroups)
 
 	_, exists := state.SecretExists(scd.RevealedPath)
@@ -747,6 +772,10 @@ func verifySecretChangeAccess(log *AuditLog, state *VerifiedState, entry *AuditE
 	existingSecret, err := state.requireSecretAccess(sca.RevealedPath, "change access of", entry)
 	if err != nil {
 		return err
+	}
+
+	if err := ValidGroupNames(sca.AccessGroups); err != nil {
+		return fmt.Errorf("secret %s: %w", sca.RevealedPath, err)
 	}
 
 	existingSecret.AccessGroups = normalizeAccessGroups(sca.AccessGroups)
@@ -886,15 +915,17 @@ func (s *VerifiedState) AdvanceTo(seqID uint64) error {
 // (.sesam/audit/init) and the latest seal's root-hash against the on-disk
 // secret footers. See [VerifyChain] for pluginUI semantics.
 func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, error) {
-	if _, err := verifyInitFileUnchanged(log.SesamDir); err != nil {
+	initCommit, err := verifyInitFileUnchanged(log.SesamDir)
+	if err != nil {
 		return nil, fmt.Errorf("init file check: %w", err)
 	}
 
 	// use an fresh empty state:
 	state := VerifiedState{
-		auditLog: log,
-		keyring:  kr,
-		pluginUI: pluginUI,
+		auditLog:   log,
+		keyring:    kr,
+		pluginUI:   pluginUI,
+		initCommit: initCommit,
 	}
 
 	if err := verify(&state); err != nil {
@@ -1195,6 +1226,7 @@ func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 		auditLog:          log,
 		keyring:           kr,
 		pluginUI:          s.pluginUI,
+		initCommit:        s.initCommit,
 	}
 	cloned.BuildIndexes()
 	return cloned

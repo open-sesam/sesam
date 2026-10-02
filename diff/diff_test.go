@@ -444,6 +444,22 @@ func TestComputeErrors(t *testing.T) {
 			want: "invalid user name",
 		},
 		{
+			name: "invalid group for a user",
+			declared: &config.State{Users: []config.StateUser{
+				declaredAdmin(),
+				{Name: "bob", Groups: []string{"dev ops"}, Keys: []string{"github:bob"}},
+			}},
+			want: `invalid group "dev ops"`,
+		},
+		{
+			name: "invalid group in an access list",
+			declared: &config.State{
+				Users:   []config.StateUser{declaredAdmin()},
+				Secrets: []config.StateSecret{{Path: "db.env", Access: []string{"dev/ops"}}},
+			},
+			want: `invalid group "dev/ops"`,
+		},
+		{
 			name: "forbidden secret path",
 			declared: &config.State{
 				Users:   []config.StateUser{declaredAdmin()},
@@ -461,6 +477,22 @@ func TestComputeErrors(t *testing.T) {
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
+}
+
+// A tracked secret's access list can change, so its group names are checked
+// for every declaration - the "already known, already checked" shortcut only
+// covers the path, which cannot change.
+func TestValidateChecksAccessOfTrackedSecrets(t *testing.T) {
+	vstate := verifiedState(
+		[]core.VerifiedUser{admin(t)},
+		[]core.VerifiedSecret{{RevealedPath: "db.env", AccessGroups: []string{"admin"}}},
+	)
+
+	_, err := Compute(vstate, &config.State{
+		Users:   []config.StateUser{declaredAdmin()},
+		Secrets: []config.StateSecret{{Path: "db.env", Access: []string{"bad group"}}},
+	})
+	require.ErrorContains(t, err, `invalid group "bad group"`)
 }
 
 // TestComputeErrorsReportEveryProblem checks that a broken declaration is
