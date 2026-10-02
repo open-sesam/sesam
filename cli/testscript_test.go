@@ -14,6 +14,7 @@ import (
 	"filippo.io/age/armor"
 	"github.com/rogpeppe/go-internal/testscript"
 	"opensesam.org/sesam/cli/commands"
+	"opensesam.org/sesam/cli/docgen"
 )
 
 const askpassTestPassphrase = "askpass-test-passphrase"
@@ -131,6 +132,14 @@ func TestWorkflows(t *testing.T) {
 		e.Setenv("PLUGIN_KEY", pluginKeyPath)
 		e.Setenv("PLUGIN_PUBKEY", MockPluginRecipient())
 
+		// Scripts run in a temp dir, so the doc generator cannot find the
+		// handbook by its repo-relative default.
+		handbook, err := filepath.Abs(filepath.Join("..", docgen.DefaultHandbook))
+		if err != nil {
+			return err
+		}
+		e.Setenv("HANDBOOK", handbook)
+
 		// SESAM_ID points to admin's key so all commands run as admin by default.
 		e.Setenv("SESAM_ID", filepath.Join(idDir, "ADMIN.age"))
 		return nil
@@ -157,6 +166,12 @@ func TestWorkflows(t *testing.T) {
 					"sesam-repo": sesamRepoCmd,
 					"envsubst":   cmdEnvsubst,
 					"hide-git":   cmdHideGit,
+				},
+				Condition: func(cond string) (bool, error) {
+					if cond == "docgen" {
+						return docgenEnabled, nil
+					}
+					return false, fmt.Errorf("unknown condition %q", cond)
 				},
 			})
 		})
