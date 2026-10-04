@@ -9,6 +9,8 @@ sesam
 
 ```
 [--askpass]=[value]
+[--clipboard-copy-cmd]=[value]
+[--clipboard-paste-cmd]=[value]
 [--cpuprofile]=[value]
 [--help|-h]
 [--identity|-i]=[value]
@@ -20,12 +22,6 @@ sesam
 [--verbose|-v]
 [--verify-mode]=[value]
 [--version]
-```
-
-**Usage**:
-
-```
-sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 ```
 
 # DESCRIPTION
@@ -102,6 +98,10 @@ built another tool.
 
 **--askpass**="": Askpass helper for encrypted identities \[$SESAM_ASKPASS, $GIT_ASKPASS, $SSH_ASKPASS\]
 
+**--clipboard-copy-cmd**="": Command reading the secret on stdin, instead of the system clipboard \[$SESAM_CLIPBOARD_COPY_CMD\]
+
+**--clipboard-paste-cmd**="": Command printing the clipboard, instead of the system clipboard \[$SESAM_CLIPBOARD_PASTE_CMD\]
+
 **--cpuprofile**="": Write a CPU profile of this invocation to `FILE` (pprof format) \[$SESAM_CPUPROFILE\]
 
 **--help, -h**: show help
@@ -157,6 +157,8 @@ Removes git integration and optionally all of the sesam repo
 Verify sesam signatures and encryption state
 
 **--all**: Run all verifications
+
+**--config**: Check sesam.yml does not declare a change that already arrived committed (not part of --all)
 
 **--forge-check**: Verify the forge public keys did not change since adding users
 
@@ -308,7 +310,15 @@ Show overview over repo state (revealed, sealed, unmanaged, ...)
 
 Show objects managed by sesam
 
+**--alsoclip, -C**: Copy to clipboard and print to stdout
+
+**--clip, -c**: Copy to clipboard instead of printing to stdout
+
 **--help, -h**: show help
+
+**--ttl, -t**="": How long to wait before clearing the clipboard (0 disables) (default: 45s)
+
+**--wait, -w**: Wait for the password to be cleared instead of forking to the background
 
 ### ls, list-secrets
 
@@ -456,23 +466,21 @@ Show the diff between config and actual state (extra args are passed to git)
 
 **--json**: Print output as JSON
 
-### config get
+**--validate**: Fail if 'sesam config apply --force' would refuse the config (dry run, needs admin rights)
 
-Get specific config keys
+### config print
 
-**--help, -h**: show help
-
-### config set
-
-Set specific config keys
+Print the whole config as one document, includes resolved (YAML, or JSON with --json)
 
 **--help, -h**: show help
+
+**--json**: Print output as JSON
 
 ### config reset
 
 Derive config from audit log
 
-**--dry-run**: Report what would be reset without writing anything
+**--force, -f**: Rewrite sesam.yml from scratch when it cannot be repaired in place, losing comments and descriptions
 
 **--help, -h**: show help
 
@@ -993,22 +1001,23 @@ sesam apply
 applied 2 changes
 ```
 
-Every step is recorded in the audit log, or none of them is: if one cannot be
-carried out, nothing is written and the reason is printed. `sesam.yml` itself is
-never rewritten by `apply` - your comments and descriptions stay as you wrote
-them. To see what would happen first, run `sesam config diff`.
+Every step is recorded in the audit log.
+If one cannot be carried out, nothing is written and the reason is printed.
+`sesam.yml` itself is never rewritten by `apply`, so your comments and descriptions
+stay. To see what would happen first, run `sesam config diff`.
 
 > **Changes have to come from your working tree**
 >
-> `sesam apply` refuses steps that are already committed.
 >
-> A config that arrived with a `git pull` was not written by you, and applying it
-> because someone asked you to "just run `sesam apply`" is how a pushed
-> `sesam.yml` turns into real access to secrets. Check where the change came from
-> (`git log -p -- sesam.yml`) and pass `--force` once you are happy with it.
+> A config you `git pull`ed should not be applied without manual approval.
+> Read through it and make sure any changes made are fine (`git log -p -- sesam.yml`).
+> If the changes are looking good, use `sesam apply --force`.
 
 Went too far while editing? `sesam config reset` rewrites `sesam.yml` from the
-audit log, throwing your edits away - `--dry-run` shows what it would discard.
+audit log, throwing your edits away.
+It edits the file in place, so your comments and descriptions survive, but a config
+too broken to read can only be replaced from scratch, so reset asks for `--force`
+before doing that.
 
 Changing groups later works the same way.
 
