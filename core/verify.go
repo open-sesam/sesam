@@ -429,6 +429,12 @@ func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 	return registerUser(state, tellDetails, kr)
 }
 
+// MaxUserKeys caps the keys a user can register with in one user.tell. It is
+// not enforced again on add-recipients so a diff or preflight check must
+// only apply this limit to a user being newly registered, not to one already
+// in the verified state.
+const MaxUserKeys = 10
+
 // registerUser adds a user's keys to the keyring and state.
 // Shared by verifyInit (initial admin) and verifyUserTell.
 func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error {
@@ -454,8 +460,8 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s needs at least one public key", tell.User)
 	}
 
-	if len(tell.PubKeys) > 10 {
-		return fmt.Errorf("user %s may not have more than 10 public keys", tell.User)
+	if len(tell.PubKeys) > MaxUserKeys {
+		return fmt.Errorf("user %s may not have more than %d public keys", tell.User, MaxUserKeys)
 	}
 
 	if len(tell.Groups) == 0 {

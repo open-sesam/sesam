@@ -71,11 +71,18 @@ type secretEntry struct {
 // should be passed to Load as a repo-relative path. It parses the file and
 // every transitively-included file into the AST, validating each against the
 // JSON schema as it goes.
-//
-// All FileSource paths — MainFile.Path and every path derived from it — are
-// kept relative to root, which is also the coordinate the revealed paths the
-// single-secret mutators (SecretAdd/SecretRemove/SecretMove) match against.
 func Load(root *os.Root, path string) (*Config, error) {
+	return load(root, path, true)
+}
+
+// LoadForRepair is like Load, but skips Validate()'s referential checks (an
+// unknown group member, an invalid name) - only the per-file schema and
+// structural checks (secretEntries) run.
+func LoadForRepair(root *os.Root, path string) (*Config, error) {
+	return load(root, path, false)
+}
+
+func load(root *os.Root, path string, validate bool) (*Config, error) {
 	path = filepath.Clean(path)
 
 	// Load the JSON schema from the embedded FS so every file can be validated
@@ -102,6 +109,10 @@ func Load(root *os.Root, path string) (*Config, error) {
 	// first read.
 	if _, err := configRepo.secretEntries(); err != nil {
 		return nil, fmt.Errorf("config structure seems off: %w", err)
+	}
+
+	if !validate {
+		return configRepo, nil
 	}
 
 	// Semantic checks the schema cannot express, on the same footing as the

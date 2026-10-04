@@ -49,12 +49,18 @@ func formatLogTime(t time.Time, full bool) string {
 	return t.Format("2006 Jan 02 15:04")
 }
 
-// groupsOrAdmin renders an access-group list, defaulting to the implicit
-// "admin" when no groups are set.
-func groupsOrAdmin(groups []string) string {
+// accessGroupsOrAdmin renders a secret's access-group list, defaulting to the
+// implicit "admin" when no groups are set
+func accessGroupsOrAdmin(groups []string) string {
 	if len(groups) == 0 {
 		return "admin"
 	}
+	return strings.Join(groups, ", ")
+}
+
+// userGroups renders a user's group list as-is. Unlike a secret's access
+// groups, a user's Groups is never legitimately empty
+func userGroups(groups []string) string {
 	return strings.Join(groups, ", ")
 }
 
@@ -125,7 +131,7 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 		}
 		return logLine{
 			"+", userColor,
-			"told " + c(d.User, userColor) + " into " + c(groupsOrAdmin(d.Groups), groupColor),
+			"told " + c(d.User, userColor) + " into " + c(userGroups(d.Groups), groupColor),
 		}
 
 	case core.OpUserKill:
@@ -152,7 +158,7 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 		}
 		return logLine{
 			"~", userColor,
-			"set groups of " + c(d.User, userColor) + " to " + c(groupsOrAdmin(d.NewGroups), groupColor),
+			"set groups of " + c(d.User, userColor) + " to " + c(userGroups(d.NewGroups), groupColor),
 		}
 
 	case core.OpUserAddRecipients:
@@ -192,7 +198,7 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 		}
 		return logLine{
 			"+", secretColor,
-			"added " + c(d.RevealedPath, secretColor) + " (" + c(groupsOrAdmin(d.AccessGroups), groupColor) + ")",
+			"added " + c(d.RevealedPath, secretColor) + " (" + c(accessGroupsOrAdmin(d.AccessGroups), groupColor) + ")",
 		}
 
 	case core.OpSecretRemove:
@@ -219,7 +225,7 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 		}
 		return logLine{
 			"~", secretColor,
-			"changed access of " + c(d.RevealedPath, secretColor) + " to " + c(groupsOrAdmin(d.AccessGroups), groupColor),
+			"changed access of " + c(d.RevealedPath, secretColor) + " to " + c(accessGroupsOrAdmin(d.AccessGroups), groupColor),
 		}
 
 	case core.OpSeal:

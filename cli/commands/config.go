@@ -76,6 +76,10 @@ func HandleConfigApply(ctx context.Context, cmd *cli.Command, r *repo.Repo) erro
 		_, err = s.Seal(repo.SealOpts{All: cmd.Bool("seal-all")})
 		return err
 	}); err != nil {
+		var committedErr *repo.CommittedChangesError
+		if errors.As(err, &committedErr) {
+			return printCommittedChanges(committedErr.Changes)
+		}
 		return err
 	}
 
@@ -141,6 +145,18 @@ func printAppliedEntries(r *repo.Repo, before uint64, count int) error {
 
 	slog.Info(fmt.Sprintf("applied %d %s", len(entries), pluralize("change", len(entries))))
 	return nil
+}
+
+// printCommittedChanges reports the committed-but-undeclared steps ConfigApply
+// refused to carry out, the same way `sesam verify --config` renders them.
+func printCommittedChanges(changes []diff.Change) error {
+	slog.Error("sesam.yml declares changes that are already committed, so they did not come from your working tree:")
+	for _, change := range changes {
+		slog.Error(fmt.Sprintf("  %s", change.String()))
+	}
+	slog.Error("check where they came from (git log -p -- sesam.yml); pass --force to apply them anyway")
+
+	return &ExitCodeError{code: 1, print: false}
 }
 
 // HandleConfigReset rewrites sesam.yml to describe the audit log again,

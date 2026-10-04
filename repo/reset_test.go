@@ -125,6 +125,123 @@ func TestConfigResetUnappliableConfig(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestConfigResetRepairsStrayGroupMemberLeftByAnEdit regresses a typo-sized
+// edit forcing a full rewrite: removing a user from users: without also
+// removing them from the groups: list they were in makes the file fail
+// Config.Validate()'s UnknownGroupMemberError before reset ever gets a chance
+// to see that reverting the implied kill - reintroducing the user - resolves
+// the very reference Validate() would otherwise complain about.
+func TestConfigResetRepairsStrayGroupMemberLeftByAnEdit(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	dir, r := bootstrapRepo(t, admin)
+
+	// Register bob for real, so he exists in the verified state.
+	writeMainConfig(t, dir, "users:\n"+
+		"  - name: admin\n    key:\n      - "+admin.Recipient+"\n"+
+		"  - name: bob\n    key:\n      - "+bob.Recipient+"\n"+
+		"groups:\n  admin:\n    - admin\n  dev:\n    - bob\n"+
+		"secrets:\n  - path: README.md\n")
+	applied, err := applyConfig(t, r)
+	require.NoError(t, err)
+	require.Equal(t, []core.Operation{core.OpUserTell}, opsOf(applied))
+
+	// Hand-edit: remove bob from users:, but forget to also remove him from
+	// dev's member list - a very ordinary incomplete edit.
+	writeMainConfig(t, dir, "users:\n"+
+		"  - name: admin\n"+
+		"    # a comment worth keeping\n"+
+		"    key:\n      - "+admin.Recipient+"\n"+
+		"groups:\n  admin:\n    - admin\n  dev:\n    - bob\n"+
+		"secrets:\n  - path: README.md\n")
+
+	// Precondition: the file as it stands does not even load.
+	_, err = r.ConfigDiff(ConfigDiffOpts{})
+	require.ErrorContains(t, err, `lists unknown user "bob"`)
+
+	reset, err := r.ConfigReset(ConfigResetOpts{Force: true})
+	require.NoError(t, err)
+	require.False(t, reset.Rewritten, "a stray reference revert resolves must be repaired, not rewritten")
+	require.Equal(t, []core.Operation{core.OpUserKill}, opsOf(reset.Discarded))
+
+	after := readFileString(t, filepath.Join(dir, configFileName))
+	require.Contains(t, after, "# a comment worth keeping")
+	require.Contains(t, after, "bob")
+
+	// The repaired file loads and is internally consistent again.
+	_, err = r.ConfigDiff(ConfigDiffOpts{})
+	require.NoError(t, err)
+}
+
+// TestConfigResetRepairsAfterGroupsKeyRemoved regresses a missing groups: key
+// making repair-in-place hard-fail instead of falling back: UserChangeGroups
+// now builds the whole groups: mapping fresh when none exists, mirroring how
+// UserTell's addGroupMember already handled the same gap for a brand new
+// user.
+func TestConfigResetRepairsAfterGroupsKeyRemoved(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	// Drop the whole groups: block - an extreme edit, but one repair must
+	// survive rather than crash on.
+	writeMainConfig(t, dir, "users:\n"+
+		"  - name: admin\n"+
+		"    # a comment worth keeping\n"+
+		"    key:\n      - "+admin.Recipient+"\n"+
+		"secrets:\n  - path: README.md\n")
+
+	reset, err := r.ConfigReset(ConfigResetOpts{Force: true})
+	require.NoError(t, err)
+	require.False(t, reset.Rewritten, "a missing groups: key should be repaired in place, not force a full rewrite")
+	require.Equal(t, []core.Operation{core.OpUserChangeGroups}, opsOf(reset.Discarded))
+
+	after := readFileString(t, filepath.Join(dir, configFileName))
+	require.Contains(t, after, "# a comment worth keeping")
+	require.Contains(t, after, "groups:")
+
+	_, err = r.ConfigDiff(ConfigDiffOpts{})
+	require.NoError(t, err)
+}
+
+// TestConfigResetFallsBackOnDanglingAlias covers the other named failure mode
+// for the repair path: an alias-valued group member. A *reference to a user
+// still in users: repairs (or simply survives) fine - the real failure case
+// is killing the user an alias elsewhere points to, which leaves that alias
+// dangling. There is no way to repair that in place (the anchor it needs is
+// simply gone); unlike a missing groups: key, this is not something
+// LoadForRepair's relaxed Validate() can help with either, since the document
+// fails to parse at all, before any Config exists to repair. Already handled
+// correctly before this change too - resetConfig's very first fallback (a
+// failed Load) already covered it - this just pins the behavior now that
+// Load has become LoadForRepair.
+func TestConfigResetFallsBackOnDanglingAlias(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	dir, r := bootstrapRepo(t, admin)
+
+	writeMainConfig(t, dir, "users:\n"+
+		"  - name: admin\n    key:\n      - "+admin.Recipient+"\n"+
+		"  - name: &bobname bob\n    key:\n      - "+bob.Recipient+"\n"+
+		"groups:\n  admin:\n    - admin\n  dev:\n    - *bobname\n"+
+		"secrets:\n  - path: README.md\n")
+	applied, err := applyConfig(t, r)
+	require.NoError(t, err)
+	require.Equal(t, []core.Operation{core.OpUserTell}, opsOf(applied))
+
+	// Remove bob - anchor and all - leaving dev's *bobname alias dangling.
+	writeMainConfig(t, dir, "users:\n"+
+		"  - name: admin\n    key:\n      - "+admin.Recipient+"\n"+
+		"groups:\n  admin:\n    - admin\n  dev:\n    - *bobname\n"+
+		"secrets:\n  - path: README.md\n")
+
+	reset, err := r.ConfigReset(ConfigResetOpts{Force: true})
+	require.NoError(t, err, "a dangling alias must fall back to a rewrite, not fail the reset")
+	require.True(t, reset.Rewritten, "nothing can repair a dangling alias in place")
+
+	_, err = r.ConfigDiff(ConfigDiffOpts{})
+	require.NoError(t, err, "the rewritten file must be valid and appliable")
+}
+
 // TestConfigResetRewritesUnreadable covers the other half of recovery: a file
 // that cannot be read at all is replaced by one derived from the audit log.
 func TestConfigResetRewritesUnreadable(t *testing.T) {

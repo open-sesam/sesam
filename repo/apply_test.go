@@ -212,6 +212,25 @@ func TestConfigApplyLeavesConfigAlone(t *testing.T) {
 	require.Equal(t, declared, readFileString(t, filepath.Join(dir, configFileName)))
 }
 
+// TestConfigApplyNoOpReturnsEmptyNotNil regresses `apply --json` printing
+// "null" where `diff --json` prints "[]" for the same "nothing to do" case:
+// ConfigApply must return the same non-nil empty slice diff.Delta already
+// guarantees, not a bare nil, when the plan is empty.
+func TestConfigApplyNoOpReturnsEmptyNotNil(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	_, r := bootstrapRepo(t, admin)
+
+	var applied []diff.Change
+	require.NoError(t, r.Update(func(s *Stage) error {
+		var err error
+		applied, err = s.ConfigApply(context.Background(), ConfigApplyOpts{})
+		return err
+	}))
+
+	require.NotNil(t, applied)
+	require.Empty(t, applied)
+}
+
 // TestConfigApplyRollsBack is the transaction: a plan that fails part-way must
 // leave the repository exactly as it was, with the reason surfaced.
 func TestConfigApplyRollsBack(t *testing.T) {
@@ -357,12 +376,12 @@ func TestConfigApplyRefusesCommittedChanges(t *testing.T) {
 
 	_, err := applyConfig(t, r)
 	require.ErrorContains(t, err, "already committed")
-	require.ErrorContains(t, err, "user bob", "the refused step is named")
 	require.ErrorContains(t, err, "--force")
 
 	var committedErr *CommittedChangesError
 	require.ErrorAs(t, err, &committedErr)
 	require.Equal(t, []core.Operation{core.OpUserTell}, opsOf(committedErr.Changes))
+	require.Equal(t, "bob", committedErr.Changes[0].User, "the refused step is named")
 
 	require.Equal(t, before, entryCount(t, r))
 	_, exists := r.vstate.UserExists("bob")

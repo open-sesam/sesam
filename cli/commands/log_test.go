@@ -52,3 +52,20 @@ func TestShortPubKeysFull(t *testing.T) {
 
 	require.Equal(t, key, shortPubKeys([]core.UserPubKey{{Key: key}}, true), "full must not truncate")
 }
+
+// TestUserGroupsNeverFakesAdmin regresses groupsOrAdmin being shared between
+// users and secrets: an empty access-group list legitimately means "admin
+// only" for a secret, but a user's Groups is never legitimately empty, so
+// rendering an empty one as "admin" would show a de-privileged user as if
+// they had just been made an admin - the opposite of the truth.
+func TestUserGroupsNeverFakesAdmin(t *testing.T) {
+	require.Equal(t, "", userGroups(nil))
+	require.Equal(t, "", userGroups([]string{}))
+	require.Equal(t, "dev, ops", userGroups([]string{"dev", "ops"}))
+}
+
+func TestAccessGroupsOrAdmin(t *testing.T) {
+	require.Equal(t, "admin", accessGroupsOrAdmin(nil))
+	require.Equal(t, "admin", accessGroupsOrAdmin([]string{}))
+	require.Equal(t, "admin, dev", accessGroupsOrAdmin([]string{"admin", "dev"}))
+}

@@ -114,10 +114,10 @@ func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 // resetConfig returns the config to write, filling in what had to be done to
 // get there. A nil config means the declaration already matched the audit log.
 func (r *Repo) resetConfig(root *os.Root, out *ConfigReset) (*sesamConf.Config, error) {
-	cfg, err := sesamConf.Load(root, configFileName)
+	cfg, err := sesamConf.LoadForRepair(root, configFileName)
 	if err != nil {
-		// Unreadable, invalid or simply gone - there is nothing to edit, so
-		// the file can only be built fresh from the audit log.
+		// Unreadable, invalid structure, or simply gone - there is nothing to
+		// edit, so the file can only be built fresh from the audit log.
 		return r.rewriteConfig(root, out, err)
 	}
 
@@ -133,12 +133,25 @@ func (r *Repo) resetConfig(root *os.Root, out *ConfigReset) (*sesamConf.Config, 
 	changes := diff.Delta(r.vstate, declared)
 	out.Discarded = changes.Changes
 
-	if changes.IsEmpty() {
-		return nil, nil //nolint:nilnil // nil config means config fits audit log (no error and nothing to reset)
+	if !changes.IsEmpty() {
+		if err := diff.Revert(cfg, r.vstate, changes); err != nil {
+			// A mutator choked on the file's own shape (e.g. a missing
+			// groups: key no fallback handles, or an alias-valued member none
+			// of them resolve) - fall back rather than fail the whole reset.
+			return r.rewriteConfig(root, out, err)
+		}
 	}
 
-	if err := diff.Revert(cfg, r.vstate, changes); err != nil {
-		return nil, fmt.Errorf("rewrite config from audit log: %w", err)
+	// LoadForRepair skipped Validate()'s referential checks on the premise
+	// that reverting the diff above might fix exactly what they'd complain
+	// about. Confirm that actually happened (or that there was nothing to fix
+	// in the first place)
+	if err := cfg.Validate(); err != nil {
+		return r.rewriteConfig(root, out, err)
+	}
+
+	if changes.IsEmpty() {
+		return nil, nil //nolint:nilnil // nil config means config fits audit log (no error and nothing to reset)
 	}
 
 	return cfg, nil

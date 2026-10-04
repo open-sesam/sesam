@@ -13,11 +13,6 @@ import (
 	"opensesam.org/sesam/repo/util"
 )
 
-// maxUserKeys mirrors the limit the audit log enforces when a user is
-// registered. Checking it here turns a mid-apply verification failure into a
-// config error reported before anything is written.
-const maxUserKeys = 10
-
 // Change is one operation that would move the verified state a step towards the
 // declared state. It names an operation of the audit log, but is deliberately
 // phrased in terms of what the caller has to invoke rather than as a ready-made
@@ -36,7 +31,7 @@ type Change struct {
 	// Groups is the declared target set: the user's new groups for
 	// user.change_groups and user.tell, the secret's new access list (without
 	// the implicit "admin") for secret.add and secret.change_access.
-	Groups []string `json:"groups,omitempty"`
+	Groups []string `json:"groups"`
 
 	// Keys are public key specs to add for user.tell and user.add_recipients.
 	// For user.rm_recipients it is the recorded key material instead of the
@@ -45,9 +40,10 @@ type Change struct {
 	// in the meantime cannot make the removal miss.
 	Keys []string `json:"keys,omitempty"`
 
-	// Old is the set being replaced, for the change operations. Purely
-	// informational, meant for rendering the diff.
-	Old []string `json:"old,omitempty"`
+	// Old is the set being replaced by Groups, for user.change_groups and
+	// secret.change_access. Purely informational, meant for rendering the
+	// diff.
+	Old []string `json:"old"`
 }
 
 // Diff is the ordered set of changes between the verified and the declared
@@ -170,7 +166,8 @@ func validate(vstate *core.VerifiedState, declared *config.State) error {
 			admins++
 		}
 
-		if _, exists := vstate.UserExists(du.Name); !exists {
+		_, exists := vstate.UserExists(du.Name)
+		if !exists {
 			if err := core.ValidUserName(du.Name); err != nil {
 				problems = append(problems, fmt.Errorf("invalid user name %q: %w", du.Name, err))
 			}
@@ -187,10 +184,17 @@ func validate(vstate *core.VerifiedState, declared *config.State) error {
 
 		switch {
 		case len(du.Keys) == 0:
+			// Mirrors the keyring's own rule (core.Keyring.RemoveRecipient keeps at
+			// least one recipient), which applies to an existing user exactly as it
+			// does to a new one.
 			problems = append(problems, fmt.Errorf("user %q has no key", du.Name))
-		case len(du.Keys) > maxUserKeys:
+		case !exists && len(du.Keys) > core.MaxUserKeys:
+			// core.MaxUserKeys is only enforced at registration (user.tell); a key
+			// added later via add-recipients is never capped, so a user already
+			// past the limit must stay appliable for anything that doesn't
+			// re-register them.
 			problems = append(problems, fmt.Errorf(
-				"user %q has %d keys, at most %d are allowed", du.Name, len(du.Keys), maxUserKeys,
+				"user %q has %d keys, at most %d are allowed", du.Name, len(du.Keys), core.MaxUserKeys,
 			))
 		}
 	}

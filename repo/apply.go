@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"opensesam.org/sesam/core"
 	sesamConf "opensesam.org/sesam/repo/config"
@@ -30,25 +29,18 @@ type ConfigApplyOpts struct {
 // Refusing them is what keeps a pushed sesam.yml from being applied by an
 // admin who was only asked to "run sesam apply" - see the invalid modified
 // config attack in docs/src/design.md.
+//
+// Error() is a short, library-friendly summary. Changes carries the full list
+// for a caller - the cli - that wants to render it in detail instead.
 type CommittedChangesError struct {
 	Changes []diff.Change
 }
 
 func (e *CommittedChangesError) Error() string {
-	lines := make([]string, 0, len(e.Changes)+2)
-	lines = append(lines,
-		"sesam.yml declares changes that are already committed, "+
-			"so they did not come from your working tree:")
-
-	for _, change := range e.Changes {
-		lines = append(lines, "  "+change.String())
-	}
-
-	lines = append(lines,
-		"check where they came from (git log -p -- sesam.yml); "+
-			"pass --force to apply them anyway")
-
-	return strings.Join(lines, "\n")
+	return fmt.Sprintf(
+		"sesam.yml declares %d change(s) that are already committed; pass --force to apply them anyway",
+		len(e.Changes),
+	)
 }
 
 // ConfigApply records what sesam.yml declares in the audit log, one entry per
@@ -94,7 +86,10 @@ func (s *Stage) ConfigApply(ctx context.Context, opts ConfigApplyOpts) ([]diff.C
 	}
 
 	if plan.IsEmpty() {
-		return nil, nil
+		// plan.Changes, not nil: diff.Delta already guarantees a non-nil empty
+		// slice here, so an apply with nothing to do matches diff's own
+		// "nothing changed" output ([], not null) under --json.
+		return plan.Changes, nil
 	}
 
 	if err := s.applyPreflight(plan.Changes, opts); err != nil {

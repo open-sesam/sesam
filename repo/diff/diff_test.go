@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"encoding/json"
 	"slices"
 	"testing"
 
@@ -445,10 +446,10 @@ func TestComputeErrors(t *testing.T) {
 			want: `user "bob" has no key`,
 		},
 		{
-			name: "too many keys",
+			name: "new user with too many keys",
 			declared: &config.State{Users: []config.StateUser{
 				declaredAdmin(),
-				{Name: "bob", Groups: []string{"dev"}, Keys: manyKeys(maxUserKeys + 1)},
+				{Name: "bob", Groups: []string{"dev"}, Keys: manyKeys(core.MaxUserKeys + 1)},
 			}},
 			want: "at most 10 are allowed",
 		},
@@ -478,6 +479,34 @@ func TestComputeErrors(t *testing.T) {
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
+}
+
+// TestComputeAllowsExistingUserOverKeyCap guards against reintroducing the
+// maxUserKeys bug: the audit log only caps keys at registration (user.tell);
+// a key added later via add-recipients is never capped. So a user who grew
+// past core.MaxUserKeys that way must stay appliable - the cap must not apply
+// to a user who already exists in the verified state.
+func TestComputeAllowsExistingUserOverKeyCap(t *testing.T) {
+	manyRecps := make(core.Recipients, 0, core.MaxUserKeys+1)
+	for range core.MaxUserKeys + 1 {
+		manyRecps = append(manyRecps, newRecipient(t, core.KeySourceManual))
+	}
+
+	vstate := verifiedState(
+		[]core.VerifiedUser{
+			admin(t),
+			{Membership: core.Membership{Name: "bob", Groups: []string{"dev"}}, Recps: manyRecps},
+		},
+		nil,
+	)
+
+	declared := &config.State{Users: []config.StateUser{
+		declaredAdmin(),
+		{Membership: core.Membership{Name: "bob", Groups: []string{"dev"}}, Keys: manyKeys(core.MaxUserKeys + 1)},
+	}}
+
+	_, err := Compute(vstate, declared)
+	require.NoError(t, err)
 }
 
 // TestComputeErrorsReportEveryProblem checks that a broken declaration is
@@ -722,6 +751,22 @@ func TestChangeString(t *testing.T) {
 			require.Equal(t, tc.want, tc.change.String())
 		})
 	}
+}
+
+// TestChangeJSONDistinguishesRevokedFromNotApplicable regresses omitempty on
+// Groups/Old hiding a secret revoked down to admin-only (or a user left with
+// no groups of its own): that must serialize as "[]", not disappear the way
+// an operation Groups/Old genuinely doesn't apply to (nil) does.
+func TestChangeJSONDistinguishesRevokedFromNotApplicable(t *testing.T) {
+	revoked := Change{Op: core.OpSecretChangeAccess, Path: "db.env", Groups: []string{}, Old: []string{"dev"}}
+	data, err := json.Marshal(revoked)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"op":"secret.change_access","path":"db.env","groups":[],"old":["dev"]}`, string(data))
+
+	notApplicable := Change{Op: core.OpSecretRemove, Path: "db.env"}
+	data, err = json.Marshal(notApplicable)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"op":"secret.remove","path":"db.env","groups":null,"old":null}`, string(data))
 }
 
 func manyKeys(n int) []string {
