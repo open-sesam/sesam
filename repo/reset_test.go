@@ -39,7 +39,7 @@ func TestConfigResetDiscardsEdits(t *testing.T) {
 		"      - dev\n"+
 		"  - path: invented.env\n")
 
-	reset, err := r.ConfigReset(ConfigResetOpts{})
+	reset, err := r.ConfigReset(ConfigResetOpts{Force: true})
 	require.NoError(t, err)
 	require.False(t, reset.Rewritten)
 	require.Equal(t, []core.Operation{
@@ -53,9 +53,40 @@ func TestConfigResetDiscardsEdits(t *testing.T) {
 	require.Contains(t, after, "# Key is the public key of this user")
 
 	// And it converges: resetting again has nothing left to do.
-	reset, err = r.ConfigReset(ConfigResetOpts{})
+	reset, err = r.ConfigReset(ConfigResetOpts{Force: true})
 	require.NoError(t, err)
 	require.Empty(t, reset.Discarded)
+}
+
+// TestConfigResetPreviewMatchesForce covers the pairing the whole preview
+// mechanism exists for: without Force, ConfigReset reports exactly what a
+// forced run would do and writes nothing - checked by running the forced
+// reset afterwards and requiring the same answer.
+func TestConfigResetPreviewMatchesForce(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	generated := readFileString(t, filepath.Join(dir, configFileName))
+	writeMainConfig(t, dir, generated+
+		"      - dev\n"+
+		"  - path: invented.env\n")
+	edited := readFileString(t, filepath.Join(dir, configFileName))
+
+	preview, err := r.ConfigReset(ConfigResetOpts{})
+	require.NoError(t, err)
+	require.Equal(t, []core.Operation{
+		core.OpSecretAdd,
+		core.OpSecretChangeAccess,
+	}, opsOf(preview.Discarded))
+
+	// Nothing moved.
+	require.Equal(t, edited, readFileString(t, filepath.Join(dir, configFileName)))
+
+	// And the forced run agrees with the preview.
+	forced, err := r.ConfigReset(ConfigResetOpts{Force: true})
+	require.NoError(t, err)
+	require.Equal(t, preview.Discarded, forced.Discarded)
+	require.NotEqual(t, edited, readFileString(t, filepath.Join(dir, configFileName)))
 }
 
 // TestConfigResetUnappliableConfig covers the state reset exists for: an edit
@@ -80,7 +111,7 @@ func TestConfigResetUnappliableConfig(t *testing.T) {
 	_, err := r.ConfigDiff(ConfigDiffOpts{})
 	require.ErrorContains(t, err, "declares no admin user", "precondition: this config is unappliable")
 
-	reset, err := r.ConfigReset(ConfigResetOpts{})
+	reset, err := r.ConfigReset(ConfigResetOpts{Force: true})
 	require.NoError(t, err)
 	require.False(t, reset.Rewritten, "a readable file is repaired, not replaced")
 	require.Equal(t, []core.Operation{core.OpUserChangeGroups}, opsOf(reset.Discarded))
@@ -130,7 +161,7 @@ func TestConfigResetRewritesUnreadable(t *testing.T) {
 
 			tc.set(t, dir)
 
-			reset, err := r.ConfigReset(ConfigResetOpts{})
+			reset, err := r.ConfigReset(ConfigResetOpts{Force: true})
 			require.NoError(t, err)
 			require.True(t, reset.Rewritten)
 			require.NotEmpty(t, reset.Reason)
@@ -147,6 +178,35 @@ func TestConfigResetRewritesUnreadable(t *testing.T) {
 			require.Contains(t, after, "README.md")
 		})
 	}
+}
+
+// TestConfigResetRewritesUnreadableWithNoSecrets covers rebuildConfig's other
+// edge: a verified state with no secrets at all must still get a `secrets:`
+// key, since SecretAdd is never called to create one. Without it the
+// rewritten file cannot be loaded again by anything, reset included.
+func TestConfigResetRewritesUnreadableWithNoSecrets(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	// Drop the only secret bootstrapRepo declares, so the verified state (and
+	// therefore the rebuilt config) has none.
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.SecretRemove([]string{"README.md"})
+	}))
+
+	writeMainConfig(t, dir, "{{{ this is not yaml\n")
+
+	reset, err := r.ConfigReset(ConfigResetOpts{Force: true})
+	require.NoError(t, err)
+	require.True(t, reset.Rewritten)
+
+	after := readFileString(t, filepath.Join(dir, configFileName))
+	require.Contains(t, after, "secrets:")
+
+	// The rewritten file must still be loadable - this is what a missing
+	// secrets: key would break, for reset itself and every other command.
+	_, err = r.ConfigDiff(ConfigDiffOpts{})
+	require.NoError(t, err)
 }
 
 // TestConfigResetReportsOrphans: a rewrite flattens the include tree into the
@@ -169,7 +229,7 @@ func TestConfigResetReportsOrphans(t *testing.T) {
 	// Destroy the main file so reset has to rewrite rather than repair.
 	writeMainConfig(t, dir, "not a config\n")
 
-	reset, err := r.ConfigReset(ConfigResetOpts{})
+	reset, err := r.ConfigReset(ConfigResetOpts{Force: true})
 	require.NoError(t, err)
 	require.True(t, reset.Rewritten)
 	require.Equal(t, []string{filepath.Join("svc", configFileName)}, reset.Orphaned)
@@ -207,7 +267,7 @@ func TestConfigResetAfterApplyRoundTrip(t *testing.T) {
 	tellUser(t, r, bob, "dev")
 
 	writeMainConfig(t, dir, "users: []\ngroups: {}\nsecrets: []\n")
-	_, err := r.ConfigReset(ConfigResetOpts{})
+	_, err := r.ConfigReset(ConfigResetOpts{Force: true})
 	require.NoError(t, err)
 
 	applied, err := applyConfig(t, r)
@@ -220,41 +280,13 @@ func TestConfigResetAfterApplyRoundTrip(t *testing.T) {
 	}))
 }
 
-// TestConfigResetDryRun reports exactly what a real reset would do and writes
-// nothing - checked by running the real reset afterwards and requiring the
-// same answer.
-func TestConfigResetDryRun(t *testing.T) {
-	admin := writeTestIdentity(t, "admin")
-	dir, r := bootstrapRepo(t, admin)
-
-	generated := readFileString(t, filepath.Join(dir, configFileName))
-	writeMainConfig(t, dir, generated+
-		"      - dev\n"+
-		"  - path: invented.env\n")
-	edited := readFileString(t, filepath.Join(dir, configFileName))
-
-	dry, err := r.ConfigReset(ConfigResetOpts{DryRun: true})
-	require.NoError(t, err)
-	require.True(t, dry.DryRun)
-	require.Equal(t, []core.Operation{
-		core.OpSecretAdd,
-		core.OpSecretChangeAccess,
-	}, opsOf(dry.Discarded))
-
-	// Nothing moved.
-	require.Equal(t, edited, readFileString(t, filepath.Join(dir, configFileName)))
-
-	// And the real run agrees with the rehearsal.
-	real, err := r.ConfigReset(ConfigResetOpts{})
-	require.NoError(t, err)
-	require.Equal(t, dry.Discarded, real.Discarded)
-	require.NotEqual(t, edited, readFileString(t, filepath.Join(dir, configFileName)))
-}
-
-// TestConfigResetDryRunKeepsSubConfigs guards the reason a dry run works on a
-// copy: reverting a declared secret empties its sub-file, and the config
-// mutators delete such a file from disk.
-func TestConfigResetDryRunKeepsSubConfigs(t *testing.T) {
+// TestConfigResetPreviewKeepsSubConfigs guards the reason the preview works on
+// a copy: reverting a declared secret empties its sub-file, and the config
+// mutators delete such a file from disk. Both runs must say so - deleting a
+// file with no trace at all is not acceptable just because a rewrite was not
+// involved (unlike Orphaned, this one already happened by the time it is
+// reported).
+func TestConfigResetPreviewKeepsSubConfigs(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	dir, r := bootstrapRepo(t, admin)
 
@@ -277,34 +309,99 @@ func TestConfigResetDryRunKeepsSubConfigs(t *testing.T) {
 		"  - path: README.md\n"+
 		"  - include: svc/sesam.yml\n")
 
-	dry, err := r.ConfigReset(ConfigResetOpts{DryRun: true})
+	preview, err := r.ConfigReset(ConfigResetOpts{})
 	require.NoError(t, err)
-	require.Equal(t, []core.Operation{core.OpSecretAdd}, opsOf(dry.Discarded))
+	require.Equal(t, []core.Operation{core.OpSecretAdd}, opsOf(preview.Discarded))
+	require.Equal(t, []string{filepath.Join("svc", configFileName)}, preview.Deleted,
+		"a preview must also report what a forced run would delete")
 
 	// The sub-config is still there, with its content and its include.
 	require.FileExists(t, sub)
 	require.Contains(t, readFileString(t, sub), "token")
 	require.Contains(t, readFileString(t, filepath.Join(dir, configFileName)), "include")
 
-	// The real reset does remove it, which is what the dry run rehearsed.
-	_, err = r.ConfigReset(ConfigResetOpts{})
+	// The forced reset does remove it, which is what the preview rehearsed -
+	// and it must say so too.
+	forced, err := r.ConfigReset(ConfigResetOpts{Force: true})
 	require.NoError(t, err)
 	require.NoFileExists(t, sub)
+	require.Equal(t, []string{filepath.Join("svc", configFileName)}, forced.Deleted)
 }
 
-// TestConfigResetDryRunRewrite covers the recovery path: a broken config is
-// reported as unusable without a replacement being written.
-func TestConfigResetDryRunRewrite(t *testing.T) {
+// TestConfigResetPreviewThenForceRewrite covers the recovery path end to end:
+// without Force, a broken config is reported as needing a full rewrite
+// without one being written; Force is what actually replaces it, and the
+// result then converges with the audit log.
+func TestConfigResetPreviewThenForceRewrite(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	dir, r := bootstrapRepo(t, admin)
 
 	const broken = "{{{ not yaml\n"
 	writeMainConfig(t, dir, broken)
 
-	dry, err := r.ConfigReset(ConfigResetOpts{DryRun: true})
-	require.NoError(t, err)
-	require.True(t, dry.Rewritten)
-	require.NotEmpty(t, dry.Reason)
-
+	preview, err := r.ConfigReset(ConfigResetOpts{})
+	require.NoError(t, err, "a normal run reports the rewrite rather than failing")
+	require.True(t, preview.Rewritten)
+	require.NotEmpty(t, preview.Reason)
 	require.Equal(t, broken, readFileString(t, filepath.Join(dir, configFileName)))
+
+	forced, err := r.ConfigReset(ConfigResetOpts{Force: true})
+	require.NoError(t, err)
+	require.True(t, forced.Rewritten)
+	require.NotEqual(t, broken, readFileString(t, filepath.Join(dir, configFileName)))
+
+	diff, err := r.ConfigDiff(ConfigDiffOpts{})
+	require.NoError(t, err)
+	require.True(t, diff.IsEmpty(), diff.String())
+}
+
+// TestConfigResetNeverErrorsWithoutForce: whether the fix would be a repair in
+// place or a full rewrite, a normal run only ever reports it - it never fails
+// just because Force was not given, and it never touches the file either.
+func TestConfigResetNeverErrorsWithoutForce(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	generated := readFileString(t, filepath.Join(dir, configFileName))
+	writeMainConfig(t, dir, generated+"  - path: invented.env\n")
+	edited := readFileString(t, filepath.Join(dir, configFileName))
+
+	reset, err := r.ConfigReset(ConfigResetOpts{})
+	require.NoError(t, err)
+	require.False(t, reset.Rewritten)
+	require.NotEmpty(t, reset.Discarded)
+	require.Equal(t, edited, readFileString(t, filepath.Join(dir, configFileName)))
+}
+
+// TestConfigPathsSkipsNestedGitAndSesamDirs regresses configPaths comparing
+// whole relative walk paths to the bare ".git"/".sesam" constants: a nested
+// one (a submodule, or a sesam repo checked out under this one) sits at some
+// deeper relative path and was never skipped, so a coincidentally-named file
+// inside it could be picked up as one of ours.
+func TestConfigPathsSkipsNestedGitAndSesamDirs(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	// A legitimate sub-config, which must still be found.
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "svc"), 0o700))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "svc", configFileName), []byte("secrets: []\n"), 0o644,
+	))
+
+	// A nested .git (e.g. a submodule) with something that looks like a config
+	// file inside it - must never be treated as one of ours.
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "svc", ".git", "hooks"), 0o700))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "svc", ".git", "hooks", configFileName), []byte("bogus"), 0o644,
+	))
+
+	// A nested .sesam (a sesam repo checked out under this one) likewise.
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "nested", ".sesam"), 0o700))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "nested", ".sesam", configFileName), []byte("bogus"), 0o644,
+	))
+
+	paths, err := r.configPaths()
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{configFileName, filepath.Join("svc", configFileName)}, paths)
 }

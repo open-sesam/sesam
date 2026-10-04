@@ -312,8 +312,9 @@ var flagsConfigDiff = []cli.Flag{flagJSON}
 // flagsConfigReset contains output controls for resetting the config.
 var flagsConfigReset = []cli.Flag{
 	&cli.BoolFlag{
-		Name:  "dry-run",
-		Usage: "Report what would be reset without writing anything",
+		Name:    "force",
+		Aliases: []string{"f"},
+		Usage:   "Actually write sesam.yml - without it, reset only reports what it would do",
 	},
 	flagJSON,
 }
@@ -370,6 +371,9 @@ var flagsVerify = []cli.Flag{
 		Name:  "integrity",
 		Usage: "Check file integrity on disk",
 	},
+	&cli.BoolFlag{
+		Name:  "config",
+		Usage: "Check sesam.yml does not declare a change that already arrived committed (not part of --all)",
+	},
 	flagJSON,
-	// TODO: Probably need a config linter here too at some point.
 }

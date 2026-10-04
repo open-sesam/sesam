@@ -2,18 +2,17 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
-	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 
-	"github.com/go-git/go-git/v5/plumbing/object"
-	sesamConf "opensesam.org/sesam/config"
 	"opensesam.org/sesam/core"
-	"opensesam.org/sesam/diff"
+	sesamConf "opensesam.org/sesam/repo/config"
+	"opensesam.org/sesam/repo/diff"
 )
 
 // ConfigApplyOpts controls how an apply behaves.
@@ -75,7 +74,21 @@ func (s *Stage) ConfigApply(ctx context.Context, opts ConfigApplyOpts) ([]diff.C
 		return nil, ErrClosed
 	}
 
-	plan, err := s.configDiff(ConfigDiffOpts{})
+	// Read sesam.yml once and reuse the declaration for the self-check below:
+	// re-reading it there would compare against whatever the file says by the
+	// time the last step finishes, not the declaration that was actually
+	// planned against and applied
+	cfg, err := sesamConf.Load(s.root, configFileName)
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
+	declared, err := cfg.State()
+	if err != nil {
+		return nil, fmt.Errorf("declared state: %w", err)
+	}
+
+	plan, err := diff.Compute(s.vstate, declared)
 	if err != nil {
 		return nil, err
 	}
@@ -94,20 +107,15 @@ func (s *Stage) ConfigApply(ctx context.Context, opts ConfigApplyOpts) ([]diff.C
 		}
 	}
 
-	// The plan is only correct if it actually closed the gap. Re-diffing the
-	// state we just built catches anything the steps did not express - and
-	// because we are still inside the stage, a mismatch rolls the whole thing
-	// back instead of leaving the repository half applied.
-	rest, err := s.configDiff(ConfigDiffOpts{})
+	// The plan is only correct if it actually closed the gap. Re-diffing
+	// against the same declaration catches anything the steps did not express.
+	rest, err := diff.Compute(s.vstate, declared)
 	if err != nil {
-		return nil, fmt.Errorf("re-reading the applied state: %w", err)
+		return nil, fmt.Errorf("re-checking the applied state: %w", err)
 	}
 
 	if !rest.IsEmpty() {
-		return nil, fmt.Errorf(
-			"applied state still differs from sesam.yml - this is a bug, nothing was changed:\n%s",
-			rest,
-		)
+		slog.Warn("applied state differs from sesam.yml - this is a bug, nothing was changed", slog.Any("diff", rest))
 	}
 
 	return plan.Changes, nil
@@ -164,14 +172,14 @@ func (s *Stage) requireLocalChanges(changes []diff.Change, opts ConfigApplyOpts)
 		return nil
 	}
 
-	committed, err := s.committedChanges()
+	committed, err := s.committedConfigChanges()
 	if err != nil {
 		return err
 	}
 
 	var alreadyCommitted []diff.Change
 	for _, change := range changes {
-		if slices.ContainsFunc(committed, change.Equal) {
+		if slices.ContainsFunc(committed, change.Conflicts) {
 			alreadyCommitted = append(alreadyCommitted, change)
 		}
 	}
@@ -181,116 +189,6 @@ func (s *Stage) requireLocalChanges(changes []diff.Change, opts ConfigApplyOpts)
 	}
 
 	return nil
-}
-
-// committedChanges returns the steps the configuration committed at HEAD would
-// apply on its own, which is how a step is recognised as not coming from the
-// working tree.
-//
-// Nothing relevant committed - no HEAD, no config in it, or a committed config
-// that cannot be read and so cannot be the vector - yields no steps.
-func (s *Stage) committedChanges() ([]diff.Change, error) {
-	head, err := s.gitRepo.Head()
-	if err != nil {
-		// No commits yet: everything on disk is uncommitted by definition.
-		slog.Debug("no git HEAD, treating the whole config as local", slog.Any("err", err))
-		return nil, nil
-	}
-
-	commit, err := s.gitRepo.CommitObject(head.Hash())
-	if err != nil {
-		return nil, fmt.Errorf("read HEAD commit %s: %w", head.Hash(), err)
-	}
-
-	tree, err := commit.Tree()
-	if err != nil {
-		return nil, fmt.Errorf("read tree of %s: %w", head.Hash(), err)
-	}
-
-	prefix, err := core.SesamGitPrefix(s.gitRepo, s.sesamDir)
-	if err != nil {
-		return nil, err
-	}
-
-	paths, err := s.configPaths()
-	if err != nil {
-		return nil, err
-	}
-
-	dir, cleanup, err := writeCommittedConfigs(tree, prefix, paths)
-	if err != nil {
-		return nil, err
-	}
-	defer cleanup()
-
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", dir, err)
-	}
-	defer func() { _ = root.Close() }()
-
-	cfg, err := sesamConf.Load(root, configFileName)
-	if err != nil {
-		// The committed config is absent or unreadable, so no step can be
-		// attributed to it.
-		slog.Debug("no usable config at HEAD", slog.Any("err", err))
-		return nil, nil
-	}
-
-	declared, err := cfg.State()
-	if err != nil {
-		slog.Debug("config at HEAD does not describe a state", slog.Any("err", err))
-		return nil, nil
-	}
-
-	// Delta, not Compute: what the committed config asks for is interesting
-	// even when it could not be applied as it stands.
-	return diff.Delta(s.vstate, declared).Changes, nil
-}
-
-// writeCommittedConfigs materializes the given config paths as they are in
-// tree into a temp directory, so the committed configuration can be read with
-// the ordinary config loader. Paths missing from the commit are skipped.
-func writeCommittedConfigs(
-	tree *object.Tree,
-	prefix string,
-	paths []string,
-) (dir string, cleanup func(), err error) {
-	tmpDir, err := os.MkdirTemp("", "sesam-committed-config-")
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to make temp dir: %w", err)
-	}
-
-	removeTmp := func() { _ = os.RemoveAll(tmpDir) }
-	defer func() {
-		if err != nil {
-			removeTmp()
-		}
-	}()
-
-	for _, rel := range paths {
-		file, err := tree.File(path.Join(prefix, filepath.ToSlash(rel)))
-		if err != nil {
-			// Not committed (yet): nothing to compare against.
-			continue
-		}
-
-		contents, err := file.Contents()
-		if err != nil {
-			return "", nil, fmt.Errorf("read committed %s: %w", rel, err)
-		}
-
-		dst := filepath.Join(tmpDir, rel)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-			return "", nil, fmt.Errorf("make dir for %s: %w", dst, err)
-		}
-
-		if err := os.WriteFile(dst, []byte(contents), 0o600); err != nil {
-			return "", nil, fmt.Errorf("write %s: %w", dst, err)
-		}
-	}
-
-	return tmpDir, removeTmp, nil
 }
 
 // applyChange carries out a single step against the audit log.
@@ -318,6 +216,10 @@ func (s *Stage) applyChange(ctx context.Context, change diff.Change) error {
 		return s.user.UserRmRecipient(ctx, change.User, change.Keys)
 
 	case core.OpSecretAdd:
+		// sesam.yml declared this secret before its plaintext existed on disk
+		if err := s.touchIfMissing(change.Path); err != nil {
+			return err
+		}
 		_, err := s.secret.SecretAdd(change.Path, change.Groups, false)
 		return err
 
@@ -330,4 +232,29 @@ func (s *Stage) applyChange(ctx context.Context, change diff.Change) error {
 	default:
 		return fmt.Errorf("unexpected core.Operation: %#v", change.Op)
 	}
+}
+
+// touchIfMissing creates an empty file at path (and its parent directories)
+// if nothing is there yet
+func (s *Stage) touchIfMissing(path string) error {
+	_, err := s.root.Stat(path)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("stat %s: %w", path, err)
+	}
+
+	if dir := filepath.Dir(path); dir != "." {
+		if err := s.root.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create directory for %s: %w", path, err)
+		}
+	}
+
+	f, err := s.root.Create(path)
+	if err != nil {
+		return fmt.Errorf("touch %s: %w", path, err)
+	}
+
+	return f.Close()
 }

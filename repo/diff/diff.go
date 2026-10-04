@@ -17,9 +17,9 @@ import (
 	"slices"
 	"strings"
 
-	"opensesam.org/sesam/config"
 	"opensesam.org/sesam/core"
-	"opensesam.org/sesam/util"
+	"opensesam.org/sesam/repo/config"
+	"opensesam.org/sesam/repo/util"
 )
 
 // maxUserKeys mirrors the limit the audit log enforces when a user is
@@ -99,6 +99,30 @@ func (c Change) Equal(other Change) bool {
 		c.Path == other.Path &&
 		sameSet(c.Groups, other.Groups) &&
 		sameSet(c.Keys, other.Keys)
+}
+
+// Conflicts reports whether c and other are the same operation on the same
+// user or path and grant an overlapping payload - any group or key one of
+// them declares, the other does too. Old is left out, same as Equal.
+//
+// This is deliberately looser than Equal: requireLocalChanges uses it to spot
+// a committed change riding along inside a larger local edit. An admin's own,
+// unrelated edit to the same user (one more group, say) changes the Groups or
+// Keys set, so Equal no longer matches the committed step - but whatever it
+// already granted (an attacker's key, say) is still being carried out, and
+// must still be flagged.
+func (c Change) Conflicts(other Change) bool {
+	if c.Op != other.Op || c.User != other.User || c.Path != other.Path {
+		return false
+	}
+
+	if len(c.Groups) == 0 && len(other.Groups) == 0 && len(c.Keys) == 0 && len(other.Keys) == 0 {
+		// Neither side carries a payload (OpUserKill, OpSecretRemove): Op,
+		// User and Path already fully identify the step.
+		return true
+	}
+
+	return intersects(c.Groups, other.Groups) || intersects(c.Keys, other.Keys)
 }
 
 // IsEmpty reports whether the declared and the verified state agree.
@@ -202,13 +226,13 @@ func validate(vstate *core.VerifiedState, declared *config.State) error {
 	}
 
 	for _, ds := range declared.Secrets {
-		if _, exists := vstate.SecretExists(ds.Path); exists {
+		if _, exists := vstate.SecretExists(ds.RevealedPath); exists {
 			// Already tracked, so it passed these checks when it was added.
 			continue
 		}
 
-		if err := core.IsForbiddenPath(ds.Path); err != nil {
-			problems = append(problems, fmt.Errorf("secret %q: %w", ds.Path, err))
+		if err := core.IsForbiddenPath(ds.RevealedPath); err != nil {
+			problems = append(problems, fmt.Errorf("secret %q: %w", ds.RevealedPath, err))
 		}
 	}
 
@@ -223,7 +247,10 @@ func userChanges(vstate *core.VerifiedState, declared *config.State) []Change {
 		vu, exists := vstate.UserExists(du.Name)
 		// "admin" is a group like any other for a user - only secrets carry it
 		// implicitly - so the declared set is taken as is, just made stable.
-		groups := slices.Compact(du.Groups)
+		// Compact mutates in place, and vu points into the caller's
+		// VerifiedState, so both sides are cloned first - a pure diff must not
+		// leave the verified state's own group slice reordered behind it.
+		groups := slices.Compact(slices.Clone(du.Groups))
 
 		if !exists {
 			changes = append(changes, Change{
@@ -240,7 +267,7 @@ func userChanges(vstate *core.VerifiedState, declared *config.State) []Change {
 				Op:     core.OpUserChangeGroups,
 				User:   du.Name,
 				Groups: groups,
-				Old:    slices.Compact(vu.Groups),
+				Old:    slices.Compact(slices.Clone(vu.Groups)),
 			})
 		}
 
@@ -275,27 +302,25 @@ func secretChanges(vstate *core.VerifiedState, declared *config.State) []Change 
 	var changes []Change
 
 	for _, ds := range declared.Secrets {
-		// The verified access list always carries "admin". Drop it on the
-		// declared side too, so spelling out the implicit group is neither a
-		// change nor something that ends up in the payload.
-		access := util.WithoutAdmin(slices.Compact(ds.Access))
-
-		vs, exists := vstate.SecretExists(ds.Path)
+		// Both sides carry the implicit "admin" group, so the access lists
+		// compare as they are. The payload drops it again: that is the form a
+		// config persists and an audit entry records.
+		vs, exists := vstate.SecretExists(ds.RevealedPath)
 		if !exists {
 			changes = append(changes, Change{
 				Op:     core.OpSecretAdd,
-				Path:   ds.Path,
-				Groups: access,
+				Path:   ds.RevealedPath,
+				Groups: ds.DeclaredGroups(),
 			})
 			continue
 		}
 
-		if !sameSet(vs.DeclaredGroups(), access) {
+		if !sameSet(vs.AccessGroups, ds.AccessGroups) {
 			changes = append(changes, Change{
 				Op:     core.OpSecretChangeAccess,
-				Path:   ds.Path,
-				Groups: access,
-				Old:    slices.Compact(vs.DeclaredGroups()),
+				Path:   ds.RevealedPath,
+				Groups: ds.DeclaredGroups(),
+				Old:    vs.DeclaredGroups(),
 			})
 		}
 	}
@@ -324,7 +349,11 @@ func secretChanges(vstate *core.VerifiedState, declared *config.State) []Change 
 // the drift is `sesam verify --forge`'s job.
 func recipientDelta(recps core.Recipients, specs []string) (add, remove []string) {
 	matches := func(r *core.Recipient, spec string) bool {
-		return string(r.Source) == spec || r.String() == spec
+		// r.Spec(), not string(r.Source): a manual key's Source is literally
+		// the sentinel "manual", so comparing it raw would make a declared
+		// spec of "manual" match every manually-keyed recipient regardless of
+		// its actual material - Spec() resolves it to the key itself instead.
+		return r.Spec() == spec || r.String() == spec
 	}
 
 	for _, spec := range specs {
@@ -365,10 +394,22 @@ var opRank = map[core.Operation]int{
 	core.OpUserKill:           7,
 }
 
+// rankOf returns op's position in opRank, or one past the worst known rank for
+// an operation opRank does not recognise - never rank 0, which a plain map
+// lookup would silently produce and which would sort an unknown operation as
+// if it were OpUserTell, first and safest.
+func rankOf(op core.Operation) int {
+	if rank, ok := opRank[op]; ok {
+		return rank
+	}
+
+	return len(opRank)
+}
+
 // compareChanges orders changes by their operation (see opRank), then by the
 // user or secret they touch so the result is stable.
 func compareChanges(a, b Change) int {
-	if c := opRank[a.Op] - opRank[b.Op]; c != 0 {
+	if c := rankOf(a.Op) - rankOf(b.Op); c != 0 {
 		return c
 	}
 
@@ -400,6 +441,17 @@ func adminRank(c Change) int {
 // duplicates.
 func sameSet(a, b []string) bool {
 	return slices.Equal(util.SortedSet(a), util.SortedSet(b))
+}
+
+// intersects reports whether a and b share at least one element.
+func intersects(a, b []string) bool {
+	for _, x := range a {
+		if slices.Contains(b, x) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // list renders a set for the one-line change rendering.

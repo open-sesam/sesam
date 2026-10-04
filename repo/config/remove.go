@@ -122,6 +122,7 @@ func (c *Config) deleteSource(path string) error {
 	if err := c.root.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
+	c.deleted = append(c.deleted, path)
 
 	return nil
 }

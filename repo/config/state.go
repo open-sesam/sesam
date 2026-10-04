@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 
-	"opensesam.org/sesam/util"
+	"opensesam.org/sesam/core"
+	"opensesam.org/sesam/repo/util"
 )
 
 // State is the declared state of the repository: the normalized projection of
@@ -20,35 +21,28 @@ import (
 // those never produce an audit entry, so a diff must not see them.
 type State struct {
 	Users   []StateUser
-	Secrets []StateSecret
+	Secrets []core.SecretAccess
+
+	// userIdx / secretIdx map a Name / RevealedPath to its position in Users /
+	// Secrets. They are built lazily, on first lookup, from whatever Users /
+	// Secrets hold at that point - callers (State() included) must finish
+	// populating both slices before calling User() or Secret() the first time.
+	userIdx   map[string]int
+	secretIdx map[string]int
 }
 
 // StateUser is one entry of users: joined with the group memberships declared
-// for it under groups:.
+// for it under groups:. What it adds to the shared membership is the one thing
+// a config states differently from the audit log: keys as specs rather than as
+// resolved recipients.
 type StateUser struct {
-	Name string
-
-	// Groups the user is a member of, sorted and deduplicated.
-	Groups []string
+	core.Membership
 
 	// Keys are the public key specs as written in the config (a literal key, a
 	// forge id, a URL or a file path), in declaration order. They are not
 	// resolved - resolving is what turns a spec into recorded key material and
 	// belongs to the operation that writes the audit entry.
 	Keys []string
-}
-
-// StateSecret is one declared secret with its path resolved to a
-// sesam-relative one.
-type StateSecret struct {
-	// Path is sesam-relative, i.e. the config's path joined with the directory
-	// of the file that declared it. This is the coordinate the audit log's
-	// revealed paths use.
-	Path string
-
-	// Access is the declared access list, sorted and deduplicated, without the
-	// implicit "admin" group.
-	Access []string
 }
 
 // DuplicateDeclarationError reports a name or path declared more than once.
@@ -79,10 +73,15 @@ func (e *PathEscapesRepoError) Error() string {
 
 // User returns the declared user by name.
 func (s *State) User(name string) (*StateUser, bool) {
-	idx := slices.IndexFunc(s.Users, func(u StateUser) bool {
-		return u.Name == name
-	})
-	if idx < 0 {
+	if s.userIdx == nil {
+		s.userIdx = make(map[string]int, len(s.Users))
+		for i := range s.Users {
+			s.userIdx[s.Users[i].Name] = i
+		}
+	}
+
+	idx, ok := s.userIdx[name]
+	if !ok {
 		return nil, false
 	}
 
@@ -90,11 +89,16 @@ func (s *State) User(name string) (*StateUser, bool) {
 }
 
 // Secret returns the declared secret by its sesam-relative path.
-func (s *State) Secret(path string) (*StateSecret, bool) {
-	idx := slices.IndexFunc(s.Secrets, func(sec StateSecret) bool {
-		return sec.Path == path
-	})
-	if idx < 0 {
+func (s *State) Secret(path string) (*core.SecretAccess, bool) {
+	if s.secretIdx == nil {
+		s.secretIdx = make(map[string]int, len(s.Secrets))
+		for i := range s.Secrets {
+			s.secretIdx[s.Secrets[i].RevealedPath] = i
+		}
+	}
+
+	idx, ok := s.secretIdx[path]
+	if !ok {
 		return nil, false
 	}
 
@@ -140,11 +144,17 @@ func (c *Config) State() (*State, error) {
 
 	state := &State{
 		Users:   make([]StateUser, 0, len(users)),
-		Secrets: make([]StateSecret, 0, len(entries)),
+		Secrets: make([]core.SecretAccess, 0, len(entries)),
 	}
 
+	// Duplicate checks use their own maps rather than state.User()/state.Secret():
+	// those lazily cache an index from whatever is in state.Users/state.Secrets at
+	// first call, which here is a work-in-progress slice still being appended to.
+	seenUsers := make(map[string]bool, len(users))
+	seenSecrets := make(map[string]bool, len(entries))
+
 	for _, u := range users {
-		if _, exists := state.User(u.Name); exists {
+		if seenUsers[u.Name] {
 			problems = append(problems, &DuplicateDeclarationError{
 				Path: c.MainFile.Path,
 				Kind: "user",
@@ -152,11 +162,14 @@ func (c *Config) State() (*State, error) {
 			})
 			continue
 		}
+		seenUsers[u.Name] = true
 
 		state.Users = append(state.Users, StateUser{
-			Name:   u.Name,
-			Groups: util.SortedSet(memberOf[u.Name]),
-			Keys:   util.SortedSet(u.Key),
+			Membership: core.Membership{
+				Name:   u.Name,
+				Groups: util.SortedSet(memberOf[u.Name]),
+			},
+			Keys: util.SortedSet(u.Key),
 		})
 	}
 
@@ -171,7 +184,7 @@ func (c *Config) State() (*State, error) {
 			continue
 		}
 
-		if _, exists := state.Secret(path); exists {
+		if seenSecrets[path] {
 			problems = append(problems, &DuplicateDeclarationError{
 				Path: e.source.Path,
 				Kind: "secret",
@@ -179,10 +192,14 @@ func (c *Config) State() (*State, error) {
 			})
 			continue
 		}
+		seenSecrets[path] = true
 
-		state.Secrets = append(state.Secrets, StateSecret{
-			Path:   path,
-			Access: util.WithoutAdmin(util.SortedSet(e.secret.Access)),
+		state.Secrets = append(state.Secrets, core.SecretAccess{
+			RevealedPath: path,
+			// Normalized the way the audit log records it: "admin" is
+			// implicit in the file and explicit here, so the declared and
+			// the verified access list compare as they are.
+			AccessGroups: util.WithAdmin(e.secret.Access),
 		})
 	}
 

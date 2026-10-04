@@ -89,6 +89,48 @@ func TestValidate_UnknownGroupMember(t *testing.T) {
 	}
 }
 
+// TestValidate_InvalidNames covers the character/length rules core.ValidUserName
+// and core.ValidGroupName enforce: the JSON schema only requires a non-empty
+// string for a name, so a name with an unsafe character would otherwise reach
+// the audit log, rendered output and JSON untouched.
+func TestValidate_InvalidNames(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name:    "user name with a slash",
+			yaml:    "users:\n  - name: ali/ce\n    key:\n      - k\ngroups:\n  admin:\n    - ali/ce\nsecrets: []\n",
+			wantErr: `invalid user name "ali/ce"`,
+		},
+		{
+			name:    "group name with a slash",
+			yaml:    "users:\n  - name: alice\n    key:\n      - k\ngroups:\n  ad/min:\n    - alice\nsecrets: []\n",
+			wantErr: `invalid group name "ad/min"`,
+		},
+		{
+			name:    "valid names are not flagged",
+			yaml:    "users:\n  - name: alice.bob\n    key:\n      - k\ngroups:\n  dev-ops:\n    - alice.bob\nsecrets: []\n",
+			wantErr: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			main := writeConfig(t, tt.yaml)
+
+			_, err := loadConfig(t, main)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
 // TestValidate_AnchoredGroupMembers checks the validation sees through aliases
 // rather than comparing raw nodes.
 func TestValidate_AnchoredGroupMembers(t *testing.T) {
@@ -101,24 +143,48 @@ func TestValidate_AnchoredGroupMembers(t *testing.T) {
 }
 
 // TestValidate_SaveRejectsInconsistentConfig covers the Save-side assertion:
-// killing a user must not leave that user behind in a group.
+// killing a user must not leave that user behind in a group, whether the
+// group lists them directly or only through an anchor/alias.
 func TestValidate_SaveRejectsInconsistentConfig(t *testing.T) {
-	main := writeConfig(t, "users:\n  - name: alice\n    key:\n      - k\n  - name: bob\n    key:\n      - k\n"+
-		"groups:\n  admin:\n    - alice\n  devs:\n    - alice\n    - bob\nsecrets: []\n")
+	tests := []struct {
+		name string
+		yaml string
+		want map[string][]string
+	}{
+		{
+			name: "direct membership",
+			yaml: "users:\n  - name: alice\n    key:\n      - k\n  - name: bob\n    key:\n      - k\n" +
+				"groups:\n  admin:\n    - alice\n  devs:\n    - alice\n    - bob\nsecrets: []\n",
+			want: map[string][]string{"admin": {"alice"}, "devs": {"alice"}},
+		},
+		{
+			name: "membership via alias",
+			yaml: "x-devs: &devs\n  - alice\n  - bob\n" +
+				"users:\n  - name: alice\n    key:\n      - k\n  - name: bob\n    key:\n      - k\n" +
+				"groups:\n  admin:\n    - alice\n  devs: *devs\nsecrets: []\n",
+			want: map[string][]string{"admin": {"alice"}, "devs": {"alice"}},
+		},
+	}
 
-	cr, err := loadConfig(t, main)
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			main := writeConfig(t, tt.yaml)
 
-	require.NoError(t, cr.UserKill("bob"))
-	require.NoError(t, cr.Save())
+			cr, err := loadConfig(t, main)
+			require.NoError(t, err)
 
-	// Reloading proves the written file is self-consistent.
-	reloaded, err := loadConfig(t, main)
-	require.NoError(t, err)
+			require.NoError(t, cr.UserKill("bob"))
+			require.NoError(t, cr.Save())
 
-	groups, err := reloaded.Groups()
-	require.NoError(t, err)
-	require.Equal(t, map[string][]string{"admin": {"alice"}, "devs": {"alice"}}, groups)
+			// Reloading proves the written file is self-consistent.
+			reloaded, err := loadConfig(t, main)
+			require.NoError(t, err)
+
+			groups, err := reloaded.Groups()
+			require.NoError(t, err)
+			require.Equal(t, tt.want, groups)
+		})
+	}
 }
 
 // flattenJoined unwraps an errors.Join tree into its leaves.

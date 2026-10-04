@@ -44,7 +44,7 @@ func testSecret(t *testing.T, mgr *SecretManager, path, content string) string {
 	writeSecret(t, mgr.SesamDir, path, content)
 
 	if mgr.State != nil {
-		mgr.State.addSecret(VerifiedSecret{
+		mgr.State.addSecret(SecretAccess{
 			RevealedPath: path,
 			AccessGroups: []string{"admin"},
 		})
@@ -384,7 +384,7 @@ func TestRevealRejectsUnauthorizedSealer(t *testing.T) {
 			{Name: "admin", Groups: []string{"admin"}},
 			{Name: "bob", Groups: []string{"dev"}},
 		},
-		Secrets: []VerifiedSecret{
+		Secrets: []SecretAccess{
 			{RevealedPath: "secrets/admin-only", AccessGroups: []string{"admin"}},
 		},
 	}

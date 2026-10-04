@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"opensesam.org/sesam/config"
 	"opensesam.org/sesam/core"
+	"opensesam.org/sesam/repo/config"
 )
 
 // loadTestConfig writes body as a sesam.yml in a fresh temp dir and loads it.
@@ -47,7 +47,7 @@ func TestRevertDescribesVerifiedState(t *testing.T) {
 			{Name: "bob", Groups: []string{"dev"}, Recps: core.Recipients{bobKey}},
 			{Name: "carol", Groups: []string{"dev", "ops"}, Recps: core.Recipients{carolKey}},
 		},
-		[]core.VerifiedSecret{
+		[]core.SecretAccess{
 			{RevealedPath: "README.md", AccessGroups: []string{"admin"}},
 			{RevealedPath: "db.env", AccessGroups: []string{"admin", "dev"}},
 		},
@@ -113,7 +113,7 @@ func TestRevertChange(t *testing.T) {
 			{Name: "admin", Groups: []string{"admin"}, Recps: core.Recipients{newRecipient(t, "github:admin")}},
 			{Name: "bob", Groups: []string{"dev"}, Recps: core.Recipients{bobKey}},
 		},
-		[]core.VerifiedSecret{
+		[]core.SecretAccess{
 			{RevealedPath: "db.env", AccessGroups: []string{"admin", "dev"}},
 		},
 	)

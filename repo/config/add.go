@@ -30,7 +30,12 @@ func (c *Config) SecretAdd(path string, nested bool, access []string) error {
 	// This also keeps a file from being declared twice — including the case
 	// where it was first added to a sub-file and is now re-added to the main
 	// file, or vice versa.
-	if c.trackedRevealedPaths()[rel] {
+	tracked, err := c.trackedRevealedPaths()
+	if err != nil {
+		return err
+	}
+
+	if tracked[rel] {
 		if len(access) == 0 {
 			// if no groups change and secret exists, we assume no change requested.
 			// If [admin] is given explicitly we would set it explicitly.

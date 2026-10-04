@@ -13,12 +13,13 @@ exec git commit -m 'init sesam'
 
 # A config written by sesam itself always agrees with the audit log.
 exec sesam config diff
-stdout 'in sync'
+! stdout .
 
 # Hand-edit: declare a new user, a new secret, and widen README.md's access.
 # The admin's key is rewritten too, which shows up as a recipient swap.
+# Exit code mirrors git diff: 1 means a difference was found, not a failure.
 cp declared.yml sesam.yml
-exec sesam config diff
+! exec sesam config diff
 stdout 'verified/sesam.yml'
 stdout 'declared/sesam.yml'
 stdout '\+  - name: carol'
@@ -38,7 +39,7 @@ exec sesam user list
 # A secret or user dropped from the config shows up as removed lines on the
 # declared side - the audit log still has them, the declaration does not.
 cp dropped.yml sesam.yml
-exec sesam config diff
+! exec sesam config diff
 stdout '-  - name: bob'
 stdout '-  - path: README.md'
 
@@ -46,12 +47,12 @@ stdout '-  - path: README.md'
 # the repo.
 mkdir sub
 cd sub
-exec sesam config diff
+! exec sesam config diff
 stdout '-  - name: bob'
 cd ..
 
 # git's own flags still work, since they are passed straight through.
-exec sesam config diff -- --stat
+! exec sesam config diff -- --stat
 stdout 'sesam.yml'
 ! stdout '  - name: bob'
 

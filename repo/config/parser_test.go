@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/goccy/go-yaml/parser"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,6 +19,29 @@ func loadConfig(t *testing.T, mainPath string) (*Config, error) {
 	}
 	t.Cleanup(func() { _ = root.Close() })
 	return Load(root, filepath.Base(mainPath))
+}
+
+// fileSourceFromYAML builds a *FileSource straight from a YAML body, without
+// going through Load's schema validation - for exercising an AST shape the
+// schema itself would already refuse.
+func fileSourceFromYAML(t *testing.T, path, body string) *FileSource {
+	t.Helper()
+
+	file, err := parser.ParseBytes([]byte(body), parser.ParseComments)
+	require.NoError(t, err)
+
+	return &FileSource{Path: path, RootNode: file.Docs[0].Body}
+}
+
+// TestOwnSecretsPropagatesDecodeError regresses ownSecrets silently returning
+// no secrets when a decode fails, which let trackedRevealedPaths (and so
+// SecretAdd's dedup check) miss a file's secrets entirely instead of erroring
+// - risking a duplicate declaration for an already-tracked path.
+func TestOwnSecretsPropagatesDecodeError(t *testing.T) {
+	src := fileSourceFromYAML(t, "sesam.yml", "secrets:\n  - path: {nested: mapping}\n")
+
+	_, err := ownSecrets(src)
+	require.Error(t, err)
 }
 
 // TestSecretAdd_RelativeConfigPathSameDir adds a secret given relative to the

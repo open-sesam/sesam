@@ -53,7 +53,6 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 
 **--version**: Print the version and exit
 
-
 # COMMANDS
 
 ## init
@@ -87,6 +86,8 @@ Removes git integration and optionally all of the sesam repo
 Verify sesam signatures and encryption state
 
 **--all**: Run all verifications
+
+**--config**: Check sesam.yml does not declare a change that already arrived committed (not part of --all)
 
 **--forge-check**: Verify the forge public keys did not change since adding users
 
@@ -376,7 +377,7 @@ Apply config differences to audit log and metadata
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--seal-all, --all**: When we seal, seal also files that did not change
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 ### diff
 
@@ -402,7 +403,7 @@ Set specific config keys
 
 Derive config from audit log
 
-**--dry-run**: Report what would be reset without writing anything
+**--force, -f**: Actually write sesam.yml, reset only reports what it would do
 
 **--help, -h**: show help
 
@@ -420,7 +421,7 @@ alias for `sesam config apply`
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
-**--seal-all, --all**: When we seal, seal also files that did not change
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 ## id
 
@@ -451,4 +452,3 @@ Show the audit log of secret changes
 **--help, -h**: show help
 
 **--json**: Print output as JSON
-

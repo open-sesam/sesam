@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"slices"
 
-	"opensesam.org/sesam/config"
 	"opensesam.org/sesam/core"
+	"opensesam.org/sesam/repo/config"
 )
 
 // Revert backs the declared changes out of cfg, turning it into a config that

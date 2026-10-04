@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"opensesam.org/sesam/core"
-	"opensesam.org/sesam/diff"
+	"opensesam.org/sesam/repo/diff"
 )
 
 // writeMainConfig replaces the repository's sesam.yml with body.

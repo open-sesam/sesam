@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-)
 
-// TODO: only allow a specific set of characters for group names and user names
-//
+	"opensesam.org/sesam/core"
+)
 
 // UnknownGroupMemberError reports a name listed under groups: that has no
 // matching entry in users:. Such a member silently contributes no keys when
@@ -53,9 +52,19 @@ func (c *Config) Validate() error {
 
 	var problems []error
 
+	for _, u := range users {
+		if err := core.ValidUserName(u.Name); err != nil {
+			problems = append(problems, fmt.Errorf("%s: invalid user name %q: %w", c.MainFile.Path, u.Name, err))
+		}
+	}
+
 	// Sorted, because map iteration would otherwise shuffle the report between
 	// runs. Members keep their declaration order.
 	for _, group := range slices.Sorted(maps.Keys(groups)) {
+		if err := core.ValidGroupName(group); err != nil {
+			problems = append(problems, fmt.Errorf("%s: invalid group name %q: %w", c.MainFile.Path, group, err))
+		}
+
 		for _, member := range groups[group] {
 			if !known[member] {
 				problems = append(problems, &UnknownGroupMemberError{

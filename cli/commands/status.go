@@ -58,9 +58,14 @@ func runGitDiff(ctx context.Context, diffDir string, targets, extraGitArgs []str
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			if exitErr.ExitCode() == 1 {
-				// if there's a diff it will exit with 1
-				return nil
+				// git diff's own convention: 1 means a difference was found,
+				// not a failure.
+				return &ExitCodeError{code: 1, print: false}
 			}
+
+			// Any other code (128, typically) is git reporting a real
+			// failure
+			return &ExitCodeError{code: exitErr.ExitCode(), print: true, err: fmt.Errorf("git diff: %w", err)}
 		}
 
 		return err

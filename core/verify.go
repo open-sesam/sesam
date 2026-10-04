@@ -10,18 +10,29 @@ import (
 	"github.com/hdevalence/ed25519consensus"
 )
 
-// VerifiedUser is a user that has been verified by the audit log.
-type VerifiedUser struct {
-	Name       string     `json:"name"`
-	Groups     []string   `json:"groups"`
-	SignPubKey string     `json:"sign_pub_key"`
-	Recps      Recipients `json:"recipients"`
+// Membership is the part of a user that the audit log and the config describe
+// identically. Both sides embed it so the two models cannot drift apart in naming or meaning.
+type Membership struct {
+	Name   string   `json:"name"`
+	Groups []string `json:"groups"`
 }
 
-// VerifiedSecret is a secret verified by the audit log.
-type VerifiedSecret struct {
+// SecretAccess is a secret the audit log and the config describe identically:
+// the path made sesam-relative, and the access list. Used directly as the
+// secret type on both sides - unlike a user, a secret has nothing that
+// differs between declared and verified, so there is no wrapping type (an
+// equivalent of VerifiedUser/StateUser) to keep the two apart.
+type SecretAccess struct {
 	RevealedPath string
 	AccessGroups []string
+}
+
+// VerifiedUser is a user that has been verified by the audit log.
+type VerifiedUser struct {
+	Membership
+
+	SignPubKey string     `json:"sign_pub_key"`
+	Recps      Recipients `json:"recipients"`
 }
 
 // VerifiedState is the state of the repo based on the audit log.
@@ -31,7 +42,7 @@ type VerifiedSecret struct {
 // - Something was tampered with (e.g. Eve added herself as admin)
 type VerifiedState struct {
 	Users   []VerifiedUser
-	Secrets []VerifiedSecret
+	Secrets []SecretAccess
 
 	// SealRequiredSeqID tells us the entry that required a seal but didn't have one yet.
 	// If a seal was provided, it is set back to 0.
@@ -61,8 +72,8 @@ func (vu *VerifiedUser) IsAdmin() bool {
 
 // DeclaredGroups returns the access groups without the implicit "admin" group -
 // the set to persist in the config, where admin membership stays implicit.
-func (vs *VerifiedSecret) DeclaredGroups() []string {
-	return withoutAdmin(vs.AccessGroups)
+func (sa *SecretAccess) DeclaredGroups() []string {
+	return withoutAdmin(sa.AccessGroups)
 }
 
 // UnmarshalJSON restores a state that was written out as JSON. The lookup
@@ -122,7 +133,7 @@ func (s *VerifiedState) addUser(u VerifiedUser) {
 
 // addSecret appends sec and records its position in secretIdx. The index must
 // already be built (verify builds it before any modification runs).
-func (s *VerifiedState) addSecret(sec VerifiedSecret) {
+func (s *VerifiedState) addSecret(sec SecretAccess) {
 	s.secretIdx[sec.RevealedPath] = len(s.Secrets)
 	s.Secrets = append(s.Secrets, sec)
 }
@@ -162,7 +173,7 @@ func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
 	return &s.Users[idx], true
 }
 
-func (s *VerifiedState) SecretExists(revealedPath string) (*VerifiedSecret, bool) {
+func (s *VerifiedState) SecretExists(revealedPath string) (*SecretAccess, bool) {
 	idx, ok := s.secretIdx[revealedPath]
 	if !ok {
 		return nil, false
@@ -307,7 +318,7 @@ func (s *VerifiedState) requireUser(name, action string, entry *AuditEntrySigned
 // exists and that the entry's author may act on it. `action` reads as a verb,
 // e.g. "remove" or "change access of". Used by the mutating secret operations;
 // secret.add checks non-existence instead and does not use this.
-func (s *VerifiedState) requireSecretAccess(path, action string, entry *AuditEntrySigned) (*VerifiedSecret, error) {
+func (s *VerifiedState) requireSecretAccess(path, action string, entry *AuditEntrySigned) (*SecretAccess, error) {
 	secret, exists := s.SecretExists(path)
 	if !exists {
 		return nil, fmt.Errorf("cannot %s non-existing secret %q (seq_id=%d)", action, path, entry.SeqID)
@@ -347,7 +358,7 @@ func groupsToMap(groups []string) map[string]bool {
 // "admin" group is present. This is the access-list counterpart to the implicit
 // admin membership baked into groupsToMap.
 func normalizeAccessGroups(groups []string) []string {
-	groups = deduplicate(groups)
+	groups = Deduplicate(groups)
 	if !slices.Contains(groups, "admin") {
 		groups = append(groups, "admin")
 	}
@@ -483,7 +494,7 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		Name:       tell.User,
 		SignPubKey: tell.SignPubKey,
 		Recps:      stored,
-		Groups:     deduplicate(tell.Groups),
+		Groups:     Deduplicate(tell.Groups),
 	})
 
 	return nil
@@ -575,7 +586,7 @@ func verifyUserChangeGroups(log *AuditLog, state *VerifiedState, entry *AuditEnt
 		}
 	}
 
-	user.Groups = deduplicate(ucg.NewGroups)
+	user.Groups = Deduplicate(ucg.NewGroups)
 	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
@@ -729,7 +740,7 @@ func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigne
 	}
 
 	// secret does not exist
-	state.addSecret(VerifiedSecret{
+	state.addSecret(SecretAccess{
 		RevealedPath: scd.RevealedPath,
 		AccessGroups: scd.AccessGroups,
 	})
@@ -749,7 +760,18 @@ func verifySecretChangeAccess(log *AuditLog, state *VerifiedState, entry *AuditE
 		return err
 	}
 
-	existingSecret.AccessGroups = normalizeAccessGroups(sca.AccessGroups)
+	// Same rule secret.add enforces on the groups it grants: having access
+	// before the change is not enough on its own, or the changer could
+	// redirect a secret's whole access list to a group they are not part of
+	newGroups := normalizeAccessGroups(sca.AccessGroups)
+	if !state.UserHasAccess(entry.ChangedBy, newGroups) {
+		return fmt.Errorf(
+			"would change access of %q to groups that %s has no access to",
+			sca.RevealedPath, entry.ChangedBy,
+		)
+	}
+
+	existingSecret.AccessGroups = newGroups
 	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
@@ -799,7 +821,7 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 		return err
 	}
 
-	state.Secrets = slices.DeleteFunc(state.Secrets, func(s VerifiedSecret) bool {
+	state.Secrets = slices.DeleteFunc(state.Secrets, func(s SecretAccess) bool {
 		return s.RevealedPath == srd.RevealedPath
 	})
 	state.rebuildSecretIndex() // positions shifted
@@ -934,8 +956,8 @@ func cloneVerifiedUsers(users []VerifiedUser) []VerifiedUser {
 	return out
 }
 
-func cloneVerifiedSecrets(secrets []VerifiedSecret) []VerifiedSecret {
-	out := make([]VerifiedSecret, len(secrets))
+func cloneVerifiedSecrets(secrets []SecretAccess) []SecretAccess {
+	out := make([]SecretAccess, len(secrets))
 	for i, s := range secrets {
 		s.AccessGroups = slices.Clone(s.AccessGroups)
 		out[i] = s
@@ -1180,7 +1202,7 @@ func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 		users[i] = u
 	}
 
-	secrets := make([]VerifiedSecret, len(s.Secrets))
+	secrets := make([]SecretAccess, len(s.Secrets))
 	for i, sec := range s.Secrets {
 		sec.AccessGroups = slices.Clone(sec.AccessGroups)
 		secrets[i] = sec

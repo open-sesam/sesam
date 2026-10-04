@@ -10,42 +10,48 @@ exec sesam init --user admin
 exec git add -A
 exec git commit -m 'init sesam'
 
-# Nothing declared beyond what the log already knows.
+# Nothing declared beyond what the log already knows - silent, like git diff.
 exec sesam apply
-stdout 'nothing to apply'
+! stdout .
 
 # Hand-edit: a new user, a new secret and a wider access list for README.md.
 cp secret.txt db.env
 cp declared.yml sesam.yml
 envsubst sesam.yml
-exec sesam config diff
+! exec sesam config diff
 stdout '\+  - name: bob'
 
+# Output reuses the audit log's own rendering (same as `sesam log`) instead
+# of a second, bespoke description of the same steps.
 exec sesam config apply
-stdout '\+ user bob \(groups: dev'
-stdout '\+ secret db.env \(access: dev\)'
-stdout '~ secret README.md access: admin -> dev'
-stdout 'applied 3 changes'
+stdout 'told bob into dev'
+stdout 'added db.env \(dev, admin\)'
+stdout 'changed access of README.md to dev'
+stderr 'applied 3 changes'
 
 # The audit log has it now, and the diff is empty again.
 exec sesam log
 stdout 'told bob into dev'
 exec sesam config diff
-stdout 'in sync'
+! stdout .
 
 # Applying twice is a no-op - the plan really closed the gap.
 exec sesam config apply
-stdout 'nothing to apply'
+! stdout .
 
 # sesam.yml was read, not written: the comment survives verbatim.
 grep 'a comment that apply must not eat' sesam.yml
 
 # A step that cannot be carried out aborts the whole plan. Here carol is told
-# first (that would work), then a secret with no file on disk is added.
+# first (that would work), then a secret whose declared path is a directory,
+# not a file, is added - apply scaffolds a missing plaintext file, but not a
+# whole directory.
+mkdir missing.env
 cp broken.yml sesam.yml
 envsubst sesam.yml
 ! exec sesam config apply
 stderr 'missing.env'
+rm missing.env
 
 # Nothing was applied: carol never made it into the log.
 exec sesam user list
@@ -82,7 +88,7 @@ exec sesam log
 
 # --force is the way through, once the change has been vouched for.
 exec sesam config apply --force
-stdout '\+ user carol'
+stdout 'told carol into dev'
 exec sesam user list
 stdout 'carol'
 exec sesam verify

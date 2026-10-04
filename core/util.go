@@ -166,17 +166,32 @@ func RevealedPath(objectPath string) (string, bool) {
 // Only alphanumeric characters (mixed case), hyphens, underscores, '@' and '.'
 // are allowed. The name must not be empty and must not exceed 64 characters.
 func ValidUserName(name string) error {
+	return validName("user", name)
+}
+
+// ValidGroupName applies the same character and length rules ValidUserName
+// does. Group names are never used in a file path the way user names are, but
+// they end up in the same places (rendered output, the audit log, JSON) where
+// an unexpected character would cause the same kind of trouble.
+func ValidGroupName(name string) error {
+	return validName("group", name)
+}
+
+// validName is the shared check behind ValidUserName and ValidGroupName: only
+// alphanumeric characters (mixed case), hyphens, underscores, '@' and '.' are
+// allowed, the name must not be empty, and must not exceed 64 characters.
+func validName(kind, name string) error {
 	if name == "" {
-		return fmt.Errorf("user name must not be empty")
+		return fmt.Errorf("%s name must not be empty", kind)
 	}
 
 	if len(name) > 64 {
-		return fmt.Errorf("user name too long: %d characters (max 64)", len(name))
+		return fmt.Errorf("%s name too long: %d characters (max 64)", kind, len(name))
 	}
 
 	for _, r := range name {
 		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' && r != '@' && r != '.' {
-			return fmt.Errorf("user name contains invalid character: %q", r)
+			return fmt.Errorf("%s name contains invalid character: %q", kind, r)
 		}
 	}
 
@@ -257,8 +272,11 @@ func validSecretPath(root *os.Root, revealedPath string) error {
 	return nil
 }
 
-// Deduplicate returns a sorted copy of s with duplicates removed.
-func deduplicate[T cmp.Ordered](s []T) []T {
+// Deduplicate returns a sorted copy of s with duplicates removed. A nil or
+// empty s returns nil - repo/util.SortedSet is the non-nil-guaranteeing
+// counterpart for callers that need an absent and an empty set to render the
+// same way.
+func Deduplicate[T cmp.Ordered](s []T) []T {
 	c := slices.Clone(s)
 	slices.Sort(c)
 	return slices.Compact(c)
@@ -266,7 +284,7 @@ func deduplicate[T cmp.Ordered](s []T) []T {
 
 // unionGroups returns the deduplicated union of base and extra.
 func unionGroups(base, extra []string) []string {
-	return deduplicate(slices.Concat(base, extra))
+	return Deduplicate(slices.Concat(base, extra))
 }
 
 // withoutAdmin drops the implicit "admin" group. Secret access lists carry it

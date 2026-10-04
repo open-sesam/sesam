@@ -130,9 +130,10 @@ func (rs Recipients) UserPubKeys() []UserPubKey {
 
 // Spec is how a recipient would be written in a config: the spec it was
 // resolved from (a forge id, a URL, a file path), or the key material itself
-// when it was given verbatim.
+// when it was given verbatim or its source is unset (a zero-value Source
+// has no spec form to fall back to besides the material itself).
 func (r *Recipient) Spec() string {
-	if r.Source == KeySourceManual {
+	if r.Source == KeySourceManual || r.Source == "" {
 		return r.String()
 	}
 
@@ -305,6 +306,20 @@ func resolveLink(ctx context.Context, url string, client ...*http.Client) ([]str
 	return splitByLine(buf.String()), err
 }
 
+// PrivateKeyError reports that a recipient spec resolved to private key
+// material rather than a public one.
+type PrivateKeyError struct {
+	Kind string
+}
+
+func (e *PrivateKeyError) Error() string {
+	return fmt.Sprintf(
+		"this is a private key (%s), not a public one - "+
+			"use the recipient from its `# public key:` line instead",
+		e.Kind,
+	)
+}
+
 // ParseRecipient turns a public key string into a recipient age can use to
 // encrypt. Accepts X25519 (`age1…`), hybrid (`age1pq1…`), age plugin recipients
 // (`age1yubikey1…`, `age1tpm1…`, …) and SSH public keys. pluginUI is required
@@ -357,15 +372,14 @@ func ParseRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
 		// A private key where a public one belongs is an easy mistake: it is
 		// the same file `sesam init -i` takes. Name it, and do not echo the
 		// value - it would put the secret in the terminal and the logs.
-		if kind := IdentityType(arg); kind != "unknown" {
-			return nil, fmt.Errorf(
-				"this is a private key (%s), not a public one - "+
-					"use the recipient from its `# public key:` line instead",
-				kind,
-			)
+		switch kind := IdentityType(arg); kind {
+		case "empty":
+			return nil, errors.New("empty recipient")
+		case "unknown":
+			return nil, errors.New("unknown recipient type")
+		default:
+			return nil, &PrivateKeyError{Kind: kind}
 		}
-
-		return nil, errors.New("unknown recipient type")
 	}
 
 	spk := newStringPubKey(s)
@@ -419,11 +433,17 @@ func ParseAndResolveRecipients(ctx context.Context, root *os.Root, pubKeySpecs [
 			return nil, fmt.Errorf("recipient %q (#%d) holds no public key", pubKeySpec, idx)
 		}
 
-		// The spec is what the user typed, so it is safe to quote back. The
-		// material behind it is not: a spec pointing at the wrong file can
-		// resolve to a private key.
+		// The spec is what the user typed, so it is normally safe to quote
+		// back - except when source is KeySourceManual, where the spec IS the
+		// material (a forge id, URL or file:// path is a reference to it, and
+		// safe to echo even then). Quoting it back on a PrivateKeyError would
+		// undo the redaction ParseRecipient just went to the trouble of doing.
 		subRecps, err := ParseRecipients(rawPubKeys, pluginUI)
 		if err != nil {
+			var privKeyErr *PrivateKeyError
+			if source == KeySourceManual && errors.As(err, &privKeyErr) {
+				return nil, fmt.Errorf("failed to parse recipient #%d: %w", idx, err)
+			}
 			return nil, fmt.Errorf("failed to parse recipient %q (#%d): %w", pubKeySpec, idx, err)
 		}
 

@@ -58,13 +58,40 @@ func groupsOrAdmin(groups []string) string {
 	return strings.Join(groups, ", ")
 }
 
+// shortMaterialLen is longer than shortIDLen: an SSH key's wire format repeats
+// its algorithm name inside the base64 blob itself, so two different
+// ed25519 keys share a prefix well past 12 characters - shortIDLen's cut
+// would print them identically. Hashes and UUIDs (shortID's other use) don't
+// have this problem, so they keep the shorter cut.
+const shortMaterialLen = 32
+
 func shortPubKeys(pubs []core.UserPubKey, full bool) string {
 	ids := make([]string, 0, len(pubs))
 	for _, pub := range pubs {
-		ids = append(ids, shortID(pub.Key, full))
+		ids = append(ids, shortKeyMaterial(pub.Key, full))
 	}
 
 	return strings.Join(ids, ", ")
+}
+
+// shortKeyMaterial shortens a key the way shortID shortens a hash, but keeps
+// an SSH key's algorithm prefix intact and cuts only the material after it,
+// at shortMaterialLen rather than shortIDLen (see shortMaterialLen).
+func shortKeyMaterial(key string, full bool) string {
+	if full {
+		return key
+	}
+
+	algo, material, found := strings.Cut(key, " ")
+	if !found {
+		return shortID(key, false)
+	}
+
+	if len(material) <= shortMaterialLen {
+		return key
+	}
+
+	return algo + " " + material[:shortMaterialLen]
 }
 
 // describeLogEntry maps an audit entry to a glyph (the action), a color (the

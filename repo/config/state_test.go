@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"opensesam.org/sesam/core"
 )
 
 func TestState(t *testing.T) {
@@ -13,7 +14,7 @@ func TestState(t *testing.T) {
 		name    string
 		body    string
 		users   []StateUser
-		secrets []StateSecret
+		secrets []core.SecretAccess
 	}{
 		{
 			name: "groups are inverted per user",
@@ -32,10 +33,16 @@ groups:
 secrets: []
 `,
 			users: []StateUser{
-				{Name: "alice", Groups: []string{"admin", "dev"}, Keys: []string{"age1alice"}},
-				{Name: "bob", Groups: []string{"dev"}, Keys: []string{"age1bob"}},
+				{
+					Membership: core.Membership{Name: "alice", Groups: []string{"admin", "dev"}},
+					Keys:       []string{"age1alice"},
+				},
+				{
+					Membership: core.Membership{Name: "bob", Groups: []string{"dev"}},
+					Keys:       []string{"age1bob"},
+				},
 			},
-			secrets: []StateSecret{},
+			secrets: []core.SecretAccess{},
 		},
 		{
 			name: "user without group membership keeps an empty set",
@@ -45,8 +52,11 @@ users:
     key: [age1alice]
 secrets: []
 `,
-			users:   []StateUser{{Name: "alice", Groups: []string{}, Keys: []string{"age1alice"}}},
-			secrets: []StateSecret{},
+			users: []StateUser{{
+				Membership: core.Membership{Name: "alice", Groups: []string{}},
+				Keys:       []string{"age1alice"},
+			}},
+			secrets: []core.SecretAccess{},
 		},
 		{
 			name: "duplicate keys and groups are folded",
@@ -58,13 +68,14 @@ groups:
   dev: [alice, alice]
 secrets: []
 `,
-			users: []StateUser{
-				{Name: "alice", Groups: []string{"dev"}, Keys: []string{"age1alice", "github:alice"}},
-			},
-			secrets: []StateSecret{},
+			users: []StateUser{{
+				Membership: core.Membership{Name: "alice", Groups: []string{"dev"}},
+				Keys:       []string{"age1alice", "github:alice"},
+			}},
+			secrets: []core.SecretAccess{},
 		},
 		{
-			name: "declared admin access is dropped, absent access stays empty",
+			name: "the implicit admin group is spelled out on both sides",
 			body: `
 secrets:
   - path: explicit.txt
@@ -72,9 +83,15 @@ secrets:
   - path: implicit.txt
 `,
 			users: []StateUser{},
-			secrets: []StateSecret{
-				{Path: "explicit.txt", Access: []string{"dev"}},
-				{Path: "implicit.txt", Access: []string{}},
+			secrets: []core.SecretAccess{
+				{
+					RevealedPath: "explicit.txt",
+					AccessGroups: []string{"admin", "dev"},
+				},
+				{
+					RevealedPath: "implicit.txt",
+					AccessGroups: []string{"admin"},
+				},
 			},
 		},
 		{
@@ -85,9 +102,9 @@ secrets:
   - path: sub/b.txt
 `,
 			users: []StateUser{},
-			secrets: []StateSecret{
-				{Path: "a.txt", Access: []string{}},
-				{Path: "sub/b.txt", Access: []string{}},
+			secrets: []core.SecretAccess{
+				{RevealedPath: "a.txt", AccessGroups: []string{"admin"}},
+				{RevealedPath: "sub/b.txt", AccessGroups: []string{"admin"}},
 			},
 		},
 	}
@@ -124,9 +141,12 @@ func TestStateIncludedSecretPaths(t *testing.T) {
 
 	state, err := cfg.State()
 	require.NoError(t, err)
-	require.Equal(t, []StateSecret{
-		{Path: "top.txt", Access: []string{}},
-		{Path: "svc/token", Access: []string{"ops"}},
+	require.Equal(t, []core.SecretAccess{
+		{RevealedPath: "top.txt", AccessGroups: []string{"admin"}},
+		{
+			RevealedPath: "svc/token",
+			AccessGroups: []string{"admin", "ops"},
+		},
 	}, state.Secrets)
 }
 
@@ -202,4 +222,60 @@ secrets:
 	require.ErrorContains(t, err, `user "alice" is declared more than once`)
 	require.ErrorContains(t, err, `secret "a.txt" is declared more than once`)
 	require.ErrorContains(t, err, "outside the repository")
+}
+
+// TestStateUserAndSecretLookupFindsLastEntry guards the lazy index behind
+// User()/Secret(): building it from a slice that is still being appended to
+// (as State() does, to detect duplicates) would cache a stale, partial index
+// and make the most recently declared user or secret unfindable.
+func TestStateUserAndSecretLookupFindsLastEntry(t *testing.T) {
+	cfg, err := loadConfig(t, writeConfig(t, `
+users:
+  - name: alice
+    key: [age1alice]
+  - name: bob
+    key: [age1bob]
+groups:
+  admin: [alice]
+secrets:
+  - path: a.txt
+  - path: b.txt
+`))
+	require.NoError(t, err)
+
+	state, err := cfg.State()
+	require.NoError(t, err)
+
+	_, ok := state.User("bob")
+	require.True(t, ok, "last-declared user should be found")
+
+	_, ok = state.Secret("b.txt")
+	require.True(t, ok, "last-declared secret should be found")
+
+	_, ok = state.User("nobody")
+	require.False(t, ok)
+}
+
+// TestStateLookupOnHandBuiltState mirrors how repo/diff's tests construct a
+// State directly (no State() call): User()/Secret() must still work since
+// their index is built lazily from whatever Users/Secrets already hold.
+func TestStateLookupOnHandBuiltState(t *testing.T) {
+	state := &State{
+		Users: []StateUser{
+			{Membership: core.Membership{Name: "alice"}},
+			{Membership: core.Membership{Name: "bob"}},
+		},
+		Secrets: []core.SecretAccess{
+			{RevealedPath: "a.txt"},
+		},
+	}
+
+	_, ok := state.User("bob")
+	require.True(t, ok)
+
+	_, ok = state.Secret("a.txt")
+	require.True(t, ok)
+
+	_, ok = state.Secret("missing.txt")
+	require.False(t, ok)
 }

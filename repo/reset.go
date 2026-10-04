@@ -9,27 +9,33 @@ import (
 	"slices"
 	"strings"
 
-	sesamConf "opensesam.org/sesam/config"
 	"opensesam.org/sesam/core"
-	"opensesam.org/sesam/diff"
+	sesamConf "opensesam.org/sesam/repo/config"
+	"opensesam.org/sesam/repo/diff"
 )
 
 // ConfigResetOpts controls how a reset behaves.
 type ConfigResetOpts struct {
-	// DryRun reports what a reset would do and leaves every file as it is.
-	// The work still happens - on a throwaway copy of the config tree - so
-	// what comes back is the real outcome, not a prediction of one.
-	DryRun bool
+	// Force actually writes sesam.yml. Without it, ConfigReset only computes
+	// and reports what a reset would do - discard some declared changes, or
+	// rewrite the file from scratch, comments and descriptions included - and
+	// leaves every file exactly as it is. The work still happens, on a
+	// throwaway copy of the config tree, so what comes back is the real
+	// outcome, not a prediction of one.
+	Force bool
 }
 
-// ConfigReset reports what resetting sesam.yml did, or would do for a dry run.
+// ConfigReset reports what resetting sesam.yml did, or would do without
+// Force.
 type ConfigReset struct {
 	// Discarded are the changes the config declared on top of the audit log,
-	// i.e. the hand edits that were thrown away. Empty when the two agreed.
+	// i.e. the hand edits that were (or would be, without Force) thrown away.
+	// Empty when the two agreed.
 	Discarded []diff.Change `json:"discarded"`
 
-	// Rewritten is set when sesam.yml could not be reused and was written from
-	// scratch, losing its comments and descriptions. Reason says why.
+	// Rewritten is set when sesam.yml could not be reused and was (or would
+	// be, without Force) written from scratch, losing its comments and
+	// descriptions. Reason says why.
 	Rewritten bool   `json:"rewritten"`
 	Reason    string `json:"reason,omitempty"`
 
@@ -38,20 +44,24 @@ type ConfigReset struct {
 	// reset's call - but nothing reads them any more, so they are reported.
 	Orphaned []string `json:"orphaned,omitempty"`
 
-	// DryRun echoes the option back, so a caller handed only this result knows
-	// whether any of it reached disk.
-	DryRun bool `json:"dry_run,omitempty"`
+	// Deleted are sub-config files the repair-in-place path removed (or would
+	// remove, without Force) from disk: reverting a locally-added secret can
+	// leave the sub-file it lived in with no secrets or includes of its own,
+	// and the config mutators delete such a file rather than leave it empty.
+	Deleted []string `json:"deleted,omitempty"`
 }
 
 // ConfigReset rewrites sesam.yml to describe the verified state, discarding
 // whatever the file declared on top of it. The audit log is the source and is
 // never touched - this is the opposite direction of `sesam config apply`.
 //
-// Wherever possible the existing file is edited rather than replaced, so only
-// the lines that disagree with the audit log change and comments, descriptions,
-// anchors and the include structure survive. A file that cannot be read at all
-// is written fresh from the audit log instead, which is the case reset exists
-// for: recovering from an edit that broke the config.
+// Without Force this only reports what would happen: the work runs against a
+// throwaway copy of the config tree - diff.Revert's mutators (an emptied
+// sub-config's removal, say) delete files outright rather than merely editing
+// them, so reset must not do that to a real file unless told to - and every
+// real file is left exactly as it is. Force runs the same code against the
+// live tree and writes the result; it is the only thing that gates a rewrite
+// too, so a normal run reports that one would happen instead of refusing.
 func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -60,11 +70,8 @@ func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 		return nil, ErrClosed
 	}
 
-	// A dry run rehearses on a copy: the same code runs, Save still validates
-	// what it would write, and the live tree is out of reach of the config
-	// mutators - which do delete a sub-file their last secret left empty.
 	root := r.root
-	if opts.DryRun {
+	if !opts.Force {
 		scratch, cleanup, err := r.scratchConfigTree()
 		if err != nil {
 			return nil, err
@@ -74,8 +81,7 @@ func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 		root = scratch
 	}
 
-	out := &ConfigReset{DryRun: opts.DryRun}
-
+	out := &ConfigReset{}
 	cfg, err := r.resetConfig(root, out)
 	if err != nil {
 		return nil, err
@@ -100,7 +106,13 @@ func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 		out.Orphaned = orphans
 	}
 
-	if !opts.DryRun {
+	// A revert (the repair-in-place path) can go the other way: pruning a
+	// declared secret out of a sub-config can leave it empty, and the config
+	// mutators delete such a file outright rather than leaving it orphaned.
+	// That must not happen without a trace either.
+	out.Deleted = cfg.Deleted()
+
+	if opts.Force {
 		// The cached view would still hold the pre-reset file.
 		r.config = nil
 	}
@@ -109,7 +121,9 @@ func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 		"config reset",
 		slog.Int("discarded", len(out.Discarded)),
 		slog.Bool("rewritten", out.Rewritten),
-		slog.Bool("dry_run", opts.DryRun),
+		slog.Int("orphaned", len(out.Orphaned)),
+		slog.Int("deleted", len(out.Deleted)),
+		slog.Bool("force", opts.Force),
 	)
 
 	return out, nil
@@ -121,21 +135,15 @@ func (r *Repo) resetConfig(root *os.Root, out *ConfigReset) (*sesamConf.Config, 
 	cfg, err := sesamConf.Load(root, configFileName)
 	if err != nil {
 		// Unreadable, invalid or simply gone - there is nothing to edit, so
-		// build the file from the audit log.
-		out.Rewritten = true
-		out.Reason = err.Error()
-
-		return r.rebuildConfig(root)
+		// the file can only be built fresh from the audit log.
+		return r.rewriteConfig(root, out, err)
 	}
 
 	declared, err := cfg.State()
 	if err != nil {
 		// The file parses but does not describe a state (a path escaping the
 		// repo, a name declared twice), so it cannot be edited either.
-		out.Rewritten = true
-		out.Reason = err.Error()
-
-		return r.rebuildConfig(root)
+		return r.rewriteConfig(root, out, err)
 	}
 
 	// Delta, not Compute: a config that lost its last admin is not appliable,
@@ -152,6 +160,17 @@ func (r *Repo) resetConfig(root *os.Root, out *ConfigReset) (*sesamConf.Config, 
 	}
 
 	return cfg, nil
+}
+
+// rewriteConfig records why the file has to be replaced and builds the
+// replacement. Whether that replacement reaches disk is entirely down to
+// which root the caller resolved: rewriteConfig itself never refuses, since
+// ConfigReset already routed a non-Force call to a throwaway copy.
+func (r *Repo) rewriteConfig(root *os.Root, out *ConfigReset, cause error) (*sesamConf.Config, error) {
+	out.Rewritten = true
+	out.Reason = cause.Error()
+
+	return r.rebuildConfig(root)
 }
 
 // rebuildConfig builds a complete config from the verified state alone, used
@@ -176,7 +195,7 @@ func (r *Repo) rebuildConfig(root *os.Root) (*sesamConf.Config, error) {
 	}
 
 	secrets := slices.Clone(r.vstate.Secrets)
-	slices.SortFunc(secrets, func(a, b core.VerifiedSecret) int {
+	slices.SortFunc(secrets, func(a, b core.SecretAccess) int {
 		return strings.Compare(a.RevealedPath, b.RevealedPath)
 	})
 
@@ -186,6 +205,12 @@ func (r *Repo) rebuildConfig(root *os.Root) (*sesamConf.Config, error) {
 		}
 	}
 
+	// SecretAdd never runs when there are no secrets, so the key would
+	// otherwise be missing entirely
+	if err := cfg.EnsureSecretsKey(); err != nil {
+		return nil, fmt.Errorf("ensure secrets key: %w", err)
+	}
+
 	return cfg, nil
 }
 
@@ -193,14 +218,13 @@ func (r *Repo) rebuildConfig(root *os.Root) (*sesamConf.Config, error) {
 // throwaway directory and returns a root for it. The returned func removes the
 // copy again.
 func (r *Repo) scratchConfigTree() (root *os.Root, cleanup func(), err error) {
-	tmpDir, err := os.MkdirTemp(filepath.Join(r.sesamDir, core.SesamTmpDir()), "config-reset-")
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to make temp dir for dry run: %w", err)
-	}
-
 	// A local, not the named return: that one is reassigned by the return
 	// statement below, and the closure would end up calling itself.
-	removeTmp := func() { _ = os.RemoveAll(tmpDir) }
+	tmpDir, removeTmp, err := scratchDir(r.sesamDir, "config-reset-")
+	if err != nil {
+		return nil, nil, err
+	}
+
 	defer func() {
 		if err != nil {
 			removeTmp()
@@ -212,21 +236,15 @@ func (r *Repo) scratchConfigTree() (root *os.Root, cleanup func(), err error) {
 		return nil, nil, err
 	}
 
-	for _, path := range paths {
+	err = writeFileCopies(tmpDir, paths, func(path string) ([]byte, bool, error) {
 		data, err := r.root.ReadFile(path)
 		if err != nil {
-			return nil, nil, fmt.Errorf("read %s: %w", path, err)
+			return nil, false, fmt.Errorf("read %s: %w", path, err)
 		}
-
-		dst := filepath.Join(tmpDir, path)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-			return nil, nil, fmt.Errorf("make dir for %s: %w", dst, err)
-		}
-
-		//nolint:gosec
-		if err := os.WriteFile(dst, data, 0o600); err != nil {
-			return nil, nil, fmt.Errorf("write %s: %w", dst, err)
-		}
+		return data, false, nil
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 
 	scratch, err := os.OpenRoot(tmpDir)
@@ -252,14 +270,17 @@ func (v *View) configPaths() ([]string, error) {
 
 		rel := filepath.FromSlash(p)
 		if entry.IsDir() {
-			switch rel {
+			// entry.Name(), not rel: a nested .git or .sesam (a submodule, a
+			// sub-repo checked out under this one) must be skipped by name at
+			// any depth, not just when it sits at the walk root.
+			switch entry.Name() {
 			case sesamSuffix, gitSuffix, forkSuffix:
 				return fs.SkipDir
 			}
 			return nil
 		}
 
-		if filepath.Base(rel) == configFileName {
+		if entry.Name() == configFileName {
 			paths = append(paths, rel)
 		}
 

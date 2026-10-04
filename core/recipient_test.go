@@ -77,6 +77,29 @@ func TestParseRecipientInvalidInputs(t *testing.T) {
 	}
 }
 
+// TestParseRecipientEmptyInput regresses a confusing message: an empty (or
+// whitespace/comment-only) recipient was reported as "this is a private key
+// (empty)", which makes no sense - there is no key here at all, private or
+// otherwise.
+func TestParseRecipientEmptyInput(t *testing.T) {
+	cases := []struct {
+		name string
+		key  string
+	}{
+		{"empty string", ""},
+		{"whitespace only", "   \n\t"},
+		{"comment only", "# public key: age1testkey\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseRecipient(tc.key, nil)
+			require.ErrorContains(t, err, "empty")
+			require.NotContains(t, err.Error(), "private key")
+		})
+	}
+}
+
 func TestParseRecipientsFromSlice(t *testing.T) {
 	alice := newTestUser(t, "alice")
 	bob := newTestUser(t, "bob")
@@ -114,6 +137,32 @@ func TestRecipientsUserPubKeys(t *testing.T) {
 
 func TestRecipientsUserPubKeysEmpty(t *testing.T) {
 	require.Empty(t, Recipients{}.UserPubKeys())
+}
+
+// TestRecipientSpec_ZeroSource regresses Spec() returning "" for a recipient
+// whose Source was never set (e.g. unmarshaled from an older or malformed
+// audit entry) - reset would otherwise write it back as `key: [""]`.
+func TestRecipientSpec_ZeroSource(t *testing.T) {
+	alice := newTestUser(t, "alice")
+
+	tests := []struct {
+		name   string
+		source KeySource
+	}{
+		{"manual", KeySourceManual},
+		{"zero value", ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			recp := &Recipient{
+				Recipient:           alice.Recipient.Recipient,
+				comparablePublicKey: alice.Recipient.comparablePublicKey,
+				Source:              tc.source,
+			}
+			require.Equal(t, alice.Recipient.String(), recp.Spec())
+		})
+	}
 }
 
 func TestForgeIdToUser(t *testing.T) {
@@ -343,6 +392,22 @@ func TestParseAndResolveRecipientsIdentityFile(t *testing.T) {
 	require.ErrorContains(t, err, "private key")
 	require.ErrorContains(t, err, "file://key.age")
 	require.NotContains(t, err.Error(), private, "the private key must not appear in the error")
+}
+
+// TestParseAndResolveRecipientsPrivateKeySpec covers giving a private key
+// directly as a recipient spec, rather than via file://, a forge id or a URL.
+// The spec IS the material in this case (KeySourceManual), so it must not be
+// echoed back into the wrapping error the way it is safe to for a file:// path
+// or forge id - that would undo the redaction ParseRecipient already did.
+func TestParseAndResolveRecipientsPrivateKeySpec(t *testing.T) {
+	_, _, private := ageKeygenFile(t)
+
+	_, err := ParseAndResolveRecipients(
+		t.Context(), nil, []string{private}, NewNonInteractivePluginUI(),
+	)
+
+	require.ErrorContains(t, err, "private key")
+	require.NotContains(t, err.Error(), private, "the private key material must not appear in the error")
 }
 
 // TestParseAndResolveRecipientsWithoutKeys covers a file (or forge account)

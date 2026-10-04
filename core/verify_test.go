@@ -413,6 +413,36 @@ func TestVerifySecretChangeNegative(t *testing.T) {
 
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
+
+	// Regression: secret.add requires the adder to have access to the groups
+	// it grants (see verifySecretAdd), but secret.change_access did not
+	// enforce the same rule on the groups it reassigns to - a user with
+	// access via one group could redirect a secret's whole access list to a
+	// second group they have no standing in, handing it to people who never
+	// had it.
+	t.Run("changer not in the new groups", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+
+		bob := newTestUser(t, "bob")
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+			User: "bob", Groups: []string{"dev"},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
+		}), nil)
+
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+			RevealedPath: "secrets/db", AccessGroups: []string{"dev"},
+		}), nil)
+
+		// Bob has access via dev, but tries to redirect it to ops - a group he
+		// is not himself a member of.
+		al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretChangeAccess{
+			RevealedPath: "secrets/db", AccessGroups: []string{"ops"},
+		}), nil)
+
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+	})
 }
 
 func TestVerifySecretChangeUpdate(t *testing.T) {
@@ -430,6 +460,34 @@ func TestVerifySecretChangeUpdate(t *testing.T) {
 
 	state := verifyState(t, al, EmptyKeyring())
 	s, _ := state.SecretExists("secrets/db")
+	require.Contains(t, s.AccessGroups, "ops")
+}
+
+// TestVerifySecretChangeAccessAllowedWhenChangerIsInNewGroup covers the
+// non-admin, non-degenerate case: a user who belongs to both the old and the
+// new group may still reassign access between them.
+func TestVerifySecretChangeAccessAllowedWhenChangerIsInNewGroup(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	bob := newTestUser(t, "bob")
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+		User: "bob", Groups: []string{"dev", "ops"},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
+	}), nil)
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/db", AccessGroups: []string{"dev"},
+	}), nil)
+
+	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretChangeAccess{
+		RevealedPath: "secrets/db", AccessGroups: []string{"ops"},
+	}), nil)
+
+	state := verifyState(t, al, EmptyKeyring())
+	s, exists := state.SecretExists("secrets/db")
+	require.True(t, exists)
 	require.Contains(t, s.AccessGroups, "ops")
 }
 
@@ -689,8 +747,8 @@ func TestVerifyUnknownOperation(t *testing.T) {
 // --- VerifiedState helper tests ---
 
 func TestIsAdmin(t *testing.T) {
-	adminUser := VerifiedUser{Name: "a", Groups: []string{"admin", "dev"}}
-	devUser := VerifiedUser{Name: "b", Groups: []string{"dev"}}
+	adminUser := VerifiedUser{Membership: Membership{Name: "a", Groups: []string{"admin", "dev"}}}
+	devUser := VerifiedUser{Membership: Membership{Name: "b", Groups: []string{"dev"}}}
 	require.True(t, adminUser.IsAdmin())
 	require.False(t, devUser.IsAdmin())
 }
@@ -711,7 +769,7 @@ func TestUserExists(t *testing.T) {
 
 func TestSecretExists(t *testing.T) {
 	state := &VerifiedState{
-		Secrets: []VerifiedSecret{{RevealedPath: "secrets/a"}},
+		Secrets: []SecretAccess{{RevealedPath: "secrets/a"}},
 	}
 	state.BuildIndexes()
 
@@ -744,7 +802,7 @@ func TestUsersForSecret(t *testing.T) {
 			{Name: "bob", Groups: []string{"dev"}},
 			{Name: "carol", Groups: []string{"ops"}},
 		},
-		Secrets: []VerifiedSecret{
+		Secrets: []SecretAccess{
 			{RevealedPath: "secrets/db", AccessGroups: []string{"dev"}},
 		},
 	}

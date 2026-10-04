@@ -926,7 +926,7 @@ func TestNeedsSeal(t *testing.T) {
 		// but recipientsFor now differs from the sealed footer's hash.
 		bob := newTestUser(t, "bob")
 		mustAddRecipient(t, mgr.Keyring, bob.Name, bob.Recipient)
-		mgr.State.addUser(VerifiedUser{Name: bob.Name, Groups: []string{"admin"}})
+		mgr.State.addUser(VerifiedUser{Membership: Membership{Name: bob.Name, Groups: []string{"admin"}}})
 
 		needs, footer, err := mgr.needsSeal(path)
 		require.NoError(t, err)
@@ -983,7 +983,7 @@ func TestMatchObject(t *testing.T) {
 		writeSecret(t, mgr.SesamDir, path, "v2")
 		bob := newTestUser(t, "bob")
 		mustAddRecipient(t, mgr.Keyring, bob.Name, bob.Recipient)
-		mgr.State.addUser(VerifiedUser{Name: bob.Name, Groups: []string{"admin"}})
+		mgr.State.addUser(VerifiedUser{Membership: Membership{Name: bob.Name, Groups: []string{"admin"}}})
 
 		got, err := mgr.MatchObject(path, bytes.NewReader(v2))
 		require.NoError(t, err)

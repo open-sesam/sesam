@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"opensesam.org/sesam/core"
-	"opensesam.org/sesam/diff"
+	"opensesam.org/sesam/repo/diff"
 )
 
 // applyConfig runs a full apply the way the CLI does: plan and seal in one
@@ -125,6 +125,34 @@ func TestConfigApply(t *testing.T) {
 	require.Empty(t, applied)
 }
 
+// TestConfigApplyTouchesMissingSecretFile covers apply scaffolding the
+// plaintext for a newly declared secret, nested directories included: the
+// declaration is what brings the file into being (the same way apply creates
+// a declared user), so it must not require the plaintext to already exist.
+func TestConfigApplyTouchesMissingSecretFile(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	writeMainConfig(t, dir, "users:\n"+
+		"  - name: admin\n    key:\n      - "+admin.Recipient+"\n"+
+		"groups:\n  admin:\n    - admin\n"+
+		"secrets:\n  - path: README.md\n  - path: new/nested/secret.env\n")
+
+	target := filepath.Join(dir, "new", "nested", "secret.env")
+	require.NoFileExists(t, target)
+
+	applied, err := applyConfig(t, r)
+	require.NoError(t, err)
+	require.Equal(t, []core.Operation{core.OpSecretAdd}, opsOf(applied))
+
+	content, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Empty(t, content)
+
+	_, exists := r.vstate.SecretExists("new/nested/secret.env")
+	require.True(t, exists)
+}
+
 // TestConfigApplyTellsUser covers the one step that does more than write an
 // entry: a new user also needs a signing key and a re-encrypted audit key.
 func TestConfigApplyTellsUser(t *testing.T) {
@@ -194,7 +222,9 @@ func TestConfigApplyRollsBack(t *testing.T) {
 	before := entryCount(t, r)
 
 	// bob is told first (step 0 of the plan, succeeds), then a secret whose
-	// plaintext does not exist is added (step 1, fails).
+	// declared path is a directory, not a file, is added (step 1, fails) -
+	// apply scaffolds a missing plaintext file, but not a whole directory.
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "missing.env"), 0o700))
 	writeMainConfig(t, dir, "users:\n"+
 		"  - name: admin\n"+
 		"    key:\n"+
@@ -403,6 +433,46 @@ func TestConfigApplyRefusesCommittedAmongLocalChanges(t *testing.T) {
 		"only the committed step is refused, the local one is not listed")
 }
 
+// TestConfigApplyRefusesCommittedChangeWidenedLocally: a committed grant that
+// an admin's own unrelated edit happens to touch (one more group, say) must
+// still be caught. Equal's exact-set match used to miss it as soon as the
+// declared Groups no longer matched byte for byte, letting the committed step
+// (and whatever it grants) ride along with the legitimate local edit.
+func TestConfigApplyRefusesCommittedChangeWidenedLocally(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	dir, r := bootstrapRepo(t, admin)
+
+	gitCommitAll(t, dir, "init sesam")
+
+	// Arrives committed: bob is told, in "dev".
+	writeMainConfig(t, dir, declareBob(admin, bob))
+	gitCommitAll(t, dir, "add bob")
+
+	// On top, an ordinary local edit: bob also joins "ops". Same user, same
+	// operation (OpUserTell, since bob is still new to the audit log), but the
+	// Groups set no longer matches the committed step exactly.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "db.env"), []byte("pw=1"), 0o600))
+	writeMainConfig(t, dir, "users:\n"+
+		"  - name: admin\n    key:\n      - "+admin.Recipient+"\n"+
+		"  - name: bob\n    key:\n      - "+bob.Recipient+"\n"+
+		"groups:\n  admin:\n    - admin\n  dev:\n    - bob\n  ops:\n    - bob\n"+
+		"secrets:\n  - path: README.md\n")
+
+	before := entryCount(t, r)
+
+	_, err := applyConfig(t, r)
+	require.ErrorContains(t, err, "already committed")
+
+	var committedErr *CommittedChangesError
+	require.ErrorAs(t, err, &committedErr)
+	require.Equal(t, []core.Operation{core.OpUserTell}, opsOf(committedErr.Changes))
+
+	require.Equal(t, before, entryCount(t, r))
+	_, exists := r.vstate.UserExists("bob")
+	require.False(t, exists)
+}
+
 // TestConfigApplyWithoutCommits: before the first commit nothing can have
 // arrived committed, so the rule stays out of the way.
 func TestConfigApplyWithoutCommits(t *testing.T) {
@@ -415,4 +485,33 @@ func TestConfigApplyWithoutCommits(t *testing.T) {
 	applied, err := applyConfig(t, r)
 	require.NoError(t, err)
 	require.Equal(t, []core.Operation{core.OpUserTell}, opsOf(applied))
+}
+
+// TestConfigApplyFailsClosedOnUnreadableCommittedConfig: sesam.yml IS
+// committed at HEAD, but that committed copy cannot be loaded. The guard must
+// refuse to guess that nothing was committed - an attacker able to make the
+// committed config unreadable must not thereby disable the "invalid modified
+// config" check for whatever the working tree currently declares.
+func TestConfigApplyFailsClosedOnUnreadableCommittedConfig(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	dir, r := bootstrapRepo(t, admin)
+
+	gitCommitAll(t, dir, "init sesam")
+
+	// The committed sesam.yml is broken beyond parsing.
+	writeMainConfig(t, dir, "this is not: [valid yaml")
+	gitCommitAll(t, dir, "break sesam.yml")
+
+	// A legitimate local edit sits on top, uncommitted.
+	writeMainConfig(t, dir, declareBob(admin, bob))
+
+	before := entryCount(t, r)
+
+	_, err := applyConfig(t, r)
+	require.ErrorContains(t, err, "committed sesam.yml at HEAD")
+	require.Equal(t, before, entryCount(t, r))
+
+	_, exists := r.vstate.UserExists("bob")
+	require.False(t, exists)
 }

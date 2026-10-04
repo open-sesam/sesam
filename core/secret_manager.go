@@ -142,7 +142,7 @@ func (sm *SecretManager) SealedPath(path string) string {
 
 // SecretAdd adds a new secret to be managed by sesam. It returns the resulting
 // verified secret, or nil when nothing changed.
-func (sm *SecretManager) SecretAdd(revealedPath string, groups []string, additive bool) (*VerifiedSecret, error) {
+func (sm *SecretManager) SecretAdd(revealedPath string, groups []string, additive bool) (*SecretAccess, error) {
 	return sm.addOrChangeSecret(revealedPath, groups, additive)
 }
 
@@ -164,7 +164,7 @@ func (sm *SecretManager) SecretChangeGroups(revealedPath string, groups []string
 // whether the secret is already known. When additive and the secret exists, the
 // given groups are merged into its current access list rather than replacing
 // it. It returns the resulting verified secret.
-func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string, additive bool) (*VerifiedSecret, error) {
+func (sm *SecretManager) addOrChangeSecret(revealedPath string, groups []string, additive bool) (*SecretAccess, error) {
 	if err := validSecretPath(sm.root, revealedPath); err != nil {
 		return nil, fmt.Errorf("invalid secret path (%s): %w", revealedPath, err)
 	}

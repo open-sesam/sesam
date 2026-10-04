@@ -7,9 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 
-	sesamConf "opensesam.org/sesam/config"
-	"opensesam.org/sesam/core"
-	"opensesam.org/sesam/diff"
+	sesamConf "opensesam.org/sesam/repo/config"
+	"opensesam.org/sesam/repo/diff"
 )
 
 // Names of the two config trees written into a diff dir. They double as the
@@ -103,15 +102,15 @@ func (v *View) configDiff(opts ConfigDiffOpts) (*ConfigDiff, error) {
 // the user wrote it, and "verified" with the declared changes backed out.
 func (v *View) writeConfigDiffDir(cfg *sesamConf.Config, changes *diff.Diff) (dir string, err error) {
 	// The tree is consumed by an external `git diff` process, so it is built
-	// with absolute paths outside the root.
-	tmpDir, err := os.MkdirTemp(filepath.Join(v.sesamDir, core.SesamTmpDir()), "config-diff-")
+	// with absolute paths
+	tmpDir, removeTmp, err := scratchDir(v.sesamDir, "config-diff-")
 	if err != nil {
-		return "", fmt.Errorf("failed to make temp dir for diff: %w", err)
+		return "", err
 	}
 
 	defer func() {
 		if err != nil {
-			_ = os.RemoveAll(tmpDir)
+			removeTmp()
 		}
 	}()
 
@@ -154,21 +153,15 @@ func (v *View) copyConfigTree(
 ) (cfg *sesamConf.Config, closeRoot func(), err error) {
 	treeDir := filepath.Join(tmpDir, name)
 
-	for _, path := range paths {
+	err = writeFileCopies(treeDir, paths, func(path string) ([]byte, bool, error) {
 		data, err := v.root.ReadFile(path)
 		if err != nil {
-			return nil, nil, fmt.Errorf("read %s: %w", path, err)
+			return nil, false, fmt.Errorf("read %s: %w", path, err)
 		}
-
-		dst := filepath.Join(treeDir, path)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-			return nil, nil, fmt.Errorf("make dir for %s: %w", dst, err)
-		}
-
-		//nolint:gosec
-		if err := os.WriteFile(dst, data, 0o600); err != nil {
-			return nil, nil, fmt.Errorf("write %s: %w", dst, err)
-		}
+		return data, false, nil
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 
 	root, err := os.OpenRoot(treeDir)

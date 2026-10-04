@@ -59,7 +59,7 @@ func (ir *IntegrityReport) String() string {
 
 func verifyIntegritySingleSecret(
 	root *os.Root,
-	vs VerifiedSecret,
+	vs SecretAccess,
 	report *IntegrityReport,
 	diskSigMap map[string]*secretFooter,
 	kr Keyring,

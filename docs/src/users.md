@@ -63,22 +63,23 @@ sesam apply
 applied 2 changes
 ```
 
-Every step is recorded in the audit log, or none of them is: if one cannot be
-carried out, nothing is written and the reason is printed. `sesam.yml` itself is
-never rewritten by `apply` - your comments and descriptions stay as you wrote
-them. To see what would happen first, run `sesam config diff`.
+Every step is recorded in the audit log.
+If one cannot be carried out, nothing is written and the reason is printed.
+`sesam.yml` itself is never rewritten by `apply`, so your comments and descriptions
+stay. To see what would happen first, run `sesam config diff`.
 
 ```admonish warning title="Changes have to come from your working tree"
-`sesam apply` refuses steps that are already committed.
 
-A config that arrived with a `git pull` was not written by you, and applying it
-because someone asked you to "just run `sesam apply`" is how a pushed
-`sesam.yml` turns into real access to secrets. Check where the change came from
-(`git log -p -- sesam.yml`) and pass `--force` once you are happy with it.
+A config you `git pull`ed should not be applied without manual approval.
+Read through it and make sure any changes made are fine (`git log -p -- sesam.yml`).
+If the changes are looking good, use `sesam apply --force`.
 ```
 
 Went too far while editing? `sesam config reset` rewrites `sesam.yml` from the
-audit log, throwing your edits away - `--dry-run` shows what it would discard.
+audit log, throwing your edits away.
+It edits the file in place, so your comments and descriptions survive, but a config
+too broken to read can only be replaced from scratch, so reset asks for `--force`
+before doing that.
 
 Changing groups later works the same way.
 

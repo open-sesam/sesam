@@ -45,6 +45,17 @@ type Config struct {
 	// root confines all config file I/O to the repository. Every FileSource
 	// path is relative to it.
 	root *os.Root
+
+	// deleted collects the paths pruneEmptySources has removed from disk, so a
+	// caller who needs to know - reset, in particular - does not have to infer
+	// it by diffing SourceFiles before and after.
+	deleted []string
+}
+
+// Deleted returns the paths a mutator has removed from disk over this
+// Config's lifetime (see pruneEmptySources), in the order they were removed.
+func (c *Config) Deleted() []string {
+	return c.deleted
 }
 
 // secretEntry is a transient view of one real (non-include) secret, pairing its
@@ -236,17 +247,7 @@ func (c *Config) loadTree(path string) (*FileSource, error) {
 
 // primedDecoder returns a decoder whose anchor table is already populated from
 // src's whole document.
-//
-// goccy registers anchors as it walks a node, so a decoder handed only a
-// sub-node cannot resolve an alias whose anchor is defined outside it — which
-// is every anchor worth writing, since a secret referencing an anchor declared
-// in its own mapping would be pointless. Decoding the root once first seeds the
-// table; the decoder keeps it across calls, so one instance serves every
-// sub-node decode of that file. YAML scopes anchors to a document, so decoders
-// must not be shared between files.
-//
-// The document itself is never rewritten: the anchors stay in the AST and Save
-// renders them back verbatim.
+// Anchors that are declared at the root of the file could not be read otherwise.
 func primedDecoder(src *FileSource) (*yaml.Decoder, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(nil))
 	if src.RootNode == nil {
@@ -333,14 +334,19 @@ func (c *Config) collectSecrets(src *FileSource, visiting map[string]bool) ([]se
 // it the basis for both global dedup and reporting which secrets a mutation
 // added. The same physical file tracked by two files collapses to one entry,
 // which is exactly the duplicate we refuse to create.
-func (c *Config) trackedRevealedPaths() map[string]bool {
+func (c *Config) trackedRevealedPaths() (map[string]bool, error) {
 	set := map[string]bool{}
 	for _, src := range c.SourceFiles {
-		for _, s := range ownSecrets(src) {
+		secrets, err := ownSecrets(src)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, s := range secrets {
 			set[filepath.Join(filepath.Dir(src.Path), s.Path)] = true
 		}
 	}
-	return set
+	return set, nil
 }
 
 // Secrets returns the merged, flattened secrets across the main file and all
@@ -407,6 +413,18 @@ func (c *Config) Groups() (map[string][]string, error) {
 		return nil, fmt.Errorf("%s: decoding groups: %w", c.MainFile.Path, err)
 	}
 	return groups, nil
+}
+
+// EnsureSecretsKey adds an empty secrets: key to the main file if it has none.
+// Load requires the key to be present even when there is nothing to list, so a
+// config built up without ever declaring a secret (e.g. ConfigReset's rebuild
+// path, when the verified state has none) still needs it to load again.
+func (c *Config) EnsureSecretsKey() error {
+	src := c.MainFile
+	if _, err := secretsNode(src.RootNode); err == nil {
+		return nil
+	}
+	return appendRootKey(src, map[string][]Secret{"secrets": {}})
 }
 
 // Save writes every loaded file back to disk. Each file's RootNode already
@@ -493,16 +511,18 @@ func fileIncludes(root ast.Node) []string {
 }
 
 // ownSecrets returns the real (non-include) secrets declared directly in src,
-// without descending into includes.
-func ownSecrets(src *FileSource) []Secret {
+// without descending into includes. A file with no secrets: key at all yields
+// no secrets and no error - Load already requires the key on anything it
+// loaded, so this is only ever reached for a legitimately empty file.
+func ownSecrets(src *FileSource) ([]Secret, error) {
 	seq, err := secretsNode(src.RootNode)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 
 	dec, err := primedDecoder(src)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	var out []Secret
@@ -516,11 +536,12 @@ func ownSecrets(src *FileSource) []Secret {
 		}
 
 		var s Secret
-		if dec.DecodeFromNode(m, &s) == nil {
-			out = append(out, s)
+		if err := dec.DecodeFromNode(m, &s); err != nil {
+			return nil, fmt.Errorf("%s: decoding secret: %w", src.Path, err)
 		}
+		out = append(out, s)
 	}
-	return out
+	return out, nil
 }
 
 func usersNode(root ast.Node) (*ast.SequenceNode, error) {
