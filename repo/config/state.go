@@ -38,9 +38,8 @@ type State struct {
 type StateUser struct {
 	core.Membership
 
-	// Keys are the public key specs as written in the config (a literal key, a
-	// forge id, a URL or a file path), in declaration order. They are not
-	// resolved - resolving is what turns a spec into recorded key material and
+	// Keys are the public key specs as written in the config in declaration order.
+	// They are not resolved - resolving is what turns a spec into recorded key material and
 	// belongs to the operation that writes the audit entry.
 	Keys []string
 }

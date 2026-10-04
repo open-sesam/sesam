@@ -586,13 +586,6 @@ type VerifyOptions struct {
 
 	// Config checks that sesam.yml does not declare a change that already
 	// arrived committed (see docs/src/design.md, "Invalid modified config").
-	//
-	// Not part of a plain Verify(All) run: sesam.yml gets an ordinary
-	// git text merge while the audit log gets its own semantic one, so right
-	// after a routine merge that touched users/groups/secrets the two can
-	// legitimately disagree - which this check cannot tell apart from a
-	// maliciously pushed config, and would otherwise fail on that alone.
-	// Ask for it explicitly, e.g. to vet a branch before applying it.
 	Config bool
 }
 

@@ -805,8 +805,7 @@ func (v *View) cleanablePaths() ([]string, error) {
 
 func (v *View) statusToDiffDir(status *Status) (diffDir string, err error) {
 	// The diff tree is consumed by an external `git diff` process, so it is
-	// built with absolute paths - inside the repository's own scratch space,
-	// since this one holds decrypted content.
+	// built with absolute paths
 	tmpDir, removeTmp, err := scratchDir(v.sesamDir, "status-diff-")
 	if err != nil {
 		return "", err

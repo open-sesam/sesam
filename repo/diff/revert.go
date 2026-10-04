@@ -13,17 +13,12 @@ import (
 //
 // Together with the config it was computed from, that gives the two sides of a
 // config diff: the file as the user wrote it, and the same file as the audit
-// log sees it - same comments, same formatting, same include structure,
-// differing only where the declaration does.
+// log sees it
 //
 // cfg must be the config the diff was computed from (or a copy of it) and
 // vstate the state it was compared against: putting back a killed user or a
 // removed secret needs the keys, groups and access lists that only the
 // verified state still knows.
-//
-// Nothing is written here - the AST is edited in memory. Note though that some
-// config mutators delete a sub-file their last secret left empty, so callers
-// must hand this a config rooted at a *copy* of the tree, never the live one.
 func Revert(cfg *config.Config, vstate *core.VerifiedState, d *Diff) error {
 	// Undo in reverse: the forward plan deliberately adds before it removes, so
 	// walking it backwards never has to remove something a later step puts

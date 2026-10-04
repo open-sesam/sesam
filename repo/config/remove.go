@@ -16,10 +16,6 @@ import (
 // file or a subdirectory file). Any subdirectory sesam.yml left empty by the
 // removal is deleted from disk and its include entry dropped from the parent
 // file, cascading upward; the main file is never deleted.
-//
-// Only the config entry is removed; the referenced plaintext file is left on
-// disk for the user to delete themselves. Directory expansion is the caller's
-// job — SecretRemove only ever touches a single secret.
 func (c *Config) SecretRemove(path string) error {
 	target := filepath.Clean(path)
 

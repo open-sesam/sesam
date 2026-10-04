@@ -1,14 +1,5 @@
 // Package diff compares the verified state of a sesam repository (replayed
 // from the audit log) against the state declared in sesam.yml.
-//
-// The comparison is pure: it touches no file, no network and no git. Whether a
-// declared secret actually exists on disk, whether a key spec still resolves to
-// the recorded material, and whether the config change is allowed to be applied
-// at all (see the "invalid modified config" attack in the design document) are
-// all decisions for the applying side.
-//
-// The audit log stays authoritative throughout: the declaration is a request,
-// never a truth.
 package diff
 
 import (
@@ -104,13 +95,6 @@ func (c Change) Equal(other Change) bool {
 // Conflicts reports whether c and other are the same operation on the same
 // user or path and grant an overlapping payload - any group or key one of
 // them declares, the other does too. Old is left out, same as Equal.
-//
-// This is deliberately looser than Equal: requireLocalChanges uses it to spot
-// a committed change riding along inside a larger local edit. An admin's own,
-// unrelated edit to the same user (one more group, say) changes the Groups or
-// Keys set, so Equal no longer matches the committed step - but whatever it
-// already granted (an attacker's key, say) is still being carried out, and
-// must still be flagged.
 func (c Change) Conflicts(other Change) bool {
 	if c.Op != other.Op || c.User != other.User || c.Path != other.Path {
 		return false
@@ -149,10 +133,6 @@ func (d *Diff) String() string {
 // pair the old name with the new one, so a renamed user or a moved secret path
 // shows up as a removal plus an addition. `sesam user rename` and
 // `sesam secret move` stay the explicit route for those.
-//
-// A declaration the repository could not legally be moved to - a user in no
-// group, a config without any admin - is an error rather than a set of
-// changes, and every such problem is reported at once.
 func Compute(vstate *core.VerifiedState, declared *config.State) (*Diff, error) {
 	if err := validate(vstate, declared); err != nil {
 		return nil, err
@@ -162,11 +142,7 @@ func Compute(vstate *core.VerifiedState, declared *config.State) (*Diff, error) 
 }
 
 // Delta returns how the two states differ, without judging whether the
-// declaration could be applied - Compute is Delta plus that judgement.
-//
-// A caller that rewrites the declaration instead of the audit log (`sesam
-// config reset`) wants an answer even for a declaration no apply would accept:
-// a config that lost its last admin is exactly the one that needs resetting.
+// declaration could be applied
 func Delta(vstate *core.VerifiedState, declared *config.State) *Diff {
 	users := userChanges(vstate, declared)
 	secrets := secretChanges(vstate, declared)
@@ -336,23 +312,8 @@ func secretChanges(vstate *core.VerifiedState, declared *config.State) []Change 
 
 // recipientDelta pairs a user's declared key specs with the recipients recorded
 // for them in the audit log.
-//
-// A recipient matches a spec either by its source (the spec it was resolved
-// from, e.g. "github:alice") or by its key material (a spec written verbatim in
-// the config). Matching both ways keeps the diff convergent when the same key
-// is declared under two spec forms, which the audit log collapses into a single
-// recipient carrying only one of them as its source.
-//
-// Comparing sources rather than resolving the specs means a forge whose
-// contents changed since the key was recorded produces no change here. That is
-// deliberate: pinning is what makes the recorded key trustworthy, and surfacing
-// the drift is `sesam verify --forge`'s job.
 func recipientDelta(recps core.Recipients, specs []string) (add, remove []string) {
 	matches := func(r *core.Recipient, spec string) bool {
-		// r.Spec(), not string(r.Source): a manual key's Source is literally
-		// the sentinel "manual", so comparing it raw would make a declared
-		// spec of "manual" match every manually-keyed recipient regardless of
-		// its actual material - Spec() resolves it to the key itself instead.
 		return r.Spec() == spec || r.String() == spec
 	}
 

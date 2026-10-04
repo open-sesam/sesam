@@ -17,11 +17,7 @@ import (
 // ConfigResetOpts controls how a reset behaves.
 type ConfigResetOpts struct {
 	// Force actually writes sesam.yml. Without it, ConfigReset only computes
-	// and reports what a reset would do - discard some declared changes, or
-	// rewrite the file from scratch, comments and descriptions included - and
-	// leaves every file exactly as it is. The work still happens, on a
-	// throwaway copy of the config tree, so what comes back is the real
-	// outcome, not a prediction of one.
+	// and reports what a reset would do
 	Force bool
 }
 
@@ -29,39 +25,25 @@ type ConfigResetOpts struct {
 // Force.
 type ConfigReset struct {
 	// Discarded are the changes the config declared on top of the audit log,
-	// i.e. the hand edits that were (or would be, without Force) thrown away.
-	// Empty when the two agreed.
+	// i.e. the hand edits that were thrown away. Empty when the two agreed.
 	Discarded []diff.Change `json:"discarded"`
 
-	// Rewritten is set when sesam.yml could not be reused and was (or would
-	// be, without Force) written from scratch, losing its comments and
-	// descriptions. Reason says why.
+	// Rewritten is set when sesam.yml could not be reused and was written from scratch
+	// losing its comments and descriptions. Reason says why.
 	Rewritten bool   `json:"rewritten"`
 	Reason    string `json:"reason,omitempty"`
 
 	// Orphaned are config files still on disk that the rewritten sesam.yml no
-	// longer includes. They are left alone - deleting a user's file is not
-	// reset's call - but nothing reads them any more, so they are reported.
+	// longer includes. Not deleted but reported.
 	Orphaned []string `json:"orphaned,omitempty"`
 
-	// Deleted are sub-config files the repair-in-place path removed (or would
-	// remove, without Force) from disk: reverting a locally-added secret can
-	// leave the sub-file it lived in with no secrets or includes of its own,
-	// and the config mutators delete such a file rather than leave it empty.
+	// Deleted are sub-config files the repair-in-place path removed from disk
 	Deleted []string `json:"deleted,omitempty"`
 }
 
 // ConfigReset rewrites sesam.yml to describe the verified state, discarding
 // whatever the file declared on top of it. The audit log is the source and is
 // never touched - this is the opposite direction of `sesam config apply`.
-//
-// Without Force this only reports what would happen: the work runs against a
-// throwaway copy of the config tree - diff.Revert's mutators (an emptied
-// sub-config's removal, say) delete files outright rather than merely editing
-// them, so reset must not do that to a real file unless told to - and every
-// real file is left exactly as it is. Force runs the same code against the
-// live tree and writes the result; it is the only thing that gates a rewrite
-// too, so a normal run reports that one would happen instead of refusing.
 func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -270,9 +252,6 @@ func (v *View) configPaths() ([]string, error) {
 
 		rel := filepath.FromSlash(p)
 		if entry.IsDir() {
-			// entry.Name(), not rel: a nested .git or .sesam (a submodule, a
-			// sub-repo checked out under this one) must be skipped by name at
-			// any depth, not just when it sits at the walk root.
 			switch entry.Name() {
 			case sesamSuffix, gitSuffix, forkSuffix:
 				return fs.SkipDir

@@ -60,9 +60,7 @@ func groupsOrAdmin(groups []string) string {
 
 // shortMaterialLen is longer than shortIDLen: an SSH key's wire format repeats
 // its algorithm name inside the base64 blob itself, so two different
-// ed25519 keys share a prefix well past 12 characters - shortIDLen's cut
-// would print them identically. Hashes and UUIDs (shortID's other use) don't
-// have this problem, so they keep the shorter cut.
+// ed25519 keys share a prefix well past 12 characters
 const shortMaterialLen = 32
 
 func shortPubKeys(pubs []core.UserPubKey, full bool) string {

@@ -19,9 +19,7 @@ type Membership struct {
 
 // SecretAccess is a secret the audit log and the config describe identically:
 // the path made sesam-relative, and the access list. Used directly as the
-// secret type on both sides - unlike a user, a secret has nothing that
-// differs between declared and verified, so there is no wrapping type (an
-// equivalent of VerifiedUser/StateUser) to keep the two apart.
+// secret type on both sides
 type SecretAccess struct {
 	RevealedPath string
 	AccessGroups []string

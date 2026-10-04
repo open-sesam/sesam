@@ -145,9 +145,7 @@ func printAppliedEntries(r *repo.Repo, before uint64, count int) error {
 
 // HandleConfigReset rewrites sesam.yml to describe the audit log again,
 // discarding whatever the file declared on top of it. Without --force it only
-// reports what would happen - a discard count, or a warning that the file
-// would need to be rewritten from scratch - and touches nothing; --force is
-// what actually writes it, whichever of the two it turns out to be.
+// reports what would happen
 func HandleConfigReset(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	force := cmd.Bool("force")
 
@@ -195,11 +193,7 @@ func HandleConfigReset(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 }
 
 // printDeleted reports sub-config files the repair-in-place path emptied and
-// removed (or would remove, without force) from disk - discarding a declared
-// secret can leave the sub-file it lived in with no secrets or includes of
-// its own, and reset deletes such a file rather than leave it empty. Unlike
-// an orphan, this one is not left for the user to deal with, so it needs its
-// own note either way.
+// removed (or would remove, without force) from disk
 func printDeleted(r *repo.Repo, reset *repo.ConfigReset, force bool) {
 	verb := "deleted"
 	if !force {

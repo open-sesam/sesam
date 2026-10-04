@@ -170,9 +170,7 @@ func ValidUserName(name string) error {
 }
 
 // ValidGroupName applies the same character and length rules ValidUserName
-// does. Group names are never used in a file path the way user names are, but
-// they end up in the same places (rendered output, the audit log, JSON) where
-// an unexpected character would cause the same kind of trouble.
+// does.
 func ValidGroupName(name string) error {
 	return validName("group", name)
 }
