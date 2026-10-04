@@ -1,0 +1,78 @@
+# pass-style shorthand: an argument that is not a subcommand falls through to
+# `show`, flags included. A bare `sesam` still prints the help, and a real
+# subcommand always wins over a secret of the same name.
+
+env CLIPBOARD_FILE=$WORK/clipboard
+env SESAM_CLIPBOARD_COPY_CMD=$WORK/copy.sh
+env SESAM_CLIPBOARD_PASTE_CMD=$WORK/paste.sh
+env XDG_RUNTIME_DIR=$WORK/run
+mkdir $WORK/run
+chmod 0755 $WORK/copy.sh
+chmod 0755 $WORK/paste.sh
+chmod 0755 $WORK/clear.sh
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec sesam add pw.txt --group dev
+
+# Bare `sesam` prints the root help, not show's - the command list is the
+# whole point of it.
+exec sesam
+stdout 'Manage encrypted secrets in git repositories'
+stdout 'SECRETS'
+! stdout 'sesam show - '
+
+# Only global flags is still no request to show anything.
+exec sesam --quiet
+stdout 'Manage encrypted secrets in git repositories'
+
+# `sesam show` on its own asks about show, so it gets show's help.
+exec sesam show
+stdout 'sesam show - '
+! stdout 'Manage encrypted secrets in git repositories'
+
+# A path falls through to show.
+exec sesam pw.txt
+stdout 's3cr3t'
+
+# ... and so do show's flags, on either side of the implied command name.
+exec sesam -c --ttl 0 pw.txt
+! stdout .
+grep '^s3cr3t$' $WORK/clipboard
+
+exec $WORK/clear.sh
+exec sesam --ttl 0 -c pw.txt
+! stdout .
+grep '^s3cr3t$' $WORK/clipboard
+
+# The explicit form keeps working unchanged.
+exec $WORK/clear.sh
+exec sesam show -c --ttl 0 pw.txt
+! stdout .
+grep '^s3cr3t$' $WORK/clipboard
+
+# A real subcommand is never shadowed, even by a secret of the same name.
+exec sesam add status --group dev
+exec sesam status
+stdout 'in sync'
+! stdout 'i am not the status command'
+
+-- pw.txt --
+s3cr3t
+-- status --
+i am not the status command
+-- copy.sh --
+#!/bin/sh
+cat > "$CLIPBOARD_FILE"
+-- paste.sh --
+#!/bin/sh
+cat "$CLIPBOARD_FILE" 2>/dev/null
+-- clear.sh --
+#!/bin/sh
+: > "$CLIPBOARD_FILE"

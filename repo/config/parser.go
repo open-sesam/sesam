@@ -517,7 +517,7 @@ func fileIncludes(root ast.Node) []string {
 func ownSecrets(src *FileSource) ([]Secret, error) {
 	seq, err := secretsNode(src.RootNode)
 	if err != nil {
-		return nil, nil
+		return nil, nil //nolint:nilerr
 	}
 
 	dec, err := primedDecoder(src)

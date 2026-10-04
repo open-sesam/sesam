@@ -198,7 +198,6 @@ func writeFileCopies(destDir string, paths []string, read func(path string) (dat
 			return fmt.Errorf("make dir for %s: %w", dst, err)
 		}
 
-		//nolint:gosec
 		if err := os.WriteFile(dst, data, 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", dst, err)
 		}

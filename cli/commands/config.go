@@ -114,7 +114,7 @@ func latestSeqID(r *repo.Repo) (uint64, error) {
 // with seq_id in (before, before+count]) the same way `sesam log` renders any
 // other entry
 func printAppliedEntries(r *repo.Repo, before uint64, count int) error {
-	ceiling := before + uint64(count)
+	ceiling := before + uint64(count) //nolint:gosec
 
 	entries := make([]*core.AuditEntrySigned, 0, count)
 	err := r.Log(func(e *core.AuditEntrySigned) error {

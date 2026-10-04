@@ -504,7 +504,7 @@ func writeCommittedConfigs(
 		file, err := tree.File(path.Join(prefix, filepath.ToSlash(rel)))
 		if err != nil {
 			// Not committed (yet): nothing to compare against.
-			return nil, true, nil
+			return nil, true, nil //nolint:nilerr
 		}
 
 		contents, err := file.Contents()
