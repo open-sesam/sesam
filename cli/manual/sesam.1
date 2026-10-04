@@ -10,6 +10,8 @@ sesam
 
 .EX
 [--askpass]=[value]
+[--clipboard-copy-cmd]=[value]
+[--clipboard-paste-cmd]=[value]
 [--cpuprofile]=[value]
 [--help|-h]
 [--identity|-i]=[value]
@@ -23,19 +25,12 @@ sesam
 [--version]
 .EE
 
-.PP
-\fBUsage\fP:
-
-.EX
-sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
-.EE
-
 
 .SH DESCRIPTION
 \fB\fBsesam\fR is a tool for managing secrets in git.\fP
 
 .PP
-That's more or less all there is. Let's dismantle that sentence a bit:
+Let's discuss the sentence above some more:
 .IP \(bu 2
 \fBsecrets\fR: Are just regular files that contain something precious to you. They are on your filesystem \fIrevealed\fP (decrypted) and \fIsealed\fP (encrypted).
 .IP \(bu 2
@@ -131,6 +126,12 @@ Deeper support for \fBenv\fR files.
 \fB--askpass\fP="": Askpass helper for encrypted identities [$SESAM_ASKPASS, $GIT_ASKPASS, $SSH_ASKPASS]
 
 .PP
+\fB--clipboard-copy-cmd\fP="": Command reading the secret on stdin, instead of the system clipboard [$SESAM_CLIPBOARD_COPY_CMD]
+
+.PP
+\fB--clipboard-paste-cmd\fP="": Command printing the clipboard, instead of the system clipboard [$SESAM_CLIPBOARD_PASTE_CMD]
+
+.PP
 \fB--cpuprofile\fP="": Write a CPU profile of this invocation to \fBFILE\fR (pprof format) [$SESAM_CPUPROFILE]
 
 .PP
@@ -203,6 +204,9 @@ Verify sesam signatures and encryption state
 
 .PP
 \fB--all\fP: Run all verifications
+
+.PP
+\fB--config\fP: Check sesam.yml does not declare a change that already arrived committed (not part of --all)
 
 .PP
 \fB--forge-check\fP: Verify the forge public keys did not change since adding users
@@ -379,7 +383,19 @@ Show overview over repo state (revealed, sealed, unmanaged, ...)
 Show objects managed by sesam
 
 .PP
+\fB--alsoclip, -C\fP: Copy to clipboard and print to stdout
+
+.PP
+\fB--clip, -c\fP: Copy to clipboard instead of printing to stdout
+
+.PP
 \fB--help, -h\fP: show help
+
+.PP
+\fB--ttl, -t\fP="": How long to wait before clearing the clipboard (0 disables) (default: 45s)
+
+.PP
+\fB--wait, -w\fP: Wait for the password to be cleared instead of forking to the background
 
 .SS ls, list-secrets
 List known secrets and metadata
@@ -558,23 +574,23 @@ Show the diff between config and actual state (extra args are passed to git)
 .PP
 \fB--json\fP: Print output as JSON
 
-.SS config get
-Get specific config keys
+.PP
+\fB--validate\fP: Fail if 'sesam config apply --force' would refuse the config (dry run, needs admin rights)
+
+.SS config print
+Print the whole config as one document, includes resolved (YAML, or JSON with --json)
 
 .PP
 \fB--help, -h\fP: show help
 
-.SS config set
-Set specific config keys
-
 .PP
-\fB--help, -h\fP: show help
+\fB--json\fP: Print output as JSON
 
 .SS config reset
 Derive config from audit log
 
 .PP
-\fB--dry-run\fP: Report what would be reset without writing anything
+\fB--force, -f\fP: Rewrite sesam.yml from scratch when it cannot be repaired in place, losing comments and descriptions
 
 .PP
 \fB--help, -h\fP: show help
@@ -1214,10 +1230,10 @@ applied 2 changes
 .EE
 
 .PP
-Every step is recorded in the audit log, or none of them is: if one cannot be
-carried out, nothing is written and the reason is printed. \fBsesam.yml\fR itself is
-never rewritten by \fBapply\fR - your comments and descriptions stay as you wrote
-them. To see what would happen first, run \fBsesam config diff\fR\&.
+Every step is recorded in the audit log.
+If one cannot be carried out, nothing is written and the reason is printed.
+\fBsesam.yml\fR itself is never rewritten by \fBapply\fR, so your comments and descriptions
+stay. To see what would happen first, run \fBsesam config diff\fR\&.
 
 .PP
 .RS
@@ -1226,19 +1242,18 @@ them. To see what would happen first, run \fBsesam config diff\fR\&.
 \fBChanges have to come from your working tree\fP
 
 .PP
-\fBsesam apply\fR refuses steps that are already committed.
-
-.PP
-A config that arrived with a \fBgit pull\fR was not written by you, and applying it
-because someone asked you to "just run \fBsesam apply\fR" is how a pushed
-\fBsesam.yml\fR turns into real access to secrets. Check where the change came from
-(\fBgit log -p -- sesam.yml\fR) and pass \fB--force\fR once you are happy with it.
+A config you \fBgit pull\fRed should not be applied without manual approval.
+Read through it and make sure any changes made are fine (\fBgit log -p -- sesam.yml\fR).
+If the changes are looking good, use \fBsesam apply --force\fR\&.
 
 .RE
 
 .PP
 Went too far while editing? \fBsesam config reset\fR rewrites \fBsesam.yml\fR from the
-audit log, throwing your edits away - \fB--dry-run\fR shows what it would discard.
+audit log, throwing your edits away.
+It edits the file in place, so your comments and descriptions survive, but a config
+too broken to read can only be replaced from scratch, so reset asks for \fB--force\fR
+before doing that.
 
 .PP
 Changing groups later works the same way.
