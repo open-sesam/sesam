@@ -208,15 +208,13 @@ Decrypt all secrets available to the current user
 
 ## run
 
-Run a command with selected secrets in its environment
-
-**--all, -a**: Inject all secrets accessible to the current user
+Run a command with secret files and dotenv variables
 
 **--env-file**="": Inject variables from an exact dotenv secret file (repeatable)
 
 **--help, -h**: show help
 
-**--secret**="": Inject an exact secret file as SESAM_SECRET_<PATH> (repeatable)
+**--secret**="": Expose an exact secret file as VARIABLE=path; VARIABLE holds a /dev/fd path (repeatable)
 
 ## status, s
 
