@@ -33,6 +33,9 @@ const (
 // build managers, defer Close) and hand it to the handler; the wrapping
 // makes it obvious which commands need an initialized sesam repository.
 func Main(args []string) error {
+	if len(args) == 2 && args[1] == "__run-supervisor" {
+		return commands.RunSupervisor()
+	}
 	installHelpOrdering()
 
 	cli.VersionFlag = &cli.BoolFlag{
@@ -210,7 +213,7 @@ func Main(args []string) error {
 				},
 				ShellComplete:             completeFiles,
 				DisableSliceFlagSeparator: true,
-				Usage:                     "Run a command with selected secrets in its environment",
+				Usage:                     "Run a command with secret files and dotenv variables",
 			},
 			{
 				Name:          "status",
@@ -440,18 +443,17 @@ func Main(args []string) error {
 
 	var activeProfile *profileState
 	var runInvocation bool
+	stopSignals := func() {}
+	defer func() { stopSignals() }()
 
 	app.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 		runInvocation = cmd.Args().First() == "run"
+		if !runInvocation {
+			ctx, stopSignals = signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+		}
 		if runInvocation {
 			if mode := cmd.String("verify-mode"); mode != "all" {
 				return ctx, fmt.Errorf("sesam run does not support --verify-mode=%s", mode)
-			}
-			if cmd.String("cpuprofile") != "" {
-				return ctx, fmt.Errorf("sesam run does not support --cpuprofile")
-			}
-			if cmd.String("memprofile") != "" {
-				return ctx, fmt.Errorf("sesam run does not support --memprofile")
 			}
 		}
 
@@ -481,23 +483,13 @@ func Main(args []string) error {
 		return ctx, nil
 	}
 
-	// After runs like a deferred cleanup (also on a failed action). Run rejects
-	// profiles because a successful process replacement cannot flush them.
+	// After runs like a deferred cleanup (also on a failed action). For run it
+	// covers sesam itself, not the command it waits for.
 	app.After = func(_ context.Context, cmd *cli.Command) error {
-		if runInvocation {
-			return nil
-		}
 		return activeProfile.stop(cmd.String("memprofile"))
 	}
 
-	ctx, cancel := signal.NotifyContext(
-		context.Background(),
-		syscall.SIGINT,
-		syscall.SIGTERM,
-	)
-	defer cancel()
-
-	return app.Run(ctx, args)
+	return app.Run(context.Background(), args)
 }
 
 func hasArgumentSeparator(args, commandArgs []string) bool {

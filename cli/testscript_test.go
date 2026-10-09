@@ -2,19 +2,31 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"filippo.io/age"
 	"filippo.io/age/armor"
 	"github.com/rogpeppe/go-internal/testscript"
+	"opensesam.org/sesam/cli/commands"
 )
+
+type runProbeState struct {
+	PID  int
+	PPID int
+}
 
 const askpassTestPassphrase = "askpass-test-passphrase"
 
@@ -22,6 +34,10 @@ func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
 		"sesam": func() {
 			if err := Main(os.Args); err != nil {
+				var exitErr *commands.ExitError
+				if errors.As(err, &exitErr) {
+					exitErr.Terminate()
+				}
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -190,6 +206,42 @@ func runProbe() {
 			value, exists := os.LookupEnv(name)
 			fmt.Printf("%s=%q exists=%t\n", name, value, exists)
 		}
+	case "files":
+		for _, name := range os.Args[2:] {
+			if err := runProbeFile(name); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+		}
+	case "no-temp-files":
+		entries, err := os.ReadDir(os.TempDir())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), "sesam-run-") {
+				fmt.Fprintln(os.Stderr, "leftover secret file:", entry.Name())
+				os.Exit(2)
+			}
+		}
+	case "hold":
+		if len(os.Args) > 3 && os.Args[3] == "ignore-term" {
+			signal.Ignore(syscall.SIGTERM)
+		}
+		if _, err := os.ReadFile(os.Getenv(os.Args[2])); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(runProbeState{PID: os.Getpid(), PPID: os.Getppid()}); err != nil {
+			os.Exit(2)
+		}
+		time.Sleep(time.Hour)
+	case "supervise":
+		if err := runProbeSupervision(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "exit":
 		code, err := strconv.Atoi(os.Args[2])
 		if err != nil {
@@ -256,8 +308,112 @@ func runProbe() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "write-binary":
+		if err := os.WriteFile(os.Args[2], []byte("a\x00\xffb\n"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	case "write-binary-env":
+		if err := os.WriteFile(os.Args[2], []byte("BINARY='a\xffb'\n"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "runprobe: unknown operation %q\n", os.Args[1])
 		os.Exit(2)
 	}
+}
+
+func runProbeFile(name string) error {
+	path := os.Getenv(name)
+	if !strings.HasPrefix(path, "/dev/fd/") {
+		return fmt.Errorf("%s is not a descriptor path: %q", name, path)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s=%q mode=%04o links=%d\n", name, content, info.Mode().Perm(), info.Sys().(*syscall.Stat_t).Nlink)
+	return nil
+}
+
+func runProbeSupervision(args []string) error {
+	sig, err := strconv.Atoi(args[0])
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	defer writer.Close()
+	command := exec.CommandContext(ctx, args[1], args[2:]...)
+	command.Stdout = writer
+	command.Stderr = os.Stderr
+	if err := command.Start(); err != nil {
+		return err
+	}
+	defer command.Process.Kill()
+	_ = writer.Close()
+	var state runProbeState
+	ready := make(chan error, 1)
+	go func() { ready <- json.NewDecoder(reader).Decode(&state) }()
+	select {
+	case err := <-ready:
+		if err != nil {
+			_ = command.Wait()
+			return err
+		}
+	case <-ctx.Done():
+		_ = command.Wait()
+		return ctx.Err()
+	}
+	if state.PID <= 0 || state.PPID <= 0 || state.PPID == command.Process.Pid {
+		return fmt.Errorf("command does not have a separate supervisor: %+v", state)
+	}
+	defer syscall.Kill(state.PID, syscall.SIGKILL)
+	defer syscall.Kill(state.PPID, syscall.SIGKILL)
+	closed := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, reader)
+		closed <- err
+	}()
+	if err := command.Process.Signal(syscall.Signal(sig)); err != nil {
+		return err
+	}
+	waitErr := command.Wait()
+	var exitErr *exec.ExitError
+	if !errors.As(waitErr, &exitErr) {
+		return fmt.Errorf("expected signal exit, got %v", waitErr)
+	}
+	status := exitErr.Sys().(syscall.WaitStatus)
+	if sig == int(syscall.SIGKILL) && (!status.Signaled() || int(status.Signal()) != sig) ||
+		sig != int(syscall.SIGKILL) && (!status.Exited() || status.ExitStatus() != 128+sig) {
+		return fmt.Errorf("unexpected parent wait status: %v", status)
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			return err
+		}
+	case <-ctx.Done():
+		return fmt.Errorf("child or supervisor survived parent termination: %w", ctx.Err())
+	}
+	if err := syscall.Kill(state.PID, 0); !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("child was not reaped: %v", err)
+	}
+	fmt.Printf("parent signal=%d child terminated and reaped\n", sig)
+	return nil
 }

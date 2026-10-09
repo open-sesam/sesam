@@ -5,11 +5,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/muesli/termenv"
 	"opensesam.org/sesam/cli"
+	"opensesam.org/sesam/cli/commands"
 )
 
 func printError(msg string) {
@@ -21,8 +23,18 @@ func printError(msg string) {
 }
 
 func main() {
-	if err := cli.Main(os.Args); err != nil {
-		printError(err.Error())
-		os.Exit(1)
+	err := cli.Main(os.Args)
+	if err == nil {
+		return
 	}
+
+	// A command run by `sesam run` reported its own failure already; sesam only
+	// reproduces its status.
+	var exitErr *commands.ExitError
+	if errors.As(err, &exitErr) {
+		exitErr.Terminate()
+	}
+
+	printError(err.Error())
+	os.Exit(1)
 }

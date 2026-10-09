@@ -4,21 +4,32 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"unsafe"
 
 	"opensesam.org/sesam/core"
 )
 
-// RunOptions contains already-canonical selectors and the inherited process
-// inputs used to prepare an environment for sesam run.
+// RunOptions contains canonical sesam-relative selectors for sesam run.
 type RunOptions struct {
-	All         bool
-	Secrets     []string
-	EnvFiles    []string
-	Environment []string
-	Arguments   []string
+	Secrets  []RunSecret
+	EnvFiles []string
+}
+
+type RunSecret struct {
+	Name string
+	Path string
+}
+
+type RunFile struct {
+	Name    string
+	Content []byte
+}
+
+// RunPreparation holds verified file contents and parsed dotenv entries.
+type RunPreparation struct {
+	Files   []RunFile
+	entries []runEntry
 }
 
 type runEntry struct {
@@ -37,59 +48,28 @@ const (
 	runMaxProcessSize       = 96 * 1024
 )
 
-// PrepareRunEnvironment verifies selected objects and builds a child-only
-// environment without mutating the current process.
-func (v *View) PrepareRunEnvironment(opts RunOptions) ([]string, error) {
+// PrepareRun reads selected encrypted objects without revealing worktree files.
+func (v *View) PrepareRun(opts RunOptions) (*RunPreparation, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
 	if v.isClosed() {
 		return nil, ErrClosed
 	}
-	if opts.All {
-		if len(opts.Secrets) > 0 {
-			return nil, fmt.Errorf("--all and --secret cannot be used together")
-		}
-		if err := validateRunSelectors(nil, opts.EnvFiles); err != nil {
-			return nil, err
-		}
-
-		envFiles := make(map[string]struct{}, len(opts.EnvFiles))
-		for _, path := range opts.EnvFiles {
-			envFiles[path] = struct{}{}
-		}
-		secrets := make([]string, 0, len(v.vstate.Secrets))
-		for _, secret := range v.vstate.Secrets {
-			if _, overridden := envFiles[secret.RevealedPath]; overridden {
-				continue
-			}
-			if v.vstate.UserHasAccess(v.whoami, secret.AccessGroups) {
-				secrets = append(secrets, secret.RevealedPath)
-			}
-		}
-		sort.Strings(secrets)
-		opts.Secrets = secrets
-		if len(opts.Secrets)+len(opts.EnvFiles) == 0 {
-			return nil, fmt.Errorf("no secrets accessible to user %s", v.whoami)
-		}
-		opts.All = false
-	}
-
-	return prepareRunEnvironment(opts, v.secret.RevealSecretBytes)
+	return prepareRun(opts, v.secret.RevealSecretBytes)
 }
 
-func prepareRunEnvironment(opts RunOptions, reveal runRevealFunc) ([]string, error) {
-	if len(opts.Secrets)+len(opts.EnvFiles) == 0 {
-		return nil, fmt.Errorf("at least one --secret or --env-file is required")
-	}
-	if len(opts.Arguments) == 0 || opts.Arguments[0] == "" {
+// Environment binds file paths to explicit names and validates the complete
+// child environment without changing the caller's environment.
+func (p *RunPreparation) Environment(inherited, arguments, filePaths []string) ([]string, error) {
+	if len(arguments) == 0 || arguments[0] == "" {
 		return nil, fmt.Errorf("a command is required after --")
 	}
-	if err := validateRunSelectors(opts.Secrets, opts.EnvFiles); err != nil {
-		return nil, err
+	if len(filePaths) != len(p.Files) {
+		return nil, fmt.Errorf("expected %d secret file paths, got %d", len(p.Files), len(filePaths))
 	}
 
-	env := append([]string(nil), opts.Environment...)
+	env := append([]string(nil), inherited...)
 	owners := make(map[string]string, len(env))
 	for _, encoded := range env {
 		name, _, _ := strings.Cut(encoded, "=")
@@ -124,6 +104,31 @@ func prepareRunEnvironment(opts RunOptions, reveal runRevealFunc) ([]string, err
 		return nil
 	}
 
+	for i, file := range p.Files {
+		if err := add(runEntry{name: file.Name, value: []byte(filePaths[i])}, fmt.Sprintf("file secret %q", file.Name)); err != nil {
+			return nil, err
+		}
+	}
+	for _, entry := range p.entries {
+		if err := add(entry, "env file"); err != nil {
+			return nil, err
+		}
+	}
+	if size := runProcessSize(arguments, env); size > runMaxProcessSize {
+		return nil, fmt.Errorf("command arguments and environment require %d bytes, exceeding %d-byte budget", size, runMaxProcessSize)
+	}
+	return env, nil
+}
+
+func prepareRun(opts RunOptions, reveal runRevealFunc) (*RunPreparation, error) {
+	if len(opts.Secrets)+len(opts.EnvFiles) == 0 {
+		return nil, fmt.Errorf("at least one --secret or --env-file is required")
+	}
+	if err := validateRunSelectors(opts.Secrets, opts.EnvFiles); err != nil {
+		return nil, err
+	}
+
+	prepared := &RunPreparation{}
 	totalPlaintext := 0
 	read := func(path string) ([]byte, error) {
 		plaintext, err := reveal(path)
@@ -140,14 +145,12 @@ func prepareRunEnvironment(opts RunOptions, reveal runRevealFunc) ([]string, err
 		return plaintext, nil
 	}
 
-	for _, path := range opts.Secrets {
-		value, err := read(path)
+	for _, secret := range opts.Secrets {
+		value, err := read(secret.Path)
 		if err != nil {
-			return nil, fmt.Errorf("read secret %s: %w", path, err)
+			return nil, fmt.Errorf("read secret %s: %w", secret.Path, err)
 		}
-		if err := add(runEntry{name: runSecretName(path), value: value}, fmt.Sprintf("secret %q", path)); err != nil {
-			return nil, err
-		}
+		prepared.Files = append(prepared.Files, RunFile{Name: secret.Name, Content: value})
 	}
 
 	for _, path := range opts.EnvFiles {
@@ -159,21 +162,13 @@ func prepareRunEnvironment(opts RunOptions, reveal runRevealFunc) ([]string, err
 		if err != nil {
 			return nil, fmt.Errorf("parse env file %s: %w", path, err)
 		}
-		for _, entry := range entries {
-			if err := add(entry, fmt.Sprintf("env file %q", path)); err != nil {
-				return nil, err
-			}
-		}
+		prepared.entries = append(prepared.entries, entries...)
 	}
 
-	if size := runProcessSize(opts.Arguments, env); size > runMaxProcessSize {
-		return nil, fmt.Errorf("command arguments and environment require %d bytes, exceeding %d-byte budget", size, runMaxProcessSize)
-	}
-
-	return env, nil
+	return prepared, nil
 }
 
-func validateRunSelectors(secrets, envFiles []string) error {
+func validateRunSelectors(secrets []RunSecret, envFiles []string) error {
 	seen := make(map[string]string, len(secrets)+len(envFiles))
 	check := func(path, mode string) error {
 		if path == "" || path == "." || filepath.IsAbs(path) || filepath.Clean(path) != path || path == ".." || strings.HasPrefix(path, ".."+string(filepath.Separator)) {
@@ -189,8 +184,16 @@ func validateRunSelectors(secrets, envFiles []string) error {
 		return nil
 	}
 
-	for _, path := range secrets {
-		if err := check(path, "secret"); err != nil {
+	for _, secret := range secrets {
+		if secret.Name == "" || !isDotenvNameStart(secret.Name[0]) {
+			return fmt.Errorf("invalid secret variable name %q", secret.Name)
+		}
+		for i := 1; i < len(secret.Name); i++ {
+			if !isDotenvNameByte(secret.Name[i]) {
+				return fmt.Errorf("invalid secret variable name %q", secret.Name)
+			}
+		}
+		if err := check(secret.Path, "secret"); err != nil {
 			return err
 		}
 	}
@@ -200,24 +203,6 @@ func validateRunSelectors(secrets, envFiles []string) error {
 		}
 	}
 	return nil
-}
-
-func runSecretName(path string) string {
-	var name strings.Builder
-	name.Grow(len("SESAM_SECRET_") + len(path))
-	name.WriteString("SESAM_SECRET_")
-	for i := 0; i < len(path); i++ {
-		b := path[i]
-		switch {
-		case b >= 'a' && b <= 'z':
-			name.WriteByte(b - ('a' - 'A'))
-		case b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
-			name.WriteByte(b)
-		default:
-			name.WriteByte('_')
-		}
-	}
-	return name.String()
 }
 
 func parseDotenv(document []byte) ([]runEntry, error) {

@@ -226,14 +226,9 @@ var flagsMove = []cli.Flag{
 }
 
 var flagsRun = []cli.Flag{
-	&cli.BoolFlag{
-		Name:    "all",
-		Aliases: []string{"a"},
-		Usage:   "Inject all secrets accessible to the current user",
-	},
 	&cli.StringSliceFlag{
 		Name:  "secret",
-		Usage: "Inject an exact secret file as SESAM_SECRET_<PATH> (repeatable)",
+		Usage: "Expose an exact secret file as VARIABLE=path; VARIABLE holds a /dev/fd path (repeatable)",
 	},
 	&cli.StringSliceFlag{
 		Name:  "env-file",

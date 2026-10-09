@@ -16,46 +16,54 @@ stderr 'invalid byte in unquoted value'
 ! exists started-malformed
 ! exists malformed.env
 
-! exec sesam run --secret oversize.txt -- runprobe mark started-oversize
+! exec sesam run --secret LARGE=oversize.txt -- runprobe mark started-oversize
 stderr 'exceeds 65536 bytes'
 ! exists started-oversize
 ! exists oversize.txt
 
-! exec sesam run --secret raw.txt -- command-that-does-not-exist
+! exec sesam run --secret RAW=raw.txt -- command-that-does-not-exist
 stderr 'find command.*using inherited PATH'
 
 exec chmod +x bad-exec
-! exec sesam run --secret raw.txt -- ./bad-exec
+! exec sesam run --secret RAW=raw.txt -- ./bad-exec
 stderr 'exec command.*exec format error'
+exec runprobe no-temp-files
 exec sesam id
 stdout '^admin$'
 
-exec runprobe status sesam run --secret raw.txt -- runprobe exit 23
+exec runprobe status sesam run --secret RAW=raw.txt -- runprobe exit 23
 stdout 'exit=23 signal=0'
+exec runprobe no-temp-files
 
-exec runprobe status sesam run --secret raw.txt -- runprobe signal
-stdout 'exit=-1 signal=15'
+exec runprobe status sesam run --secret RAW=raw.txt -- runprobe signal
+stdout 'exit=143 signal=0'
+exec runprobe no-temp-files
 
 ! exec sesam run -- runprobe mark started-no-selector
-stderr 'at least one --secret, --env-file, or --all is required'
+stderr 'at least one --secret or --env-file is required'
 ! exists started-no-selector
 
-! exec sesam run --all --secret raw.txt -- runprobe mark started-conflicting-selection
-stderr '--all and --secret cannot be used together'
-! exists started-conflicting-selection
+! exec sesam run --secret raw.txt -- runprobe mark started-invalid-mapping
+stderr 'must be VARIABLE=path'
+! exists started-invalid-mapping
 
-! exec sesam run --secret raw.txt --
+! exec sesam run --secret BAD-NAME=raw.txt -- runprobe mark started-invalid-name
+stderr 'invalid secret variable name'
+! exists started-invalid-name
+
+! exec sesam run --secret RAW=raw.txt --
 stderr 'a command is required after --'
 
-! exec sesam run --secret raw.txt runprobe mark started-no-separator
+! exec sesam run --secret RAW=raw.txt runprobe mark started-no-separator
 stderr 'a command is required after --'
 ! exists started-no-separator
 
 # Inherited names are never overwritten.
-env SESAM_SECRET_RAW_TXT=parent
-! exec sesam run --secret raw.txt -- runprobe mark started-collision
-stderr 'SESAM_SECRET_RAW_TXT.*collides with inherited environment'
+env RAW=parent
+! exec sesam run --secret RAW=raw.txt -- runprobe mark started-collision
+stderr 'RAW.*collides with inherited environment'
 ! exists started-collision
+exec runprobe no-temp-files
 
 -- raw-fixture --
 raw
