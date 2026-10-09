@@ -1,0 +1,59 @@
+# The incoming branch is checked against its OWN audit log, not ours. That is not
+# a technicality: a branch may add a user and have that user seal a secret, and
+# our side has never heard of them until the log merge applies the tell. Checking
+# against our log instead would reject that entirely legitimate branch.
+
+sesam-repo admin base.txt mine.txt theirs.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+
+# THEIRS: a new admin is told in, and that new user reseals the secret.
+exec git checkout -b withbob
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group admin
+exec git add -A
+exec git commit -m 'tell bob'
+
+cp $TMPDIR/theirs.txt s
+env SESAM_ID=$BOB_KEY
+exec sesam seal
+exec git add -A
+exec git commit -m 'bob reseals s'
+
+# The object really is sealed by someone our branch does not know yet.
+exec sesam show .sesam/objects/s.sesam
+stdout 'THEIRS'
+grep '"sealed_by":"bob"' .sesam/objects/s.sesam
+
+# OURS: our own change to the same secret, so the driver has to merge it.
+env SESAM_ID=$ADMIN_KEY
+exec git checkout master
+cp $TMPDIR/mine.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'ours: reseal s'
+
+# Accepted: bob is vouched for by the log of the branch he sealed on.
+! exec git merge withbob
+stderr 'automatically merging revealed file s'
+! stderr 'does not verify'
+! stderr 'invalid signature'
+
+cp $TMPDIR/mine.txt s
+exec git add -A
+exec git commit --no-edit
+exec sesam verify
+stderr 'Integrity: ok'
+
+# Both the tell and the reseal survived the merge.
+exec sesam user ls
+stdout 'bob'
+
+-- base.txt --
+BASE
+-- mine.txt --
+MINE
+-- theirs.txt --
+THEIRS

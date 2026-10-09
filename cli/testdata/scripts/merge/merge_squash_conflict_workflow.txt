@@ -1,0 +1,65 @@
+# `git merge --squash` fires post-merge even when it conflicted, with the
+# conflicts still sitting in the index. Revealing there would overwrite the
+# driver's merge result with our side, so the hook keeps its hands off.
+
+sesam-repo admin base.txt ours.txt theirs.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add secret'
+
+exec git checkout -b topic
+cp $TMPDIR/theirs.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change s'
+
+exec git checkout master
+cp $TMPDIR/ours.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'master: change s'
+
+! exec git merge --squash topic
+
+# The markers the driver wrote survive the hook.
+grep '^<<<<<<< ' s
+grep 'OURS' s
+grep 'THEIRS' s
+
+# A squash sets no MERGE_HEAD, so it used to look like "no merge at all" and skip
+# the finalize. SQUASH_MSG gives it away instead.
+exec sesam status
+stdout 'conflicted'
+stdout 'a squash merge is in progress'
+stdout 'git commit'
+! stdout 'abort'
+
+# The finalize therefore refuses the markers, as it would in a plain merge.
+exec git add -A
+! exec git commit -m squashed
+stderr 'unresolved conflicts in this squash merge'
+
+# Resolving lets it through, and the squashed commit is consistent.
+cp $TMPDIR/ours.txt s
+exec git commit -m squashed
+exec sesam show .sesam/objects/s.sesam
+stdout 'OURS'
+exec sesam verify
+stderr 'Integrity: ok'
+exec sesam status
+! stdout 'in progress'
+
+-- base.txt --
+line one
+BASE
+line three
+-- ours.txt --
+line one
+OURS
+line three
+-- theirs.txt --
+line one
+THEIRS
+line three

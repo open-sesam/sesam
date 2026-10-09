@@ -33,14 +33,29 @@ const askpassTestPassphrase = "askpass-test-passphrase"
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
 		"sesam": func() {
-			if err := Main(os.Args); err != nil {
-				var exitErr *commands.ExitError
-				if errors.As(err, &exitErr) {
-					exitErr.Terminate()
-				}
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
+			err := Main(os.Args)
+			if err == nil {
+				return
 			}
+
+			var runExitErr *commands.ExitError
+			if errors.As(err, &runExitErr) {
+				runExitErr.Terminate()
+			}
+
+			// Mirror main.go: the merge drivers talk to git through exit codes,
+			// so a harness that collapses them to 1 would not be testing them.
+			exitErr := new(commands.ExitCodeError)
+			if errors.As(err, &exitErr) {
+				if exitErr.Print() {
+					fmt.Fprintln(os.Stderr, exitErr.Message())
+				}
+
+				os.Exit(exitErr.Code())
+			}
+
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		},
 		"age-plugin-sesamtest": RunMockPlugin,
 		"runprobe":             runProbe,
@@ -156,6 +171,9 @@ func TestWorkflows(t *testing.T) {
 			testscript.Run(t, testscript.Params{
 				Dir:   filepath.Join(root, category),
 				Setup: setup,
+				Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
+					"sesam-repo": sesamRepoCmd,
+				},
 			})
 		})
 	}
@@ -416,4 +434,34 @@ func runProbeSupervision(args []string) error {
 	}
 	fmt.Printf("parent signal=%d child terminated and reaped\n", sig)
 	return nil
+}
+
+// sesamRepoCmd sets up the git+sesam repo nearly every script opens with:
+//
+//	sesam-repo [user]        (user defaults to "admin")
+//
+// Anything the script wants to survive sesam's aggressive clean has to live
+// outside the worktree, so the fixture files named after it are moved to
+// $TMPDIR and can be copied back in as $TMPDIR/<name>.
+func sesamRepoCmd(ts *testscript.TestScript, neg bool, args []string) {
+	if neg {
+		ts.Fatalf("sesam-repo does not support negation")
+	}
+
+	user := "admin"
+	fixtures := args
+	if len(args) > 0 && !strings.Contains(args[0], ".") {
+		user, fixtures = args[0], args[1:]
+	}
+
+	for _, name := range fixtures {
+		ts.Check(os.Rename(ts.MkAbs(name), filepath.Join(ts.Getenv("TMPDIR"), name)))
+	}
+
+	ts.Check(ts.Exec("git", "init"))
+	ts.Check(ts.Exec("git", "config", "user.email", "test@sesam.dev"))
+	ts.Check(ts.Exec("git", "config", "user.name", "Sesam Test"))
+	ts.Check(ts.Exec("sesam", "init", "--user", user, "--install-merge"))
+	ts.Check(ts.Exec("git", "add", "-A"))
+	ts.Check(ts.Exec("git", "commit", "-m", "init sesam"))
 }

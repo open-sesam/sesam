@@ -32,7 +32,7 @@ var flagNoSeal = &cli.BoolFlag{
 var flagSeal = &cli.BoolFlag{
 	Name:    "seal-all",
 	Aliases: []string{"all"},
-	Usage:   "When we seal, seal also files that did not change",
+	Usage:   "Seal every secret from its plaintext as it is, stale and diverged ones included",
 }
 
 // userFlag builds the --user flag. Required-ness and help text differ per
@@ -98,6 +98,16 @@ var flagsGeneral = []cli.Flag{
 		Name:    "askpass",
 		Usage:   "Askpass helper for encrypted identities",
 		Sources: cli.EnvVars("SESAM_ASKPASS", "GIT_ASKPASS", "SSH_ASKPASS"),
+	},
+	&cli.StringFlag{
+		Name:    "clipboard-copy-cmd",
+		Usage:   "Command reading the secret on stdin, instead of the system clipboard",
+		Sources: cli.EnvVars("SESAM_CLIPBOARD_COPY_CMD"),
+	},
+	&cli.StringFlag{
+		Name:    "clipboard-paste-cmd",
+		Usage:   "Command printing the clipboard, instead of the system clipboard",
+		Sources: cli.EnvVars("SESAM_CLIPBOARD_PASTE_CMD"),
 	},
 	&cli.BoolFlag{
 		Name:    "no-color",
@@ -184,6 +194,10 @@ var flagsClean = []cli.Flag{
 		Usage: "Also delete other untracked files (similar to `git clean -fdx`)",
 	},
 	&cli.BoolFlag{
+		Name:  "unsealed",
+		Usage: "Also delete plaintext whose content is not sealed: edited since, or never",
+	},
+	&cli.BoolFlag{
 		Name:  "dry-run",
 		Usage: "Do not actually delete, just print what would be deleted",
 	},
@@ -194,7 +208,7 @@ var flagsReveal = []cli.Flag{
 	&cli.BoolFlag{
 		Name:    "all",
 		Aliases: []string{"a"},
-		Usage:   "Reveal all files, even those that did not change",
+		Usage:   "Reveal every secret, overwriting plaintext you edited",
 	},
 }
 
@@ -300,7 +314,56 @@ var flagsUserRegenerateSignKey = []cli.Flag{
 	userFlag(true, "Regenerate the signing key for a user"),
 }
 
-var flagsShow = []cli.Flag{}
+// showFlags are the flags of `sesam show`. They exist twice: once on the
+// command, and once on the root so the pass-style `sesam -c <path>` parses
+// before the default command is picked.
+func showFlags(hidden bool) []cli.Flag {
+	return []cli.Flag{
+		&cli.BoolFlag{
+			Name:    "clip",
+			Aliases: []string{"c"},
+			Usage:   "Copy to clipboard instead of printing to stdout",
+			Hidden:  hidden,
+		},
+		&cli.BoolFlag{
+			Name:    "alsoclip",
+			Aliases: []string{"C"},
+			Usage:   "Copy to clipboard and print to stdout",
+			Hidden:  hidden,
+		},
+		&cli.BoolFlag{
+			Name:    "wait",
+			Aliases: []string{"w"},
+			Usage:   "Wait for the password to be cleared instead of forking to the background",
+			Hidden:  hidden,
+		},
+		&cli.DurationFlag{
+			Name:    "ttl",
+			Aliases: []string{"t"},
+			Usage:   "How long to wait before clearing the clipboard (0 disables)",
+			Value:   45 * time.Second,
+			Hidden:  hidden,
+		},
+	}
+}
+
+var (
+	flagsShow     = showFlags(false)
+	flagsShowRoot = showFlags(true)
+)
+
+var flagsUnclip = []cli.Flag{
+	&cli.DurationFlag{
+		Name:  "ttl",
+		Usage: "How long to wait before clearing the clipboard",
+		Value: 45 * time.Second,
+	},
+	&cli.StringFlag{
+		Name:     "token",
+		Usage:    "Ownership token of the clipboard copy this should clear",
+		Required: true,
+	},
+}
 
 var flagsLog = []cli.Flag{
 	&cli.BoolFlag{

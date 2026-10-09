@@ -12,7 +12,7 @@ exec sesam init --user admin
 
 # Wiring is present after init.
 exec git config --local alias.sesam
-stdout '^!sesam$'
+stdout '^!cd -- "\$\{GIT_PREFIX:-\.\}" && exec sesam$'
 exec git config --local diff.sesam-diff.textconv
 stdout '^sesam show$'
 exists .gitattributes

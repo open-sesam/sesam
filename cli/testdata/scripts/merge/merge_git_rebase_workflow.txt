@@ -1,0 +1,76 @@
+# A rebase runs both drivers, but never writes MERGE_HEAD and never calls the
+# pre-commit finalize. What carries it: clean merges are sealed into %A by the
+# driver, conflicted ones are reported by `sesam status` with rebase advice.
+
+sesam-repo admin base.txt main.txt topic.txt resolved.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add secret'
+
+# MAIN changes the secret.
+cp $TMPDIR/main.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'main: change secret'
+
+# TOPIC branches from before that and changes the same line.
+exec git checkout -b topic HEAD~1
+cp $TMPDIR/topic.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change secret'
+
+# The drivers do run during a rebase: the log is merged semantically and the
+# secret conflict lands as markers in the revealed (gitignored) file.
+! exec git rebase master
+stderr 'automatically merging revealed file s; 1 conflict'
+stderr 'the audit log was therefore semantically merged'
+
+# The advice is rebase-specific: git never sets MERGE_HEAD here, so telling the
+# user to run `git commit` (or to abort with `git merge --abort`) would be wrong.
+stderr 'finish this rebase with .git rebase --continue.'
+stderr 'start over with .git rebase --abort.'
+! stderr 'git merge --abort'
+
+grep '^<<<<<<< ' s
+exec sesam status
+stdout 'conflicted'
+stdout 'a rebase is in progress'
+stdout 'git rebase --continue'
+
+# Resolve the revealed file, then seal it: `git rebase --continue` runs no
+# pre-commit hook, so nothing else will reseal the resolution for us.
+cp $TMPDIR/resolved.txt s
+exec sesam seal
+exec git add -A
+exec git -c core.editor=true rebase --continue
+
+# The rebased commit carries the resolution, and the repo verifies.
+exec sesam show .sesam/objects/s.sesam
+stdout 'RESOLVED'
+exec sesam status
+stdout 'in sync'
+! stdout 'in progress'
+exec sesam verify
+stderr 'Integrity: ok'
+exec git status --short
+! stdout .
+
+-- base.txt --
+line one
+line two
+line three
+-- main.txt --
+line one
+MAIN
+line three
+-- topic.txt --
+line one
+TOPIC
+line three
+-- resolved.txt --
+line one
+RESOLVED
+line three

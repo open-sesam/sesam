@@ -21,7 +21,7 @@ stdout '^sesam --sesam-dir=sub show$'
 
 # The alias is a plain convenience shim, never repo-specific.
 exec git config --local alias.sesam
-stdout '^!sesam$'
+stdout '^!cd -- "\$\{GIT_PREFIX:-\.\}" && exec sesam$'
 
 exec git add -A
 exec git commit -m 'init sesam'

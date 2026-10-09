@@ -1,0 +1,57 @@
+# The verified state of the incoming branch is cached so the driver runs (one per
+# conflicting path) do not repeat the work. An aborted merge leaves that file
+# behind, so it is bound to the revision it was verified for - otherwise the next
+# merge would inherit whatever the previous one was allowed to do.
+
+sesam-repo admin base.txt good.txt ours.txt broken.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+
+# A: a perfectly ordinary branch that verifies.
+exec git checkout -b good
+cp $TMPDIR/good.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'good: change s'
+
+# B: same repo, changes the same secret, but also carries an object that no audit
+# entry accounts for - so the branch as a whole does not verify.
+exec git checkout -b broken master
+cp $TMPDIR/broken.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'broken: change s'
+cp .sesam/objects/s.sesam .sesam/objects/ghost.sesam
+exec git add .sesam/objects/ghost.sesam
+exec git commit --no-verify -m 'broken: unaccounted object'
+
+exec git checkout master
+cp $TMPDIR/ours.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'ours: change s'
+
+# Merge A: it verifies, and its state is parked for the driver runs.
+! exec git merge good
+exec sh -c 'ls .sesam/tmp/theirs-vstate-*.json'
+stdout 'theirs-vstate-'
+
+# Abort. Nothing runs sesam, so the parked state survives.
+exec git merge --abort
+exec sh -c 'ls .sesam/tmp/theirs-vstate-*.json'
+
+# Merging B must NOT ride on the state verified for A.
+! exec git merge broken
+stderr 'does not verify - refusing to merge it'
+
+-- base.txt --
+BASE
+-- good.txt --
+GOOD
+-- ours.txt --
+OURS
+-- broken.txt --
+BROKEN

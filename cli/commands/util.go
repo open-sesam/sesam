@@ -31,8 +31,13 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 			return err
 		}
 
+		sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+		if err != nil {
+			return err
+		}
+
 		r, err := repo.Load(
-			cmd.String("sesam-dir"),
+			sesamDir,
 			cmd.StringSlice("identity"),
 			repo.RepoOpts{
 				Interactive:     true,
@@ -40,6 +45,7 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 				AskpassRequired: askpassRequired(),
 				LockTimeout:     cmd.Duration("lock-timeout"),
 				VerifyMode:      verifyMode,
+				InMerge:         mergeState(sesamDir).InProgress(),
 			},
 		)
 		if err != nil {
@@ -57,8 +63,34 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 			}
 			slog.Warn("close repo failed", slog.Any("error", closeErr))
 		}()
+
+		nudgeMissingGitIntegration(r)
+
 		return action(ctx, cmd, r)
 	}
+}
+
+// nudgeMissingGitIntegration prints a gentle hint when a repo is loaded whose
+// git integration was never wired up (the typical "cloned and forgot `sesam
+// init`" case). Best-effort: any check failure is logged, never fatal, so it can
+// never block a command.
+func nudgeMissingGitIntegration(r *repo.Repo) {
+	if r.GitIntegrationNudgeSuppressed() {
+		return
+	}
+
+	installed, err := r.GitIntegrationInstalled()
+	if err != nil {
+		slog.Debug("could not determine git integration status", slog.Any("err", err))
+		return
+	}
+	if installed {
+		return
+	}
+
+	slog.Info("git-integration is not installed - run `sesam init` to make sure it is available.")
+	slog.Info("if you prefer to run without then run `touch .sesam/no-git-integration-warning` to disable this warning.")
+	slog.Info("more info on this when you run `sesam doctor`.")
 }
 
 func askpassRequired() string {
@@ -112,6 +144,22 @@ func printInfo(format string, args ...any) {
 	// rendered into the message, not used to forge log records.
 	//nolint:gosec // G706: not attacker-controlled log injection
 	slog.Info(fmt.Sprintf(format, args...))
+}
+
+// waysOut is the one sentence every "pick a side" message ends with.
+const waysOut = "`sesam reveal --all` takes the incoming version, `sesam seal --all` keeps yours"
+
+// printNote is sesam's "left these alone" notice on stderr: a headline, the
+// paths, and how to get on. git shows nothing of it, the plaintext is gitignored.
+func printNote(headline string, lines []string, hint string) {
+	var b strings.Builder
+	b.WriteString("sesam: " + headline + "\n")
+	for _, l := range lines {
+		b.WriteString("sesam:   " + l + "\n")
+	}
+
+	b.WriteString("sesam: " + hint + "\n")
+	fmt.Fprint(os.Stderr, b.String())
 }
 
 func pluralize(s string, n int) string {

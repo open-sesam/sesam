@@ -1,0 +1,75 @@
+# Both sides of a secret merge are checked against the audit log of the branch
+# they come from, not just the incoming one.
+#
+# That distinction only shows up in a rebase. `git merge`, cherry-pick, revert and
+# stash pop put our own history on %A, but a rebase (`git pull --rebase` included)
+# replays our commits ON TOP of the upstream, so HEAD - and with it %A - is the
+# side we did not write. Checking only %B would leave exactly that side unchecked.
+#
+# The object below is the one merge_rejects_foreign_object_workflow refuses on the
+# incoming side: it decrypts (same recipient) but is signed by a key this repo's
+# log never pinned. Were it merged, its content would end up inside an object
+# resealed under our own key - and the reseal repairs the root hash, so a later
+# `sesam verify` would no longer have anything to catch it with.
+
+sesam-repo admin base.txt mine.txt other.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+
+# A second, unrelated sesam repo, initialized with the same identity: its object
+# is encrypted to us (so it decrypts) but signed by its own key (so it means
+# nothing here).
+mkdir $TMPDIR/foreign
+cd $TMPDIR/foreign
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam init --user admin
+cp $TMPDIR/other.txt s
+exec sesam add s --group admin
+cd $WORK
+
+# UPSTREAM: the attacker pushed the foreign object onto the branch we track. The
+# audit log is untouched, so nothing about the vault state looks off.
+cp $TMPDIR/foreign/.sesam/objects/s.sesam .sesam/objects/s.sesam
+exec git add .sesam/objects/s.sesam
+exec git commit --no-verify -m 'upstream: foreign object'
+
+# OURS: a local change to the same line, branched off before the poisoned commit.
+exec git checkout -b topic HEAD~1
+cp $TMPDIR/mine.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: my change'
+
+# Refused, and the message says which side is at fault: during a rebase "ours" is
+# the branch being rebased onto, which is the surprising part.
+! exec git rebase master
+stderr 'our s does not verify against this repository''s audit log'
+stderr 'rebasing onto'
+stderr 'no matching signature key found'
+! stderr 'automatically merging revealed file s'
+
+# Nothing of theirs was written: the revealed file still holds our own content,
+# with no merge markers and no trace of the foreign side.
+exec git rebase --abort
+exec cat s
+stdout 'MINE'
+! stdout 'FOREIGN'
+! grep '^<<<<<<< ' s
+
+-- base.txt --
+line one
+line two
+line three
+-- mine.txt --
+line one
+MINE
+line three
+-- other.txt --
+line one
+FOREIGN
+line three

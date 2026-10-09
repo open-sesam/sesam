@@ -19,3 +19,29 @@ stdout '# sesam doctor'
 stdout '## System'
 stdout '## Git'
 stdout '## Summary'
+
+# The clipboard check reports what `sesam show --clip` would actually pick.
+# With the env overrides in place it must name them rather than probe the
+# system, which is also how it stays green on a headless CI box.
+env SESAM_CLIPBOARD_COPY_CMD=$WORK/copy.sh
+env SESAM_CLIPBOARD_PASTE_CMD=$WORK/paste.sh
+exec sesam doctor
+stdout 'clipboard: using --clipboard-copy-cmd and --clipboard-paste-cmd'
+
+# The flags are the same setting under another name.
+env SESAM_CLIPBOARD_COPY_CMD=
+env SESAM_CLIPBOARD_PASTE_CMD=
+exec sesam --clipboard-copy-cmd $WORK/copy.sh --clipboard-paste-cmd $WORK/paste.sh doctor
+stdout 'clipboard: using --clipboard-copy-cmd and --clipboard-paste-cmd'
+
+# Half a pair is a configuration error, not a working clipboard.
+exec sesam --clipboard-copy-cmd $WORK/copy.sh doctor
+stdout 'clipboard: `sesam show --clip` has no way to reach the clipboard'
+stdout 'must be set together'
+
+-- copy.sh --
+#!/bin/sh
+cat > /dev/null
+-- paste.sh --
+#!/bin/sh
+true

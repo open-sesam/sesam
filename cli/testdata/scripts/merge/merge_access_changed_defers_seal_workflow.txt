@@ -1,0 +1,57 @@
+# The driver seals a clean merge straight into %A, but only when it can be sure
+# who to encrypt to. If access to the secret changed on both sides, ours' log is
+# not that authority any more - sealing from it would use a stale recipient set.
+# The seal is then left to the finalize, which has the merged log.
+
+sesam-repo admin base.txt ours.txt theirs.txt
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group ops
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+
+# THEIRS grants dev and edits the secret.
+exec git checkout -b topic
+exec sesam add s --group-add dev
+cp $TMPDIR/theirs.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'theirs: dev only'
+
+# OURS grants ops instead, and edits a different line.
+exec git checkout master
+exec sesam add s --group-add ops
+cp $TMPDIR/ours.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'ours: ops only'
+
+# The line edits do not overlap, so the content merges cleanly - but the
+# recipient sets disagree, so the driver declines to seal rather than guess.
+! exec git merge topic
+stderr 'access to it changed on both sides'
+stderr 'sealed with the merged recipients when you commit'
+! stderr 'could not be resealed'
+
+# The finalize does it, and the result verifies.
+exec git commit --no-edit
+exec sesam verify
+stderr 'Integrity: ok'
+exec sesam show .sesam/objects/s.sesam
+stdout 'OURS'
+stdout 'THEIRS'
+
+-- base.txt --
+first = BASE
+middle = BASE
+last = BASE
+-- ours.txt --
+first = OURS
+middle = BASE
+last = BASE
+-- theirs.txt --
+first = BASE
+middle = BASE
+last = THEIRS

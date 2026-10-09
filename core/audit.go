@@ -43,6 +43,7 @@ const (
 	OpSecretAdd    = Operation("secret.add")
 	OpSecretRemove = Operation("secret.remove")
 	OpSeal         = Operation("seal")
+	OpMerge        = Operation("merge")
 
 	// Update operations:
 	OpUserRename            = Operation("user.rename")
@@ -68,7 +69,8 @@ type AuditDetail interface {
 		DetailUserChangeGroups |
 		DetailUserAddRecipients |
 		DetailUserRmRecipients |
-		DetailUserRegenerateSignKey
+		DetailUserRegenerateSignKey |
+		DetailMerge
 }
 
 type AuditEntry struct {
@@ -78,6 +80,12 @@ type AuditEntry struct {
 
 	// ChangedBy is the user that executed the operation.
 	ChangedBy string `json:"changed_by"`
+
+	// ChangedByBeforeMerge records the original author of an entry that was
+	// rebased during a merge and re-signed by the merging admin (ChangedBy).
+	// Empty for normal, non-merged entries (omitted from JSON so existing
+	// entry hashes stay stable).
+	ChangedByBeforeMerge string `json:"changed_by_before_merge,omitempty"`
 
 	// Detail are operation specific details.
 	Detail            json.RawMessage `json:"detail"`
@@ -140,13 +148,54 @@ func (aes *AuditEntrySigned) Encrypt(aead cipher.AEAD) ([]byte, error) {
 	}
 
 	nonce := make([]byte, aead.NonceSize())
-	binary.BigEndian.PutUint64(nonce, aes.SeqID)
-	encData := aead.Seal(nil, nonce, sigJSON, nil)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("generate nonce: %w", err)
+	}
+
+	encData := aead.Seal(nonce, nonce, sigJSON, seqAssociatedData(aes.SeqID))
 
 	base64Buf := make([]byte, base64.RawStdEncoding.EncodedLen(len(encData))+1)
 	base64.RawStdEncoding.Encode(base64Buf, encData)
 	base64Buf[len(base64Buf)-1] = '\n'
 	return base64Buf, nil
+}
+
+// decryptEntryLine opens one entry line: nonce prefix, ciphertext, seq id as
+// associated data.
+func (al *AuditLog) decryptEntryLine(dst, data []byte, seqID uint64) ([]byte, error) {
+	nonceSize := al.aead.NonceSize()
+	if len(data) > nonceSize {
+		plain, err := al.aead.Open(dst, data[:nonceSize], data[nonceSize:], seqAssociatedData(seqID))
+		if err == nil {
+			return plain, nil
+		}
+	}
+
+	// Older commits still carry logs in the pre-nonce container; see audit_legacy.go.
+	return legacyDecryptEntry(dst, al.key, data, seqID)
+}
+
+// Reading the pre-nonce audit log container.
+//
+// Entries used to be sealed with ChaCha20-Poly1305, the nonce derived from the
+// seq id and no associated data. Two branches appending at the same seq then
+// reused a (key, nonce) pair, so the format moved to XChaCha20-Poly1305 with a
+// stored random nonce.
+func legacyDecryptEntry(dst []byte, key [32]byte, data []byte, seqID uint64) ([]byte, error) {
+	aead, err := chacha20poly1305.New(key[:])
+	if err != nil {
+		return nil, fmt.Errorf("init legacy aead: %w", err)
+	}
+
+	nonce := make([]byte, aead.NonceSize())
+	binary.BigEndian.PutUint64(nonce, seqID)
+
+	plain, err := aead.Open(dst, nonce, data, nil)
+	if err != nil {
+		return nil, fmt.Errorf("not readable as current or legacy format: %w", err)
+	}
+
+	return plain, nil
 }
 
 ///////// DETAILS /////////////
@@ -306,6 +355,42 @@ type DetailSeal struct {
 	FilesSealed int `json:"files_sealed"`
 }
 
+// MergeAction records what a merge did with one of theirs' entries, or the kind
+// of a post-merge advisory.
+type MergeAction string
+
+const (
+	MergeApplied   = MergeAction("applied")   // kept as-is (only re-attributed to the merger)
+	MergeRewritten = MergeAction("rewritten") // applied with a modified detail (delta merge)
+	MergeDropped   = MergeAction("dropped")   // discarded (revocation/collision/dedupe)
+	MergeFlagged   = MergeAction("flagged")   // post-merge advisory about the end state (e.g. R1)
+)
+
+// ConflictResolutionEntry is the user-facing record of a single merge decision:
+// what happened to one of theirs' entries, or a post-merge advisory. The
+// material subset is persisted inside DetailMerge so `sesam log` can show it.
+type ConflictResolutionEntry struct {
+	Operation            Operation   `json:"operation,omitempty"` // empty for advisories not tied to an op
+	Target               string      `json:"target,omitempty"`    // user name, revealed path or group
+	Action               MergeAction `json:"action"`
+	Reason               string      `json:"reason,omitempty"`
+	ChangedByBeforeMerge string      `json:"changed_by_before_merge,omitempty"`
+}
+
+// DetailMerge is the informational OpMerge entry appended at the end of a merge.
+// It captures provenance (the three tips), applied/dropped counts and only the
+// material conflict decisions - routine applies/dedupes and derivable advisories
+// stay out of the append-only log. It carries no state; verifyMerge only checks
+// the author is an admin.
+type DetailMerge struct {
+	BaseSeqID     uint64                    `json:"base_seq_id"`
+	OurTipSeqID   uint64                    `json:"our_tip_seq_id"`
+	TheirTipSeqID uint64                    `json:"their_tip_seq_id"`
+	Applied       int                       `json:"applied"`
+	Dropped       int                       `json:"dropped"`
+	Resolutions   []ConflictResolutionEntry `json:"resolutions,omitempty"`
+}
+
 // AuditLog records all operations that change the state of the sesam repo.
 // It is an append-only log that cannot be rewritten.
 //
@@ -400,6 +485,8 @@ func operationFor(detail any) Operation {
 		return OpUserRmRecipients
 	case *DetailUserRegenerateSignKey:
 		return OpUserRegenerateSignKey
+	case *DetailMerge:
+		return OpMerge
 	default:
 		panic(fmt.Sprintf("unknown detail type: %T", detail))
 	}
@@ -472,6 +559,24 @@ func (aes *AuditEntrySigned) Verify(kr Keyring) (string, error) {
 	return kr.Verify(SesamDomainSignAuditTag, wholeEntryJSON, aes.Signature, aes.ChangedBy)
 }
 
+// newAuditAEAD builds the audit log's AEAD. XChaCha20's 24 byte nonce makes
+// random nonces safe without having to count how many entries share a key.
+func newAuditAEAD(key []byte) (cipher.AEAD, error) {
+	return chacha20poly1305.NewX(key)
+}
+
+// seqAssociatedData binds an entry line to its position in the log.
+func seqAssociatedData(seqID uint64) []byte {
+	return binary.BigEndian.AppendUint64(nil, seqID)
+}
+
+// newAuditKey returns a fresh symmetric key for the audit log.
+func newAuditKey() [32]byte {
+	var key [32]byte
+	rand.Read(key[:])
+	return key
+}
+
 // encryptAuditKey wraps key for recps using age, base64-encodes the result,
 // and appends a newline. The return value is a complete line-1 for log.jsonl.
 func encryptAuditKey(key [32]byte, recps Recipients) ([]byte, error) {
@@ -490,6 +595,40 @@ func encryptAuditKey(key [32]byte, recps Recipients) ([]byte, error) {
 	return []byte(encoded + "\n"), nil
 }
 
+// writeEncryptedLog writes a complete audit log to w.
+func writeEncryptedLog(w io.Writer, key [32]byte, recps Recipients, entries []AuditEntrySigned) error {
+	line1, err := encryptAuditKey(key, recps)
+	if err != nil {
+		return fmt.Errorf("encrypt audit key: %w", err)
+	}
+	if _, err := w.Write(line1); err != nil {
+		return fmt.Errorf("write key line: %w", err)
+	}
+
+	aead, err := newAuditAEAD(key[:])
+	if err != nil {
+		return fmt.Errorf("init aead: %w", err)
+	}
+
+	for idx := range entries {
+		b64EntryData, err := entries[idx].Encrypt(aead)
+		if err != nil {
+			return fmt.Errorf("encrypt entry %d: %w", idx, err)
+		}
+		if _, err := w.Write(b64EntryData); err != nil {
+			return fmt.Errorf("write entry %d: %w", idx, err)
+		}
+	}
+
+	return nil
+}
+
+// WriteEncrypted serializes the whole log to w as an encrypted .jsonl (key line
+// for recps + encrypted entries), reusing the log's current symmetric key.
+func (al *AuditLog) WriteEncrypted(w io.Writer, recps Recipients) error {
+	return writeEncryptedLog(w, al.key, recps, al.Entries)
+}
+
 // WriteAuditKey rewrites the log with the same symmetric key but a new recipient
 // set. The update is atomic: a tmp file is written and then renamed into place.
 // SetBase points the log's paths at base (a stage's fork dir). Only affects
@@ -503,7 +642,7 @@ func (al *AuditLog) SetBase(base string) { al.base = base }
 // sharing cipher state. The caller is responsible for having materialized the
 // log file at base beforehand (Repo.materializeFork byte-copies it).
 func (al *AuditLog) Fork(root *os.Root, base string) (*AuditLog, error) {
-	aead, err := chacha20poly1305.New(al.key[:])
+	aead, err := newAuditAEAD(al.key[:])
 	if err != nil {
 		return nil, fmt.Errorf("derive aead for fork: %w", err)
 	}
@@ -567,10 +706,9 @@ func (al *AuditLog) WriteAuditKey(recps Recipients) error {
 }
 
 func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
-	var newKey [32]byte
-	rand.Read(newKey[:])
+	newKey := newAuditKey()
 
-	newAead, err := chacha20poly1305.New(newKey[:])
+	newAead, err := newAuditAEAD(newKey[:])
 	if err != nil {
 		return fmt.Errorf("init aead with new key: %w", err)
 	}
@@ -585,22 +723,8 @@ func (al *AuditLog) RotateKey(signer Signer, recps Recipients) error {
 		_ = tmp.Cleanup()
 	}()
 
-	line1, err := encryptAuditKey(newKey, recps)
-	if err != nil {
-		return fmt.Errorf("encrypt new audit key: %w", err)
-	}
-	if _, err := tmp.Write(line1); err != nil {
-		return fmt.Errorf("write key line to tmp: %w", err)
-	}
-
-	for idx := range al.Entries {
-		b64EntryData, err := al.Entries[idx].Encrypt(newAead)
-		if err != nil {
-			return fmt.Errorf("re-encrypt entry %d: %w", idx, err)
-		}
-		if _, err := tmp.Write(b64EntryData); err != nil {
-			return fmt.Errorf("write entry %d to tmp log: %w", idx, err)
-		}
+	if err := writeEncryptedLog(tmp, newKey, recps, al.Entries); err != nil {
+		return err
 	}
 
 	if err := tmp.CloseAtomicallyReplace(); err != nil {
@@ -643,7 +767,7 @@ func InitAuditLog(root *os.Root, signer Signer, recps Recipients, admin DetailUs
 	}
 
 	// Generate the symmetric key and write it as line 1 of the log.
-	rand.Read(al.key[:])
+	al.key = newAuditKey()
 	line1, err := encryptAuditKey(al.key, recps)
 	if err != nil {
 		closeLogged(fd)
@@ -658,7 +782,7 @@ func InitAuditLog(root *os.Root, signer Signer, recps Recipients, admin DetailUs
 		return nil, fmt.Errorf("sync audit log: %w", err)
 	}
 
-	al.aead, err = chacha20poly1305.New(al.key[:])
+	al.aead, err = newAuditAEAD(al.key[:])
 	if err != nil {
 		return nil, err
 	}
@@ -741,6 +865,14 @@ func (al *AuditLog) AddEntry(signer Signer, e *AuditEntry, verify func() error) 
 		}
 	}
 
+	// In-memory logs (no fd) - e.g. the merge planning log - keep entries only
+	// in al.Entries; encryption and persistence are the caller's responsibility.
+	// This lets merge reuse the sign/verify/rechain machinery without writing to
+	// disk mid-plan.
+	if al.fd == nil {
+		return aes, nil
+	}
+
 	b64EntryData, err := aes.Encrypt(al.aead)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt entry: %w", err)
@@ -796,6 +928,29 @@ func loadAuditKey(data []byte, ids Identities) ([]byte, error) {
 	return key, nil
 }
 
+// LoadAuditLogFromPath opens an audit log file at `logPath` with `ids`.
+//
+// It does not protect against path traversal!
+// Avoid using this function, it's only there to allow git integration (where paths are in some random tmp folder we don't control).
+//
+// Note that this does not load the init hash file as it assuems that it's not accessible.
+func LoadAuditLogFromPath(logPath string, ids Identities) (*AuditLog, error) {
+	//nolint:gosec // see comment
+	fd, err := os.Open(logPath)
+	if err != nil {
+		return nil, err
+	}
+
+	al, err := loadAuditLogFromFd(fd, ids)
+	if err != nil {
+		closeLogged(fd)
+		return nil, err
+	}
+
+	al.fd = fd
+	return al, nil
+}
+
 // loadAuditLogFile parses a log.jsonl file and returns the populated AuditLog.
 // The returned struct has fd=nil; callers that need to append must open their own fd.
 func loadAuditLogFile(root *os.Root, logPath string, ids Identities) (*AuditLog, error) {
@@ -806,6 +961,10 @@ func loadAuditLogFile(root *os.Root, logPath string, ids Identities) (*AuditLog,
 
 	defer closeLogged(fd)
 
+	return loadAuditLogFromFd(fd, ids)
+}
+
+func loadAuditLogFromFd(fd *os.File, ids Identities) (*AuditLog, error) {
 	info, err := fd.Stat()
 	if err != nil {
 		return nil, err
@@ -817,16 +976,6 @@ func loadAuditLogFile(root *os.Root, logPath string, ids Identities) (*AuditLog,
 	}
 
 	return loadAuditLogFromReader(fd, ids)
-}
-
-// LoadAuditLogFromReader parses a log.jsonl byte stream into an AuditLog.
-// Used by the git smudge filter, which reads the log from the git index
-// (via `git cat-file`) rather than the working tree to stay consistent with
-// the file being smudged. Callers are responsible for any size-bound checks
-// before invoking. The returned AuditLog has fd=nil; callers that need to
-// append must open their own fd.
-func LoadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
-	return loadAuditLogFromReader(rd, ids)
 }
 
 func loadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
@@ -855,15 +1004,14 @@ func loadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
 		return nil, fmt.Errorf("failed to load audit key: %w", err)
 	}
 	copy(al.key[:], key)
-	al.aead, err = chacha20poly1305.New(key)
+	al.aead, err = newAuditAEAD(key)
 	if err != nil {
 		return nil, fmt.Errorf("init aead: %w", err)
 	}
 
-	// Lines 2+: encrypted entries. Nonce = SeqID = len(Entries)+1 before each append.
+	// Lines 2+: encrypted entries, each prefixed with its own nonce.
 	decBuf := make([]byte, 64*1024)   // base64 decode target, grown as needed
 	plainBuf := make([]byte, 16*1024) // AEAD plaintext target, grown by Open
-	nonce := make([]byte, al.aead.NonceSize())
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++
@@ -878,8 +1026,7 @@ func loadAuditLogFromReader(rd io.Reader, ids Identities) (*AuditLog, error) {
 			return nil, fmt.Errorf("base64 decode line %d: %w", lineNumber, err)
 		}
 
-		binary.BigEndian.PutUint64(nonce, uint64(len(al.Entries)+1))
-		jsonData, err := al.aead.Open(plainBuf[:0], nonce, decBuf[:n], nil)
+		jsonData, err := al.decryptEntryLine(plainBuf[:0], decBuf[:n], uint64(len(al.Entries)+1))
 		if err != nil {
 			return nil, fmt.Errorf("decrypt line %d: %w", lineNumber, err)
 		}

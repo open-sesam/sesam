@@ -45,13 +45,14 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 		testRoot(t, sesamDir),
 		Identities{admin.Identity},
 		signer, keyring, auditLog, vstate,
+		"",
 	)
 	require.NoError(t, err)
 
 	secretPath := "secrets/db_password"
 	writeSecret(t, sesamDir, secretPath, "hunter2")
 	require.NoError(t, onlyErr(sm.SecretAdd(secretPath, []string{"admin"}, false)))
-	require.NoError(t, sm.Seal(true))
+	require.NoError(t, sm.Seal(true, nil))
 
 	gitCommitAll(t, repo, "add secret and seal")
 
@@ -82,13 +83,14 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 		testRoot(t, sesamDir),
 		Identities{admin.Identity},
 		signer2, keyring2, auditLog2, vstate2,
+		"",
 	)
 	require.NoError(t, err)
 
 	report := VerifyIntegrity(testRoot(t, sesamDir), vstate2, keyring2)
 	require.True(t, report.OK(), "integrity check failed: %s", report.String())
 
-	require.NoError(t, sm2.Reveal(true))
+	require.NoError(t, sm2.RevealAll())
 	got, err := os.ReadFile(filepath.Join(sesamDir, secretPath))
 	require.NoError(t, err)
 	require.Equal(t, "hunter2", string(got))
@@ -151,13 +153,14 @@ func TestIntegrationMultiUser(t *testing.T) {
 		testRoot(t, sesamDir),
 		Identities{bob.Identity},
 		bobSignKey, keyring, al, vstate,
+		"",
 	)
 	require.NoError(t, err)
-	require.NoError(t, smBob.Seal(true))
+	require.NoError(t, smBob.Seal(true, nil))
 	gitCommitAll(t, repo, "seal")
 
 	os.Remove(filepath.Join(sesamDir, secretPath))
-	require.NoError(t, smBob.Reveal(true))
+	require.NoError(t, smBob.RevealAll())
 
 	got, err := os.ReadFile(filepath.Join(sesamDir, secretPath))
 	require.NoError(t, err)
@@ -237,6 +240,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 		kr,
 		al,
 		vs,
+		"",
 	)
 	require.NoError(t, err)
 
@@ -245,7 +249,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	require.NoError(t, onlyErr(sm.SecretAdd("secrets/token", []string{"admin"}, false)))
 
 	// 2. Seal.
-	require.NoError(t, sm.Seal(true))
+	require.NoError(t, sm.Seal(true, nil))
 	gitCommitAll(t, repo, "add and seal")
 
 	// 3. Change groups (add dev).
@@ -267,9 +271,10 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 		kr,
 		al,
 		vs,
+		"",
 	)
 	require.NoError(t, err)
-	require.NoError(t, sm.Seal(true))
+	require.NoError(t, sm.Seal(true, nil))
 	gitCommitAll(t, repo, "change groups and reseal")
 
 	// 5. Remove secret and clean up files.

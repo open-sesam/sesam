@@ -1,0 +1,35 @@
+# `sesam rm --force` deletes the revealed plaintext of the secret it removed.
+# That plaintext lives at the sesam-relative path, which is not the cwd-relative
+# one when the command runs from outside the sesam subtree - e.g. from the
+# worktree root of a monorepo with --sesam-dir. There the argument is already
+# sesam-relative (see toRepoPath), so `rm --force db.txt` must remove
+# vault/db.txt and never touch an unrelated ./db.txt.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+mkdir vault
+exec sesam init --user admin --sesam-dir vault
+exec git add -A
+exec git commit -m 'init sesam'
+
+# A secret in the vault and an unrelated, same-named file at the worktree root.
+cp secret vault/db.txt
+cp bystander db.txt
+exec sesam --sesam-dir vault add db.txt --group admin
+exists vault/.sesam/objects/db.txt.sesam
+
+exec sesam --sesam-dir vault rm --force db.txt
+
+# The object is gone and so is the secret's plaintext...
+! exists vault/.sesam/objects/db.txt.sesam
+! exists vault/db.txt
+# ...while the bystander at the worktree root is untouched.
+exists db.txt
+grep 'not a secret' db.txt
+
+-- secret --
+top secret
+-- bystander --
+not a secret

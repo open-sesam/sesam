@@ -22,7 +22,7 @@ import (
 func revealableBy(t *testing.T, sesamDir string, u *testUser, kr Keyring, al *AuditLog, state *VerifiedState, revealedPath string) bool {
 	t.Helper()
 
-	mgr, err := BuildSecretManager(sesamDir, testRoot(t, sesamDir), Identities{u.Identity}, u.Signer, kr, al, state)
+	mgr, err := BuildSecretManager(sesamDir, testRoot(t, sesamDir), Identities{u.Identity}, u.Signer, kr, al, state, "")
 	require.NoError(t, err)
 
 	err = revealSecret(mgr, revealedPath)
@@ -165,7 +165,7 @@ func initAuditLog(t testing.TB, sesamDir string, admin *testUser) *AuditLog {
 	}
 
 	// Real init (InitAdminUser) writes the admin's signing key to disk via
-	// GenerateSignKey; mirror that so on-disk fixtures match production and
+	// GenerateSignKeyAt; mirror that so on-disk fixtures match production and
 	// operations like UserRename (which moves the key file) can find it.
 	persistSignKey(t, root, admin)
 
@@ -174,7 +174,7 @@ func initAuditLog(t testing.TB, sesamDir string, admin *testUser) *AuditLog {
 
 // persistSignKey writes u's signing key to disk under
 // .sesam/signkeys/<user>.age, encrypted to u's own recipient — the same shape
-// GenerateSignKey produces during a real init/tell. It reuses u's existing key
+// GenerateSignKeyAt produces during a real init/tell. It reuses u's existing key
 // so the in-memory signer and the on-disk file stay consistent.
 func persistSignKey(t testing.TB, root *os.Root, u *testUser) {
 	t.Helper()
@@ -281,6 +281,7 @@ func testSecretManagerFull(t *testing.T) *SecretManager {
 		kr,
 		al,
 		state,
+		"",
 	)
 	if err != nil {
 		t.Fatal(err)

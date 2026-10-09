@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/repo"
@@ -38,7 +39,7 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 			return nil
 		}
 
-		return s.Seal(cmd.Bool("seal-all"))
+		return sealStage(cmd, r, s)
 	})
 }
 
@@ -58,7 +59,7 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if err := s.SecretRemove(paths); err != nil {
 			return err
 		}
-		return s.Seal(cmd.Bool("seal-all"))
+		return sealStage(cmd, r, s)
 	}); err != nil {
 		return err
 	}
@@ -67,7 +68,9 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return nil
 	}
 
-	return os.RemoveAll(revealedPath)
+	// The plaintext lives at the sesam-relative path, which is not the argument
+	// as typed once the cwd is outside the sesam subtree.
+	return os.RemoveAll(filepath.Join(r.SesamDir(), paths[0]))
 }
 
 func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
@@ -90,6 +93,6 @@ func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if err := s.SecretMove(paths[0], paths[1], nested); err != nil {
 			return err
 		}
-		return s.Seal(cmd.Bool("seal-all"))
+		return sealStage(cmd, r, s)
 	})
 }

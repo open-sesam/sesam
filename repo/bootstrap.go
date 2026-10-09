@@ -234,6 +234,13 @@ type gitConfigEntry struct {
 	report     bool
 }
 
+// gitAliasCmd is what `git sesam` runs. git executes `!` aliases from the
+// worktree root, so with a nested sesam dir a bare `!sesam` would look for
+// `.sesam/` at the root and resolve relative arguments against it. git exports
+// the caller's subdirectory as GIT_PREFIX (empty at the root), so go back there
+// first: `git sesam` then behaves exactly like `sesam` run where the user is.
+const gitAliasCmd = `!cd -- "${GIT_PREFIX:-.}" && exec sesam`
+
 // expectedGitConfig returns the git-config entries `sesam init` installs for the
 // repository at sesamDir. It is the single source of truth for both writing the
 // config (ensureGitConfig) and checking it (CheckGitConfig); the driver command
@@ -267,6 +274,16 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 		return nil, err
 	}
 
+	preMergeCommitCmd, err := sesamCmd(r, sesamDir, "hook", "pre-merge-commit")
+	if err != nil {
+		return nil, err
+	}
+
+	postMergeCmd, err := sesamCmd(r, sesamDir, "hook", "post-merge")
+	if err != nil {
+		return nil, err
+	}
+
 	// suffix uniquifies the subsection names per sesam repo so several sesam
 	// repos can coexist in one git repo without clobbering each other's config
 	// (and, for hooks, so all of them fire). It also lands in .gitattributes as
@@ -282,8 +299,9 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 		{"merge.sesam-merge.driver", "merge", "sesam-merge-secret" + suffix, "driver", mergeSecretCmd, true},
 		{"merge.sesam-merge.name", "merge", "sesam-merge-log" + suffix, "name", "sesam-audit-log merge driver", false},
 		{"merge.sesam-merge.driver", "merge", "sesam-merge-log" + suffix, "driver", mergeLogCmd, false},
+		{"merge.sesam-ours.driver", "merge", "sesam-ours", "driver", "true", false},
 		{"diff.sesam-diff.textconv", "diff", "sesam-diff" + suffix, "textconv", textconvCmd, true},
-		{"alias.sesam", "alias", "", "sesam", "!sesam", true},
+		{"alias.sesam", "alias", "", "sesam", gitAliasCmd, true},
 	}
 
 	var gitSupportsConfigHooks bool
@@ -296,7 +314,7 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 	if ver.GreaterThanEqual(semver.MustParse("2.54.0")) {
 		gitSupportsConfigHooks = true
 	} else {
-		slog.Warn("not installing hooks, because git >= 2.54.0 is needed")
+		slog.Warn("hooks require git >= 2.54.0")
 	}
 
 	if gitSupportsConfigHooks {
@@ -305,6 +323,10 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 			{"hook.sesam-precommit.command", "hook", "sesam-precommit" + suffix, "command", wrapHookCmd(preCommitCmd), true},
 			{"hook.sesam-postcheckout.event", "hook", "sesam-postcheckout" + suffix, "event", "post-checkout", false},
 			{"hook.sesam-postcheckout.command", "hook", "sesam-postcheckout" + suffix, "command", wrapHookCmd(postCheckoutCmd), true},
+			{"hook.sesam-premergecommit.event", "hook", "sesam-premergecommit" + suffix, "event", "pre-merge-commit", false},
+			{"hook.sesam-premergecommit.command", "hook", "sesam-premergecommit" + suffix, "command", wrapHookCmd(preMergeCommitCmd), true},
+			{"hook.sesam-postmerge.event", "hook", "sesam-postmerge" + suffix, "event", "post-merge", false},
+			{"hook.sesam-postmerge.command", "hook", "sesam-postmerge" + suffix, "command", wrapHookCmd(postMergeCmd), true},
 		}...)
 	}
 

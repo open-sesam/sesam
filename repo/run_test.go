@@ -279,7 +279,8 @@ func TestRepoPrepareRunReadsEncryptedObjects(t *testing.T) {
 		if err := s.SecretAdd([]string{"raw.txt", "vars.env"}, []string{"admin"}, false, false); err != nil {
 			return err
 		}
-		return s.Seal(true)
+		_, err := s.Seal(SealOpts{All: true})
+		return err
 	}))
 	require.NoError(t, os.Remove(filepath.Join(dir, "raw.txt")))
 	require.NoError(t, os.Remove(filepath.Join(dir, "vars.env")))
@@ -319,7 +320,8 @@ func TestRepoPrepareRunChecksCurrentUserAccess(t *testing.T) {
 		if err := s.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"dev"}, false); err != nil {
 			return err
 		}
-		return s.Seal(true)
+		_, err := s.Seal(SealOpts{All: true})
+		return err
 	}))
 	require.NoError(t, r.Close())
 	require.NoError(t, os.Remove(filepath.Join(dir, "secrets/raw.txt")))

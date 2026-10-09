@@ -1,0 +1,70 @@
+# After a cherry-pick nothing has reconciled the worktree: the objects moved, the
+# revealed files did not. Sealing used to write the pre-pick plaintext back over
+# the picked objects. Now seal notices that the plaintext is the decryption of an
+# earlier object version - git still has it - and leaves the object alone.
+
+sesam-repo admin base.txt changed.txt
+
+cp $TMPDIR/base.txt s
+cp $TMPDIR/base.txt t
+exec sesam add s --group admin
+exec sesam add t --group admin
+exec git add -A
+exec git commit -m 'add secrets'
+
+exec git checkout -b topic
+cp $TMPDIR/changed.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change s'
+
+exec git checkout master
+cp $TMPDIR/changed.txt t
+exec sesam seal
+exec git add -A
+exec git commit -m 'master: change t'
+
+exec git cherry-pick topic
+
+# The picked object is CHANGED, our plaintext is still BASE - and status can
+# tell that it is the old version, not an edit.
+exec sesam show .sesam/objects/s.sesam
+stdout 'CHANGED'
+exec cat s
+stdout 'BASE'
+exec sesam status
+stdout 'S s'
+stdout '1 stale'
+
+# Sealing skips it and says why; the picked content survives.
+exec sesam seal
+stderr 'not sealed - the object is newer than the plaintext'
+stderr 'sesam:   s'
+exec sesam show .sesam/objects/s.sesam
+stdout 'CHANGED'
+
+# Reveal takes the picked version, and the next seal has nothing to say.
+exec sesam reveal
+exec cat s
+stdout 'CHANGED'
+exec sesam seal
+! stderr 'not sealed'
+exec sesam status
+! stdout 'stale'
+
+# --all is the way to insist on the plaintext, stale or not.
+cp $TMPDIR/base.txt s
+exec sesam status
+stdout '1 stale'
+exec sesam seal --all
+exec sesam show .sesam/objects/s.sesam
+stdout 'BASE'
+
+-- base.txt --
+line one
+BASE
+line three
+-- changed.txt --
+line one
+CHANGED
+line three

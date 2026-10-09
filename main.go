@@ -35,6 +35,16 @@ func main() {
 		exitErr.Terminate()
 	}
 
+	mergeExitErr := new(commands.ExitCodeError)
+	if errors.As(err, &mergeExitErr) {
+		if mergeExitErr.Print() {
+			printError(mergeExitErr.Message())
+		}
+
+		os.Exit(mergeExitErr.Code())
+		return
+	}
+
 	printError(err.Error())
 	os.Exit(1)
 }

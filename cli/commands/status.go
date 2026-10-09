@@ -84,8 +84,16 @@ const colorDim = colorGrey
 // Glyphs are single-width on purpose so the tree's leading column stays aligned.
 func glyphFor(state repo.SecretState) (glyph, color string) {
 	switch state {
+	case repo.SecretStateConflicted:
+		return "U", colorRed // unmerged - conflict markers present
+	case repo.SecretStateDiverged:
+		return "!", colorRed // edited here and replaced by git - pick a side
 	case repo.SecretStateNotInSync:
 		return "M", colorYellow // modified - needs seal
+	case repo.SecretStateStale:
+		return "S", "#00AAFF" // stale - the object moved on, reveal takes it
+	case repo.SecretStateRecipientsChanged:
+		return "R", colorYellow // recipients changed - needs reseal
 	case repo.SecretStateNoSealedPath:
 		return "A", colorGreen // added - never sealed
 	case repo.SecretStateNoRevealedPath:
@@ -103,7 +111,11 @@ func glyphFor(state repo.SecretState) (glyph, color string) {
 
 // footerOrder fixes the order states appear in the summary line.
 var footerOrder = []repo.SecretState{
+	repo.SecretStateConflicted,
+	repo.SecretStateDiverged,
 	repo.SecretStateNotInSync,
+	repo.SecretStateRecipientsChanged,
+	repo.SecretStateStale,
 	repo.SecretStateNoSealedPath,
 	repo.SecretStateNoRevealedPath,
 	repo.SecretStateUserHasNoAccess,
@@ -245,6 +257,7 @@ func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		// The diff dir is for managed secrets only; the tree needs unmanaged
 		// files so the footer can count them (they are hidden unless --all).
 		IgnoreUnmanaged: diff,
+		Sync:            syncOpts(r.SesamDir()),
 	})
 	if err != nil {
 		return err
@@ -259,5 +272,61 @@ func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	}
 
 	printStatusTree(r.SesamDir(), status, cmd.Bool("all"), cmd.Bool("users"))
+	printMergeHint(mergeState(cmd.String("sesam-dir")), status)
 	return nil
+}
+
+func countState(status *repo.Status, state repo.SecretState) int {
+	n := 0
+	for _, f := range status.Files {
+		if f.State == state {
+			n++
+		}
+	}
+
+	return n
+}
+
+// printMergeHint names the half-finished git operation and how to finish it.
+// git status shows none of sesam's share of the work: revealed files are
+// gitignored.
+func printMergeHint(kind mergeKind, status *repo.Status) {
+	if !kind.InProgress() {
+		return
+	}
+
+	conflicted := countState(status, repo.SecretStateConflicted)
+	fmt.Printf("\na %s is in progress.\n", kind)
+	switch {
+	case conflicted > 0 && kind.RunsPreCommit():
+		fmt.Printf("resolve the conflicted (U) secrets above\n")
+	case conflicted > 0:
+		// Nothing runs a hook when this ends, so the resolution has to be sealed by hand.
+		fmt.Printf("resolve the conflicted (U) secrets above, then run `sesam seal`\n")
+	default:
+		fmt.Printf("nothing left to resolve - review the merged secrets\n")
+	}
+
+	if countState(status, repo.SecretStateStale) > 0 {
+		if kind.RunsPreCommit() {
+			fmt.Printf("the stale (S) secrets take the incoming version when you finish\n")
+		} else {
+			fmt.Printf("run `sesam reveal` to give the stale (S) secrets the incoming version\n")
+		}
+	}
+
+	if countState(status, repo.SecretStateDiverged) > 0 {
+		fmt.Printf("the diverged (!) secrets were edited here and replaced by the %s:\n", kind)
+		fmt.Printf("  %s\n", waysOut)
+	}
+
+	if cont := kind.ContinueCmd(); cont != "" {
+		fmt.Printf("and finish with `%s`\n", cont)
+	} else {
+		fmt.Printf("and `git add` them (a conflicted `git stash pop` ends up here)\n")
+	}
+
+	if abort := kind.AbortCmd(); abort != "" {
+		fmt.Printf("or start over with `%s` followed by `sesam reveal --all`\n", abort)
+	}
 }

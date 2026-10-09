@@ -1,0 +1,29 @@
+# git runs `!` aliases from the worktree root, so with a nested sesam dir a
+# plain `!sesam` alias looks for `.sesam/` at the root and fails. The alias has
+# to return to the caller's directory first (git exports it as GIT_PREFIX) so
+# `git sesam` behaves exactly like `sesam` run where the user is.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+mkdir vault
+exec sesam init --user admin --sesam-dir vault
+exec git add -A
+exec git commit -m 'init sesam'
+
+# From inside the nested sesam dir the alias finds the repo like `sesam` does.
+cd vault
+exec git sesam ls
+stdout 'README\.md'
+
+# Relative paths resolve against the caller's cwd, not the worktree root.
+mkdir sub
+cp $WORK/secretfile sub/local
+cd sub
+exec git sesam add ./local --group admin
+cd $WORK
+grep 'sub/local' vault/sesam.yml
+
+-- secretfile --
+top secret

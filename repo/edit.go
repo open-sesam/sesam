@@ -16,7 +16,7 @@ func (r *Repo) EditSecret(revealedPath string, edit func(path string) error, sea
 		return fmt.Errorf("missing editor")
 	}
 
-	tmpPath, err := r.revealSecretToTmp(revealedPath)
+	tmpPath, err := r.stageForEdit(revealedPath)
 	if err != nil {
 		return err
 	}
@@ -30,25 +30,49 @@ func (r *Repo) EditSecret(revealedPath string, edit func(path string) error, sea
 	}
 
 	return r.Update(func(s *Stage) error {
-		return s.Seal(sealAll)
+		_, err := s.Seal(SealOpts{All: sealAll})
+		return err
 	})
 }
 
-func (r *Repo) revealSecretToTmp(revealedPath string) (string, error) {
+// stageForEdit puts the secret's current content into .sesam/tmp: the plaintext
+// when the user has one (unsealed edits included), the object when the
+// plaintext is missing or older than the object.
+func (r *Repo) stageForEdit(revealedPath string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.isClosed() {
 		return "", ErrClosed
 	}
-	if _, ok := r.vstate.SecretExists(revealedPath); !ok {
+
+	states, err := r.syncStates(SyncOpts{Paths: []string{revealedPath}})
+	if err != nil {
+		return "", err
+	}
+
+	state, ok := states[revealedPath]
+	if !ok {
 		return "", fmt.Errorf("no such secret: %s", revealedPath)
 	}
 
 	tmpPath := filepath.Join(core.SesamTmpDir(), revealedPath)
-	if err := r.secret.RevealTo(revealedPath, tmpPath); err != nil {
-		return "", fmt.Errorf("failed to reveal %s: %w", revealedPath, err)
+	switch state {
+	case SecretStateUserHasNoAccess:
+		return "", fmt.Errorf("no access to %s", revealedPath)
+	case SecretStateNoRevealedPath, SecretStateStale:
+		if err := r.secret.RevealTo(revealedPath, tmpPath); err != nil {
+			return "", fmt.Errorf("failed to reveal %s: %w", revealedPath, err)
+		}
+	default:
+		if err := r.root.MkdirAll(filepath.Dir(tmpPath), 0o700); err != nil {
+			return "", fmt.Errorf("create tmp dir: %w", err)
+		}
+		if err := core.CopyFile(r.root, revealedPath, tmpPath, false); err != nil {
+			return "", fmt.Errorf("copy %s for editing: %w", revealedPath, err)
+		}
 	}
+
 	return tmpPath, nil
 }
 

@@ -30,10 +30,10 @@ stdout 'README\.md'
 cp modified_readme.md README.md
 exec sesam status
 stdout 'README\.md'
-stdout 'out of sync'
+stdout 'modified'
 
 exec sesam status --json
-stdout '"out_of_sync"'
+stdout '"modified"'
 
 # --diff shells out to git to show old (sealed) vs new (revealed) content.
 exec sesam status --diff

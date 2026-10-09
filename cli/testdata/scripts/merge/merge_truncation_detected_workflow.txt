@@ -1,0 +1,47 @@
+# A merge performed WITHOUT sesam's audit-log driver (e.g. a fresh clone before
+# `sesam init` set up the local git config) forces the user to resolve the log
+# conflict by hand. Taking one side wholesale drops the other side's audit
+# entries - a silent truncation of the mainline. VerifyHistory's first-parent
+# walk must catch it (a proper `sesam` merge rebases instead, losing nothing).
+
+sesam-repo admin base.txt theirs.txt
+
+cp $TMPDIR/base.txt db.txt
+exec sesam add db.txt --group admin
+exec git add -A
+exec git commit -m 'add db'
+
+# OURS: add bob - a distinctive audit entry that must survive any merge.
+exec git checkout -b ours
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'ours: tell bob'
+
+# THEIRS: edit the secret and reseal (also changes the audit log).
+exec git checkout -b theirs ours~1
+cp $TMPDIR/theirs.txt db.txt
+exec sesam seal
+exec git add -A
+exec git commit -m 'theirs: edit+seal'
+
+# Simulate a merge with NO sesam log driver configured: git falls back to a plain
+# text merge and the audit log conflicts.
+exec git checkout ours
+exec git config --remove-section merge.sesam-merge-log
+! exec git merge theirs
+stdout 'CONFLICT'
+
+# The user "resolves" by taking theirs wholesale - silently dropping ours'
+# tell-bob entry. --no-verify skips pre-commit so nothing re-adds it.
+exec git checkout --theirs .sesam/audit/log.jsonl
+exec git add -A
+exec git commit --no-verify --no-edit
+
+# The dropped mainline entry is caught by the first-parent truncation check.
+! exec sesam verify
+stderr 'truncated'
+
+-- base.txt --
+S=BASE
+-- theirs.txt --
+S=THEIRS

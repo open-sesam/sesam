@@ -1,0 +1,58 @@
+# The merge base is a historical object, so it is not held to the two sides'
+# standard: it is decrypted and its path is checked, but no verified state has to
+# vouch for its sealer.
+#
+# Here alice seals the secret, then BOTH branches kill her and edit it. Neither
+# side's state knows alice any more, so a signature check against either one
+# would reject the base - and with it a merge that is entirely ordinary. What
+# covers the base instead is that it comes from shared history, which
+# `sesam verify` checks as a whole.
+
+sesam-repo admin base.txt ours.txt theirs.txt alice.txt
+
+exec sesam tell --user alice --recipient $BOB_PUBKEY --group dev
+cp $TMPDIR/base.txt s
+exec sesam add s --group dev
+exec git add -A
+exec git commit -m 'add s'
+
+# Alice reseals it, so the object at the merge base is signed by her key.
+cp $TMPDIR/alice.txt s
+exec sesam seal -i $BOB_KEY
+exec git add -A
+exec git commit -m 'alice seals s'
+exec git branch topic
+
+# OURS: alice leaves, and the secret changes.
+exec sesam kill --user alice
+cp $TMPDIR/ours.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'ours: kill alice, change s'
+
+# THEIRS: the same call, made independently on the other branch.
+exec git checkout topic
+exec sesam kill --user alice
+cp $TMPDIR/theirs.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'theirs: kill alice, change s'
+
+# The merge runs: both sides reach the text merge, and the conflict is an
+# ordinary content conflict rather than a refusal.
+exec git checkout master
+! exec git merge topic
+stderr 'automatically merging revealed file s; 1 conflict'
+! stderr 'merge base'
+! stderr 'no matching signature key'
+
+grep '^<<<<<<< ours/s' s
+
+-- base.txt --
+BASE
+-- alice.txt --
+ALICE
+-- ours.txt --
+OURS
+-- theirs.txt --
+THEIRS

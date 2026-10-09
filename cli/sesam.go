@@ -49,10 +49,20 @@ func Main(args []string) error {
 	}
 
 	app := &cli.Command{
-		Name:                   "sesam",
-		Usage:                  "Manage encrypted secrets in git repositories",
-		Version:                resolveBuildInfo().String(),
-		Flags:                  flagsGeneral,
+		Name:  "sesam",
+		Usage: "Manage encrypted secrets in git repositories",
+		Description: `
+See https://opensesam.org for the documentation.
+
+If no sub-command is given, but the first argument is a path,
+we assume 'sesam show path/to/secret' as convenience.`,
+		Version: resolveBuildInfo().String(),
+		Flags:   slices.Concat(flagsGeneral, flagsShowRoot),
+		// pass-style shorthand: an argument that is not a subcommand falls
+		// through to `show`, so `sesam -c path/to/secret` works. With no
+		// arguments at all this lands in show with no object, which prints
+		// the help - see HandleShow.
+		DefaultCommand:         "show",
 		EnableShellCompletion:  true,
 		UseShortOptionHandling: true,
 		Commands: []*cli.Command{
@@ -100,12 +110,56 @@ func Main(args []string) error {
 					{
 						Name:   "secret",
 						Usage:  "Merge secrets",
-						Action: commands.HandleStub,
+						Action: commands.HandleMergeSecret,
+						Arguments: []cli.Argument{
+							&cli.StringArg{
+								Name:      "origin",
+								UsageText: "%O",
+							},
+							&cli.StringArg{
+								Name:      "our-path",
+								UsageText: "%A",
+							},
+							&cli.StringArg{
+								Name:      "their-path",
+								UsageText: "%B",
+							},
+							&cli.IntArg{
+								Name:      "conflict-marker-size",
+								UsageText: "%L",
+							},
+							&cli.StringArg{
+								Name:      "path",
+								UsageText: "%P",
+							},
+						},
 					},
 					{
 						Name:   "log",
 						Usage:  "Merge audit log",
-						Action: commands.HandleStub,
+						Action: commands.HandleMergeAuditLog,
+						Arguments: []cli.Argument{
+							&cli.StringArg{
+								Name:      "origin",
+								UsageText: "%O",
+							},
+							&cli.StringArg{
+								Name:      "our-path",
+								UsageText: "%A",
+							},
+							&cli.StringArg{
+								Name:      "their-path",
+								UsageText: "%B",
+							},
+							&cli.IntArg{
+								Name:      "conflict-marker-size",
+								UsageText: "%L",
+							},
+							&cli.StringArg{
+								Name:      "path",
+								UsageText: "%P",
+							},
+						},
 					},
 				},
 			},
@@ -123,6 +177,16 @@ func Main(args []string) error {
 						Name:   "post-checkout",
 						Usage:  "Execute the post-checkout hook - meant to be run by git!",
 						Action: commands.HandleHookPostCheckout,
+					},
+					{
+						Name:   "pre-merge-commit",
+						Usage:  "Execute the pre-merge-commit hook - meant to be run by git!",
+						Action: commands.HandleHookPreMergeCommit,
+					},
+					{
+						Name:   "post-merge",
+						Usage:  "Execute the post-merge hook - meant to be run by git!",
+						Action: commands.HandleHookPostMerge,
 					},
 					{
 						Name:   "install",
@@ -237,6 +301,14 @@ func Main(args []string) error {
 						UsageText: "<object>",
 					},
 				},
+			},
+			{
+				Name:     "unclip",
+				Hidden:   true,
+				Category: catSecrets,
+				Flags:    flagsUnclip,
+				Action:   commands.HandleUnclip,
+				Usage:    "Clear the clipboard (spawned by `sesam show --clip`)",
 			},
 			{
 				Name:     "ls",

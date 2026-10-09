@@ -17,7 +17,7 @@ func guessUserNameFromForgeID(recps []string) (string, error) {
 		for _, prefix := range core.SupportedForges {
 			if strings.HasPrefix(recp, prefix+":") {
 				_, user, _ := strings.Cut(recp, ":")
-				slog.Info(fmt.Sprintf("guessed '--user %s' from %s\n", user, recp))
+				slog.Info(fmt.Sprintf("guessed '--user %s' from %s", user, recp))
 				return user, nil
 			}
 		}
@@ -56,7 +56,7 @@ func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if noSeal {
 			return nil
 		}
-		return s.Seal(cmd.Bool("seal-all"))
+		return sealStage(cmd, r, s)
 	})
 }
 
@@ -72,7 +72,7 @@ func HandleKill(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if noSeal {
 			return nil
 		}
-		return s.Seal(cmd.Bool("seal-all"))
+		return sealStage(cmd, r, s)
 	})
 }
 
@@ -91,7 +91,7 @@ func HandleUserChangeGroups(_ context.Context, cmd *cli.Command, r *repo.Repo) e
 		if noSeal {
 			return nil
 		}
-		return s.Seal(cmd.Bool("seal-all"))
+		return sealStage(cmd, r, s)
 	})
 }
 
@@ -119,7 +119,7 @@ func HandleUserAddRecipient(ctx context.Context, cmd *cli.Command, r *repo.Repo)
 		if noSeal {
 			return nil
 		}
-		return s.Seal(cmd.Bool("seal-all"))
+		return sealStage(cmd, r, s)
 	})
 }
 
@@ -161,7 +161,7 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 		if noSeal {
 			return nil
 		}
-		return s.Seal(cmd.Bool("seal-all"))
+		return sealStage(cmd, r, s)
 	})
 }
 

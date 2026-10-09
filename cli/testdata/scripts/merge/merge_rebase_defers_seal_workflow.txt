@@ -1,0 +1,63 @@
+# Same setup as merge_access_changed_defers_seal_workflow, but replayed with a
+# rebase. The deferred seal is done by the pre-commit hook, and `git rebase
+# --continue` runs no hook at all - so the advice must point at `sesam seal`
+# instead of promising it happens on commit.
+
+sesam-repo admin base.txt ours.txt theirs.txt
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group ops
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+
+exec git checkout -b topic
+exec sesam add s --group-add dev
+cp $TMPDIR/theirs.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: dev only'
+
+exec git checkout master
+exec sesam add s --group-add ops
+cp $TMPDIR/ours.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'master: ops only'
+
+# Replay topic onto master. The content merges, the recipients disagree, so the
+# seal is deferred - and nothing downstream would pick it up, so the driver
+# reports a conflict instead of letting git commit the pre-merge object.
+exec git checkout topic
+! exec git rebase master
+stderr 'access to it changed on both sides'
+stderr 'sesam seal'
+stderr 'git rebase --continue'
+! stderr 'sealed with the merged recipients when you commit'
+
+# The merged plaintext is on disk, so the advice works: seal it, stage it, go on.
+grep 'first = OURS' s
+grep 'last = THEIRS' s
+exec sesam seal
+exec git add -A
+exec git -c core.editor=true rebase --continue
+
+# Both sides made it into the committed object, and both recipient sets stuck.
+exec sesam verify
+exec sesam show .sesam/objects/s.sesam
+stdout 'OURS'
+stdout 'THEIRS'
+
+-- base.txt --
+first = BASE
+middle = BASE
+last = BASE
+-- ours.txt --
+first = OURS
+middle = BASE
+last = BASE
+-- theirs.txt --
+first = BASE
+middle = BASE
+last = THEIRS

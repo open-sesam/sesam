@@ -23,7 +23,8 @@ func cleanCheck(path string, quiet, dryRun bool) (bool, error) {
 // even when the audit state is partially broken.
 //
 // With --aggressive, untracked files inside `.sesam/` are removed too
-// (similar to `git clean -fdx`). Without it, `.sesam/` is left alone.
+// (similar to `git clean -fdx`). Without it, `.sesam/` is left alone - and
+// plaintext that was edited or never sealed stays unless --unsealed says otherwise.
 func HandleClean(ctx context.Context, cmd *cli.Command) error {
 	dryRun := cmd.Bool("dry-run")
 	quiet := cmd.Bool("quiet")
@@ -35,12 +36,14 @@ func HandleClean(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if cmd.Bool("aggressive") {
-		return repo.CleanAggressive(
-			ctx,
-			cmd.String("sesam-dir"),
-			cmd.StringSlice("identity"),
-			opts,
-		)
+		// Walk up to the nearest .sesam like WithRepo does; the raw flag value
+		// would only work from the sesam dir itself.
+		sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+		if err != nil {
+			return err
+		}
+
+		return repo.CleanAggressive(ctx, sesamDir, cmd.StringSlice("identity"), opts)
 	}
 
 	return WithRepo(HandleCleanWithRepo)(ctx, cmd)
@@ -50,10 +53,18 @@ func HandleCleanWithRepo(ctx context.Context, cmd *cli.Command, r *repo.Repo) er
 	dryRun := cmd.Bool("dry-run")
 	quiet := cmd.Bool("quiet")
 
-	return r.Clean(ctx, repo.CleanOpts{
-		Aggressive: false,
+	res, err := r.Clean(ctx, repo.CleanOpts{
+		Aggressive:            false,
+		CleanEditedOrUnsealed: cmd.Bool("unsealed"),
+		Sync:                  syncOpts(r.SesamDir()),
 		CheckFunc: func(path string) (bool, error) {
 			return cleanCheck(path, quiet, dryRun)
 		},
 	})
+	if err != nil {
+		return err
+	}
+
+	printKeptClean(res)
+	return nil
 }
