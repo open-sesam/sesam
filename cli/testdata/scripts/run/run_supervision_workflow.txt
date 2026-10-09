@@ -1,0 +1,33 @@
+# The supervisor kills and reaps the command when sesam is killed. Signals
+# addressed only to sesam are forwarded while the parent stays alive to wait.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam init --user admin
+cp raw-fixture raw.txt
+exec sesam add raw.txt
+rm raw.txt
+
+exec runprobe supervise 9 sesam run --secret RAW=raw.txt -- runprobe hold RAW ignore-term
+stdout 'parent signal=9 child terminated and reaped'
+exec runprobe no-temp-files
+
+exec runprobe supervise 15 sesam run --secret RAW=raw.txt -- runprobe hold RAW
+stdout 'parent signal=15 child terminated and reaped'
+exec runprobe no-temp-files
+
+exec runprobe supervise 2 sesam run --secret RAW=raw.txt -- runprobe hold RAW
+stdout 'parent signal=2 child terminated and reaped'
+exec runprobe no-temp-files
+
+exec runprobe supervise 1 sesam run --secret RAW=raw.txt -- runprobe hold RAW
+stdout 'parent signal=1 child terminated and reaped'
+exec runprobe no-temp-files
+
+! exists raw.txt
+exec sesam id
+stdout '^admin$'
+
+-- raw-fixture --
+raw

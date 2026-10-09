@@ -155,6 +155,41 @@ versions `git` holds, so nothing has to be remembered on your machine:
 - `R` recipients changed: the content agrees, but who may read it changed. `sesam seal` re-encrypts it.
 - `U` conflicted: a merge left conflict markers in the plaintext.
 
+## Running a command with secrets
+
+Use `sesam run` to give a command access to selected secrets without revealing
+them in your worktree:
+
+```bash
+sesam run \
+  --secret TLS_CERT=certs/client.pem \
+  --env-file deploy/production.env \
+  -- ./deploy
+```
+
+- `--secret TLS_CERT=certs/client.pem` gives the command a read-only file and sets
+  `TLS_CERT` to its path, such as `/dev/fd/3`. Have your program read that variable;
+  it must keep the inherited file descriptor open to use the path.
+- `--env-file deploy/production.env` adds the variables declared in that dotenv
+  file to the command's environment. Sesam parses the file without shell expansion.
+
+Both options select managed files and can be repeated. Sesam verifies the secrets
+and your access before starting the command. It rejects conflicting variable
+names, including names already set in your environment, and releases the
+repository lock before the command starts.
+
+<div style="text-align: center;">
+  <img class="arch-diagram arch-light" src="run_light.svg" width="900" alt="Sesam starts a supervisor and command, passing file secrets as open files and dotenv entries as environment variables." />
+  <img class="arch-diagram arch-dark" src="run_dark.svg" width="900" alt="Sesam starts a supervisor and command, passing file secrets as open files and dotenv entries as environment variables." />
+</div>
+
+Sesam waits for the command and returns its exit code, or `128 + signal` if a
+signal terminates it. On Linux and macOS, sesam removes each temporary file's
+name before writing secret bytes. The open file still works through `/dev/fd`;
+the OS releases it when the last reference closes. If sesam receives `SIGKILL`,
+its surviving supervisor kills and waits for the immediate child. This does not
+cover the command's descendants.
+
 ## Removing secrets
 
 If you have deleted files you can run this:

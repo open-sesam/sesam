@@ -234,6 +234,16 @@ Decrypt all secrets available to the current user
 
 **--help, -h**: show help
 
+## run
+
+Run a command with secret files and dotenv variables
+
+**--env-file**="": Inject variables from an exact dotenv secret file (repeatable)
+
+**--help, -h**: show help
+
+**--secret**="": Expose an exact secret file as VARIABLE=path; VARIABLE holds a /dev/fd path (repeatable)
+
 ## status, s
 
 Show overview over repo state (revealed, sealed, unmanaged, ...)

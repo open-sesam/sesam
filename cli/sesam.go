@@ -33,6 +33,9 @@ const (
 // build managers, defer Close) and hand it to the handler; the wrapping
 // makes it obvious which commands need an initialized sesam repository.
 func Main(args []string) error {
+	if len(args) == 2 && args[1] == "__run-supervisor" {
+		return commands.RunSupervisor()
+	}
 	installHelpOrdering()
 
 	cli.VersionFlag = &cli.BoolFlag{
@@ -260,6 +263,21 @@ we assume 'sesam show path/to/secret' as convenience.`,
 				Action:        commands.WithRepo(commands.HandleOpen),
 				ShellComplete: completeSecrets,
 				Usage:         "Decrypt all secrets available to the current user",
+			},
+			{
+				Name:      "run",
+				Category:  catSecrets,
+				Flags:     flagsRun,
+				ArgsUsage: "-- <command> [args...]",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					if !hasArgumentSeparator(args, cmd.Args().Slice()) {
+						return fmt.Errorf("a command is required after --")
+					}
+					return commands.HandleRun(ctx, cmd)
+				},
+				ShellComplete:             completeFiles,
+				DisableSliceFlagSeparator: true,
+				Usage:                     "Run a command with secret files and dotenv variables",
 			},
 			{
 				Name:          "status",
@@ -496,9 +514,22 @@ we assume 'sesam show path/to/secret' as convenience.`,
 	}
 
 	var activeProfile *profileState
+	var runInvocation bool
+	stopSignals := func() {}
+	defer func() { stopSignals() }()
 
 	app.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-		if cmd.Bool("no-color") {
+		runInvocation = cmd.Args().First() == "run"
+		if !runInvocation {
+			ctx, stopSignals = signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+		}
+		if runInvocation {
+			if mode := cmd.String("verify-mode"); mode != "all" {
+				return ctx, fmt.Errorf("sesam run does not support --verify-mode=%s", mode)
+			}
+		}
+
+		if cmd.Bool("no-color") && !runInvocation {
 			// hack to make sure color is always ignored without passing it to everywhere we use termenv.
 			_ = os.Setenv("NO_COLOR", "1")
 		}
@@ -524,18 +555,20 @@ we assume 'sesam show path/to/secret' as convenience.`,
 		return ctx, nil
 	}
 
-	// After runs like a deferred cleanup (also on a failed action), so the CPU
-	// profile is always flushed and the heap profile captured at exit.
+	// After runs like a deferred cleanup (also on a failed action). For run it
+	// covers sesam itself, not the command it waits for.
 	app.After = func(_ context.Context, cmd *cli.Command) error {
 		return activeProfile.stop(cmd.String("memprofile"))
 	}
 
-	ctx, cancel := signal.NotifyContext(
-		context.Background(),
-		syscall.SIGINT,
-		syscall.SIGTERM,
-	)
-	defer cancel()
+	return app.Run(context.Background(), args)
+}
 
-	return app.Run(ctx, args)
+func hasArgumentSeparator(args, commandArgs []string) bool {
+	for i, arg := range args {
+		if arg == "--" && slices.Equal(args[i+1:], commandArgs) {
+			return true
+		}
+	}
+	return false
 }

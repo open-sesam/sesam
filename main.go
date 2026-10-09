@@ -23,19 +23,28 @@ func printError(msg string) {
 }
 
 func main() {
-	if err := cli.Main(os.Args); err != nil {
-		exitErr := new(commands.ExitCodeError)
-		if errors.As(err, &exitErr) {
-			if exitErr.Print() {
-				printError(exitErr.Message())
-			}
+	err := cli.Main(os.Args)
+	if err == nil {
+		return
+	}
 
-			os.Exit(exitErr.Code())
-			return
+	// A command run by `sesam run` reported its own failure already; sesam only
+	// reproduces its status.
+	var exitErr *commands.ExitError
+	if errors.As(err, &exitErr) {
+		exitErr.Terminate()
+	}
+
+	mergeExitErr := new(commands.ExitCodeError)
+	if errors.As(err, &mergeExitErr) {
+		if mergeExitErr.Print() {
+			printError(mergeExitErr.Message())
 		}
 
-		// generic case:
-		printError(err.Error())
-		os.Exit(1)
+		os.Exit(mergeExitErr.Code())
+		return
 	}
+
+	printError(err.Error())
+	os.Exit(1)
 }
