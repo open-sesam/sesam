@@ -24,7 +24,8 @@ exec git add -A
 exec git commit -m 'y1'
 exec git tag y1
 
-# X merges y1 (sesam.yml takes ours via the merge driver, config-regen is separate).
+# X merges y1 (sesam.yml takes ours via the merge driver, then gets reset
+# against the merged log on commit).
 exec git checkout X
 ! exec git merge y1
 exec git commit --no-edit
@@ -40,8 +41,13 @@ exec git checkout X
 ! exec git merge Y
 exec git commit --no-edit
 
-# The doubly-merged log verifies, and both sides' changes are present.
+# The doubly-merged log verifies, and both sides' changes are present. sesam.yml
+# was reset against it along the way, so there is nothing left to diff.
 exec sesam verify
 exec sesam show .sesam/audit/log.jsonl
 stdout 'opsx'
 stdout '"user": "carol"'
+exec sesam config diff
+! stdout .
+exec git status --porcelain
+! stdout .

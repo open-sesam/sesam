@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -127,6 +128,57 @@ func (rs Recipients) UserPubKeys() []UserPubKey {
 	return upks
 }
 
+// Spec is how a recipient would be written in a config: the spec it was
+// resolved from (a forge id, a URL, a file path), or the key material itself
+// when it was given verbatim or its source is unset (a zero-value Source
+// has no spec form to fall back to besides the material itself).
+func (r *Recipient) Spec() string {
+	if r.Source == KeySourceManual || r.Source == "" {
+		return r.String()
+	}
+
+	return string(r.Source)
+}
+
+// CanonicalKeySpec returns spec in the form the audit log records a key given
+// verbatim: an SSH key loses its comment (user@host). Any other spec, and an
+// SSH key that does not parse, is returned as is.
+func CanonicalKeySpec(spec string) string {
+	if !strings.HasPrefix(spec, "ssh-") {
+		return spec
+	}
+
+	canonical, err := canonicalSSHKey(spec)
+	if err != nil {
+		return spec
+	}
+
+	return canonical
+}
+
+// canonicalSSHKey re-marshals an authorized_keys line without its comment.
+func canonicalSSHKey(key string) (string, error) {
+	sshPub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(key))
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub))), nil
+}
+
+// Specs is Spec over the whole list, deduplicated - one forge id can have
+// produced several recorded keys, and a config declares it once.
+func (rs Recipients) Specs() []string {
+	specs := make([]string, 0, len(rs))
+	for _, recp := range rs {
+		if spec := recp.Spec(); !slices.Contains(specs, spec) {
+			specs = append(specs, spec)
+		}
+	}
+
+	return specs
+}
+
 func (rs Recipients) Strings() []string {
 	strs := make([]string, 0, len(rs))
 	for _, recp := range rs {
@@ -230,11 +282,12 @@ func ResolveRecipient(ctx context.Context, root *os.Root, pubKeySpec string) ([]
 	return keys, KeySource(pubKeySpec), err
 }
 
+// splitByLine returns one key per line, dropping blank lines and comments.
 func splitByLine(s string) []string {
 	lines := []string{}
 	for _, line := range strings.Split(s, "\n") {
 		line = strings.TrimSpace(line)
-		if len(line) == 0 {
+		if len(line) == 0 || strings.HasPrefix(line, "#") {
 			continue
 		}
 		lines = append(lines, line)
@@ -279,6 +332,20 @@ func resolveLink(ctx context.Context, url string, client ...*http.Client) ([]str
 	return splitByLine(buf.String()), err
 }
 
+// PrivateKeyError reports that a recipient spec resolved to private key
+// material rather than a public one.
+type PrivateKeyError struct {
+	Kind string
+}
+
+func (e *PrivateKeyError) Error() string {
+	return fmt.Sprintf(
+		"this is a private key (%s), not a public one - "+
+			"use the recipient from its `# public key:` line instead",
+		e.Kind,
+	)
+}
+
 // ParseRecipient turns a public key string into a recipient age can use to
 // encrypt. Accepts X25519 (`age1…`), hybrid (`age1pq1…`), age plugin recipients
 // (`age1yubikey1…`, `age1tpm1…`, …) and SSH public keys. pluginUI is required
@@ -316,7 +383,7 @@ func ParseRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
 	case strings.HasPrefix(arg, "ssh-"):
 		// ssh keys have no stringer sadly. Incoming ssh keys might contain comments (like user@host) or options.
 		// which can making comparison hard. Parse it therefore and re-marshal to strip that kind of stops.
-		sshPub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(arg))
+		canonical, err := canonicalSSHKey(arg)
 		if err != nil {
 			return nil, err
 		}
@@ -326,9 +393,19 @@ func ParseRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
 			return nil, err
 		}
 
-		r, s = sr, string(ssh.MarshalAuthorizedKey(sshPub))
+		r, s = sr, canonical
 	default:
-		return nil, fmt.Errorf("unknown recipient type: %s", arg)
+		// A private key where a public one belongs is an easy mistake: it is
+		// the same file `sesam init -i` takes. Name it, and do not echo the
+		// value - it would put the secret in the terminal and the logs.
+		switch kind := IdentityType(arg); kind {
+		case "empty":
+			return nil, errors.New("empty recipient")
+		case "unknown":
+			return nil, errors.New("unknown recipient type")
+		default:
+			return nil, &PrivateKeyError{Kind: kind}
+		}
 	}
 
 	spk := newStringPubKey(s)
@@ -378,9 +455,22 @@ func ParseAndResolveRecipients(ctx context.Context, root *os.Root, pubKeySpecs [
 			return nil, fmt.Errorf("failed to resolve recipient %s (#%d): %w", pubKeySpec, idx, err)
 		}
 
+		if len(rawPubKeys) == 0 {
+			return nil, fmt.Errorf("recipient %q (#%d) holds no public key", pubKeySpec, idx)
+		}
+
+		// The spec is what the user typed, so it is normally safe to quote
+		// back - except when source is KeySourceManual, where the spec IS the
+		// material (a forge id, URL or file:// path is a reference to it, and
+		// safe to echo even then). Quoting it back on a PrivateKeyError would
+		// undo the redaction ParseRecipient just went to the trouble of doing.
 		subRecps, err := ParseRecipients(rawPubKeys, pluginUI)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse recipient %s (#%d): %w", rawPubKeys, idx, err)
+			var privKeyErr *PrivateKeyError
+			if source == KeySourceManual && errors.As(err, &privKeyErr) {
+				return nil, fmt.Errorf("failed to parse recipient #%d: %w", idx, err)
+			}
+			return nil, fmt.Errorf("failed to parse recipient %q (#%d): %w", pubKeySpec, idx, err)
 		}
 
 		for i := range subRecps {

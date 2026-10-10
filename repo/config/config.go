@@ -4,16 +4,21 @@ import (
 	"github.com/goccy/go-yaml/ast"
 )
 
+// Document is the whole config as a single sesam.yml would declare it.
+type Document struct {
+	Users   []User              `yaml:"users" json:"users"`
+	Groups  map[string][]string `yaml:"groups" json:"groups"`
+	Secrets []Secret            `yaml:"secrets" json:"secrets"`
+}
+
 // FileSource carries the parsed AST for one on-disk YAML file. Every file the
-// repository touches — the entry file and each transitively-included one —
-// gets exactly one FileSource.
+// repository touches gets exactly one FileSource.
 //
 // RootNode is the single source of truth. The file is parsed with
 // parser.ParseComments, so comments live on the nodes themselves: inserting a
 // node carries its comment in, cutting a node carries its comment out, and
-// Save re-renders the tree verbatim via RootNode.String(). RootNode is nil
-// only for a file created in memory that has not had its first item added yet;
-// the first insert builds the root, and Save skips any source still nil.
+// Save re-renders the tree via RootNode.String(). RootNode is nil
+// only for a file created in memory that has not had its first item added yet
 type FileSource struct {
 	Path     string
 	RootNode ast.Node

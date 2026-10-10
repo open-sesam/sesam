@@ -24,7 +24,7 @@ func TestDeduplicateStrings(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := deduplicate(tc.in)
+			got := Deduplicate(tc.in)
 			if tc.want == nil {
 				require.Empty(t, got)
 			} else {
@@ -35,12 +35,24 @@ func TestDeduplicateStrings(t *testing.T) {
 }
 
 func TestDeduplicateInts(t *testing.T) {
-	got := deduplicate([]int{3, 1, 2, 1, 3})
+	got := Deduplicate([]int{3, 1, 2, 1, 3})
 	require.Equal(t, []int{1, 2, 3}, got)
 }
 
+// TestValidUserName and TestValidGroupName share one table: both validators
+// apply the exact same character/length rules (see validName).
 func TestValidUserName(t *testing.T) {
-	valid := []string{
+	testValidName(t, ValidUserName)
+}
+
+func TestValidGroupName(t *testing.T) {
+	testValidName(t, ValidGroupName)
+}
+
+func testValidName(t *testing.T, valid func(string) error) {
+	t.Helper()
+
+	names := []string{
 		"alice",
 		"bob-admin",
 		"user_42",
@@ -52,12 +64,22 @@ func TestValidUserName(t *testing.T) {
 		"Alice",
 	}
 
-	for _, name := range valid {
-		require.NoError(t, ValidUserName(name), "should accept %q", name)
+	for _, name := range names {
+		require.NoError(t, valid(name), "should accept %q", name)
 	}
 }
 
 func TestValidUserNameRejects(t *testing.T) {
+	testValidNameRejects(t, ValidUserName)
+}
+
+func TestValidGroupNameRejects(t *testing.T) {
+	testValidNameRejects(t, ValidGroupName)
+}
+
+func testValidNameRejects(t *testing.T, valid func(string) error) {
+	t.Helper()
+
 	cases := []struct {
 		name  string
 		input string
@@ -76,7 +98,7 @@ func TestValidUserNameRejects(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Error(t, ValidUserName(tc.input), "should reject %q", tc.input)
+			require.Error(t, valid(tc.input), "should reject %q", tc.input)
 		})
 	}
 }

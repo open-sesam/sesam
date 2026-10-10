@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"opensesam.org/sesam/core"
 )
 
 // --- Init / Load lifecycle -------------------------------------------------
@@ -409,6 +410,44 @@ func TestRepo_Verify_NoChecksMeansOK(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, report.Integrity, "no checks requested → no Integrity report")
 	require.True(t, report.OK())
+}
+
+// TestRepo_Verify_ConfigFlagsCommittedChange covers the gap "invalid modified
+// config" left open: apply refuses a step that arrived already committed
+// (see docs/src/design.md), but nothing previously told someone who only runs
+// verify that sesam.yml has one sitting there, ready to be applied.
+func TestRepo_Verify_ConfigFlagsCommittedChange(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	dir, r := bootstrapRepo(t, admin)
+
+	gitCommitAll(t, dir, "init sesam")
+	writeMainConfig(t, dir, declareBob(admin, bob))
+	gitCommitAll(t, dir, "add bob")
+
+	report, err := r.Verify(context.Background(), VerifyOptions{Config: true})
+	require.NoError(t, err)
+	require.False(t, report.OK())
+	require.Equal(t, []core.Operation{core.OpUserTell}, opsOf(report.CommittedConfigChanges))
+
+	// Verify only observes - nothing was actually applied.
+	_, exists := r.vstate.UserExists("bob")
+	require.False(t, exists)
+}
+
+// TestRepo_Verify_ConfigFlagNoOpBeforeAnyCommit mirrors apply's own rule:
+// before the first commit nothing can have arrived committed.
+func TestRepo_Verify_ConfigFlagNoOpBeforeAnyCommit(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	dir, r := bootstrapRepo(t, admin)
+
+	writeMainConfig(t, dir, declareBob(admin, bob))
+
+	report, err := r.Verify(context.Background(), VerifyOptions{Config: true})
+	require.NoError(t, err)
+	require.True(t, report.OK())
+	require.Empty(t, report.CommittedConfigChanges)
 }
 
 func TestVerifyReport_OK(t *testing.T) {

@@ -35,10 +35,15 @@ task coverage    # tests with coverage report (-coverpkg=./... captures testscri
 
 ## Packages
 
+Only cli, core and repo are top-level packages; everything else lives under one
+of them.
+
 - cli: CLI implementation. Should only contain env/flag parsing and visualization and calling high level API.
 - repo: High level API for all operations do-able on the repository.
+  - repo/config: Implementation for the config parsing, modification and marshalling.
+  - repo/diff: Compares the config against the verified state and describes the steps between them.
+  - repo/util: Small helpers shared by the two above.
 - core: Low level API doing one secret or user at a time and implementing the cryptographic primitives used here.
-- config: Implementation for the config parsing, modification and marshalling.
 
 ## Documentation
 

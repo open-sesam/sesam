@@ -4,13 +4,18 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"opensesam.org/sesam/core"
 )
 
 func (c *Config) UserAddRecipient(user string, pubKeySpecs []string) error {
 	src := c.MainFile
 	userSeq, err := usersNode(src.RootNode)
+	if err != nil {
+		return err
+	}
+
+	dec, err := primedDecoder(src)
 	if err != nil {
 		return err
 	}
@@ -41,13 +46,13 @@ func (c *Config) UserAddRecipient(user string, pubKeySpecs []string) error {
 		// latter folds an inline comment into the value and would bake it into
 		// the rewritten key.
 		var existingKeys []string
-		if err := yaml.NodeToValue(keySeq, &existingKeys); err != nil {
+		if err := dec.DecodeFromNode(keySeq, &existingKeys); err != nil {
 			return fmt.Errorf("%s: decode keys of user %q: %w", src.Path, user, err)
 		}
 
 		newKeys := slices.Clone(existingKeys)
 		for _, newKey := range pubKeySpecs {
-			if !slices.Contains(newKeys, newKey) {
+			if !slices.ContainsFunc(newKeys, sameKeySpec(newKey)) {
 				newKeys = append(newKeys, newKey)
 			}
 		}
@@ -67,6 +72,11 @@ func (c *Config) UserAddRecipient(user string, pubKeySpecs []string) error {
 func (c *Config) UserRmRecipient(user string, pubKeySpecs []string) error {
 	src := c.MainFile
 	seq, err := usersNode(src.RootNode)
+	if err != nil {
+		return err
+	}
+
+	dec, err := primedDecoder(src)
 	if err != nil {
 		return err
 	}
@@ -94,12 +104,12 @@ func (c *Config) UserRmRecipient(user string, pubKeySpecs []string) error {
 		}
 
 		var existingKeys []string
-		if err := yaml.NodeToValue(keySeq, &existingKeys); err != nil {
+		if err := dec.DecodeFromNode(keySeq, &existingKeys); err != nil {
 			return fmt.Errorf("%s: decode keys of user %q: %w", src.Path, user, err)
 		}
 
 		filteredKeys := slices.DeleteFunc(existingKeys, func(key string) bool {
-			return slices.Contains(pubKeySpecs, key)
+			return slices.ContainsFunc(pubKeySpecs, sameKeySpec(key))
 		})
 
 		if len(filteredKeys) == 0 {
@@ -116,4 +126,13 @@ func (c *Config) UserRmRecipient(user string, pubKeySpecs []string) error {
 	}
 
 	return fmt.Errorf("%s: user %q not found", src.Path, user)
+}
+
+// sameKeySpec matches specs naming the same key, so a verbatim SSH key matches
+// with or without its comment.
+func sameKeySpec(spec string) func(string) bool {
+	canonical := core.CanonicalKeySpec(spec)
+	return func(other string) bool {
+		return core.CanonicalKeySpec(other) == canonical
+	}
 }

@@ -1165,7 +1165,7 @@ type ConflictedSecret struct {
 // either kind (revealed files are gitignored, the object is ciphertext), so the
 // finalize must refuse until they are resolved - sealing a marker'd file, or one
 // with side files still present, would bake the conflict into the object.
-func ConflictedSecrets(root *os.Root, secrets []VerifiedSecret) ([]ConflictedSecret, error) {
+func ConflictedSecrets(root *os.Root, secrets []SecretAccess) ([]ConflictedSecret, error) {
 	var conflicted []ConflictedSecret
 	for _, s := range secrets {
 		// A binary conflict has no markers; the driver leaves .ours/.theirs beside

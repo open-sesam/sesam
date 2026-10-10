@@ -17,8 +17,15 @@ import (
 )
 
 func printDirectoryDiff(ctx context.Context, status *repo.Status, extraGitArgs []string) error {
+	return runGitDiff(ctx, status.DiffDir, []string{"sealed/", "revealed/"}, extraGitArgs)
+}
+
+// runGitDiff shows two trees inside diffDir with `git diff --no-index`,
+// removing diffDir afterwards. targets are the paths to compare, relative to
+// diffDir.
+func runGitDiff(ctx context.Context, diffDir string, targets, extraGitArgs []string) error {
 	defer func() {
-		if err := os.RemoveAll(status.DiffDir); err != nil {
+		if err := os.RemoveAll(diffDir); err != nil {
 			slog.Error("failed to remove diff dir", slog.Any("err", err))
 		}
 	}()
@@ -27,37 +34,22 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status, extraGitArgs [
 		return fmt.Errorf("failed to find git in PATH - required for this command")
 	}
 
-	// We have to call git directly here, as the user might have configured git tooling of his liking.
-	// go-git offers no comparable diff viewing capabilities (just basic uncolored diffs)
 	args := []string{
 		"diff",
 		"--no-index",
 		"--color=auto",
 	}
 
-	targetDirs := []string{
-		"--",
-		"sealed/",
-		"revealed/",
-	}
+	args = append(args, extraGitArgs...)
+	args = append(args, "--")
+	args = append(args, targets...)
 
-	//nolint:gocritic
-	allArgs := append(
-		args,
-		append(
-			extraGitArgs,
-			targetDirs...,
-		)...,
-	)
-
-	// gosec complains about extra args coming from the command line.
-	//nolint:gosec
 	cmd := exec.CommandContext(
 		ctx,
 		"git",
-		allArgs...,
+		args...,
 	)
-	cmd.Dir = status.DiffDir
+	cmd.Dir = diffDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -66,9 +58,14 @@ func printDirectoryDiff(ctx context.Context, status *repo.Status, extraGitArgs [
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			if exitErr.ExitCode() == 1 {
-				// if there's a diff it will exit with 1
-				return nil
+				// git diff's own convention: 1 means a difference was found,
+				// not a failure.
+				return &ExitCodeError{code: 1, print: false}
 			}
+
+			// Any other code (128, typically) is git reporting a real
+			// failure
+			return &ExitCodeError{code: exitErr.ExitCode(), print: true, err: fmt.Errorf("git diff: %w", err)}
 		}
 
 		return err

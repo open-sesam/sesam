@@ -1,0 +1,75 @@
+# A hand-edited sesam.yml that lists someone in a group without declaring them
+# under users: must be refused when the config is loaded, naming the group and
+# the unknown member. Fixing the file makes it load again.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec sesam ls
+
+# Hand-edit: ghost is in the admin group but was never declared as a user.
+cp broken.yml sesam.yml
+! exec sesam ls
+stderr 'group "admin" lists unknown user "ghost"'
+
+# Every problem is reported at once, not one per run.
+cp broken_many.yml sesam.yml
+! exec sesam ls
+stderr 'group "admin" lists unknown user "ghost"'
+stderr 'group "dev" lists unknown user "phantom"'
+
+# Declaring the missing user resolves it.
+cp fixed.yml sesam.yml
+exec sesam ls
+
+-- broken.yml --
+users:
+  - name: admin
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial
+groups:
+  admin:
+    - admin
+    - ghost
+secrets:
+  - path: README.md
+    access:
+      - admin
+
+-- broken_many.yml --
+users:
+  - name: admin
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial
+groups:
+  admin:
+    - admin
+    - ghost
+  dev:
+    - phantom
+secrets:
+  - path: README.md
+    access:
+      - admin
+
+-- fixed.yml --
+users:
+  - name: admin
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial
+  - name: ghost
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAnotherKeyMaterial
+groups:
+  admin:
+    - admin
+    - ghost
+secrets:
+  - path: README.md
+    access:
+      - admin

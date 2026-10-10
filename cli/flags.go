@@ -365,6 +365,40 @@ var flagsLog = []cli.Flag{
 
 var flagsID = []cli.Flag{flagJSON}
 
+// flagsConfigDiff contains output controls for the config/audit-log diff.
+var flagsConfigDiff = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "validate",
+		Usage: "Fail if 'sesam config apply --force' would refuse the config (dry run, needs admin rights)",
+	},
+	flagJSON,
+}
+
+// flagsConfigPrint contains output controls for printing the merged config.
+var flagsConfigPrint = []cli.Flag{flagJSON}
+
+// flagsConfigReset contains output controls for resetting the config.
+var flagsConfigReset = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "force",
+		Aliases: []string{"f"},
+		Usage:   "Rewrite sesam.yml from scratch when it cannot be repaired in place, losing comments and descriptions",
+	},
+	flagJSON,
+}
+
+// flagsConfigApply contains output and sealing controls for applying the config.
+var flagsConfigApply = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "force",
+		Aliases: []string{"f"},
+		Usage:   "Also apply changes that arrived already committed (see the docs on modified configs)",
+	},
+	flagJSON,
+	flagNoSeal,
+	flagSeal,
+}
+
 var flagsStatus = []cli.Flag{
 	&cli.BoolFlag{
 		Name:    "diff",
@@ -405,6 +439,9 @@ var flagsVerify = []cli.Flag{
 		Name:  "integrity",
 		Usage: "Check file integrity on disk",
 	},
+	&cli.BoolFlag{
+		Name:  "config",
+		Usage: "Check sesam.yml does not declare a change that already arrived committed (not part of --all)",
+	},
 	flagJSON,
-	// TODO: Probably need a config linter here too at some point.
 }

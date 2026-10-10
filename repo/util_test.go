@@ -2,6 +2,7 @@ package repo
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -251,4 +252,44 @@ func TestIsInitialized(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+// TestWriteFileCopies covers the three behaviors reset/diff/apply's scratch
+// copies each rely on: writing into nested destination dirs, skipping a path
+// read reports as absent, and propagating a read error without writing
+// anything for that path.
+func TestWriteFileCopies(t *testing.T) {
+	destDir := t.TempDir()
+
+	err := writeFileCopies(destDir, []string{"a.txt", "sub/b.txt", "missing.txt"},
+		func(path string) ([]byte, bool, error) {
+			if path == "missing.txt" {
+				return nil, true, nil
+			}
+			return []byte("content of " + path), false, nil
+		})
+	require.NoError(t, err)
+
+	got, err := os.ReadFile(filepath.Join(destDir, "a.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "content of a.txt", string(got))
+
+	got, err = os.ReadFile(filepath.Join(destDir, "sub", "b.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "content of sub/b.txt", string(got))
+
+	_, err = os.Stat(filepath.Join(destDir, "missing.txt"))
+	require.True(t, os.IsNotExist(err), "skipped path must not be written")
+}
+
+func TestWriteFileCopiesPropagatesReadError(t *testing.T) {
+	destDir := t.TempDir()
+
+	err := writeFileCopies(destDir, []string{"a.txt"}, func(path string) ([]byte, bool, error) {
+		return nil, false, errors.New("boom")
+	})
+	require.ErrorContains(t, err, "boom")
+
+	_, err = os.Stat(filepath.Join(destDir, "a.txt"))
+	require.True(t, os.IsNotExist(err), "a failed read must not leave a partial file")
 }

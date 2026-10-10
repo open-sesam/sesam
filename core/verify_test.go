@@ -413,6 +413,36 @@ func TestVerifySecretChangeNegative(t *testing.T) {
 
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
+
+	// Regression: secret.add requires the adder to have access to the groups
+	// it grants (see verifySecretAdd), but secret.change_access did not
+	// enforce the same rule on the groups it reassigns to - a user with
+	// access via one group could redirect a secret's whole access list to a
+	// second group they have no standing in, handing it to people who never
+	// had it.
+	t.Run("changer not in the new groups", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+
+		bob := newTestUser(t, "bob")
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+			User: "bob", Groups: []string{"dev"},
+			PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
+		}), nil)
+
+		al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+			RevealedPath: "secrets/db", AccessGroups: []string{"dev"},
+		}), nil)
+
+		// Bob has access via dev, but tries to redirect it to ops - a group he
+		// is not himself a member of.
+		al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretChangeAccess{
+			RevealedPath: "secrets/db", AccessGroups: []string{"ops"},
+		}), nil)
+
+		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+	})
 }
 
 func TestVerifySecretChangeUpdate(t *testing.T) {
@@ -430,6 +460,34 @@ func TestVerifySecretChangeUpdate(t *testing.T) {
 
 	state := verifyState(t, al, EmptyKeyring())
 	s, _ := state.SecretExists("secrets/db")
+	require.Contains(t, s.AccessGroups, "ops")
+}
+
+// TestVerifySecretChangeAccessAllowedWhenChangerIsInNewGroup covers the
+// non-admin, non-degenerate case: a user who belongs to both the old and the
+// new group may still reassign access between them.
+func TestVerifySecretChangeAccessAllowedWhenChangerIsInNewGroup(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+
+	bob := newTestUser(t, "bob")
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailUserTell{
+		User: "bob", Groups: []string{"dev", "ops"},
+		PubKeys: []UserPubKey{{Key: bob.Recipient.String(), Source: KeySourceManual}}, SignPubKey: bob.SignPubKey,
+	}), nil)
+
+	al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{
+		RevealedPath: "secrets/db", AccessGroups: []string{"dev"},
+	}), nil)
+
+	al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretChangeAccess{
+		RevealedPath: "secrets/db", AccessGroups: []string{"ops"},
+	}), nil)
+
+	state := verifyState(t, al, EmptyKeyring())
+	s, exists := state.SecretExists("secrets/db")
+	require.True(t, exists)
 	require.Contains(t, s.AccessGroups, "ops")
 }
 
@@ -689,8 +747,8 @@ func TestVerifyUnknownOperation(t *testing.T) {
 // --- VerifiedState helper tests ---
 
 func TestIsAdmin(t *testing.T) {
-	adminUser := VerifiedUser{Name: "a", Groups: []string{"admin", "dev"}}
-	devUser := VerifiedUser{Name: "b", Groups: []string{"dev"}}
+	adminUser := VerifiedUser{Membership: Membership{Name: "a", Groups: []string{"admin", "dev"}}}
+	devUser := VerifiedUser{Membership: Membership{Name: "b", Groups: []string{"dev"}}}
 	require.True(t, adminUser.IsAdmin())
 	require.False(t, devUser.IsAdmin())
 }
@@ -699,7 +757,7 @@ func TestUserExists(t *testing.T) {
 	state := &VerifiedState{
 		Users: []VerifiedUser{{Name: "alice"}, {Name: "bob"}},
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	u, ok := state.UserExists("alice")
 	require.True(t, ok)
@@ -711,15 +769,40 @@ func TestUserExists(t *testing.T) {
 
 func TestSecretExists(t *testing.T) {
 	state := &VerifiedState{
-		Secrets: []VerifiedSecret{{RevealedPath: "secrets/a"}},
+		Secrets: []SecretAccess{{RevealedPath: "secrets/a"}},
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	s, ok := state.SecretExists("secrets/a")
 	require.True(t, ok)
 	require.Equal(t, "secrets/a", s.RevealedPath)
 
 	_, ok = state.SecretExists("secrets/b")
+	require.False(t, ok)
+}
+
+// TestUserExistsLazyIndexWithoutBuildIndexes pins the behavior BaseState adds
+// on top of the old VerifiedState-only index: a hand-built state answers
+// UserExists/SecretExists correctly even if BuildIndexes was never called -
+// the shared lookup builds its index lazily on first read, the same
+// repo/config.State's User/Secret already relied on before this type merged
+// the two. BuildIndexes remains required only for the incremental mutators
+// (addUser, renameUser, ...), not for reading.
+func TestUserExistsLazyIndexWithoutBuildIndexes(t *testing.T) {
+	state := &VerifiedState{
+		Users:   []VerifiedUser{{Membership: Membership{Name: "alice"}}},
+		Secrets: []SecretAccess{{RevealedPath: "secrets/a"}},
+	}
+
+	u, ok := state.UserExists("alice")
+	require.True(t, ok)
+	require.Equal(t, "alice", u.Name)
+
+	s, ok := state.SecretExists("secrets/a")
+	require.True(t, ok)
+	require.Equal(t, "secrets/a", s.RevealedPath)
+
+	_, ok = state.UserExists("eve")
 	require.False(t, ok)
 }
 
@@ -730,7 +813,7 @@ func TestUserHasAccess(t *testing.T) {
 			{Name: "bob", Groups: []string{"dev"}},
 		},
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	require.True(t, state.UserHasAccess("alice", []string{"ops"}), "admin has implicit access")
 	require.False(t, state.UserHasAccess("bob", []string{"ops"}), "bob not in ops")
@@ -744,11 +827,11 @@ func TestUsersForSecret(t *testing.T) {
 			{Name: "bob", Groups: []string{"dev"}},
 			{Name: "carol", Groups: []string{"ops"}},
 		},
-		Secrets: []VerifiedSecret{
+		Secrets: []SecretAccess{
 			{RevealedPath: "secrets/db", AccessGroups: []string{"dev"}},
 		},
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	users := state.UsersForSecret("secrets/db")
 	require.Len(t, users, 2) // alice (admin) + bob (dev)
@@ -775,7 +858,7 @@ func TestRequireAdmin(t *testing.T) {
 			{Name: "bob", Groups: []string{"dev"}},
 		},
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	entry := &AuditEntrySigned{AuditEntry: AuditEntry{ChangedBy: "alice", SeqID: 1}}
 	u, err := state.RequireAdmin(entry)

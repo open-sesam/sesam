@@ -25,6 +25,30 @@ Forge-ids and URLs are resolved by the admin on first use. Any subsequent
 change to the remote content is flagged as a warning when running `sesam
 verify`.
 
+## Validation
+
+Beyond the schema, which checks the shape of each file, `sesam` checks the
+config for consistency whenever it loads it. A config that fails these checks is
+refused outright rather than partially applied, and every problem found is
+reported at once so a hand-edited file can be fixed in one pass.
+
+**Group members must be declared users.** Every name listed under `groups:` must
+have a matching entry in `users:`. An undeclared member contributes no keys when
+access is resolved, so a typo would otherwise quietly shrink a secret's set of
+recipients instead of failing:
+
+```yaml
+users:
+  - name: alice
+    key:
+      - ssh-ed25519 AAAA…
+
+groups:
+  admin:
+    - alice
+    - alicce   # error: group "admin" lists unknown user "alicce"
+```
+
 ## YAML anchors
 
 If you want to re-use a part of your configuration, you can create a snippet:
@@ -56,7 +80,7 @@ secrets:
       - group2
       - group3
   - path: bar.txt
-    <<: *default-access
+    access: *default-access
 ```
 
 Read up on [YAML anchors](https://en.wikipedia.org/wiki/YAML#Advanced_components) for more background.
@@ -118,7 +142,8 @@ version: 1
 users:
   - name: alice@example.com
     desc: Alice, team lead
-    key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial
   - name: bob@example.com
     desc: Bob, developer
     key:

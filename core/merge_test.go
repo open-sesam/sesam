@@ -157,7 +157,7 @@ func TestResolveTheirs(t *testing.T) {
 		state.rebuildSecretIndex()
 		return state
 	}
-	secretState := func(secrets ...VerifiedSecret) *VerifiedState {
+	secretState := func(secrets ...SecretAccess) *VerifiedState {
 		state := &VerifiedState{Secrets: secrets}
 		state.rebuildUserIndex()
 		state.rebuildSecretIndex()
@@ -183,7 +183,7 @@ func TestResolveTheirs(t *testing.T) {
 		{
 			name:       "U1 kill of present user applies",
 			their:      signed("admin", &DetailUserKill{User: "bob"}),
-			merged:     userState(VerifiedUser{Name: "bob", Groups: []string{"dev"}}),
+			merged:     userState(VerifiedUser{Membership: Membership{Name: "bob", Groups: []string{"dev"}}}),
 			base:       userState(),
 			wantAction: MergeApplied,
 		},
@@ -198,23 +198,23 @@ func TestResolveTheirs(t *testing.T) {
 			name:       "U3 change_groups on killed user is dropped",
 			their:      signed("admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"ops"}}),
 			merged:     userState(),
-			base:       userState(VerifiedUser{Name: "bob", Groups: []string{"dev"}}),
+			base:       userState(VerifiedUser{Membership: Membership{Name: "bob", Groups: []string{"dev"}}}),
 			wantAction: MergeDropped,
 		},
 		{
 			name:  "U3 change_groups delta-merges divergent sets",
 			their: signed("admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"dev", "sec"}}),
 			// ours already added ops; base had dev only.
-			merged:     userState(VerifiedUser{Name: "bob", Groups: []string{"dev", "ops"}}),
-			base:       userState(VerifiedUser{Name: "bob", Groups: []string{"dev"}}),
+			merged:     userState(VerifiedUser{Membership: Membership{Name: "bob", Groups: []string{"dev", "ops"}}}),
+			base:       userState(VerifiedUser{Membership: Membership{Name: "bob", Groups: []string{"dev"}}}),
 			wantAction: MergeRewritten,
 		},
 		{
 			name:  "U3 remove wins over concurrent keep",
 			their: signed("admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{"ops"}}), // theirs removed dev
 			// ours kept dev and added sec.
-			merged:     userState(VerifiedUser{Name: "bob", Groups: []string{"dev", "ops", "sec"}}),
-			base:       userState(VerifiedUser{Name: "bob", Groups: []string{"dev", "ops"}}),
+			merged:     userState(VerifiedUser{Membership: Membership{Name: "bob", Groups: []string{"dev", "ops", "sec"}}}),
+			base:       userState(VerifiedUser{Membership: Membership{Name: "bob", Groups: []string{"dev", "ops"}}}),
 			wantAction: MergeRewritten,
 		},
 		{
@@ -222,35 +222,35 @@ func TestResolveTheirs(t *testing.T) {
 			// is kept rather than emptying the set.
 			name:       "U3 group merge that would empty the set keeps ours",
 			their:      signed("admin", &DetailUserChangeGroups{User: "bob", NewGroups: []string{}}),
-			merged:     userState(VerifiedUser{Name: "bob", Groups: []string{"dev"}}),
-			base:       userState(VerifiedUser{Name: "bob", Groups: []string{"dev"}}),
+			merged:     userState(VerifiedUser{Membership: Membership{Name: "bob", Groups: []string{"dev"}}}),
+			base:       userState(VerifiedUser{Membership: Membership{Name: "bob", Groups: []string{"dev"}}}),
 			wantAction: MergeDropped,
 		},
 		{
 			name:       "U5 rename with occupied target is dropped",
 			their:      signed("admin", &DetailUserRename{OldName: "bob", NewName: "alice"}),
-			merged:     userState(VerifiedUser{Name: "bob"}, VerifiedUser{Name: "alice"}),
+			merged:     userState(VerifiedUser{Membership: Membership{Name: "bob"}}, VerifiedUser{Membership: Membership{Name: "alice"}}),
 			base:       userState(),
 			wantAction: MergeDropped,
 		},
 		{
 			name:       "U6 regen prefers ours when we already rotated",
 			their:      signed("admin", &DetailUserRegenerateSignKey{User: "bob", NewSignPubKey: "their-key"}),
-			merged:     userState(VerifiedUser{Name: "bob", SignPubKey: "our-key"}),
-			base:       userState(VerifiedUser{Name: "bob", SignPubKey: "base-key"}),
+			merged:     userState(VerifiedUser{Membership: Membership{Name: "bob"}, SignPubKey: "our-key"}),
+			base:       userState(VerifiedUser{Membership: Membership{Name: "bob"}, SignPubKey: "base-key"}),
 			wantAction: MergeDropped,
 		},
 		{
 			name:       "B1 remove of present secret applies",
 			their:      signed("admin", &DetailSecretRemove{RevealedPath: "s/db"}),
-			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin"}}),
+			merged:     secretState(SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin"}}),
 			base:       secretState(),
 			wantAction: MergeApplied,
 		},
 		{
 			name:       "B4 move onto occupied path is dropped",
 			their:      signed("admin", &DetailSecretMove{OldRevealedPath: "s/db", NewRevealedPath: "s/api"}),
-			merged:     secretState(VerifiedSecret{RevealedPath: "s/db"}, VerifiedSecret{RevealedPath: "s/api"}),
+			merged:     secretState(SecretAccess{RevealedPath: "s/db"}, SecretAccess{RevealedPath: "s/api"}),
 			base:       secretState(),
 			wantAction: MergeDropped,
 		},
@@ -259,29 +259,29 @@ func TestResolveTheirs(t *testing.T) {
 		{
 			name:       "change_access delta-merges divergent sets",
 			their:      signed("admin", &DetailSecretChangeAccess{RevealedPath: "s/db", AccessGroups: []string{"dev", "sec"}}),
-			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev", "ops"}}),
-			base:       secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			merged:     secretState(SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev", "ops"}}),
+			base:       secretState(SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
 			wantAction: MergeRewritten,
 		},
 		{
 			name:       "change_access already covered by ours is dropped",
 			their:      signed("admin", &DetailSecretChangeAccess{RevealedPath: "s/db", AccessGroups: []string{"dev"}}),
-			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev", "ops"}}),
-			base:       secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			merged:     secretState(SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev", "ops"}}),
+			base:       secretState(SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
 			wantAction: MergeDropped,
 		},
 		{
 			name:       "change_access equal to theirs applies",
 			their:      signed("admin", &DetailSecretChangeAccess{RevealedPath: "s/db", AccessGroups: []string{"dev", "ops"}}),
-			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
-			base:       secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			merged:     secretState(SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			base:       secretState(SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
 			wantAction: MergeApplied,
 		},
 		{
 			name:       "change_access on removed secret is dropped",
 			their:      signed("admin", &DetailSecretChangeAccess{RevealedPath: "s/db", AccessGroups: []string{"dev"}}),
 			merged:     secretState(),
-			base:       secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			base:       secretState(SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
 			wantAction: MergeDropped,
 		},
 
@@ -289,21 +289,21 @@ func TestResolveTheirs(t *testing.T) {
 		{
 			name:       "remove wins over concurrent access change",
 			their:      signed("admin", &DetailSecretRemove{RevealedPath: "s/db"}),
-			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev", "ops"}}),
-			base:       secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			merged:     secretState(SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev", "ops"}}),
+			base:       secretState(SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
 			wantAction: MergeApplied,
 		},
 		{
 			name:       "add of same path with different access keeps ours",
 			their:      signed("admin", &DetailSecretAdd{RevealedPath: "s/db", AccessGroups: []string{"ops"}}),
-			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			merged:     secretState(SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
 			base:       secretState(),
 			wantAction: MergeDropped,
 		},
 		{
 			name:       "add of same path with same access dedupes",
 			their:      signed("admin", &DetailSecretAdd{RevealedPath: "s/db", AccessGroups: []string{"dev"}}),
-			merged:     secretState(VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
+			merged:     secretState(SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}),
 			base:       secretState(),
 			wantAction: MergeDropped,
 		},
@@ -312,7 +312,7 @@ func TestResolveTheirs(t *testing.T) {
 		{
 			name:       "move to a free path applies",
 			their:      signed("admin", &DetailSecretMove{OldRevealedPath: "s/db", NewRevealedPath: "s/new"}),
-			merged:     secretState(VerifiedSecret{RevealedPath: "s/db"}),
+			merged:     secretState(SecretAccess{RevealedPath: "s/db"}),
 			base:       secretState(),
 			wantAction: MergeApplied,
 		},
@@ -326,15 +326,15 @@ func TestResolveTheirs(t *testing.T) {
 		{
 			name:       "rename to a free name applies",
 			their:      signed("admin", &DetailUserRename{OldName: "bob", NewName: "carol"}),
-			merged:     userState(VerifiedUser{Name: "bob"}),
+			merged:     userState(VerifiedUser{Membership: Membership{Name: "bob"}}),
 			base:       userState(),
 			wantAction: MergeApplied,
 		},
 		{
 			name:       "regen applies when ours has not rotated",
 			their:      signed("admin", &DetailUserRegenerateSignKey{User: "bob", NewSignPubKey: "their-key"}),
-			merged:     userState(VerifiedUser{Name: "bob", SignPubKey: "base-key"}),
-			base:       userState(VerifiedUser{Name: "bob", SignPubKey: "base-key"}),
+			merged:     userState(VerifiedUser{Membership: Membership{Name: "bob"}, SignPubKey: "base-key"}),
+			base:       userState(VerifiedUser{Membership: Membership{Name: "bob"}, SignPubKey: "base-key"}),
 			wantAction: MergeApplied,
 		},
 
@@ -342,7 +342,7 @@ func TestResolveTheirs(t *testing.T) {
 		{
 			name:       "add-recipients to a live user applies",
 			their:      signed("admin", &DetailUserAddRecipients{User: "bob"}),
-			merged:     userState(VerifiedUser{Name: "bob"}),
+			merged:     userState(VerifiedUser{Membership: Membership{Name: "bob"}}),
 			base:       userState(),
 			wantAction: MergeApplied,
 		},
@@ -356,14 +356,14 @@ func TestResolveTheirs(t *testing.T) {
 		{
 			name:       "rm-recipients of a present key applies",
 			their:      signed("admin", &DetailUserRmRecipients{User: "bob", PubKeys: []UserPubKey{{Key: alice.Recipient.String()}}}),
-			merged:     userState(VerifiedUser{Name: "bob", Recps: Recipients{alice.Recipient}}),
+			merged:     userState(VerifiedUser{Membership: Membership{Name: "bob"}, Recps: Recipients{alice.Recipient}}),
 			base:       userState(),
 			wantAction: MergeApplied,
 		},
 		{
 			name:       "rm-recipients of an already-gone key is a no-op",
 			their:      signed("admin", &DetailUserRmRecipients{User: "bob", PubKeys: []UserPubKey{{Key: alice.Recipient.String()}}}),
-			merged:     userState(VerifiedUser{Name: "bob"}),
+			merged:     userState(VerifiedUser{Membership: Membership{Name: "bob"}}),
 			base:       userState(),
 			wantAction: MergeDropped,
 		},
@@ -385,7 +385,7 @@ func TestResolveTheirs(t *testing.T) {
 
 	// U2: identical vs divergent tell of the same name.
 	t.Run("U2 dedupes identical tell", func(t *testing.T) {
-		existing := VerifiedUser{Name: alice.Name, SignPubKey: alice.SignPubKey, Recps: Recipients{alice.Recipient}}
+		existing := VerifiedUser{Membership: Membership{Name: alice.Name}, SignPubKey: alice.SignPubKey, Recps: Recipients{alice.Recipient}}
 		d := alice.DetailUserTell([]string{"dev"})
 		r := resolveTheirs(signed("admin", &d), statesFor(userState(existing), userState(), nil, nil))
 		require.Equal(t, MergeDropped, r.Action)
@@ -393,7 +393,7 @@ func TestResolveTheirs(t *testing.T) {
 	})
 
 	t.Run("U2 keeps ours on identity clash", func(t *testing.T) {
-		existing := VerifiedUser{Name: alice.Name, SignPubKey: "different-key", Recps: Recipients{alice.Recipient}}
+		existing := VerifiedUser{Membership: Membership{Name: alice.Name}, SignPubKey: "different-key", Recps: Recipients{alice.Recipient}}
 		d := alice.DetailUserTell([]string{"dev"})
 		r := resolveTheirs(signed("admin", &d), statesFor(userState(existing), userState(), nil, nil))
 		require.Equal(t, MergeDropped, r.Action)
@@ -746,8 +746,8 @@ func TestAuditMergeRecipientRemoveWins(t *testing.T) {
 	k2 := newTestUser(t, "k2").Recipient
 	k3 := newTestUser(t, "k3").Recipient
 
-	base := userState(VerifiedUser{Name: "bob", Recps: Recipients{k1, k2}})
-	ours := userState(VerifiedUser{Name: "bob", Recps: Recipients{k1}}) // ours revoked k2
+	base := userState(VerifiedUser{Membership: Membership{Name: "bob"}, Recps: Recipients{k1, k2}})
+	ours := userState(VerifiedUser{Membership: Membership{Name: "bob"}, Recps: Recipients{k1}}) // ours revoked k2
 
 	t.Run("revoked key alone is dropped", func(t *testing.T) {
 		their := signed("admin", &DetailUserAddRecipients{User: "bob", PubKeys: []UserPubKey{{Key: k2.String()}}})
@@ -770,7 +770,7 @@ func TestAuditMergeRecipientRemoveWins(t *testing.T) {
 	// launder it past our revocation: what counts is base vs ours, and theirs'
 	// own removal has already moved both theirPrev and the running state.
 	t.Run("their churn does not undo our revocation", func(t *testing.T) {
-		churned := userState(VerifiedUser{Name: "bob", Recps: Recipients{k1}}) // theirs removed k2 too
+		churned := userState(VerifiedUser{Membership: Membership{Name: "bob"}, Recps: Recipients{k1}}) // theirs removed k2 too
 		their := signed("admin", &DetailUserAddRecipients{User: "bob", PubKeys: []UserPubKey{{Key: k2.String()}}})
 		r := resolveTheirs(their, statesFor(churned, base, churned, ours))
 		require.Equal(t, MergeDropped, r.Action)
@@ -780,7 +780,7 @@ func TestAuditMergeRecipientRemoveWins(t *testing.T) {
 	// Same churn, but we never revoked anything: theirs' re-add is their own
 	// decision and must land.
 	t.Run("their churn without our revocation applies", func(t *testing.T) {
-		churned := userState(VerifiedUser{Name: "bob", Recps: Recipients{k1}})
+		churned := userState(VerifiedUser{Membership: Membership{Name: "bob"}, Recps: Recipients{k1}})
 		their := signed("admin", &DetailUserAddRecipients{User: "bob", PubKeys: []UserPubKey{{Key: k2.String()}}})
 		r := resolveTheirs(their, statesFor(churned, base, churned, base))
 		require.Equal(t, MergeApplied, r.Action)
@@ -1018,7 +1018,7 @@ func TestOpTableAdminOnlyMatchesVerify(t *testing.T) {
 
 // mergeState builds a VerifiedState for the guards below. The lookup indexes are
 // derived, so a hand-built state has to rebuild them or every lookup misses.
-func mergeState(users []VerifiedUser, secrets []VerifiedSecret) *VerifiedState {
+func mergeState(users []VerifiedUser, secrets []SecretAccess) *VerifiedState {
 	state := &VerifiedState{Users: users, Secrets: secrets}
 	state.rebuildUserIndex()
 	state.rebuildSecretIndex()
@@ -1088,12 +1088,12 @@ func TestIsMergeAdminKill(t *testing.T) {
 // Verifying theirs proves what its author could do on their own branch. This is
 // the other half: what we have taken away from them since the merge base.
 func TestAuthorRevoked(t *testing.T) {
-	admin := VerifiedUser{Name: "admin", Groups: []string{"admin"}}
-	demoted := VerifiedUser{Name: "bob", Groups: []string{"dev"}}
-	db := VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}
-	locked := VerifiedSecret{RevealedPath: "s/db", AccessGroups: []string{"admin"}}
+	admin := VerifiedUser{Membership: Membership{Name: "admin", Groups: []string{"admin"}}}
+	demoted := VerifiedUser{Membership: Membership{Name: "bob", Groups: []string{"dev"}}}
+	db := SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin", "dev"}}
+	locked := SecretAccess{RevealedPath: "s/db", AccessGroups: []string{"admin"}}
 
-	theirs := mergeState([]VerifiedUser{admin, {Name: "bob", Groups: []string{"admin"}}}, []VerifiedSecret{db})
+	theirs := mergeState([]VerifiedUser{admin, {Name: "bob", Groups: []string{"admin"}}}, []SecretAccess{db})
 
 	tests := []struct {
 		name   string
@@ -1134,19 +1134,19 @@ func TestAuthorRevoked(t *testing.T) {
 		{
 			name:   "access to the secret withdrawn on our side",
 			their:  signed("bob", &DetailSecretChangeAccess{RevealedPath: "s/db", AccessGroups: []string{"dev"}}),
-			merged: mergeState([]VerifiedUser{admin, demoted}, []VerifiedSecret{locked}),
+			merged: mergeState([]VerifiedUser{admin, demoted}, []SecretAccess{locked}),
 			want:   "has no access to s/db",
 		},
 		{
 			name:   "move of a secret the author can no longer reach",
 			their:  signed("bob", &DetailSecretMove{OldRevealedPath: "s/db", NewRevealedPath: "s/api"}),
-			merged: mergeState([]VerifiedUser{admin, demoted}, []VerifiedSecret{locked}),
+			merged: mergeState([]VerifiedUser{admin, demoted}, []SecretAccess{locked}),
 			want:   "has no access to s/db",
 		},
 		{
 			name:   "author still has access",
 			their:  signed("bob", &DetailSecretRemove{RevealedPath: "s/db"}),
-			merged: mergeState([]VerifiedUser{admin, demoted}, []VerifiedSecret{db}),
+			merged: mergeState([]VerifiedUser{admin, demoted}, []SecretAccess{db}),
 			want:   "",
 		},
 		{
@@ -1223,7 +1223,7 @@ func TestRecordOrphanedRename(t *testing.T) {
 	// move was dropped and its target is an orphan.
 	merged := mergeState(
 		[]VerifiedUser{{Name: "bob"}, {Name: "bobby"}},
-		[]VerifiedSecret{{RevealedPath: "s/old"}, {RevealedPath: "s/new"}},
+		[]SecretAccess{{RevealedPath: "s/old"}, {RevealedPath: "s/new"}},
 	)
 
 	recordOrphanedRename(signed("admin", &DetailUserRename{OldName: "bob", NewName: "bobby"}), merged, users, secrets)

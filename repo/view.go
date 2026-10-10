@@ -16,9 +16,12 @@ import (
 	"sync"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/sahib/renameio/v2"
-	sesamConf "opensesam.org/sesam/config"
 	"opensesam.org/sesam/core"
+	sesamConf "opensesam.org/sesam/repo/config"
+	"opensesam.org/sesam/repo/diff"
 )
 
 // View is a consistent, read-only window onto a sesam state. It is embedded in
@@ -67,9 +70,12 @@ func (v *View) isClosed() bool {
 // Caller must hold v.mu (matching expandSecretFiles/secretsUnder). This is the
 // canonical config access point for staged writes today and read paths (apply,
 // the config commands) later.
+// configFileName is the declared state's entry file, relative to the sesam dir.
+const configFileName = "sesam.yml"
+
 func (v *View) cfg() (*sesamConf.Config, error) {
 	if v.config == nil {
-		c, err := sesamConf.Load(v.root, "sesam.yml")
+		c, err := sesamConf.Load(v.root, configFileName)
 		if err != nil {
 			return nil, fmt.Errorf("load config: %w", err)
 		}
@@ -78,8 +84,8 @@ func (v *View) cfg() (*sesamConf.Config, error) {
 	return v.config, nil
 }
 
-// closeState closes the audit log and verified state. The root and lock are
-// shared/owned by the Repo and are not touched here.
+// closeState closes the audit log and drops the verified state. The root and
+// lock are shared/owned by the Repo and are not touched here.
 func (v *View) closeState() error {
 	return v.closeStateQuiet(true)
 }
@@ -92,6 +98,7 @@ func (v *View) closeStateQuiet(warnPendingSeal bool) error {
 		}
 		v.auditLog = nil
 	}
+
 	if v.vstate != nil {
 		// A pending seal means unsealed changes sit on disk; nudge the user to
 		// seal before committing. Suppressed mid-merge, where the seal is
@@ -104,6 +111,7 @@ func (v *View) closeStateQuiet(warnPendingSeal bool) error {
 		}
 		v.vstate = nil
 	}
+
 	return errors.Join(errs...)
 }
 
@@ -175,13 +183,13 @@ func (v *View) ListSecrets(paths []string) ([]SecretInfo, error) {
 	}
 
 	// NOTE: This is probably slow for large N, but ok for the start.
-	combinedInfo := func(vs core.VerifiedSecret) SecretInfo {
+	combinedInfo := func(vs core.SecretAccess) SecretInfo {
 		idx := slices.IndexFunc(cfgSecrets, func(s sesamConf.Secret) bool {
 			return s.Path == vs.RevealedPath
 		})
 
 		info := SecretInfo{
-			VerifiedSecret: vs,
+			SecretAccess: vs,
 		}
 
 		if idx >= 0 {
@@ -368,8 +376,187 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 		report.SharedPublicKeys = core.VerifyKeyReuse(v.keyring)
 	}
 
+	if opts.Config {
+		conflicts, err := v.configConflicts()
+		if err != nil {
+			return nil, fmt.Errorf("check config: %w", err)
+		}
+		report.CommittedConfigChanges = conflicts
+	}
+
 	report.Success = report.OK()
 	return report, nil
+}
+
+// configConflicts reports which of sesam.yml's currently declared changes are
+// already reflected in the config committed at HEAD - the same signal `sesam
+// config apply` uses to refuse them. Verify cannot refuse anything, being read-only,
+// but it must not stay silent about a pushed config sitting there ready to be applied by
+// someone who never thought to check.
+func (v *View) configConflicts() ([]diff.Change, error) {
+	declared, err := v.declaredState()
+	if err != nil {
+		return nil, err
+	}
+
+	return v.committedConflicts(diff.Delta(v.vstate, declared).Changes)
+}
+
+// declaredState reads sesam.yml fresh rather than through the cached config:
+// the user may well have edited it since this repo was opened.
+func (v *View) declaredState() (*sesamConf.State, error) {
+	cfg, err := sesamConf.Load(v.root, configFileName)
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
+	declared, err := cfg.State()
+	if err != nil {
+		return nil, fmt.Errorf("declared state: %w", err)
+	}
+
+	return declared, nil
+}
+
+// MergedConfig returns sesam.yml with every included file flattened into it.
+func (v *View) MergedConfig() (*sesamConf.Document, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return nil, ErrClosed
+	}
+
+	// Fresh, like declaredState: what the file says now.
+	cfg, err := sesamConf.Load(v.root, configFileName)
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
+	return cfg.Merged()
+}
+
+// committedConflicts returns those of changes that the config committed at
+// HEAD already declares on its own.
+func (v *View) committedConflicts(changes []diff.Change) ([]diff.Change, error) {
+	committed, err := v.committedConfigChanges()
+	if err != nil {
+		return nil, err
+	}
+
+	var conflicts []diff.Change
+	for _, change := range changes {
+		if slices.ContainsFunc(committed, change.Conflicts) {
+			conflicts = append(conflicts, change)
+		}
+	}
+
+	return conflicts, nil
+}
+
+// committedConfigChanges returns the steps the configuration committed at HEAD
+// would apply on its own, which is how a step is recognised as not coming from
+// the working tree.
+func (v *View) committedConfigChanges() ([]diff.Change, error) {
+	head, err := v.gitRepo.Head()
+	if err != nil {
+		if errors.Is(err, plumbing.ErrReferenceNotFound) {
+			// No commits yet: everything on disk is uncommitted by definition.
+			return nil, nil
+		}
+		return nil, fmt.Errorf("resolve HEAD: %w", err)
+	}
+
+	commit, err := v.gitRepo.CommitObject(head.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("read HEAD commit %s: %w", head.Hash(), err)
+	}
+
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("read tree of %s: %w", head.Hash(), err)
+	}
+
+	prefix, err := core.SesamGitPrefix(v.gitRepo, v.sesamDir)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := tree.File(path.Join(prefix, filepath.ToSlash(configFileName))); err != nil {
+		// sesam.yml itself was never committed (e.g. the very first apply):
+		// there is nothing to compare the declaration against.
+		return nil, nil
+	}
+
+	paths, err := v.configPaths()
+	if err != nil {
+		return nil, err
+	}
+
+	dir, cleanup, err := writeCommittedConfigs(v.sesamDir, tree, prefix, paths)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", dir, err)
+	}
+	defer func() { _ = root.Close() }()
+
+	cfg, err := sesamConf.Load(root, configFileName)
+	if err != nil {
+		return nil, fmt.Errorf("load committed sesam.yml at HEAD: %w", err)
+	}
+
+	declared, err := cfg.State()
+	if err != nil {
+		return nil, fmt.Errorf("committed sesam.yml at HEAD does not describe a state: %w", err)
+	}
+
+	return diff.Delta(v.vstate, declared).Changes, nil
+}
+
+// writeCommittedConfigs materializes the given config paths as they are in
+// tree into a scratch directory, so the committed configuration can be read
+// with the ordinary config loader. Paths missing from the commit are skipped.
+func writeCommittedConfigs(
+	sesamDir string,
+	tree *object.Tree,
+	prefix string,
+	paths []string,
+) (dir string, cleanup func(), err error) {
+	tmpDir, removeTmp, err := scratchDir(sesamDir, "committed-config-")
+	if err != nil {
+		return "", nil, err
+	}
+
+	defer func() {
+		if err != nil {
+			removeTmp()
+		}
+	}()
+
+	err = writeFileCopies(tmpDir, paths, func(rel string) ([]byte, bool, error) {
+		file, err := tree.File(path.Join(prefix, filepath.ToSlash(rel)))
+		if err != nil {
+			// Not committed (yet): nothing to compare against.
+			return nil, true, nil //nolint:nilerr
+		}
+
+		contents, err := file.Contents()
+		if err != nil {
+			return nil, false, fmt.Errorf("read committed %s: %w", rel, err)
+		}
+
+		return []byte(contents), false, nil
+	})
+	if err != nil {
+		return "", nil, err
+	}
+
+	return tmpDir, removeTmp, nil
 }
 
 // Whoami returns the current user, determined by matching an identity against
@@ -478,6 +665,45 @@ func (v *View) GitAddDotSesam() error {
 	})
 }
 
+// GitAddConfig stages sesam.yml, every config file it still includes, and
+// deleted - paths a reset removed from disk - so a regenerated config tree
+// lands in git's index exactly as it sits in the worktree. Needed because the
+// sesam-ours merge driver leaves sesam.yml's own index entry untouched: only
+// an explicit add after a config reset keeps it in sync.
+func (v *View) GitAddConfig(deleted []string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return ErrClosed
+	}
+
+	paths, err := v.configPaths()
+	if err != nil {
+		return err
+	}
+
+	wt, err := v.gitRepo.Worktree()
+	if err != nil {
+		return err
+	}
+
+	prefix, err := core.SesamGitPrefix(v.gitRepo, v.sesamDir)
+	if err != nil {
+		return err
+	}
+
+	for _, p := range slices.Concat(paths, deleted) {
+		if err := wt.AddWithOptions(&git.AddOptions{
+			Path: path.Join(prefix, filepath.ToSlash(p)),
+		}); err != nil {
+			return fmt.Errorf("git add %s: %w", p, err)
+		}
+	}
+
+	return nil
+}
+
 // Status computes a comparison between the revealed and sealed state.
 func (v *View) Status(opts StatusOpts) (*Status, error) {
 	v.mu.Lock()
@@ -489,7 +715,7 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 
 	var status Status
 
-	secretMap := make(map[string]*core.VerifiedSecret)
+	secretMap := make(map[string]*core.SecretAccess)
 	for idx := range v.vstate.Secrets {
 		secretMap[v.vstate.Secrets[idx].RevealedPath] = &v.vstate.Secrets[idx]
 	}
@@ -623,10 +849,10 @@ func (v *View) expandSecretFiles(rel string) ([]string, error) {
 
 // secretsUnder returns every managed secret at or beneath the sesam-relative
 // path rel, enumerated from verified state.
-func (v *View) secretsUnder(rel string) []core.VerifiedSecret {
+func (v *View) secretsUnder(rel string) []core.SecretAccess {
 	target := filepath.Clean(rel)
 
-	var out []core.VerifiedSecret
+	var out []core.SecretAccess
 	for _, s := range v.vstate.Secrets {
 		secretRel := filepath.Clean(s.RevealedPath)
 		if secretRel == target || isUnder(target, secretRel) {
@@ -634,7 +860,7 @@ func (v *View) secretsUnder(rel string) []core.VerifiedSecret {
 		}
 	}
 
-	slices.SortFunc(out, func(a, b core.VerifiedSecret) int {
+	slices.SortFunc(out, func(a, b core.SecretAccess) int {
 		return strings.Compare(a.RevealedPath, b.RevealedPath)
 	})
 
@@ -656,16 +882,15 @@ func (v *View) cleanablePaths() ([]string, error) {
 
 func (v *View) statusToDiffDir(status *Status) (diffDir string, err error) {
 	// The diff tree is consumed by an external `git diff` process, so it is
-	// built with absolute paths outside the root.
-	rootTmpDir := filepath.Join(v.sesamDir, core.SesamTmpDir())
-	tmpDir, err := os.MkdirTemp(rootTmpDir, "status-diff-")
+	// built with absolute paths
+	tmpDir, removeTmp, err := scratchDir(v.sesamDir, "status-diff-")
 	if err != nil {
-		return "", fmt.Errorf("failed to make temp dir for diff: %w", err)
+		return "", err
 	}
 
 	defer func() {
 		if err != nil {
-			_ = os.RemoveAll(tmpDir)
+			removeTmp()
 		}
 	}()
 

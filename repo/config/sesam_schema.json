@@ -15,6 +15,9 @@
   },
   "type": "object",
   "additionalProperties": false,
+  "patternProperties": {
+    "^x-": true
+  },
   "properties": {
     "version": {
       "x-order": 0,
@@ -43,18 +46,11 @@
           },
           "key": {
             "x-order": 1,
-            "description": "Public key(s) of this user. May be given once or several times.",
-            "anyOf": [
-              {
-                "$ref": "#/$defs/pubkey"
-              },
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/$defs/pubkey"
-                }
-              }
-            ]
+            "description": "Public key(s) of this user. Can be given multiple times.",
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/pubkey"
+            }
           },
           "desc": {
             "x-order": 2,
@@ -105,19 +101,50 @@
             ],
             "properties": {
               "path": {
+                "x-order": 0,
                 "$ref": "#/$defs/non-empty-string",
                 "description": "Path to the decrypted secret"
               },
+              "name": {
+                "x-order": 1,
+                "$ref": "#/$defs/non-empty-string",
+                "description": "Name of the secret. Defaults to the path when omitted."
+              },
+              "desc": {
+                "x-order": 2,
+                "$ref": "#/$defs/non-empty-string",
+                "description": "Description of the secret"
+              },
               "access": {
+                "x-order": 3,
                 "type": "array",
                 "description": "Groups or users allowed to reveal this secret. Defaults to admin only when omitted.",
                 "items": {
                   "$ref": "#/$defs/non-empty-string"
                 }
               },
-              "desc": {
-                "$ref": "#/$defs/non-empty-string",
-                "description": "Description of the secret"
+              "rotate": {
+                "x-order": 4,
+                "type": "array",
+                "description": "Rotation steps replacing this secret with a fresh one. Not implemented yet, see the Rotation page."
+              },
+              "swap": {
+                "x-order": 5,
+                "type": "array",
+                "description": "Commands propagating a rotated secret to where it is used. Not implemented yet, see the Rotation page.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "cmd"
+                  ],
+                  "properties": {
+                    "cmd": {
+                      "$ref": "#/$defs/non-empty-string",
+                      "description": "Command to run after the secret was rotated"
+                    }
+                  }
+                }
               }
             }
           }

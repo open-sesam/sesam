@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"opensesam.org/sesam/core"
@@ -35,6 +36,10 @@ type Stage struct {
 
 	repo *Repo
 	done bool
+
+	// touched are worktree paths the stage created outside the fork, in
+	// creation order. Rollback removes them; Commit keeps them.
+	touched []string
 }
 
 // Stage opens a read-write transaction. It errors if a stage is already open
@@ -298,6 +303,12 @@ func (s *Stage) Rollback() error {
 
 	_ = s.closeStateQuiet(false)
 	s.repo.stage = nil
+
+	// Newest first, so files go before the directories created for them.
+	// Remove, not RemoveAll: a directory something else wrote into stays.
+	for _, path := range slices.Backward(s.touched) {
+		_ = s.repo.root.Remove(path)
+	}
 
 	// Repo's live state was never touched, so nothing to restore.
 	return s.repo.root.RemoveAll(forkSuffix)

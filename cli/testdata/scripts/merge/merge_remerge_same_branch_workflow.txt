@@ -22,14 +22,18 @@ exec sesam user change-groups --user bob --group-add ops
 exec git add -A
 exec git commit -m 'theirs: bob += ops'
 
-# Merge #1, finalized. sesam.yml takes ours via the sesam-ours merge driver
-# (config-regen from the merged log is a separate, tracked follow-up), so there
-# is nothing to resolve by hand: git stops via pre-merge-commit, `git commit`
-# finalizes.
+# Merge #1, finalized. sesam.yml takes ours via the sesam-ours merge driver, so
+# there is nothing to resolve by hand: git stops via pre-merge-commit, `git
+# commit` finalizes - which also resets sesam.yml against the merged log, so
+# bob's new group is declared and the tree is left clean.
 exec git checkout ours
 ! exec git merge theirs
 exec git commit --no-edit
 exec sesam verify
+exec sesam config diff
+! stdout .
+exec git status --porcelain
+! stdout .
 
 # THEIRS gets a SECOND change on top of the already-merged branch.
 exec git checkout theirs
@@ -42,8 +46,12 @@ exec git checkout ours
 ! exec git merge theirs
 exec git commit --no-edit
 
-# Both of theirs' changes are in the twice-merged log, which verifies end to end.
+# Both of theirs' changes are in the twice-merged log, which verifies end to end,
+# and sesam.yml was reset again - declaring both groups, nothing left to diff.
 exec sesam verify
 exec sesam show .sesam/audit/log.jsonl
 stdout 'ops'
 stdout 'sec'
+exec sesam config diff
+! stdout .
+grep 'sec' sesam.yml
