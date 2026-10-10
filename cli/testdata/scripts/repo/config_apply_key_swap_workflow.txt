@@ -1,0 +1,46 @@
+# The admin running `sesam config apply` swaps their own key. Changing a user's
+# keys regenerates their signing key, so every step after that must be signed
+# with the new one - including the ones the same apply carries out.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# New key for admin, plus a new user told afterwards, signed by the new key.
+cp declared.yml sesam.yml
+envsubst sesam.yml
+exec sesam config apply
+stdout 'told bob into dev'
+stderr 'applied'
+
+# From now on admin works with the new key, and everything is in sync.
+env SESAM_ID=$CAROL_KEY
+exec sesam verify
+exec sesam config diff
+! stdout .
+
+# The old key was revoked with it.
+env SESAM_ID=$ADMIN_KEY
+! exec sesam verify
+
+-- declared.yml --
+users:
+  - name: admin
+    key:
+      - $CAROL_PUBKEY
+  - name: bob
+    key:
+      - $BOB_PUBKEY
+
+groups:
+  admin:
+    - admin
+  dev:
+    - bob
+
+secrets:
+  - path: README.md
