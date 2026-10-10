@@ -276,6 +276,43 @@ func TestConfigApplyRollsBack(t *testing.T) {
 	require.NoDirExists(t, filepath.Join(dir, ".sesam-tmp"))
 }
 
+// TestConfigApplyRejectsZeroKeysAtApplyTime regresses the overlap between
+// diff.validate (which ConfigApply no longer runs - see diff.Delta's doc
+// comment) and the audit log's own rule that a user may never end up with
+// zero keys: dropping bob down to none is still refused, just by
+// UserRmRecipient itself once it reaches his last key, instead of by a
+// pre-check before the plan starts. Still rolls back like any other apply
+// failure.
+func TestConfigApplyRejectsZeroKeysAtApplyTime(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	dir, r := bootstrapRepo(t, admin)
+	tellUser(t, r, bob, "dev")
+
+	before := entryCount(t, r)
+
+	writeMainConfig(t, dir, "users:\n"+
+		"  - name: admin\n"+
+		"    key:\n"+
+		"      - "+admin.Recipient+"\n"+
+		"  - name: bob\n"+
+		"    key: []\n"+
+		"groups:\n"+
+		"  admin:\n"+
+		"    - admin\n"+
+		"  dev:\n"+
+		"    - bob\n"+
+		"secrets:\n"+
+		"  - path: README.md\n")
+
+	_, err := applyConfig(t, r)
+	require.ErrorContains(t, err, "one key left")
+
+	// Rolled back like any other failed apply.
+	require.Equal(t, before, entryCount(t, r))
+	require.NoDirExists(t, filepath.Join(dir, ".sesam-tmp"))
+}
+
 // TestConfigApplyPreflight rejects plans that would strand the repository or
 // the person applying them, before anything is written.
 func TestConfigApplyPreflight(t *testing.T) {

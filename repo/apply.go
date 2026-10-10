@@ -46,15 +46,7 @@ func (e *CommittedChangesError) Error() string {
 // ConfigApply records what sesam.yml declares in the audit log, one entry per
 // step of the diff.
 //
-// It runs inside a stage, so the whole plan is a transaction: every entry, key
-// and object it writes lands in the fork of .sesam, and a failure anywhere
-// leaves the live repository untouched. The caller commits (or rolls back) the
-// stage - typically via Repo.Update, which also gives the plan and the seal
-// that follows it a single atomic swap.
-//
-// sesam.yml itself is never written: the declaration is already the target
-// state, so the file keeps the user's comments, anchors and descriptions
-// exactly as they were.
+// # It runs inside a stage, so the whole plan is a transaction
 //
 // The returned changes are the ones that were carried out, in the order they
 // were applied. Nothing to do yields no changes and no error.
@@ -80,10 +72,9 @@ func (s *Stage) ConfigApply(ctx context.Context, opts ConfigApplyOpts) ([]diff.C
 		return nil, fmt.Errorf("declared state: %w", err)
 	}
 
-	plan, err := diff.Compute(s.vstate, declared)
-	if err != nil {
-		return nil, err
-	}
+	// every step below is fed straight to the staged audit log,
+	// which already rejects anything not validating
+	plan := diff.Delta(s.vstate, declared)
 
 	if plan.IsEmpty() {
 		// plan.Changes, not nil: diff.Delta already guarantees a non-nil empty
@@ -104,10 +95,7 @@ func (s *Stage) ConfigApply(ctx context.Context, opts ConfigApplyOpts) ([]diff.C
 
 	// The plan is only correct if it actually closed the gap. Re-diffing
 	// against the same declaration catches anything the steps did not express.
-	rest, err := diff.Compute(s.vstate, declared)
-	if err != nil {
-		return nil, fmt.Errorf("re-checking the applied state: %w", err)
-	}
+	rest := diff.Delta(s.vstate, declared)
 
 	if !rest.IsEmpty() {
 		slog.Warn("applied state differs from sesam.yml - this is a bug, nothing was changed", slog.Any("diff", rest))

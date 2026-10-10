@@ -627,6 +627,45 @@ func (v *View) GitAddDotSesam() error {
 	})
 }
 
+// GitAddConfig stages sesam.yml, every config file it still includes, and
+// deleted - paths a reset removed from disk - so a regenerated config tree
+// lands in git's index exactly as it sits in the worktree. Needed because the
+// sesam-ours merge driver leaves sesam.yml's own index entry untouched: only
+// an explicit add after a config reset keeps it in sync.
+func (v *View) GitAddConfig(deleted []string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return ErrClosed
+	}
+
+	paths, err := v.configPaths()
+	if err != nil {
+		return err
+	}
+
+	wt, err := v.gitRepo.Worktree()
+	if err != nil {
+		return err
+	}
+
+	prefix, err := core.SesamGitPrefix(v.gitRepo, v.sesamDir)
+	if err != nil {
+		return err
+	}
+
+	for _, p := range slices.Concat(paths, deleted) {
+		if err := wt.AddWithOptions(&git.AddOptions{
+			Path: path.Join(prefix, filepath.ToSlash(p)),
+		}); err != nil {
+			return fmt.Errorf("git add %s: %w", p, err)
+		}
+	}
+
+	return nil
+}
+
 // Status computes a comparison between the revealed and sealed state.
 func (v *View) Status(opts StatusOpts) (*Status, error) {
 	v.mu.Lock()

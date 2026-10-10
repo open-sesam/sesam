@@ -373,7 +373,7 @@ var flagsConfigReset = []cli.Flag{
 	&cli.BoolFlag{
 		Name:    "force",
 		Aliases: []string{"f"},
-		Usage:   "Actually write sesam.yml - without it, reset only reports what it would do",
+		Usage:   "Rewrite sesam.yml from scratch when it cannot be repaired in place, losing comments and descriptions",
 	},
 	flagJSON,
 }

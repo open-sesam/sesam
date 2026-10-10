@@ -427,16 +427,6 @@ we assume 'sesam show path/to/secret' as convenience.`,
 						Action: commands.WithRepo(commands.HandleConfigDiff),
 					},
 					{
-						Name:   "get",
-						Usage:  "Get specific config keys",
-						Action: commands.HandleStub,
-					},
-					{
-						Name:   "set",
-						Usage:  "Set specific config keys",
-						Action: commands.HandleStub,
-					},
-					{
 						Name:   "reset",
 						Flags:  flagsConfigReset,
 						Usage:  "Derive config from audit log",

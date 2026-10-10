@@ -1,8 +1,10 @@
 # `sesam config reset` rewrites sesam.yml to describe the audit log again,
 # throwing away whatever the file declared on top of it. It is the opposite of
-# `sesam config apply` and never touches the log. Without --force it only
-# reports what it would do and leaves every file exactly as it is; --force is
-# what actually writes it.
+# `sesam config apply` and never touches the log. A hand edit that can be
+# repaired in place is fixed right away - no --force needed, since nothing is
+# lost. Only a config too broken to read needs --force: that can only be
+# replaced wholesale, which costs its comments, so without --force it is only
+# reported.
 
 exec git init
 exec git config user.email test@sesam.dev
@@ -20,24 +22,14 @@ exec sesam config reset
 exec sesam config reset --force
 ! stdout .
 
-# Hand edits: a normal run only reports what would be discarded, and writes
-# nothing.
+# Hand edits: a normal run repairs the file in place right away - no --force
+# needed, since the fix only discards what was never in the audit log anyway.
 cp edited.yml sesam.yml
 envsubst sesam.yml
 ! exec sesam config diff
 stdout '\+  - name: carol'
 
 exec sesam config reset
-! stdout .
-stderr 'would discard'
-stderr 'pass --force'
-
-# Still there - nothing was written.
-! exec sesam config diff
-stdout '\+  - name: carol'
-
-# --force is what actually writes it.
-exec sesam config reset --force
 ! stdout .
 stderr 'discarded'
 exec sesam config diff

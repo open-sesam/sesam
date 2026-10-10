@@ -14,22 +14,7 @@ import (
 // State is the declared state of the repository: the normalized projection of
 // the config that can be compared against the verified state replayed from the
 // audit log.
-//
-// It carries only what has a counterpart in the audit log. Everything the
-// config knows on top of that - descriptions, secret names, rotation and swap
-// commands, which file a secret was declared in - is dropped here on purpose:
-// those never produce an audit entry, so a diff must not see them.
-type State struct {
-	Users   []StateUser
-	Secrets []core.SecretAccess
-
-	// userIdx / secretIdx map a Name / RevealedPath to its position in Users /
-	// Secrets. They are built lazily, on first lookup, from whatever Users /
-	// Secrets hold at that point - callers (State() included) must finish
-	// populating both slices before calling User() or Secret() the first time.
-	userIdx   map[string]int
-	secretIdx map[string]int
-}
+type State = core.BaseState[StateUser]
 
 // StateUser is one entry of users: joined with the group memberships declared
 // for it under groups:. What it adds to the shared membership is the one thing
@@ -68,40 +53,6 @@ func (e *PathEscapesRepoError) Error() string {
 		"%s: secret path %q resolves to %q, which is outside the repository",
 		e.Path, e.Declared, e.Resolved,
 	)
-}
-
-// User returns the declared user by name.
-func (s *State) User(name string) (*StateUser, bool) {
-	if s.userIdx == nil {
-		s.userIdx = make(map[string]int, len(s.Users))
-		for i := range s.Users {
-			s.userIdx[s.Users[i].Name] = i
-		}
-	}
-
-	idx, ok := s.userIdx[name]
-	if !ok {
-		return nil, false
-	}
-
-	return &s.Users[idx], true
-}
-
-// Secret returns the declared secret by its sesam-relative path.
-func (s *State) Secret(path string) (*core.SecretAccess, bool) {
-	if s.secretIdx == nil {
-		s.secretIdx = make(map[string]int, len(s.Secrets))
-		for i := range s.Secrets {
-			s.secretIdx[s.Secrets[i].RevealedPath] = i
-		}
-	}
-
-	idx, ok := s.secretIdx[path]
-	if !ok {
-		return nil, false
-	}
-
-	return &s.Secrets[idx], true
 }
 
 // State derives the declared state from the config. Users and groups come from

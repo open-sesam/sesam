@@ -121,14 +121,18 @@ func (d *Diff) String() string {
 }
 
 // Compute diffs the declared state against the verified one and returns the
-// changes needed to make the verified state match the declaration, ordered so
-// that applying them in sequence never passes through a state the audit log
-// would reject.
+// changes needed to make the verified state match the declaration, checking
+// first that the declaration is appliable at all, in the audit log's own
+// terms. Ordered so that applying them in sequence never passes through a
+// state the audit log would reject.
 //
-// Renames are not detected. Nothing in the verified state survives a rename to
-// pair the old name with the new one, so a renamed user or a moved secret path
-// shows up as a removal plus an addition. `sesam user rename` and
-// `sesam secret move` stay the explicit route for those.
+// Use this for a caller that never actually applies the plan - `sesam config
+// diff`, in particular - since nothing else would catch an unappliable
+// declaration there. A caller that does apply the plan through the audit log
+// (`sesam config apply`) should use Delta instead: the log's own verification
+// rejects everything validate would, as each step is fed to it, so checking
+// twice only buys a worse error (mid-apply, inside a now-discarded stage,
+// instead of up front).
 func Compute(vstate *core.VerifiedState, declared *config.State) (*Diff, error) {
 	if err := validate(vstate, declared); err != nil {
 		return nil, err
@@ -138,7 +142,8 @@ func Compute(vstate *core.VerifiedState, declared *config.State) (*Diff, error) 
 }
 
 // Delta returns how the two states differ, without judging whether the
-// declaration could be applied
+// declaration could be applied. See Compute's doc comment for when this is
+// enough on its own.
 func Delta(vstate *core.VerifiedState, declared *config.State) *Diff {
 	users := userChanges(vstate, declared)
 	secrets := secretChanges(vstate, declared)

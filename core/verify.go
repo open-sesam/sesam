@@ -17,6 +17,82 @@ type Membership struct {
 	Groups []string `json:"groups"`
 }
 
+// GetName satisfies Named.
+func (m Membership) GetName() string {
+	return m.Name
+}
+
+// Named is implemented by any user representation that carries a name
+type Named interface {
+	GetName() string
+}
+
+// BaseState is the shape shared by every representation of "what the
+// repository looks like": a user list and a secret list, each looked up by
+// name/path through an index built lazily on first lookup.
+type BaseState[U Named] struct {
+	Users   []U            `json:"users"`
+	Secrets []SecretAccess `json:"secrets"`
+
+	// userIdx / secretIdx map a Name / RevealedPath to its position in Users /
+	// Secrets. Built lazily, on first lookup, from whatever Users / Secrets
+	// hold at that point.
+	userIdx   map[string]int
+	secretIdx map[string]int
+}
+
+// User returns the entry in Users named name.
+func (s *BaseState[U]) User(name string) (*U, bool) {
+	if s.userIdx == nil {
+		s.rebuildUserIndex()
+	}
+
+	idx, ok := s.userIdx[name]
+	if !ok {
+		return nil, false
+	}
+
+	return &s.Users[idx], true
+}
+
+// Secret returns the entry in Secrets at revealedPath.
+func (s *BaseState[U]) Secret(revealedPath string) (*SecretAccess, bool) {
+	if s.secretIdx == nil {
+		s.rebuildSecretIndex()
+	}
+
+	idx, ok := s.secretIdx[revealedPath]
+	if !ok {
+		return nil, false
+	}
+
+	return &s.Secrets[idx], true
+}
+
+// rebuildUserIndex rebuilds userIdx from Users. Called after verify and after a
+// modification that shifts positions (a user removal).
+func (s *BaseState[U]) rebuildUserIndex() {
+	s.userIdx = make(map[string]int, len(s.Users))
+	for i := range s.Users {
+		s.userIdx[s.Users[i].GetName()] = i
+	}
+}
+
+// rebuildSecretIndex rebuilds secretIdx from Secrets. Called after verify and
+// after a modification that shifts positions (a secret removal).
+func (s *BaseState[U]) rebuildSecretIndex() {
+	s.secretIdx = make(map[string]int, len(s.Secrets))
+	for i := range s.Secrets {
+		s.secretIdx[s.Secrets[i].RevealedPath] = i
+	}
+}
+
+// BuildIndexes (re)builds both lookup indexes from Users and Secrets.
+func (s *BaseState[U]) BuildIndexes() {
+	s.rebuildUserIndex()
+	s.rebuildSecretIndex()
+}
+
 // SecretAccess is a secret the audit log and the config describe identically:
 // the path made sesam-relative, and the access list. Used directly as the
 // secret type on both sides
@@ -39,8 +115,7 @@ type VerifiedUser struct {
 // - Config was edited by user locally (to add new secrets or users declaratively)
 // - Something was tampered with (e.g. Eve added herself as admin)
 type VerifiedState struct {
-	Users   []VerifiedUser `json:"users"`
-	Secrets []SecretAccess `json:"secrets"`
+	BaseState[VerifiedUser]
 
 	// SealRequiredSeqID tells us the entry that required a seal but didn't have one yet.
 	// If a seal was provided, it is set back to 0.
@@ -53,11 +128,6 @@ type VerifiedState struct {
 	// LastSealRootHash is the RootHash from the most recent seal entry.
 	// Compared against disk after replay to detect file substitution.
 	LastSealRootHash string `json:"last_seal_root_hash"`
-
-	// userIdx / secretIdx map a Name / RevealedPath to its position in Users /
-	// Secrets. They exist as optimization only and are lazily loaded.
-	userIdx   map[string]int
-	secretIdx map[string]int
 
 	auditLog *AuditLog
 	keyring  Keyring
@@ -89,37 +159,6 @@ func (s *VerifiedState) UnmarshalJSON(data []byte) error {
 	s.rebuildUserIndex()
 	s.rebuildSecretIndex()
 	return nil
-}
-
-// rebuildUserIndex rebuilds userIdx from Users. Called after verify and after a
-// modification that shifts positions (a user removal).
-func (s *VerifiedState) rebuildUserIndex() {
-	s.userIdx = make(map[string]int, len(s.Users))
-	for i := range s.Users {
-		s.userIdx[s.Users[i].Name] = i
-	}
-}
-
-// rebuildSecretIndex rebuilds secretIdx from Secrets. Called after verify and
-// after a modification that shifts positions (a secret removal).
-func (s *VerifiedState) rebuildSecretIndex() {
-	s.secretIdx = make(map[string]int, len(s.Secrets))
-	for i := range s.Secrets {
-		s.secretIdx[s.Secrets[i].RevealedPath] = i
-	}
-}
-
-// BuildIndexes (re)builds both lookup indexes from Users and Secrets. verify
-// calls it after replay, and every later modification keeps the indexes in sync
-// incrementally, so the read accessors (UserExists, SecretExists, ...) never
-// write and are safe to call concurrently on an unchanging state. Code that
-// constructs or modifies a VerifiedState by hand - outside this package there
-// is no other way - must call this before reading it, or every lookup answers
-// "not found".
-// It is not safe against concurrent modification; that would need a mutex.
-func (s *VerifiedState) BuildIndexes() {
-	s.rebuildUserIndex()
-	s.rebuildSecretIndex()
 }
 
 // addUser appends u and records its position in userIdx. The index must already
@@ -162,22 +201,14 @@ func (s *VerifiedState) renameSecret(oldPath, newPath string) {
 	s.secretIdx[newPath] = idx
 }
 
+// UserExists is BaseState.User
 func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
-	idx, ok := s.userIdx[user]
-	if !ok {
-		return nil, false
-	}
-
-	return &s.Users[idx], true
+	return s.BaseState.User(user)
 }
 
+// SecretExists is BaseState.Secret
 func (s *VerifiedState) SecretExists(revealedPath string) (*SecretAccess, bool) {
-	idx, ok := s.secretIdx[revealedPath]
-	if !ok {
-		return nil, false
-	}
-
-	return &s.Secrets[idx], true
+	return s.BaseState.Secret(revealedPath)
 }
 
 // UserHasAccess checks if `user` is in one of `grous` and has therefore access.

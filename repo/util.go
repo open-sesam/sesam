@@ -10,6 +10,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/go-git/go-git/v5"
+	"github.com/sahib/renameio/v2"
 	"opensesam.org/sesam/core"
 )
 
@@ -198,7 +199,7 @@ func writeFileCopies(destDir string, paths []string, read func(path string) (dat
 			return fmt.Errorf("make dir for %s: %w", dst, err)
 		}
 
-		if err := os.WriteFile(dst, data, 0o600); err != nil {
+		if err := renameio.WriteFile(dst, data, 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", dst, err)
 		}
 	}

@@ -16,8 +16,8 @@ import (
 
 // ConfigResetOpts controls how a reset behaves.
 type ConfigResetOpts struct {
-	// Force actually writes sesam.yml. Without it, ConfigReset only computes
-	// and reports what a reset would do
+	// Force allows rewriting sesam.yml from scratch when it cannot be
+	// repaired in place, discarding its comments and descriptions.
 	Force bool
 }
 
@@ -52,19 +52,8 @@ func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 		return nil, ErrClosed
 	}
 
-	root := r.root
-	if !opts.Force {
-		scratch, cleanup, err := r.scratchConfigTree()
-		if err != nil {
-			return nil, err
-		}
-		defer cleanup()
-
-		root = scratch
-	}
-
 	out := &ConfigReset{}
-	cfg, err := r.resetConfig(root, out)
+	cfg, err := r.resetConfig(r.root, out)
 	if err != nil {
 		return nil, err
 	}
@@ -74,30 +63,35 @@ func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 		return out, nil
 	}
 
-	if err := cfg.Save(); err != nil {
-		return nil, fmt.Errorf("save config: %w", err)
-	}
-
 	if out.Rewritten {
 		// A rewrite flattens everything into the main file, so any sub-config
-		// that used to be included is now unreferenced.
+		// that used to be included is now unreferenced - true whether or not
+		// Force lets the rewrite actually reach disk.
 		orphans, err := r.orphanedConfigs(cfg)
 		if err != nil {
 			return nil, err
 		}
 		out.Orphaned = orphans
+
+		if !opts.Force {
+			// rebuildConfig only ever builds cfg in memory, so nothing has
+			// reached disk yet - safe to stop here and just report it.
+			return out, nil
+		}
 	}
 
-	// A revert (the repair-in-place path) can go the other way: pruning a
-	// declared secret out of a sub-config can leave it empty, and the config
-	// mutators delete such a file outright rather than leaving it orphaned.
-	// That must not happen without a trace either.
+	if err := cfg.Save(); err != nil {
+		return nil, fmt.Errorf("save config: %w", err)
+	}
+
+	// A revert (the repair-in-place path) can prune a declared secret out of
+	// a sub-config and leave it empty; the config mutators delete such a file
+	// outright rather than leaving it orphaned. That must not happen without
+	// a trace either.
 	out.Deleted = cfg.Deleted()
 
-	if opts.Force {
-		// The cached view would still hold the pre-reset file.
-		r.config = nil
-	}
+	// The cached view would still hold the pre-reset file.
+	r.config = nil
 
 	slog.Debug(
 		"config reset",
@@ -207,50 +201,6 @@ func (r *Repo) rebuildConfig(root *os.Root) (*sesamConf.Config, error) {
 	}
 
 	return cfg, nil
-}
-
-// scratchConfigTree copies every config file in the repository into a
-// throwaway directory and returns a root for it. The returned func removes the
-// copy again.
-func (r *Repo) scratchConfigTree() (root *os.Root, cleanup func(), err error) {
-	// A local, not the named return: that one is reassigned by the return
-	// statement below, and the closure would end up calling itself.
-	tmpDir, removeTmp, err := scratchDir(r.sesamDir, "config-reset-")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	defer func() {
-		if err != nil {
-			removeTmp()
-		}
-	}()
-
-	paths, err := r.configPaths()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	err = writeFileCopies(tmpDir, paths, func(path string) ([]byte, bool, error) {
-		data, err := r.root.ReadFile(path)
-		if err != nil {
-			return nil, false, fmt.Errorf("read %s: %w", path, err)
-		}
-		return data, false, nil
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	scratch, err := os.OpenRoot(tmpDir)
-	if err != nil {
-		return nil, nil, fmt.Errorf("open %s: %w", tmpDir, err)
-	}
-
-	return scratch, func() {
-		_ = scratch.Close()
-		removeTmp()
-	}, nil
 }
 
 // configPaths lists every config file in the repository, wherever it sits in

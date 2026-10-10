@@ -781,6 +781,31 @@ func TestSecretExists(t *testing.T) {
 	require.False(t, ok)
 }
 
+// TestUserExistsLazyIndexWithoutBuildIndexes pins the behavior BaseState adds
+// on top of the old VerifiedState-only index: a hand-built state answers
+// UserExists/SecretExists correctly even if BuildIndexes was never called -
+// the shared lookup builds its index lazily on first read, the same
+// repo/config.State's User/Secret already relied on before this type merged
+// the two. BuildIndexes remains required only for the incremental mutators
+// (addUser, renameUser, ...), not for reading.
+func TestUserExistsLazyIndexWithoutBuildIndexes(t *testing.T) {
+	state := &VerifiedState{
+		Users:   []VerifiedUser{{Membership: Membership{Name: "alice"}}},
+		Secrets: []SecretAccess{{RevealedPath: "secrets/a"}},
+	}
+
+	u, ok := state.UserExists("alice")
+	require.True(t, ok)
+	require.Equal(t, "alice", u.Name)
+
+	s, ok := state.SecretExists("secrets/a")
+	require.True(t, ok)
+	require.Equal(t, "secrets/a", s.RevealedPath)
+
+	_, ok = state.UserExists("eve")
+	require.False(t, ok)
+}
+
 func TestUserHasAccess(t *testing.T) {
 	state := &VerifiedState{
 		Users: []VerifiedUser{

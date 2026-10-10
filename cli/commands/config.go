@@ -160,8 +160,10 @@ func printCommittedChanges(changes []diff.Change) error {
 }
 
 // HandleConfigReset rewrites sesam.yml to describe the audit log again,
-// discarding whatever the file declared on top of it. Without --force it only
-// reports what would happen
+// discarding whatever the file declared on top of it. A repair that can be
+// made in place always happens; only a full rewrite, which also loses
+// comments and descriptions, needs --force - without it, that case is only
+// reported.
 func HandleConfigReset(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	force := cmd.Bool("force")
 
@@ -189,7 +191,9 @@ func HandleConfigReset(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 			))
 		}
 
-		printDeleted(r, reset, force)
+		if force {
+			printDeleted(r, reset)
+		}
 		return forceHint(force)
 	}
 
@@ -198,34 +202,25 @@ func HandleConfigReset(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 		return nil
 	}
 
-	verb := "discarded"
-	if !force {
-		verb = "would discard"
-	}
-	slog.Info(fmt.Sprintf("%s %d declared %s", verb, len(reset.Discarded), pluralize("change", len(reset.Discarded))))
+	slog.Info(fmt.Sprintf("discarded %d declared %s", len(reset.Discarded), pluralize("change", len(reset.Discarded))))
 
-	printDeleted(r, reset, force)
-	return forceHint(force)
+	printDeleted(r, reset)
+	return nil
 }
 
 // printDeleted reports sub-config files the repair-in-place path emptied and
-// removed (or would remove, without force) from disk
-func printDeleted(r *repo.Repo, reset *repo.ConfigReset, force bool) {
-	verb := "deleted"
-	if !force {
-		verb = "would delete"
-	}
-
+// removed from disk.
+func printDeleted(r *repo.Repo, reset *repo.ConfigReset) {
 	for _, path := range reset.Deleted {
-		slog.Info(fmt.Sprintf("note: %s is now empty and was %s", displayPath(r.SesamDir(), path), verb))
+		slog.Info(fmt.Sprintf("note: %s is now empty and was deleted", displayPath(r.SesamDir(), path)))
 	}
 }
 
-// forceHint says that nothing was written, so a preview cannot be mistaken
-// for the real thing.
+// forceHint says a rewrite was only reported, not written, so a preview
+// cannot be mistaken for the real thing.
 func forceHint(force bool) error {
 	if !force {
-		slog.Info("pass --force to actually reset sesam.yml")
+		slog.Info("pass --force to rewrite sesam.yml from the audit log")
 	}
 
 	return nil
