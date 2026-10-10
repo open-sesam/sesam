@@ -1,13 +1,13 @@
-# `sesam help` shows command help; --man opens the built-in manual.
-# Without a terminal the manual falls back to plain markdown on stdout.
+# `sesam help` opens the built-in manual; with a command it shows that
+# command's help. Without a terminal the manual falls back to plain markdown on
+# stdout.
 
 env PAGER=
 env MANPAGER=
 
-# Bare help prints the command overview and points at the manual.
-exec sesam help
+# The command overview is still there via --help.
+exec sesam --help
 stdout 'USAGE:'
-stdout 'sesam help --man'
 ! stdout '# FREQUENTLY ASKED QUESTIONS'
 
 # A command name shows that command's help.
@@ -19,8 +19,8 @@ stdout 'sesam init - Initialize sesam in the current repository'
 exec sesam help s
 stdout 'sesam status -'
 
-# --man opens the whole manual.
-exec sesam help --man
+# Bare help opens the whole manual.
+exec sesam help
 stdout '# NAME'
 stdout '# DESCRIPTION'
 stdout '# COMMANDS'

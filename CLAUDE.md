@@ -39,7 +39,7 @@ Only cli, core and repo are top-level packages; everything else lives under one
 of them.
 
 - cli: CLI implementation. Should only contain env/flag parsing and visualization and calling high level API.
-- cli/manual: the generated man page the binary embeds for `sesam help --man`.
+- cli/manual: the generated man page the binary embeds for `sesam help`.
 - cli/docgen: generators for the man page and the CLI/config references. Build-time only - reachable solely from a build tagged `docgen`, so cli-docs and go-md2man stay out of the release binary.
 - repo: High level API for all operations do-able on the repository.
   - repo/config: Implementation for the config parsing, modification and marshalling.

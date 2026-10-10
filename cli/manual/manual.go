@@ -1,5 +1,5 @@
 // Package manual carries the sesam manual the binary serves offline, via
-// `sesam help --man`.
+// `sesam help`.
 //
 // Both files are generated artifacts, committed because go:embed needs them at
 // build time - that way a plain `go build` or `go install` has a working

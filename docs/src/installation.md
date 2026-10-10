@@ -27,7 +27,7 @@ sudo install -m644 sesam.1 /usr/local/share/man/man1/
 You do not have to. The binary carries the same manual and opens it for you:
 
 ```bash
-sesam help --man
+sesam help
 ```
 
 ### Signatures
