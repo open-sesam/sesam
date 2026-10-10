@@ -140,6 +140,32 @@ func (r *Recipient) Spec() string {
 	return string(r.Source)
 }
 
+// CanonicalKeySpec returns spec in the form the audit log records a key given
+// verbatim: an SSH key loses its comment (user@host). Any other spec, and an
+// SSH key that does not parse, is returned as is.
+func CanonicalKeySpec(spec string) string {
+	if !strings.HasPrefix(spec, "ssh-") {
+		return spec
+	}
+
+	canonical, err := canonicalSSHKey(spec)
+	if err != nil {
+		return spec
+	}
+
+	return canonical
+}
+
+// canonicalSSHKey re-marshals an authorized_keys line without its comment.
+func canonicalSSHKey(key string) (string, error) {
+	sshPub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(key))
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub))), nil
+}
+
 // Specs is Spec over the whole list, deduplicated - one forge id can have
 // produced several recorded keys, and a config declares it once.
 func (rs Recipients) Specs() []string {
@@ -357,7 +383,7 @@ func ParseRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
 	case strings.HasPrefix(arg, "ssh-"):
 		// ssh keys have no stringer sadly. Incoming ssh keys might contain comments (like user@host) or options.
 		// which can making comparison hard. Parse it therefore and re-marshal to strip that kind of stops.
-		sshPub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(arg))
+		canonical, err := canonicalSSHKey(arg)
 		if err != nil {
 			return nil, err
 		}
@@ -367,7 +393,7 @@ func ParseRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
 			return nil, err
 		}
 
-		r, s = sr, string(ssh.MarshalAuthorizedKey(sshPub))
+		r, s = sr, canonical
 	default:
 		// A private key where a public one belongs is an easy mistake: it is
 		// the same file `sesam init -i` takes. Name it, and do not echo the

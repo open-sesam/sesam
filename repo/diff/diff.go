@@ -237,7 +237,7 @@ func secretChanges(vstate *core.VerifiedState, declared *config.State) []Change 
 // for them in the audit log.
 func recipientDelta(recps core.Recipients, specs []string) (add, remove []string) {
 	matches := func(r *core.Recipient, spec string) bool {
-		return r.Spec() == spec || r.String() == spec
+		return r.Spec() == spec || r.String() == core.CanonicalKeySpec(spec)
 	}
 
 	for _, spec := range specs {

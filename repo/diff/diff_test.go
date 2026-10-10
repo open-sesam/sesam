@@ -1,12 +1,15 @@
 package diff
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"slices"
 	"testing"
 
 	"filippo.io/age"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 	"opensesam.org/sesam/core"
 	"opensesam.org/sesam/repo/config"
 	"opensesam.org/sesam/repo/util"
@@ -24,6 +27,22 @@ func newRecipient(t *testing.T, source core.KeySource) *core.Recipient {
 	require.NoError(t, err)
 
 	recp.Source = source
+	return recp
+}
+
+// newSSHRecipient returns a freshly generated, manually given ssh recipient.
+func newSSHRecipient(t *testing.T) *core.Recipient {
+	t.Helper()
+
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	sshPub, err := ssh.NewPublicKey(pub)
+	require.NoError(t, err)
+
+	recp, err := core.ParseRecipient(string(ssh.MarshalAuthorizedKey(sshPub)), nil)
+	require.NoError(t, err)
+
 	return recp
 }
 
@@ -245,6 +264,7 @@ func TestDeltaSecrets(t *testing.T) {
 func TestDeltaRecipientMatching(t *testing.T) {
 	forge := newRecipient(t, "github:bob")
 	manual := newRecipient(t, core.KeySourceManual)
+	sshKey := newSSHRecipient(t)
 
 	tests := []struct {
 		name  string
@@ -261,6 +281,13 @@ func TestDeltaRecipientMatching(t *testing.T) {
 			name:  "literal key matches the recorded material",
 			recps: core.Recipients{manual},
 			keys:  []string{manual.String()},
+		},
+		{
+			name: "verbatim ssh key matches with its comment",
+			// The audit log records ssh keys without their comment, so a
+			// pasted `id_ed25519.pub` must not stay a diff forever.
+			recps: core.Recipients{sshKey},
+			keys:  []string{sshKey.String() + " bob@laptop"},
 		},
 		{
 			name: "one key declared under two spec forms",

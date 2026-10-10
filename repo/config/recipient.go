@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/goccy/go-yaml/ast"
+	"opensesam.org/sesam/core"
 )
 
 func (c *Config) UserAddRecipient(user string, pubKeySpecs []string) error {
@@ -51,7 +52,7 @@ func (c *Config) UserAddRecipient(user string, pubKeySpecs []string) error {
 
 		newKeys := slices.Clone(existingKeys)
 		for _, newKey := range pubKeySpecs {
-			if !slices.Contains(newKeys, newKey) {
+			if !slices.ContainsFunc(newKeys, sameKeySpec(newKey)) {
 				newKeys = append(newKeys, newKey)
 			}
 		}
@@ -108,7 +109,7 @@ func (c *Config) UserRmRecipient(user string, pubKeySpecs []string) error {
 		}
 
 		filteredKeys := slices.DeleteFunc(existingKeys, func(key string) bool {
-			return slices.Contains(pubKeySpecs, key)
+			return slices.ContainsFunc(pubKeySpecs, sameKeySpec(key))
 		})
 
 		if len(filteredKeys) == 0 {
@@ -125,4 +126,13 @@ func (c *Config) UserRmRecipient(user string, pubKeySpecs []string) error {
 	}
 
 	return fmt.Errorf("%s: user %q not found", src.Path, user)
+}
+
+// sameKeySpec matches specs naming the same key, so a verbatim SSH key matches
+// with or without its comment.
+func sameKeySpec(spec string) func(string) bool {
+	canonical := core.CanonicalKeySpec(spec)
+	return func(other string) bool {
+		return core.CanonicalKeySpec(other) == canonical
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"filippo.io/age"
@@ -38,6 +39,41 @@ func TestParseRecipientSSH(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, r)
 	require.NotEmpty(t, r.String())
+}
+
+func TestCanonicalKeySpec(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	sshPub, err := ssh.NewPublicKey(pub)
+	require.NoError(t, err)
+
+	bare := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
+	ageKey := newTestUser(t, "alice").Recipient.String()
+
+	tests := []struct {
+		name string
+		spec string
+		want string
+	}{
+		{name: "bare ssh key", spec: bare, want: bare},
+		{name: "ssh key with comment", spec: bare + " user@host", want: bare},
+		{name: "ssh key with trailing newline", spec: bare + "\n", want: bare},
+		{name: "unparseable ssh key", spec: "ssh-ed25519 garbage", want: "ssh-ed25519 garbage"},
+		{name: "age key", spec: ageKey, want: ageKey},
+		{name: "forge id", spec: "github:bob", want: "github:bob"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, CanonicalKeySpec(tc.spec))
+		})
+	}
+
+	// The canonical form is exactly what a parsed recipient records.
+	r, err := ParseRecipient(bare+" user@host", nil)
+	require.NoError(t, err)
+	require.Equal(t, r.String(), CanonicalKeySpec(bare+" user@host"))
 }
 
 func TestParseRecipientPluginHRP(t *testing.T) {
