@@ -427,6 +427,12 @@ we assume 'sesam show path/to/secret' as convenience.`,
 						Action: commands.WithRepo(commands.HandleConfigDiff),
 					},
 					{
+						Name:   "print",
+						Flags:  flagsConfigPrint,
+						Usage:  "Print the whole config as one document, includes resolved (YAML, or JSON with --json)",
+						Action: commands.WithRepo(commands.HandleConfigPrint),
+					},
+					{
 						Name:   "reset",
 						Flags:  flagsConfigReset,
 						Usage:  "Derive config from audit log",

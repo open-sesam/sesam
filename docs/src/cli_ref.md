@@ -412,6 +412,14 @@ Show the diff between config and actual state (extra args are passed to git)
 
 **--validate**: Fail if 'sesam config apply --force' would refuse the config (dry run, needs admin rights)
 
+### print
+
+Print the whole config as one document, includes resolved (YAML, or JSON with --json)
+
+**--help, -h**: show help
+
+**--json**: Print output as JSON
+
 ### reset
 
 Derive config from audit log

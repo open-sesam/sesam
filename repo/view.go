@@ -418,6 +418,24 @@ func (v *View) declaredState() (*sesamConf.State, error) {
 	return declared, nil
 }
 
+// MergedConfig returns sesam.yml with every included file flattened into it.
+func (v *View) MergedConfig() (*sesamConf.Document, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return nil, ErrClosed
+	}
+
+	// Fresh, like declaredState: what the file says now.
+	cfg, err := sesamConf.Load(v.root, configFileName)
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
+	return cfg.Merged()
+}
+
 // committedConflicts returns those of changes that the config committed at
 // HEAD already declares on its own.
 func (v *View) committedConflicts(changes []diff.Change) ([]diff.Change, error) {

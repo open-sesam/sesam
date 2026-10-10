@@ -374,6 +374,9 @@ var flagsConfigDiff = []cli.Flag{
 	flagJSON,
 }
 
+// flagsConfigPrint contains output controls for printing the merged config.
+var flagsConfigPrint = []cli.Flag{flagJSON}
+
 // flagsConfigReset contains output controls for resetting the config.
 var flagsConfigReset = []cli.Flag{
 	&cli.BoolFlag{

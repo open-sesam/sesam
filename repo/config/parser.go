@@ -426,6 +426,43 @@ func (c *Config) Groups() (map[string][]string, error) {
 	return groups, nil
 }
 
+// Merged returns the config as one document: included files are flattened
+// into secrets and their paths resolved relative to the main file, so the
+// result loads as a single sesam.yml.
+func (c *Config) Merged() (*Document, error) {
+	users, err := c.Users()
+	if err != nil {
+		return nil, err
+	}
+
+	groups, err := c.Groups()
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := c.secretEntries()
+	if err != nil {
+		return nil, err
+	}
+
+	secrets := make([]Secret, 0, len(entries))
+	for _, e := range entries {
+		s := e.secret
+		s.Path = filepath.ToSlash(filepath.Join(filepath.Dir(e.source.Path), s.Path))
+		secrets = append(secrets, s)
+	}
+
+	// Non-nil, so empty sections render as [] / {} rather than null.
+	if users == nil {
+		users = []User{}
+	}
+	if groups == nil {
+		groups = map[string][]string{}
+	}
+
+	return &Document{Users: users, Groups: groups, Secrets: secrets}, nil
+}
+
 // EnsureSecretsKey adds an empty secrets: key to the main file if it has none.
 // Load requires the key to be present even when there is nothing to list, so a
 // config built up without ever declaring a secret (e.g. ConfigReset's rebuild

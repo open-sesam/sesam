@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/goccy/go-yaml"
 	"github.com/muesli/termenv"
 	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/core"
@@ -161,6 +162,27 @@ func printCommittedChanges(changes []diff.Change) error {
 	slog.Error("check where they came from (git log -p -- sesam.yml); pass --force to apply them anyway")
 
 	return &ExitCodeError{code: 1, print: false}
+}
+
+// HandleConfigPrint prints sesam.yml with every included file flattened into
+// it, as YAML or, with --json, as JSON - for piping into yq or jq.
+func HandleConfigPrint(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+	doc, err := r.MergedConfig()
+	if err != nil {
+		return err
+	}
+
+	if cmd.Bool("json") {
+		return printJSON(doc)
+	}
+
+	out, err := yaml.MarshalWithOptions(doc, yaml.IndentSequence(true))
+	if err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+
+	_, err = os.Stdout.Write(out)
+	return err
 }
 
 // HandleConfigReset rewrites sesam.yml to describe the audit log again,

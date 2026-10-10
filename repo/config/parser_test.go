@@ -96,6 +96,25 @@ func Test_resolveIncludeSecretsOnly(t *testing.T) {
 	require.Equal(t, []string{"nested.txt", "top.txt"}, paths)
 }
 
+func TestMerged(t *testing.T) {
+	cr, err := loadConfig(t, "testdata/main_with_include.yaml")
+	require.NoError(t, err)
+
+	doc, err := cr.Merged()
+	require.NoError(t, err)
+
+	// The include is flattened in place and its path made relative to the
+	// main file.
+	require.Equal(t, &Document{
+		Users:  []User{{Name: "test_user", Key: []string{"key"}}},
+		Groups: map[string][]string{"group1": {"test_user"}},
+		Secrets: []Secret{
+			{Path: "sub/nested.txt", Access: []string{"group1"}},
+			{Path: "top.txt", Access: []string{"group1"}},
+		},
+	}, doc)
+}
+
 // TestSchema_MatchesStructs guards the agreement between sesam_schema.json and
 // the structs in config.go, in both directions: a document the schema accepts
 // must decode into User/Secret, and any field those structs do not model must

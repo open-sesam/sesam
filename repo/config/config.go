@@ -4,6 +4,13 @@ import (
 	"github.com/goccy/go-yaml/ast"
 )
 
+// Document is the whole config as a single sesam.yml would declare it.
+type Document struct {
+	Users   []User              `yaml:"users" json:"users"`
+	Groups  map[string][]string `yaml:"groups" json:"groups"`
+	Secrets []Secret            `yaml:"secrets" json:"secrets"`
+}
+
 // FileSource carries the parsed AST for one on-disk YAML file. Every file the
 // repository touches gets exactly one FileSource.
 //
