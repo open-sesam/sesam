@@ -3,7 +3,6 @@
 package diff
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -120,30 +119,11 @@ func (d *Diff) String() string {
 	return strings.Join(lines, "\n")
 }
 
-// Compute diffs the declared state against the verified one and returns the
-// changes needed to make the verified state match the declaration, checking
-// first that the declaration is appliable at all, in the audit log's own
-// terms. Ordered so that applying them in sequence never passes through a
-// state the audit log would reject.
-//
-// Use this for a caller that never actually applies the plan - `sesam config
-// diff`, in particular - since nothing else would catch an unappliable
-// declaration there. A caller that does apply the plan through the audit log
-// (`sesam config apply`) should use Delta instead: the log's own verification
-// rejects everything validate would, as each step is fed to it, so checking
-// twice only buys a worse error (mid-apply, inside a now-discarded stage,
-// instead of up front).
-func Compute(vstate *core.VerifiedState, declared *config.State) (*Diff, error) {
-	if err := validate(vstate, declared); err != nil {
-		return nil, err
-	}
-
-	return Delta(vstate, declared), nil
-}
-
-// Delta returns how the two states differ, without judging whether the
-// declaration could be applied. See Compute's doc comment for when this is
-// enough on its own.
+// Delta diffs the declared state against the verified one and returns the
+// changes needed to make the verified state match the declaration. Ordered so
+// that applying them in sequence never passes through a state the audit log
+// would reject. Whether the declaration is appliable at all is left to the
+// audit log itself, as each change is fed to it.
 func Delta(vstate *core.VerifiedState, declared *config.State) *Diff {
 	users := userChanges(vstate, declared)
 	secrets := secretChanges(vstate, declared)
@@ -156,72 +136,6 @@ func Delta(vstate *core.VerifiedState, declared *config.State) *Diff {
 	slices.SortStableFunc(changes, compareChanges)
 
 	return &Diff{Changes: changes}
-}
-
-// validate rejects declarations that cannot be applied at all, in the terms the
-// audit log's own verification uses. Checks that depend on the world outside
-// the two states (does the secret exist on disk, does the spec still resolve)
-// are left to the applying side.
-func validate(vstate *core.VerifiedState, declared *config.State) error {
-	var problems []error
-
-	admins := 0
-	for _, du := range declared.Users {
-		if slices.Contains(du.Groups, "admin") {
-			admins++
-		}
-
-		_, exists := vstate.UserExists(du.Name)
-		if !exists {
-			if err := core.ValidUserName(du.Name); err != nil {
-				problems = append(problems, fmt.Errorf("invalid user name %q: %w", du.Name, err))
-			}
-		}
-
-		// The audit log refuses to register a user without a group and refuses
-		// to change an existing user to zero groups, so an ungrouped user is
-		// never appliable - not even as a no-op.
-		if len(du.Groups) == 0 {
-			problems = append(problems, fmt.Errorf(
-				"user %q is in no group: add them to a group under groups", du.Name,
-			))
-		}
-
-		switch {
-		case len(du.Keys) == 0:
-			// Mirrors the keyring's own rule (core.Keyring.RemoveRecipient keeps at
-			// least one recipient), which applies to an existing user exactly as it
-			// does to a new one.
-			problems = append(problems, fmt.Errorf("user %q has no key", du.Name))
-		case !exists && len(du.Keys) > core.MaxUserKeys:
-			// core.MaxUserKeys is only enforced at registration (user.tell); a key
-			// added later via add-recipients is never capped, so a user already
-			// past the limit must stay appliable for anything that doesn't
-			// re-register them.
-			problems = append(problems, fmt.Errorf(
-				"user %q has %d keys, at most %d are allowed", du.Name, len(du.Keys), core.MaxUserKeys,
-			))
-		}
-	}
-
-	if admins == 0 {
-		problems = append(problems, errors.New(
-			"config declares no admin user: at least one user must be a member of the admin group",
-		))
-	}
-
-	for _, ds := range declared.Secrets {
-		if _, exists := vstate.SecretExists(ds.RevealedPath); exists {
-			// Already tracked, so it passed these checks when it was added.
-			continue
-		}
-
-		if err := core.IsForbiddenPath(ds.RevealedPath); err != nil {
-			problems = append(problems, fmt.Errorf("secret %q: %w", ds.RevealedPath, err))
-		}
-	}
-
-	return errors.Join(problems...)
 }
 
 // userChanges diffs the declared users against the verified ones.

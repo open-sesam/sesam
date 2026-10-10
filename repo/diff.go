@@ -1,6 +1,8 @@
 package repo
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -24,6 +26,10 @@ type ConfigDiffOpts struct {
 	// WriteDiffDir materializes the two config trees to compare (see
 	// ConfigDiff.DiffDir). Skipped when the states already agree.
 	WriteDiffDir bool
+
+	// Validate fails the diff if `sesam config apply --force` would refuse
+	// the declaration. Needs admin rights once there is anything to apply.
+	Validate bool
 }
 
 // ConfigDiff is the difference between sesam.yml and the audit log
@@ -51,24 +57,24 @@ func (cd *ConfigDiff) String() string {
 
 // ConfigDiff compares the state declared in sesam.yml against the verified
 // state replayed from the audit log.
-func (v *View) ConfigDiff(opts ConfigDiffOpts) (*ConfigDiff, error) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
+func (r *Repo) ConfigDiff(ctx context.Context, opts ConfigDiffOpts) (*ConfigDiff, error) {
+	if opts.Validate {
+		if err := r.validateConfig(ctx); err != nil {
+			return nil, err
+		}
+	}
 
-	if v.isClosed() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.isClosed() {
 		return nil, ErrClosed
 	}
 
-	return v.configDiff(opts)
-}
-
-// configDiff is the lock-free body of ConfigDiff, also used by apply, which
-// holds the lock across the whole transaction.
-func (v *View) configDiff(opts ConfigDiffOpts) (*ConfigDiff, error) {
 	// Read sesam.yml fresh rather than through the cached view: the whole
 	// point of the diff is to answer what the file says *now*, and the user
 	// may well have edited it since this repo was opened.
-	cfg, err := sesamConf.Load(v.root, configFileName)
+	cfg, err := sesamConf.Load(r.root, configFileName)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
@@ -78,23 +84,33 @@ func (v *View) configDiff(opts ConfigDiffOpts) (*ConfigDiff, error) {
 		return nil, fmt.Errorf("declared state: %w", err)
 	}
 
-	changes, err := diff.Compute(v.vstate, declared)
-	if err != nil {
-		return nil, err
-	}
+	changes := diff.Delta(r.vstate, declared)
 
 	out := &ConfigDiff{Changes: changes.Changes}
 	if !opts.WriteDiffDir || changes.IsEmpty() {
 		return out, nil
 	}
 
-	dir, err := v.writeConfigDiffDir(cfg, changes)
+	dir, err := r.writeConfigDiffDir(cfg, changes)
 	if err != nil {
 		return nil, err
 	}
 	out.DiffDir = dir
 
 	return out, nil
+}
+
+// validateConfig dry-runs `sesam config apply --force` in a stage that is
+// always rolled back. Force, because a change that arrived committed is a
+// question of origin, not of validity.
+func (r *Repo) validateConfig(ctx context.Context) error {
+	s, err := r.Stage()
+	if err != nil {
+		return err
+	}
+
+	_, err = s.ConfigApply(ctx, ConfigApplyOpts{Force: true})
+	return errors.Join(err, s.Rollback())
 }
 
 // writeConfigDiffDir materializes the two sides of the diff as two copies of

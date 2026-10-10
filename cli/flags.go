@@ -366,7 +366,13 @@ var flagsLog = []cli.Flag{
 var flagsID = []cli.Flag{flagJSON}
 
 // flagsConfigDiff contains output controls for the config/audit-log diff.
-var flagsConfigDiff = []cli.Flag{flagJSON}
+var flagsConfigDiff = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "validate",
+		Usage: "Fail if 'sesam config apply --force' would refuse the config (dry run, needs admin rights)",
+	},
+	flagJSON,
+}
 
 // flagsConfigReset contains output controls for resetting the config.
 var flagsConfigReset = []cli.Flag{

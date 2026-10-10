@@ -78,7 +78,7 @@ func ops(d *Diff) []core.Operation {
 	return out
 }
 
-func TestComputeInSync(t *testing.T) {
+func TestDeltaInSync(t *testing.T) {
 	alice := admin(t)
 	vstate := verifiedState(
 		[]core.VerifiedUser{alice},
@@ -94,12 +94,11 @@ func TestComputeInSync(t *testing.T) {
 		},
 	}
 
-	got, err := Compute(vstate, declared)
-	require.NoError(t, err)
+	got := Delta(vstate, declared)
 	require.True(t, got.IsEmpty(), got.String())
 }
 
-func TestComputeUsers(t *testing.T) {
+func TestDeltaUsers(t *testing.T) {
 	bobKey := newRecipient(t, core.KeySourceManual)
 	oldKey := newRecipient(t, "github:bob")
 
@@ -165,14 +164,13 @@ func TestComputeUsers(t *testing.T) {
 				declared.Users = append(declared.Users, *tc.declared)
 			}
 
-			got, err := Compute(vstate, declared)
-			require.NoError(t, err)
+			got := Delta(vstate, declared)
 			require.Equal(t, tc.want, nilIfEmpty(got.Changes))
 		})
 	}
 }
 
-func TestComputeSecrets(t *testing.T) {
+func TestDeltaSecrets(t *testing.T) {
 	tests := []struct {
 		name     string
 		secret   *core.SecretAccess
@@ -235,17 +233,16 @@ func TestComputeSecrets(t *testing.T) {
 				declared.Secrets = append(declared.Secrets, *tc.declared)
 			}
 
-			got, err := Compute(vstate, declared)
-			require.NoError(t, err)
+			got := Delta(vstate, declared)
 			require.Equal(t, tc.want, nilIfEmpty(got.Changes))
 		})
 	}
 }
 
-// TestComputeRecipientMatching covers the spec-to-recipient pairing. The
+// TestDeltaRecipientMatching covers the spec-to-recipient pairing. The
 // central property is convergence: a declaration the audit log already
 // satisfies must produce no change, however the key was spelled.
-func TestComputeRecipientMatching(t *testing.T) {
+func TestDeltaRecipientMatching(t *testing.T) {
 	forge := newRecipient(t, "github:bob")
 	manual := newRecipient(t, core.KeySourceManual)
 
@@ -316,18 +313,17 @@ func TestComputeRecipientMatching(t *testing.T) {
 				{Name: "bob", Groups: []string{"dev"}, Keys: tc.keys},
 			}}
 
-			got, err := Compute(vstate, declared)
-			require.NoError(t, err)
+			got := Delta(vstate, declared)
 			require.Equal(t, tc.want, nilIfEmpty(got.Changes))
 		})
 	}
 }
 
-// TestComputeOrdering checks that a plan touching everything at once is ordered
+// TestDeltaOrdering checks that a plan touching everything at once is ordered
 // so no intermediate state is one the audit log would reject: the new admin is
 // told before the old one is demoted and killed, and secrets are added before
 // the users losing access disappear.
-func TestComputeOrdering(t *testing.T) {
+func TestDeltaOrdering(t *testing.T) {
 	vstate := verifiedState(
 		[]core.VerifiedUser{
 			{
@@ -359,8 +355,7 @@ func TestComputeOrdering(t *testing.T) {
 		},
 	}
 
-	got, err := Compute(vstate, declared)
-	require.NoError(t, err)
+	got := Delta(vstate, declared)
 	require.Equal(t, []core.Operation{
 		core.OpUserTell,           // bob, so an admin exists before alice steps down
 		core.OpUserChangeGroups,   // alice: admin -> dev
@@ -371,10 +366,10 @@ func TestComputeOrdering(t *testing.T) {
 	}, ops(got), got.String())
 }
 
-// TestComputeOrderingPromotionBeforeDemotion checks the ordering within
+// TestDeltaOrderingPromotionBeforeDemotion checks the ordering within
 // user.change_groups itself: whoever gains admin must gain it before the
 // current admin drops it, or the audit log rejects the demotion.
-func TestComputeOrderingPromotionBeforeDemotion(t *testing.T) {
+func TestDeltaOrderingPromotionBeforeDemotion(t *testing.T) {
 	vstate := verifiedState([]core.VerifiedUser{
 		{Name: "alice", Groups: []string{"admin"}, Recps: core.Recipients{newRecipient(t, "github:alice")}},
 		{Name: "bob", Groups: []string{"dev"}, Recps: core.Recipients{newRecipient(t, "github:bob")}},
@@ -385,8 +380,7 @@ func TestComputeOrderingPromotionBeforeDemotion(t *testing.T) {
 		{Membership: core.Membership{Name: "bob", Groups: []string{"admin"}}, Keys: []string{"github:bob"}},
 	}}
 
-	got, err := Compute(vstate, declared)
-	require.NoError(t, err)
+	got := Delta(vstate, declared)
 	require.Len(t, got.Changes, 2)
 	require.Equal(t, "bob", got.Changes[0].User, got.String())
 	require.Equal(t, "alice", got.Changes[1].User, got.String())
@@ -405,124 +399,11 @@ func TestCompareChangesUnknownOpSortsLast(t *testing.T) {
 	}
 	slices.SortStableFunc(changes, compareChanges)
 
-	require.Equal(t,
+	require.Equal(
+		t,
 		[]core.Operation{core.OpUserTell, core.OpUserKill, core.Operation("bogus")},
 		ops(&Diff{Changes: changes}),
 	)
-}
-
-func TestComputeErrors(t *testing.T) {
-	tests := []struct {
-		name     string
-		declared *config.State
-		want     string
-	}{
-		{
-			name: "no admin declared",
-			declared: &config.State{Users: []config.StateUser{
-				{Membership: core.Membership{Name: "alice", Groups: []string{"dev"}}, Keys: []string{"github:alice"}},
-			}},
-			want: "declares no admin user",
-		},
-		{
-			name:     "no users at all",
-			declared: &config.State{},
-			want:     "declares no admin user",
-		},
-		{
-			name: "user in no group",
-			declared: &config.State{Users: []config.StateUser{
-				declaredAdmin(),
-				{Name: "bob", Keys: []string{"github:bob"}},
-			}},
-			want: `user "bob" is in no group`,
-		},
-		{
-			name: "user without key",
-			declared: &config.State{Users: []config.StateUser{
-				declaredAdmin(),
-				{Name: "bob", Groups: []string{"dev"}},
-			}},
-			want: `user "bob" has no key`,
-		},
-		{
-			name: "new user with too many keys",
-			declared: &config.State{Users: []config.StateUser{
-				declaredAdmin(),
-				{Name: "bob", Groups: []string{"dev"}, Keys: manyKeys(core.MaxUserKeys + 1)},
-			}},
-			want: "at most 10 are allowed",
-		},
-		{
-			name: "invalid name for a new user",
-			declared: &config.State{Users: []config.StateUser{
-				declaredAdmin(),
-				{Membership: core.Membership{Name: "bob or so", Groups: []string{"dev"}}, Keys: []string{"github:bob"}},
-			}},
-			want: "invalid user name",
-		},
-		{
-			name: "forbidden secret path",
-			declared: &config.State{
-				Users:   []config.StateUser{declaredAdmin()},
-				Secrets: []core.SecretAccess{{RevealedPath: ".sesam/audit/log.jsonl"}},
-			},
-			want: "not allowed",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			vstate := verifiedState([]core.VerifiedUser{admin(t)}, nil)
-
-			_, err := Compute(vstate, tc.declared)
-			require.ErrorContains(t, err, tc.want)
-		})
-	}
-}
-
-// TestComputeAllowsExistingUserOverKeyCap guards against reintroducing the
-// maxUserKeys bug: the audit log only caps keys at registration (user.tell);
-// a key added later via add-recipients is never capped. So a user who grew
-// past core.MaxUserKeys that way must stay appliable - the cap must not apply
-// to a user who already exists in the verified state.
-func TestComputeAllowsExistingUserOverKeyCap(t *testing.T) {
-	manyRecps := make(core.Recipients, 0, core.MaxUserKeys+1)
-	for range core.MaxUserKeys + 1 {
-		manyRecps = append(manyRecps, newRecipient(t, core.KeySourceManual))
-	}
-
-	vstate := verifiedState(
-		[]core.VerifiedUser{
-			admin(t),
-			{Membership: core.Membership{Name: "bob", Groups: []string{"dev"}}, Recps: manyRecps},
-		},
-		nil,
-	)
-
-	declared := &config.State{Users: []config.StateUser{
-		declaredAdmin(),
-		{Membership: core.Membership{Name: "bob", Groups: []string{"dev"}}, Keys: manyKeys(core.MaxUserKeys + 1)},
-	}}
-
-	_, err := Compute(vstate, declared)
-	require.NoError(t, err)
-}
-
-// TestComputeErrorsReportEveryProblem checks that a broken declaration is
-// reported in full rather than one problem at a time.
-func TestComputeErrorsReportEveryProblem(t *testing.T) {
-	_, err := Compute(
-		verifiedState([]core.VerifiedUser{admin(t)}, nil),
-		&config.State{Users: []config.StateUser{
-			{Name: "bob", Keys: []string{"github:bob"}},
-			{Name: "eve", Groups: []string{"dev"}},
-		}},
-	)
-
-	require.ErrorContains(t, err, `user "bob" is in no group`)
-	require.ErrorContains(t, err, `user "eve" has no key`)
-	require.ErrorContains(t, err, "declares no admin user")
 }
 
 // applyTo mimics what the audit log does with a change, mirroring the
@@ -530,7 +411,7 @@ func TestComputeErrorsReportEveryProblem(t *testing.T) {
 // secret's access list additionally gains the implicit "admin", and a key spec
 // resolves to material carrying the spec as its source.
 //
-// It exists to check convergence (see TestComputeConverges) without a
+// It exists to check convergence (see TestDeltaConverges) without a
 // repository. The real round trip belongs to the apply side once it exists.
 func applyTo(t *testing.T, vstate *core.VerifiedState, c Change) {
 	t.Helper()
@@ -581,12 +462,12 @@ func applyTo(t *testing.T, vstate *core.VerifiedState, c Change) {
 	vstate.BuildIndexes()
 }
 
-// TestComputeConverges is the property the whole module hinges on: applying a
+// TestDeltaConverges is the property the whole module hinges on: applying a
 // diff has to make the next one empty. A normalization that disagrees with the
 // audit log's - the implicit admin group leaking into a payload, a key spec
 // that never matches the recipient it produced - shows up here as a change that
 // keeps being proposed forever.
-func TestComputeConverges(t *testing.T) {
+func TestDeltaConverges(t *testing.T) {
 	vstate := verifiedState(
 		[]core.VerifiedUser{
 			{Name: "alice", Groups: []string{"admin"}, Recps: core.Recipients{newRecipient(t, "github:alice")}},
@@ -610,26 +491,24 @@ func TestComputeConverges(t *testing.T) {
 		},
 	}
 
-	first, err := Compute(vstate, declared)
-	require.NoError(t, err)
+	first := Delta(vstate, declared)
 	require.False(t, first.IsEmpty())
 
 	for _, c := range first.Changes {
 		applyTo(t, vstate, c)
 	}
 
-	second, err := Compute(vstate, declared)
-	require.NoError(t, err)
+	second := Delta(vstate, declared)
 	require.True(t, second.IsEmpty(), "diff did not converge:\n%s", second.String())
 }
 
-// TestComputeDoesNotMutateVerifiedState regresses slices.Compact operating in
+// TestDeltaDoesNotMutateVerifiedState regresses slices.Compact operating in
 // place on vu.Groups: UserExists returns a pointer straight into the caller's
 // VerifiedState, so compacting it without cloning first silently reordered
 // the verified state's own group slice as a side effect of computing a diff -
-// which Compute's own doc comment promises never happens ("touches no file,
+// which Delta's own doc comment promises never happens ("touches no file,
 // no network").
-func TestComputeDoesNotMutateVerifiedState(t *testing.T) {
+func TestDeltaDoesNotMutateVerifiedState(t *testing.T) {
 	bob := core.VerifiedUser{
 		Membership: core.Membership{Name: "bob", Groups: []string{"dev", "dev", "ops"}},
 		Recps:      core.Recipients{newRecipient(t, "github:bob")},
@@ -645,10 +524,9 @@ func TestComputeDoesNotMutateVerifiedState(t *testing.T) {
 		},
 	}}
 
-	_, err := Compute(vstate, declared)
-	require.NoError(t, err)
+	Delta(vstate, declared)
 	require.Equal(t, before, vstate.Users[1].Groups,
-		"Compute must not mutate the verified state's group slice")
+		"Delta must not mutate the verified state's group slice")
 }
 
 // TestChangeConflicts covers the guard requireLocalChanges relies on: a
@@ -767,15 +645,6 @@ func TestChangeJSONDistinguishesRevokedFromNotApplicable(t *testing.T) {
 	data, err = json.Marshal(notApplicable)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"op":"secret.remove","path":"db.env","groups":null,"old":null}`, string(data))
-}
-
-func manyKeys(n int) []string {
-	keys := make([]string, 0, n)
-	for i := range n {
-		keys = append(keys, string(rune('a'+i)))
-	}
-
-	return keys
 }
 
 // normalized sorts and deduplicates a group set the way core's verification

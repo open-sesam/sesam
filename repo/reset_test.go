@@ -97,7 +97,7 @@ func TestConfigResetUnappliableConfig(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	dir, r := bootstrapRepo(t, admin)
 
-	// No admin group at all - diff.Compute refuses this outright.
+	// No admin group at all - apply refuses this outright.
 	writeMainConfig(t, dir, "users:\n"+
 		"  - name: admin\n"+
 		"    # a comment worth keeping\n"+
@@ -109,8 +109,8 @@ func TestConfigResetUnappliableConfig(t *testing.T) {
 		"secrets:\n"+
 		"  - path: README.md\n")
 
-	_, err := r.ConfigDiff(ConfigDiffOpts{})
-	require.ErrorContains(t, err, "declares no admin user", "precondition: this config is unappliable")
+	_, err := r.ConfigDiff(t.Context(), ConfigDiffOpts{Validate: true})
+	require.ErrorContains(t, err, "takes admin from admin", "precondition: this config is unappliable")
 
 	reset, err := r.ConfigReset(ConfigResetOpts{})
 	require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestConfigResetUnappliableConfig(t *testing.T) {
 	require.Contains(t, after, "admin")
 
 	// The repaired file is appliable again.
-	_, err = r.ConfigDiff(ConfigDiffOpts{})
+	_, err = r.ConfigDiff(t.Context(), ConfigDiffOpts{Validate: true})
 	require.NoError(t, err)
 }
 
@@ -157,7 +157,7 @@ func TestConfigResetRepairsStrayGroupMemberLeftByAnEdit(t *testing.T) {
 		"secrets:\n  - path: README.md\n")
 
 	// Precondition: the file as it stands does not even load.
-	_, err = r.ConfigDiff(ConfigDiffOpts{})
+	_, err = r.ConfigDiff(t.Context(), ConfigDiffOpts{})
 	require.ErrorContains(t, err, `lists unknown user "bob"`)
 
 	reset, err := r.ConfigReset(ConfigResetOpts{})
@@ -170,7 +170,7 @@ func TestConfigResetRepairsStrayGroupMemberLeftByAnEdit(t *testing.T) {
 	require.Contains(t, after, "bob")
 
 	// The repaired file loads and is internally consistent again.
-	_, err = r.ConfigDiff(ConfigDiffOpts{})
+	_, err = r.ConfigDiff(t.Context(), ConfigDiffOpts{})
 	require.NoError(t, err)
 }
 
@@ -200,7 +200,7 @@ func TestConfigResetRepairsAfterGroupsKeyRemoved(t *testing.T) {
 	require.Contains(t, after, "# a comment worth keeping")
 	require.Contains(t, after, "groups:")
 
-	_, err = r.ConfigDiff(ConfigDiffOpts{})
+	_, err = r.ConfigDiff(t.Context(), ConfigDiffOpts{})
 	require.NoError(t, err)
 }
 
@@ -239,7 +239,7 @@ func TestConfigResetFallsBackOnDanglingAlias(t *testing.T) {
 	require.NoError(t, err, "a dangling alias must fall back to a rewrite, not fail the reset")
 	require.True(t, reset.Rewritten, "nothing can repair a dangling alias in place")
 
-	_, err = r.ConfigDiff(ConfigDiffOpts{})
+	_, err = r.ConfigDiff(t.Context(), ConfigDiffOpts{Validate: true})
 	require.NoError(t, err, "the rewritten file must be valid and appliable")
 }
 
@@ -285,7 +285,7 @@ func TestConfigResetRewritesUnreadable(t *testing.T) {
 			require.NotEmpty(t, reset.Reason)
 
 			// The rewritten file describes the audit log exactly.
-			diff, err := r.ConfigDiff(ConfigDiffOpts{})
+			diff, err := r.ConfigDiff(t.Context(), ConfigDiffOpts{})
 			require.NoError(t, err)
 			require.True(t, diff.IsEmpty(), diff.String())
 
@@ -323,7 +323,7 @@ func TestConfigResetRewritesUnreadableWithNoSecrets(t *testing.T) {
 
 	// The rewritten file must still be loadable - this is what a missing
 	// secrets: key would break, for reset itself and every other command.
-	_, err = r.ConfigDiff(ConfigDiffOpts{})
+	_, err = r.ConfigDiff(t.Context(), ConfigDiffOpts{})
 	require.NoError(t, err)
 }
 
@@ -459,7 +459,7 @@ func TestConfigResetPreviewThenForceRewrite(t *testing.T) {
 	require.True(t, forced.Rewritten)
 	require.NotEqual(t, broken, readFileString(t, filepath.Join(dir, configFileName)))
 
-	diff, err := r.ConfigDiff(ConfigDiffOpts{})
+	diff, err := r.ConfigDiff(t.Context(), ConfigDiffOpts{})
 	require.NoError(t, err)
 	require.True(t, diff.IsEmpty(), diff.String())
 }

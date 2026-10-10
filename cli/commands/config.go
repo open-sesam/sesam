@@ -22,11 +22,15 @@ import (
 //
 // Exit code follows git diff's own convention: 0 means the two agree, 1 means
 // they differ (not a failure - see runGitDiff), 128 means the comparison
-// itself could not be made.
+// itself could not be made - or, with --validate, that `sesam config apply
+// --force` would refuse the declaration.
 func HandleConfigDiff(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	json := cmd.Bool("json")
 
-	changes, err := r.ConfigDiff(repo.ConfigDiffOpts{WriteDiffDir: !json})
+	changes, err := r.ConfigDiff(ctx, repo.ConfigDiffOpts{
+		WriteDiffDir: !json,
+		Validate:     cmd.Bool("validate"),
+	})
 	if err != nil {
 		return &ExitCodeError{code: 128, print: true, err: err}
 	}

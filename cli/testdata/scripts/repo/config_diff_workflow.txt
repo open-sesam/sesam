@@ -56,17 +56,39 @@ cd ..
 stdout 'sesam.yml'
 ! stdout '  - name: bob'
 
-# The diff is a plan, so a declaration that could never be applied is refused
-# rather than reported: dropping the last admin would leave nobody who could
-# change anything afterwards.
+# A declaration that could never be applied is still just a diff: dropping
+# the last admin would leave nobody who could change anything afterwards...
+envsubst no_admin.yml
 cp no_admin.yml sesam.yml
 ! exec sesam config diff
-stderr 'declares no admin user'
+stdout '-  admin:'
 
-# Same for a declaration the audit log would reject entry by entry.
+# ...until --validate dry-runs `sesam config apply --force`, which refuses it.
+! exec sesam config diff --validate
+stderr 'takes admin from admin'
+
+# Same for a declaration the audit log rejects entry by entry...
+envsubst no_group.yml
 cp no_group.yml sesam.yml
-! exec sesam config diff
-stderr 'user "bob" is in no group'
+! exec sesam config diff --validate
+stderr 'changing to zero groups is not allowed'
+
+# ...or a key apply could not encrypt to.
+envsubst bad_key.yml
+cp bad_key.yml sesam.yml
+! exec sesam config diff --validate
+stderr 'failed to parse recipient'
+
+# A declaration apply accepts passes validation and is diffed as usual. The
+# dry run leaves nothing behind - not even the placeholder for db.env.
+envsubst valid.yml
+cp valid.yml sesam.yml
+! exec sesam config diff --validate
+stdout '\+  - path: db.env'
+! exists db.env
+! exists .sesam-tmp
+exec sesam log
+! stdout 'db.env'
 
 -- declared.yml --
 users:
@@ -111,7 +133,7 @@ secrets: []
 users:
   - name: admin
     key:
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial
+      - $ADMIN_PUBKEY
 
 groups:
   dev:
@@ -123,7 +145,7 @@ secrets: []
 users:
   - name: admin
     key:
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial
+      - $ADMIN_PUBKEY
   - name: bob
     key:
       - age1tdy2pxsfwpxxe0c9cuwty8zpsv6uuhf4zyug5f9lfl982lh3tctqrw2ll7
@@ -133,3 +155,42 @@ groups:
     - admin
 
 secrets: []
+
+-- bad_key.yml --
+users:
+  - name: admin
+    key:
+      - $ADMIN_PUBKEY
+  - name: bob
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial
+
+groups:
+  admin:
+    - admin
+  dev:
+    - bob
+
+secrets:
+  - path: README.md
+
+-- valid.yml --
+users:
+  - name: admin
+    key:
+      - $ADMIN_PUBKEY
+  - name: bob
+    key:
+      - age1tdy2pxsfwpxxe0c9cuwty8zpsv6uuhf4zyug5f9lfl982lh3tctqrw2ll7
+
+groups:
+  admin:
+    - admin
+  dev:
+    - bob
+
+secrets:
+  - path: README.md
+  - path: db.env
+    access:
+      - dev

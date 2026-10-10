@@ -78,8 +78,7 @@ func TestRevertDescribesVerifiedState(t *testing.T) {
 	declared, err := cfg.State()
 	require.NoError(t, err)
 
-	changes, err := Compute(vstate, declared)
-	require.NoError(t, err)
+	changes := Delta(vstate, declared)
 	require.Equal(t, []core.Operation{
 		core.OpUserTell,           // dave
 		core.OpUserAddRecipients,  // admin's new key
@@ -100,8 +99,7 @@ func TestRevertDescribesVerifiedState(t *testing.T) {
 	reverted, err := cfg.State()
 	require.NoError(t, err)
 
-	again, err := Compute(vstate, reverted)
-	require.NoError(t, err)
+	again := Delta(vstate, reverted)
 	require.True(t, again.IsEmpty(), "reverted config still differs:\n%s", again.String())
 }
 

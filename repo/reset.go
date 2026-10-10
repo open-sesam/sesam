@@ -122,8 +122,6 @@ func (r *Repo) resetConfig(root *os.Root, out *ConfigReset) (*sesamConf.Config, 
 		return r.rewriteConfig(root, out, err)
 	}
 
-	// Delta, not Compute: a config that lost its last admin is not appliable,
-	// and is exactly the one that needs resetting.
 	changes := diff.Delta(r.vstate, declared)
 	out.Discarded = changes.Changes
 

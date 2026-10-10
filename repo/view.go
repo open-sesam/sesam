@@ -394,18 +394,40 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 // but it must not stay silent about a pushed config sitting there ready to be applied by
 // someone who never thought to check.
 func (v *View) configConflicts() ([]diff.Change, error) {
-	declared, err := v.configDiff(ConfigDiffOpts{})
+	declared, err := v.declaredState()
 	if err != nil {
 		return nil, err
 	}
 
+	return v.committedConflicts(diff.Delta(v.vstate, declared).Changes)
+}
+
+// declaredState reads sesam.yml fresh rather than through the cached config:
+// the user may well have edited it since this repo was opened.
+func (v *View) declaredState() (*sesamConf.State, error) {
+	cfg, err := sesamConf.Load(v.root, configFileName)
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
+	declared, err := cfg.State()
+	if err != nil {
+		return nil, fmt.Errorf("declared state: %w", err)
+	}
+
+	return declared, nil
+}
+
+// committedConflicts returns those of changes that the config committed at
+// HEAD already declares on its own.
+func (v *View) committedConflicts(changes []diff.Change) ([]diff.Change, error) {
 	committed, err := v.committedConfigChanges()
 	if err != nil {
 		return nil, err
 	}
 
 	var conflicts []diff.Change
-	for _, change := range declared.Changes {
+	for _, change := range changes {
 		if slices.ContainsFunc(committed, change.Conflicts) {
 			conflicts = append(conflicts, change)
 		}
@@ -475,8 +497,6 @@ func (v *View) committedConfigChanges() ([]diff.Change, error) {
 		return nil, fmt.Errorf("committed sesam.yml at HEAD does not describe a state: %w", err)
 	}
 
-	// Delta, not Compute: what the committed config asks for is interesting
-	// even when it could not be applied as it stands.
 	return diff.Delta(v.vstate, declared).Changes, nil
 }
 

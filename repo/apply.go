@@ -10,7 +10,6 @@ import (
 	"slices"
 
 	"opensesam.org/sesam/core"
-	sesamConf "opensesam.org/sesam/repo/config"
 	"opensesam.org/sesam/repo/diff"
 )
 
@@ -62,14 +61,9 @@ func (s *Stage) ConfigApply(ctx context.Context, opts ConfigApplyOpts) ([]diff.C
 	// re-reading it there would compare against whatever the file says by the
 	// time the last step finishes, not the declaration that was actually
 	// planned against and applied
-	cfg, err := sesamConf.Load(s.root, configFileName)
+	declared, err := s.declaredState()
 	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
-	}
-
-	declared, err := cfg.State()
-	if err != nil {
-		return nil, fmt.Errorf("declared state: %w", err)
+		return nil, err
 	}
 
 	// every step below is fed straight to the staged audit log,
@@ -155,20 +149,12 @@ func (s *Stage) applyPreflight(changes []diff.Change, opts ConfigApplyOpts) erro
 // declares did not originate with the user running the command.
 func (s *Stage) requireLocalChanges(changes []diff.Change, opts ConfigApplyOpts) error {
 	if opts.Force {
-		slog.Warn("applying with --force: changes that arrived committed are not refused")
 		return nil
 	}
 
-	committed, err := s.committedConfigChanges()
+	alreadyCommitted, err := s.committedConflicts(changes)
 	if err != nil {
 		return err
-	}
-
-	var alreadyCommitted []diff.Change
-	for _, change := range changes {
-		if slices.ContainsFunc(committed, change.Conflicts) {
-			alreadyCommitted = append(alreadyCommitted, change)
-		}
 	}
 
 	if len(alreadyCommitted) > 0 {
@@ -222,7 +208,7 @@ func (s *Stage) applyChange(ctx context.Context, change diff.Change) error {
 }
 
 // touchIfMissing creates an empty file at path (and its parent directories)
-// if nothing is there yet
+// if nothing is there yet, recording what it created so Rollback can undo it.
 func (s *Stage) touchIfMissing(path string) error {
 	_, err := s.root.Stat(path)
 	if err == nil {
@@ -232,16 +218,29 @@ func (s *Stage) touchIfMissing(path string) error {
 		return fmt.Errorf("stat %s: %w", path, err)
 	}
 
-	if dir := filepath.Dir(path); dir != "." {
-		if err := s.root.MkdirAll(dir, 0o700); err != nil {
+	var dirs []string
+	for dir := filepath.Dir(path); dir != "."; dir = filepath.Dir(dir) {
+		if _, err := s.root.Stat(dir); err == nil {
+			break
+		}
+		dirs = append(dirs, dir)
+	}
+
+	if len(dirs) > 0 {
+		if err := s.root.MkdirAll(dirs[0], 0o700); err != nil {
 			return fmt.Errorf("create directory for %s: %w", path, err)
 		}
+
+		// Outermost first, so Rollback removes them innermost first.
+		slices.Reverse(dirs)
+		s.touched = append(s.touched, dirs...)
 	}
 
 	f, err := s.root.Create(path)
 	if err != nil {
 		return fmt.Errorf("touch %s: %w", path, err)
 	}
+	s.touched = append(s.touched, path)
 
 	return f.Close()
 }

@@ -67,6 +67,7 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 
 **--version**: Print the version and exit
 
+
 # COMMANDS
 
 ## init
@@ -409,23 +410,13 @@ Show the diff between config and actual state (extra args are passed to git)
 
 **--json**: Print output as JSON
 
-### get
-
-Get specific config keys
-
-**--help, -h**: show help
-
-### set
-
-Set specific config keys
-
-**--help, -h**: show help
+**--validate**: Fail if 'sesam config apply --force' would refuse the config (dry run, needs admin rights)
 
 ### reset
 
 Derive config from audit log
 
-**--force, -f**: Actually write sesam.yml, reset only reports what it would do
+**--force, -f**: Rewrite sesam.yml from scratch when it cannot be repaired in place, losing comments and descriptions
 
 **--help, -h**: show help
 
@@ -474,3 +465,4 @@ Show the audit log of secret changes
 **--help, -h**: show help
 
 **--json**: Print output as JSON
+

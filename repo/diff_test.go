@@ -31,7 +31,7 @@ func TestConfigDiffInSync(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	_, r := bootstrapRepo(t, admin)
 
-	changes, err := r.ConfigDiff(ConfigDiffOpts{WriteDiffDir: true})
+	changes, err := r.ConfigDiff(t.Context(), ConfigDiffOpts{WriteDiffDir: true})
 	require.NoError(t, err)
 	require.True(t, changes.IsEmpty())
 	require.Empty(t, changes.DiffDir)
@@ -41,6 +41,7 @@ func TestConfigDiffInSync(t *testing.T) {
 // sesam.yml, ask what it would change. The audit log must stay untouched.
 func TestConfigDiffHandEdited(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
 	dir, r := bootstrapRepo(t, admin)
 
 	writeMainConfig(t, dir, "users:\n"+
@@ -49,18 +50,18 @@ func TestConfigDiffHandEdited(t *testing.T) {
 		"      - "+admin.Recipient+"\n"+
 		"  - name: bob\n"+
 		"    key:\n"+
-		"      - github:bob\n"+
+		"      - "+bob.Recipient+"\n"+
 		"groups:\n"+
 		"  admin:\n"+
 		"    - admin\n"+
 		"  dev:\n"+
 		"    - bob\n"+
 		"secrets:\n"+
-		"  - path: db.env\n"+
+		"  - path: app/db.env\n"+
 		"    access:\n"+
 		"      - dev\n")
 
-	changes, err := r.ConfigDiff(ConfigDiffOpts{WriteDiffDir: true})
+	changes, err := r.ConfigDiff(t.Context(), ConfigDiffOpts{WriteDiffDir: true, Validate: true})
 	require.NoError(t, err)
 
 	ops := make([]core.Operation, 0, len(changes.Changes))
@@ -69,7 +70,7 @@ func TestConfigDiffHandEdited(t *testing.T) {
 	}
 	require.Equal(t, []core.Operation{
 		core.OpUserTell,     // bob
-		core.OpSecretAdd,    // db.env
+		core.OpSecretAdd,    // app/db.env
 		core.OpSecretRemove, // README.md, which the declaration dropped
 	}, ops)
 
@@ -88,11 +89,14 @@ func TestConfigDiffHandEdited(t *testing.T) {
 	require.Contains(t, verified, "README.md")
 	require.Contains(t, verified, admin.Recipient)
 
-	// Reporting only: the audit log still has neither bob nor db.env.
+	// Reporting only: the audit log still has neither bob nor app/db.env, and
+	// the placeholder the validating dry run created for it is gone again.
 	_, exists := r.vstate.UserExists("bob")
 	require.False(t, exists)
-	_, exists = r.vstate.SecretExists("db.env")
+	_, exists = r.vstate.SecretExists("app/db.env")
 	require.False(t, exists)
+	require.NoDirExists(t, filepath.Join(dir, "app"))
+	require.NoDirExists(t, filepath.Join(dir, forkSuffix))
 }
 
 // TestConfigDiffKeepsComments is the reason both sides are rendered by the same
@@ -107,7 +111,7 @@ func TestConfigDiffKeepsComments(t *testing.T) {
 	generated := readFileString(t, filepath.Join(dir, configFileName))
 	writeMainConfig(t, dir, generated+"      - dev\n")
 
-	changes, err := r.ConfigDiff(ConfigDiffOpts{WriteDiffDir: true})
+	changes, err := r.ConfigDiff(t.Context(), ConfigDiffOpts{WriteDiffDir: true})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(changes.DiffDir) })
 
@@ -152,7 +156,7 @@ func TestConfigDiffLeavesLiveTreeAlone(t *testing.T) {
 		"  - path: README.md\n"+
 		"  - include: svc/sesam.yml\n")
 
-	changes, err := r.ConfigDiff(ConfigDiffOpts{WriteDiffDir: true})
+	changes, err := r.ConfigDiff(t.Context(), ConfigDiffOpts{WriteDiffDir: true})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(changes.DiffDir) })
 
@@ -169,8 +173,8 @@ func TestConfigDiffLeavesLiveTreeAlone(t *testing.T) {
 	require.NotContains(t, readDiffFile(t, changes.DiffDir, VerifiedTreeDir, configFileName), "include")
 }
 
-// TestConfigDiffRejectsUnappliable checks that a declaration the audit log
-// could never accept is an error rather than a change list.
+// TestConfigDiffRejectsUnappliable checks that, when validating, a declaration
+// apply would refuse is an error rather than a change list.
 func TestConfigDiffRejectsUnappliable(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	dir, r := bootstrapRepo(t, admin)
@@ -184,8 +188,13 @@ func TestConfigDiffRejectsUnappliable(t *testing.T) {
 		"    - admin\n"+
 		"secrets: []\n")
 
-	_, err := r.ConfigDiff(ConfigDiffOpts{WriteDiffDir: true})
-	require.ErrorContains(t, err, "declares no admin user")
+	// Without validation it is just a diff, shown to anyone who asks.
+	changes, err := r.ConfigDiff(t.Context(), ConfigDiffOpts{})
+	require.NoError(t, err)
+	require.Equal(t, []core.Operation{core.OpUserChangeGroups, core.OpSecretRemove}, opsOf(changes.Changes))
+
+	_, err = r.ConfigDiff(t.Context(), ConfigDiffOpts{Validate: true})
+	require.ErrorContains(t, err, "takes admin from admin")
 }
 
 func opsOf(changes []diff.Change) []core.Operation {
