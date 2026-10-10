@@ -1,0 +1,53 @@
+# The same truncation as verify_truncate_workflow.txt, hidden behind a merge
+# whose FIRST parent is an unrelated root commit. The history walk follows first
+# parents, so it left the vault's history at that root and had nothing left to
+# compare the shortened log against - truncation reported "ok". The walk has to
+# cross over into the parent that still carries the log.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'c1'
+
+# Snapshot the (short) c1 log; .gitignore keeps it untracked.
+cp .sesam/audit/log.jsonl log-c1.jsonl
+
+exec sesam add s.txt --group dev
+exec git add -A
+exec git commit -m 'c2'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+# Name the real history, then start an unrelated root and merge the vault into
+# it: the merge's first parent is that root, the vault is only its second.
+exec git branch vault
+exec git switch --orphan unrelated
+cp note note.txt
+exec git add -f note.txt
+exec git commit -m 'unrelated root'
+# sesam's pre-merge-commit hook stops the merge short; finalize it without the
+# hooks, so the fixture keeps exactly the merged tree.
+! exec git merge --allow-unrelated-histories --no-edit vault
+exec git commit --no-verify --no-edit
+
+# Roll the log back to its c1 content inside the merge commit itself.
+cp log-c1.jsonl .sesam/audit/log.jsonl
+exec git add -A
+exec git commit --amend --no-verify --no-edit
+
+# The merge really does hang off an unrelated root...
+exec git rev-list --first-parent HEAD
+stdout -count=2 '^[0-9a-f]{40}$'
+
+# ...and the shortened log must still be caught. no-disk isolates the history
+# check from the on-disk root-hash mismatch the rollback also introduces.
+! exec sesam --verify-mode no-disk verify --truncate
+stderr 'not a prefix'
+
+-- s.txt --
+top secret
+-- note --
+unrelated file

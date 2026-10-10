@@ -476,24 +476,18 @@ we assume 'sesam show path/to/secret' as convenience.`,
 				Usage:    "Show the audit log of secret changes",
 			},
 			{
-				Name:   "docgen",
-				Hidden: true,
-				Usage:  "Generate reference documentation",
-				Commands: []*cli.Command{
-					{
-						Name:   "cli",
-						Action: commands.HandleDocGenCLI,
-						Usage:  "Write a markdown CLI reference to stdout",
-					},
-					{
-						Name:   "config",
-						Action: commands.HandleDocGenConfig,
-						Usage:  "Write a markdown config reference to stdout",
-					},
-				},
+				Name:      "help",
+				Aliases:   []string{"h"},
+				Category:  catMeta,
+				HideHelp:  true,
+				Action:    commands.HandleHelp,
+				Usage:     "Show the built-in manual, or the help of a command",
+				ArgsUsage: "[command]",
 			},
 		},
 	}
+
+	app.Commands = append(app.Commands, docgenCommands()...)
 
 	var activeProfile *profileState
 

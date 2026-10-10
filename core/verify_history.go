@@ -21,10 +21,20 @@ type auditLogSnapshot struct {
 	Log    *AuditLog
 }
 
-func auditLogHistory(sesamDir string, repo *git.Repository, ids Identities, fromRev string) (iter.Seq2[*auditLogSnapshot, error], error) {
-	initCommitRev, err := verifyInitFileUnchangedWithRepo(sesamDir, repo)
-	if err != nil {
-		return nil, fmt.Errorf("verify init file: %w", err)
+func auditLogHistory(
+	sesamDir string,
+	repo *git.Repository,
+	ids Identities,
+	fromRev string,
+	initCommitRev string,
+) (iter.Seq2[*auditLogSnapshot, error], error) {
+	if initCommitRev == "" {
+		// No anchor handed down, so the init-file check has not run for this
+		// state (VerifyChain, or a caller without one): walk history for it.
+		var err error
+		if initCommitRev, err = verifyInitFileUnchangedWithRepo(sesamDir, repo); err != nil {
+			return nil, fmt.Errorf("verify init file: %w", err)
+		}
 	}
 
 	if initCommitRev == "" {
@@ -68,11 +78,13 @@ func auditLogHistory(sesamDir string, repo *git.Repository, ids Identities, from
 	}
 
 	return func(yield func(*auditLogSnapshot, error) bool) {
-		// Walk FIRST-PARENT only (which is always "ours"). On merge commits we
-		// should take the route the merge driver should have taken as well.
+		// Walk FIRST-PARENT (which is always "ours"). On merge commits we take
+		// the route the merge driver should have taken as well - except where
+		// "ours" never had a vault at all, see the cross-over below.
 		hash := *fromCommit
 		var lastBlob plumbing.Hash
 		var sawGap bool
+		var child *object.Commit // the newer commit this one was reached from
 		for {
 			commit, err := repo.CommitObject(hash)
 			if err != nil {
@@ -92,10 +104,18 @@ func auditLogHistory(sesamDir string, repo *git.Repository, ids Identities, from
 			file, err := tree.File(auditPathRel)
 			switch {
 			case errors.Is(err, object.ErrFileNotFound):
+				// "Ours" carries no vault here. If this commit was reached from a
+				// merge whose other side still holds the log, that side is where
+				// the log's history continues - a vault merged in from a branch,
+				// or a merge spliced in front of one to cut this walk short and
+				// leave a shortened log with nothing to compare it against.
+				if alt, ok := logCarryingParent(repo, child, hash, auditPathRel); ok {
+					hash = alt
+					continue
+				}
+
 				// Below the commit that introduced the vault - the end of this line
-				// of history, not tampering. initCommitRev comes from an all-parents
-				// walk, so when the vault was created on a side branch it sits off
-				// the first-parent chain we follow and we run past it.
+				// of history, not tampering.
 				//
 				// Keep walking rather than stopping: the log reappearing further
 				// back would mean it was deleted in between, which is tampering and
@@ -153,9 +173,47 @@ func auditLogHistory(sesamDir string, repo *git.Repository, ids Identities, from
 				return
 			}
 
-			hash = commit.ParentHashes[0] // follow the mainline (ours) only
+			child = commit
+			hash = commit.ParentHashes[0] // follow the mainline (ours) first
 		}
 	}, nil
+}
+
+// logCarryingParent returns the parent of child - other than the one already
+// tried - whose tree still holds the audit log, so the walk can follow the log
+// rather than the mainline where the two part ways. Only a parent that really
+// carries the log is returned, so the caller cannot bounce back in here.
+func logCarryingParent(
+	repo *git.Repository,
+	child *object.Commit,
+	tried plumbing.Hash,
+	auditPathRel string,
+) (plumbing.Hash, bool) {
+	if child == nil {
+		return plumbing.ZeroHash, false
+	}
+
+	for _, parent := range child.ParentHashes {
+		if parent == tried {
+			continue
+		}
+
+		commit, err := repo.CommitObject(parent)
+		if err != nil {
+			continue
+		}
+
+		tree, err := commit.Tree()
+		if err != nil {
+			continue
+		}
+
+		if _, err := tree.File(auditPathRel); err == nil {
+			return parent, true
+		}
+	}
+
+	return plumbing.ZeroHash, false
 }
 
 // auditLogIsPrefix tests if `old` is a prefix of `new`
@@ -183,21 +241,34 @@ func auditLogIsPrefix(new, old *AuditLog) error {
 
 // VerifyHistory checks that, along the FIRST-PARENT chain from HEAD, every older
 // audit log is a prefix of the newer one (append-only, no truncation), and that
-// the tip chain-verifies.
+// the tip chain-verifies. Where that chain has no vault - a merge that brought
+// one in from its second parent - the walk crosses over to the parent that does,
+// so the log's own ancestry is followed down to the trust anchor.
 //
 // A merge done WITHOUT sesam's driver (e.g. a hand-resolved log conflict) that
 // drops mainline entries is correctly reported as truncation - fix it by
 // re-merging through sesam so the log is rebased instead of overwritten.
 //
+// initCommitRev is the trust anchor commit from Verify (VerifiedState.InitCommit):
+// finding it walks the whole history, and Verify already did that. Pass "" to
+// have it determined here, which also re-runs the init-file check.
+//
 // CAVEAT: Right now we do not recognize renames: If the sesam repo was moved from secret/ to secrets/
 // then this function does not find the old audit log before that rename. We could use git's renames,
 // but there will edge cases too if the file was renamed and a user was rotated (git looks for 50% matching content).
-func VerifyHistory(sesamDir string, repo *git.Repository, ids Identities, pluginUI *PluginUI) error {
+func VerifyHistory(
+	sesamDir string,
+	repo *git.Repository,
+	ids Identities,
+	pluginUI *PluginUI,
+	initCommitRev string,
+) error {
 	auditLogIter, err := auditLogHistory(
 		sesamDir,
 		repo,
 		ids,
 		"HEAD",
+		initCommitRev,
 	)
 	if err != nil {
 		return fmt.Errorf("build audit log history: %w", err)

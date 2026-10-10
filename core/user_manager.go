@@ -60,6 +60,10 @@ func (um *UserManager) UserTell(
 		return fmt.Errorf("invalid user name: %w", err)
 	}
 
+	if err := ValidGroupNames(groups); err != nil {
+		return err
+	}
+
 	if !um.signUser.IsAdmin() {
 		return fmt.Errorf("need to be admin for telling users")
 	}

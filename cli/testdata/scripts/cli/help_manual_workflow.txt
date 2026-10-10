@@ -1,0 +1,53 @@
+# `sesam help` opens the built-in manual; with a command it shows that
+# command's help. Without a terminal the manual falls back to plain markdown on
+# stdout.
+
+env PAGER=
+env MANPAGER=
+
+# The command overview is still there via --help.
+exec sesam --help
+stdout 'USAGE:'
+! stdout '# FREQUENTLY ASKED QUESTIONS'
+
+# A command name shows that command's help.
+exec sesam help init
+stdout 'sesam init - Initialize sesam in the current repository'
+! stdout '# FREQUENTLY ASKED QUESTIONS'
+
+# Aliases resolve to their command as well.
+exec sesam help s
+stdout 'sesam status -'
+
+# Bare help opens the whole manual.
+exec sesam help
+stdout '# NAME'
+stdout '# DESCRIPTION'
+stdout '# COMMANDS'
+stdout '# FREQUENTLY ASKED QUESTIONS'
+stdout '# SEE ALSO'
+cp stdout embedded.md
+
+# Everything below needs the doc generator, which only a build tagged "docgen"
+# carries. `task test` passes the tag; a plain `go test ./...` does not.
+[!docgen] stop
+
+# The embedded manual must match what the generator produces right now, or the
+# committed docs/manual.md and docs/sesam.1 are stale - run `task docgen`.
+exec sesam docgen man --format=markdown --handbook $HANDBOOK
+cmp stdout embedded.md
+
+# The man page generator produces roff.
+exec sesam docgen man --handbook $HANDBOOK
+stdout '^\.TH sesam 1 '
+stdout '\.SH FREQUENTLY ASKED QUESTIONS'
+stdout '\.SH GIT INTEGRATION'
+
+# Subcommands are spelled out in full: roff has no third heading level, so
+# "pre-commit" alone would read as a top-level command.
+stdout '\.SS hook pre-commit'
+stdout '\.SS user add-recipient, ar'
+
+# Environment variables of a flag are part of the generated CLI reference.
+exec sesam docgen cli
+stdout '--identity, -i.*\\\[\$SESAM_ID, \$SESAM_IDENTITY\\\]'

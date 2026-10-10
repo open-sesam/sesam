@@ -20,7 +20,7 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags:
-      - -s -w -X github.com/open-sesam/sesam/cli.version={{ .Version }}
+      - -s -w -X opensesam.org/sesam/cli.version={{ .Version }}
     goos:
       - linux
       - darwin
@@ -40,6 +40,10 @@ archives:
     files:
       - README.md
       - LICENSE
+      # The same page the binary embeds. Tarball users install it themselves:
+      #   install -m644 sesam.1 /usr/local/share/man/man1/
+      - src: cli/manual/sesam.1
+        dst: sesam.1
 
 # Sign checksums.txt with the project SSH key (managed by sesam itself:
 # encrypted at rest in git, present as plaintext in the working tree via the
