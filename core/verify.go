@@ -203,12 +203,12 @@ func (s *VerifiedState) renameSecret(oldPath, newPath string) {
 
 // UserExists is BaseState.User
 func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
-	return s.BaseState.User(user)
+	return s.User(user)
 }
 
 // SecretExists is BaseState.Secret
 func (s *VerifiedState) SecretExists(revealedPath string) (*SecretAccess, bool) {
-	return s.BaseState.Secret(revealedPath)
+	return s.Secret(revealedPath)
 }
 
 // UserHasAccess checks if `user` is in one of `grous` and has therefore access.
