@@ -119,9 +119,13 @@ func (s *Stage) applyPreflight(changes []diff.Change, opts ConfigApplyOpts) erro
 		)
 	}
 
-	// Every step after the first is signed as an admin and verified against the
-	// state the previous ones built, so an apply that strips its own author of
-	// admin rights invalidates everything that follows it.
+	// Every step is signed by whoever is applying, and verified against the
+	// state the previous ones built - so a self-kill/self-demote anywhere but
+	// the last step already dooms the rest of the plan to a verify failure,
+	// rolling the whole stage back on its own. What that can't catch is the
+	// self-kill/self-demote itself landing as the last (or only) step: nothing
+	// follows it to fail, so it would otherwise go through and quietly cut off
+	// the person who just ran the apply.
 	for _, change := range changes {
 		if change.User != s.whoami {
 			continue
