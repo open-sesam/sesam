@@ -532,9 +532,7 @@ Show the audit log of secret changes
 
 ### help, h
 
-Show help for a command, or the built-in manual
-
-**--man**: Show the built-in manual instead of the command overview
+Show the built-in manual, or the help of a command
 
 # GETTING STARTED
 

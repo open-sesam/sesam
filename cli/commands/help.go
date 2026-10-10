@@ -16,26 +16,15 @@ import (
 
 // HandleHelp implements `sesam help [command]`.
 //
-// Without an argument it prints the usual command overview, with one it prints
-// that command's help. --man opens the manual the binary carries, which is the
-// same page the release archives ship as sesam.1.
+// Without an argument it opens the manual the binary carries, which is the
+// same page the release archives ship as sesam.1. With one it prints that
+// command's help. The command overview stays at `sesam --help`.
 func HandleHelp(ctx context.Context, cmd *cli.Command) error {
-	root := cmd.Root()
-
-	if cmd.Bool("man") {
-		return showManual(ctx)
-	}
-
 	if arg := cmd.Args().First(); arg != "" {
-		return cli.ShowCommandHelp(ctx, root, arg)
+		return cli.ShowCommandHelp(ctx, cmd.Root(), arg)
 	}
 
-	if err := cli.ShowRootCommandHelp(root); err != nil {
-		return err
-	}
-
-	_, _ = fmt.Fprintln(root.Writer, "\n   Run `sesam help --man` for the full manual.")
-	return nil
+	return showManual(ctx)
 }
 
 // showManual hands the embedded man page to man(1), falling back to markdown
