@@ -604,6 +604,8 @@ func verifyUserRegenerateSignKey(log *AuditLog, state *VerifiedState, entry *Aud
 	}
 
 	user.SignPubKey = dursk.NewSignPubKey
+	// footers signed with the old key no longer verify
+	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
 

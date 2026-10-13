@@ -374,6 +374,10 @@ Regenerate the signing key of a specific user
 
 **--help, -h**: show help
 
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
+
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
+
 **--user, -u**="": Regenerate the signing key for a user
 
 ### rename

@@ -38,3 +38,21 @@ exec sesam verify
 
 # Regenerating the key of a non-existent user fails.
 ! exec sesam user regen-sign-key --user ghost
+
+# Regenerating admin's key orphans the footers admin sealed (README.md at init).
+# The implicit seal must re-sign them, so the deep check still passes.
+exec sesam user regen-sign-key --user admin
+exec sesam verify --all
+! stderr 'invalid signature'
+! stderr 'a seal is pending'
+
+# With --no-seal the footers stay orphaned and the seal pending until the next seal.
+exec sesam user regen-sign-key --user admin --no-seal
+stderr 'a seal is pending'
+! exec sesam verify
+stderr 'invalid signature'
+stderr 'a seal is pending'
+exec sesam seal
+exec sesam verify --all
+! stderr 'invalid signature'
+! stderr 'a seal is pending'
