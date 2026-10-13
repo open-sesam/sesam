@@ -58,7 +58,7 @@ const (
 	AdviceChanged
 
 	// AdviceUnchanged: the plaintext matches the object, reseal only when the
-	// recipients changed.
+	// recipients changed or the footer no longer verifies.
 	AdviceUnchanged
 
 	// AdviceKeep: the plaintext is older than the object, leave the object alone.
@@ -349,8 +349,8 @@ func (sm *SecretManager) decideSeal(revealedPath string, all bool, advice SealAd
 			return false, footer, nil
 		}
 
-		drifted, err := sm.recipientsDrifted(footer, revealedPath)
-		return drifted, footer, err
+		outdated, err := sm.footerOutdated(footer, revealedPath)
+		return outdated, footer, err
 	default:
 		return sm.needsSeal(revealedPath)
 	}
@@ -616,9 +616,9 @@ func (sm *SecretManager) needsSeal(revealedPath string) (bool, *secretFooter, er
 		return false, nil, err
 	}
 
-	drifted, err := sm.recipientsDrifted(footer, revealedPath)
-	if err != nil || drifted {
-		return drifted, footer, err
+	outdated, err := sm.footerOutdated(footer, revealedPath)
+	if err != nil || outdated {
+		return outdated, footer, err
 	}
 
 	matches, err := sm.plaintextMatches(revealedPath, sealFd, footer)
@@ -681,6 +681,36 @@ func (sm *SecretManager) plaintextMatches(revealedPath string, object io.Reader,
 
 	got := MulticodeEncode(keyContentHash(newHash, ageKey, plainContentHash.Sum(nil)), hashCode)
 	return got == footer.HMACContentHash, nil
+}
+
+// footerOutdated reports whether the object has to be resealed even though its
+// plaintext did not change: the recipients drifted, or the footer signature no
+// longer verifies against the keyring (e.g. the sealer's signing key was
+// regenerated). Footer only, no decryption.
+func (sm *SecretManager) footerOutdated(footer *secretFooter, revealedPath string) (bool, error) {
+	drifted, err := sm.recipientsDrifted(footer, revealedPath)
+	if err != nil || drifted {
+		return drifted, err
+	}
+
+	return !sm.footerVerifies(footer), nil
+}
+
+// footerVerifies checks the footer signature against the current keyring. The
+// ciphertext hash is taken from the footer as is; comparing it to the actual
+// ciphertext is up to reveal and verify.
+func (sm *SecretManager) footerVerifies(footer *secretFooter) bool {
+	var data []byte
+	for _, h := range []string{footer.CipherTextHash, footer.HMACContentHash, footer.RecipientsHash} {
+		raw, _, err := multicodeDecode(h)
+		if err != nil {
+			return false
+		}
+		data = append(data, raw...)
+	}
+
+	_, err := sm.Keyring.Verify(SesamDomainSignSecretTag, data, footer.Signature, footer.SealedBy)
+	return err == nil
 }
 
 // recipientsDrifted reports whether the footer was sealed for a different

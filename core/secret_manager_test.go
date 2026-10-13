@@ -336,6 +336,46 @@ func TestSealDischargesObligationWithoutRecipientChange(t *testing.T) {
 	require.Equal(t, before, after, "an unchanged recipient set must not re-encrypt the object")
 }
 
+// TestSealIncrementalResealsOnOrphanedSignature pins that Seal(false) re-seals
+// an unchanged secret whose footer no longer verifies because the sealer's
+// signing key was regenerated. Recipients stay the same, so drift alone would
+// leave the stale footer behind and verification would fail.
+func TestSealIncrementalResealsOnOrphanedSignature(t *testing.T) {
+	tcs := []struct {
+		name   string
+		advice SealAdvice
+	}{
+		{"compare", AdviceCompare},
+		{"unchanged", AdviceUnchanged},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := sealedSecretManager(t) // admin sealed secrets/test
+			obj := filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test"))
+
+			before, err := os.ReadFile(obj)
+			require.NoError(t, err)
+
+			um, err := BuildUserManager(mgr.root, mgr.Signer, mgr.AuditLog, mgr.State, mgr)
+			require.NoError(t, err)
+			require.NoError(t, um.UserRegenerateSignKey("admin"))
+
+			report := VerifyIntegrity(mgr.root, mgr.State, mgr.Keyring)
+			require.False(t, report.OK(), "old footer must not verify after regen")
+
+			require.NoError(t, mgr.Seal(false, map[string]SealAdvice{"secrets/test": tc.advice}))
+
+			after, err := os.ReadFile(obj)
+			require.NoError(t, err)
+			require.NotEqual(t, before, after, "orphaned footer must trigger a re-seal")
+
+			report = VerifyIntegrity(mgr.root, mgr.State, mgr.Keyring)
+			require.True(t, report.OK(), report.String())
+		})
+	}
+}
+
 func TestRevealFailsMissingAge(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	// No .sesam files exist, so reveal should fail.
