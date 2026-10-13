@@ -301,6 +301,8 @@ var flagsUserRemoveRecipient = []cli.Flag{
 
 var flagsUserRegenerateSignKey = []cli.Flag{
 	userFlag(true, "Regenerate the signing key for a user"),
+	flagNoSeal,
+	flagSeal,
 }
 
 // showFlags are the flags of `sesam show`. They exist twice: once on the
