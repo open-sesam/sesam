@@ -359,7 +359,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, err
 	}
 
-	opts.PrintStep("Staging all files…")
+	opts.PrintStep("Staging initial files…")
 	if err := stageInitFiles(gitRepo, resolvedDir, configPath); err != nil {
 		return nil, err
 	}
