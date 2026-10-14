@@ -26,8 +26,9 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/gofrs/flock"
-	sesamConf "opensesam.org/sesam/config"
 	"opensesam.org/sesam/core"
+	sesamConf "opensesam.org/sesam/repo/config"
+	"opensesam.org/sesam/repo/diff"
 )
 
 const defaultLockTimeout = 30 * time.Second
@@ -539,8 +540,7 @@ func (r *Repo) SesamDir() string {
 	return r.sesamDir
 }
 
-// Close releases the on-disk lock and closes the audit log. Safe to call
-// multiple times. The first non-nil error is returned.
+// Close releases the on-disk lock and closes the audit log.
 func (r *Repo) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -563,7 +563,7 @@ func (r *Repo) Close() error {
 }
 
 type SecretInfo struct {
-	core.VerifiedSecret
+	core.SecretAccess
 	Config sesamConf.Secret `json:"config"`
 }
 
@@ -583,6 +583,10 @@ type VerifyOptions struct {
 	// Integrity checks the integrity of all files and whether they match the
 	// current seal's root hash.
 	Integrity bool
+
+	// Config checks that sesam.yml does not declare a change that already
+	// arrived committed (see docs/src/design.md, "Invalid modified config").
+	Config bool
 }
 
 // VerifyReport carries the per-check outcome from Verify.
@@ -592,6 +596,11 @@ type VerifyReport struct {
 	TruncateError    error                  `json:"truncate_error,omitempty"`
 	ForgeCheckReport *core.ForgeReport      `json:"forge_report,omitempty"`
 	SharedPublicKeys []core.SharedPublicKey `json:"shared_public_keys,omitempty"`
+
+	// CommittedConfigChanges are steps sesam.yml currently declares that the
+	// config committed at HEAD would already carry out on its own. Verify only
+	// reports it: applying (or not) is still the applier's call, force or otherwise.
+	CommittedConfigChanges []diff.Change `json:"committed_config_changes,omitempty"`
 }
 
 // OK reports whether every requested check passed.
@@ -609,6 +618,10 @@ func (rep *VerifyReport) OK() bool {
 	}
 
 	if len(rep.SharedPublicKeys) > 0 {
+		return false
+	}
+
+	if len(rep.CommittedConfigChanges) > 0 {
 		return false
 	}
 

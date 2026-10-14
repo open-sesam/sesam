@@ -10,18 +10,103 @@ import (
 	"github.com/hdevalence/ed25519consensus"
 )
 
-// VerifiedUser is a user that has been verified by the audit log.
-type VerifiedUser struct {
-	Name       string     `json:"name"`
-	Groups     []string   `json:"groups"`
-	SignPubKey string     `json:"sign_pub_key"`
-	Recps      Recipients `json:"recipients"`
+// Membership is the part of a user that the audit log and the config describe
+// identically. Both sides embed it so the two models cannot drift apart in naming or meaning.
+type Membership struct {
+	Name   string   `json:"name"`
+	Groups []string `json:"groups"`
 }
 
-// VerifiedSecret is a secret verified by the audit log.
-type VerifiedSecret struct {
+// GetName satisfies Named.
+func (m Membership) GetName() string {
+	return m.Name
+}
+
+// Named is implemented by any user representation that carries a name
+type Named interface {
+	GetName() string
+}
+
+// BaseState is the shape shared by every representation of "what the
+// repository looks like": a user list and a secret list, each looked up by
+// name/path through an index built lazily on first lookup.
+type BaseState[U Named] struct {
+	Users   []U            `json:"users"`
+	Secrets []SecretAccess `json:"secrets"`
+
+	// userIdx / secretIdx map a Name / RevealedPath to its position in Users /
+	// Secrets. Built lazily, on first lookup, from whatever Users / Secrets
+	// hold at that point.
+	userIdx   map[string]int
+	secretIdx map[string]int
+}
+
+// User returns the entry in Users named name.
+func (s *BaseState[U]) User(name string) (*U, bool) {
+	if s.userIdx == nil {
+		s.rebuildUserIndex()
+	}
+
+	idx, ok := s.userIdx[name]
+	if !ok {
+		return nil, false
+	}
+
+	return &s.Users[idx], true
+}
+
+// Secret returns the entry in Secrets at revealedPath.
+func (s *BaseState[U]) Secret(revealedPath string) (*SecretAccess, bool) {
+	if s.secretIdx == nil {
+		s.rebuildSecretIndex()
+	}
+
+	idx, ok := s.secretIdx[revealedPath]
+	if !ok {
+		return nil, false
+	}
+
+	return &s.Secrets[idx], true
+}
+
+// rebuildUserIndex rebuilds userIdx from Users. Called after verify and after a
+// modification that shifts positions (a user removal).
+func (s *BaseState[U]) rebuildUserIndex() {
+	s.userIdx = make(map[string]int, len(s.Users))
+	for i := range s.Users {
+		s.userIdx[s.Users[i].GetName()] = i
+	}
+}
+
+// rebuildSecretIndex rebuilds secretIdx from Secrets. Called after verify and
+// after a modification that shifts positions (a secret removal).
+func (s *BaseState[U]) rebuildSecretIndex() {
+	s.secretIdx = make(map[string]int, len(s.Secrets))
+	for i := range s.Secrets {
+		s.secretIdx[s.Secrets[i].RevealedPath] = i
+	}
+}
+
+// BuildIndexes (re)builds both lookup indexes from Users and Secrets.
+func (s *BaseState[U]) BuildIndexes() {
+	s.rebuildUserIndex()
+	s.rebuildSecretIndex()
+}
+
+// SecretAccess is a secret the audit log and the config describe identically:
+// the path made sesam-relative, and the access list. Used directly as the
+// secret type on both sides
+type SecretAccess struct {
 	RevealedPath string   `json:"revealed_path"`
 	AccessGroups []string `json:"access_groups"`
+}
+
+// VerifiedUser is a user that has been verified by the audit log.
+type VerifiedUser struct {
+	Membership
+
+	SignPubKey string     `json:"sign_pub_key"`
+	Recps      Recipients `json:"recipients"`
 }
 
 // VerifiedState is the state of the repo based on the audit log.
@@ -30,8 +115,7 @@ type VerifiedSecret struct {
 // - Config was edited by user locally (to add new secrets or users declaratively)
 // - Something was tampered with (e.g. Eve added herself as admin)
 type VerifiedState struct {
-	Users   []VerifiedUser   `json:"users"`
-	Secrets []VerifiedSecret `json:"secrets"`
+	BaseState[VerifiedUser]
 
 	// SealRequiredSeqID tells us the entry that required a seal but didn't have one yet.
 	// If a seal was provided, it is set back to 0.
@@ -45,11 +129,6 @@ type VerifiedState struct {
 	// Compared against disk after replay to detect file substitution.
 	LastSealRootHash string `json:"last_seal_root_hash"`
 
-	// userIdx / secretIdx map a Name / RevealedPath to its position in Users /
-	// Secrets. They exist as optimization only and are lazily loaded.
-	userIdx   map[string]int
-	secretIdx map[string]int
-
 	auditLog *AuditLog
 	keyring  Keyring
 	pluginUI *PluginUI
@@ -61,8 +140,8 @@ func (vu *VerifiedUser) IsAdmin() bool {
 
 // DeclaredGroups returns the access groups without the implicit "admin" group -
 // the set to persist in the config, where admin membership stays implicit.
-func (vs *VerifiedSecret) DeclaredGroups() []string {
-	return withoutAdmin(vs.AccessGroups)
+func (sa *SecretAccess) DeclaredGroups() []string {
+	return withoutAdmin(sa.AccessGroups)
 }
 
 // UnmarshalJSON restores a state that was written out as JSON. The lookup
@@ -82,35 +161,6 @@ func (s *VerifiedState) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// rebuildUserIndex rebuilds userIdx from Users. Called after verify and after a
-// modification that shifts positions (a user removal).
-func (s *VerifiedState) rebuildUserIndex() {
-	s.userIdx = make(map[string]int, len(s.Users))
-	for i := range s.Users {
-		s.userIdx[s.Users[i].Name] = i
-	}
-}
-
-// rebuildSecretIndex rebuilds secretIdx from Secrets. Called after verify and
-// after a modification that shifts positions (a secret removal).
-func (s *VerifiedState) rebuildSecretIndex() {
-	s.secretIdx = make(map[string]int, len(s.Secrets))
-	for i := range s.Secrets {
-		s.secretIdx[s.Secrets[i].RevealedPath] = i
-	}
-}
-
-// buildIndexes (re)builds both lookup indexes from Users and Secrets. verify
-// calls it after replay, and every later modification keeps the indexes in sync
-// incrementally, so the read accessors (UserExists, SecretExists, ...) never
-// write and are safe to call concurrently on an unchanging state. Code that
-// constructs a VerifiedState by hand must call this before reading it.
-// It is not safe against concurrent modification; that would need a mutex.
-func (s *VerifiedState) buildIndexes() {
-	s.rebuildUserIndex()
-	s.rebuildSecretIndex()
-}
-
 // addUser appends u and records its position in userIdx. The index must already
 // be built (verify builds it before any modification runs).
 func (s *VerifiedState) addUser(u VerifiedUser) {
@@ -120,7 +170,7 @@ func (s *VerifiedState) addUser(u VerifiedUser) {
 
 // addSecret appends sec and records its position in secretIdx. The index must
 // already be built (verify builds it before any modification runs).
-func (s *VerifiedState) addSecret(sec VerifiedSecret) {
+func (s *VerifiedState) addSecret(sec SecretAccess) {
 	s.secretIdx[sec.RevealedPath] = len(s.Secrets)
 	s.Secrets = append(s.Secrets, sec)
 }
@@ -151,22 +201,14 @@ func (s *VerifiedState) renameSecret(oldPath, newPath string) {
 	s.secretIdx[newPath] = idx
 }
 
+// UserExists is BaseState.User
 func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
-	idx, ok := s.userIdx[user]
-	if !ok {
-		return nil, false
-	}
-
-	return &s.Users[idx], true
+	return s.User(user)
 }
 
-func (s *VerifiedState) SecretExists(revealedPath string) (*VerifiedSecret, bool) {
-	idx, ok := s.secretIdx[revealedPath]
-	if !ok {
-		return nil, false
-	}
-
-	return &s.Secrets[idx], true
+// SecretExists is BaseState.Secret
+func (s *VerifiedState) SecretExists(revealedPath string) (*SecretAccess, bool) {
+	return s.Secret(revealedPath)
 }
 
 // UserHasAccess checks if `user` is in one of `grous` and has therefore access.
@@ -305,7 +347,7 @@ func (s *VerifiedState) requireUser(name, action string, entry *AuditEntrySigned
 // exists and that the entry's author may act on it. `action` reads as a verb,
 // e.g. "remove" or "change access of". Used by the mutating secret operations;
 // secret.add checks non-existence instead and does not use this.
-func (s *VerifiedState) requireSecretAccess(path, action string, entry *AuditEntrySigned) (*VerifiedSecret, error) {
+func (s *VerifiedState) requireSecretAccess(path, action string, entry *AuditEntrySigned) (*SecretAccess, error) {
 	secret, exists := s.SecretExists(path)
 	if !exists {
 		return nil, fmt.Errorf("cannot %s non-existing secret %q (seq_id=%d)", action, path, entry.SeqID)
@@ -345,7 +387,7 @@ func groupsToMap(groups []string) map[string]bool {
 // "admin" group is present. This is the access-list counterpart to the implicit
 // admin membership baked into groupsToMap.
 func normalizeAccessGroups(groups []string) []string {
-	groups = deduplicate(groups)
+	groups = Deduplicate(groups)
 	if !slices.Contains(groups, "admin") {
 		groups = append(groups, "admin")
 	}
@@ -418,6 +460,12 @@ func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 	return registerUser(state, tellDetails, kr)
 }
 
+// MaxUserKeys caps the keys a user can register with in one user.tell. It is
+// not enforced again on add-recipients so a diff or preflight check must
+// only apply this limit to a user being newly registered, not to one already
+// in the verified state.
+const MaxUserKeys = 10
+
 // registerUser adds a user's keys to the keyring and state.
 // Shared by verifyInit (initial admin) and verifyUserTell.
 func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error {
@@ -443,8 +491,8 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		return fmt.Errorf("user %s needs at least one public key", tell.User)
 	}
 
-	if len(tell.PubKeys) > 10 {
-		return fmt.Errorf("user %s may not have more than 10 public keys", tell.User)
+	if len(tell.PubKeys) > MaxUserKeys {
+		return fmt.Errorf("user %s may not have more than %d public keys", tell.User, MaxUserKeys)
 	}
 
 	if len(tell.Groups) == 0 {
@@ -481,7 +529,7 @@ func registerUser(state *VerifiedState, tell *DetailUserTell, kr Keyring) error 
 		Name:       tell.User,
 		SignPubKey: tell.SignPubKey,
 		Recps:      stored,
-		Groups:     deduplicate(tell.Groups),
+		Groups:     Deduplicate(tell.Groups),
 	})
 
 	return nil
@@ -573,7 +621,7 @@ func verifyUserChangeGroups(log *AuditLog, state *VerifiedState, entry *AuditEnt
 		}
 	}
 
-	user.Groups = deduplicate(ucg.NewGroups)
+	user.Groups = Deduplicate(ucg.NewGroups)
 	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
@@ -727,7 +775,7 @@ func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigne
 	}
 
 	// secret does not exist
-	state.addSecret(VerifiedSecret{
+	state.addSecret(SecretAccess{
 		RevealedPath: scd.RevealedPath,
 		AccessGroups: scd.AccessGroups,
 	})
@@ -747,7 +795,18 @@ func verifySecretChangeAccess(log *AuditLog, state *VerifiedState, entry *AuditE
 		return err
 	}
 
-	existingSecret.AccessGroups = normalizeAccessGroups(sca.AccessGroups)
+	// Same rule secret.add enforces on the groups it grants: having access
+	// before the change is not enough on its own, or the changer could
+	// redirect a secret's whole access list to a group they are not part of
+	newGroups := normalizeAccessGroups(sca.AccessGroups)
+	if !state.UserHasAccess(entry.ChangedBy, newGroups) {
+		return fmt.Errorf(
+			"would change access of %q to groups that %s has no access to",
+			sca.RevealedPath, entry.ChangedBy,
+		)
+	}
+
+	existingSecret.AccessGroups = newGroups
 	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
@@ -797,7 +856,7 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 		return err
 	}
 
-	state.Secrets = slices.DeleteFunc(state.Secrets, func(s VerifiedSecret) bool {
+	state.Secrets = slices.DeleteFunc(state.Secrets, func(s SecretAccess) bool {
 		return s.RevealedPath == srd.RevealedPath
 	})
 	state.rebuildSecretIndex() // positions shifted
@@ -932,8 +991,8 @@ func cloneVerifiedUsers(users []VerifiedUser) []VerifiedUser {
 	return out
 }
 
-func cloneVerifiedSecrets(secrets []VerifiedSecret) []VerifiedSecret {
-	out := make([]VerifiedSecret, len(secrets))
+func cloneVerifiedSecrets(secrets []SecretAccess) []SecretAccess {
+	out := make([]SecretAccess, len(secrets))
 	for i, s := range secrets {
 		s.AccessGroups = slices.Clone(s.AccessGroups)
 		out[i] = s
@@ -1046,7 +1105,7 @@ func replay(state *VerifiedState, batched bool, upTo uint64) error {
 	newState := *state
 	newState.Users = cloneVerifiedUsers(state.Users)
 	newState.Secrets = cloneVerifiedSecrets(state.Secrets)
-	newState.buildIndexes()
+	newState.BuildIndexes()
 
 	var previousEntry *AuditEntrySigned
 	var checks []SigCheck
@@ -1178,7 +1237,7 @@ func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 		users[i] = u
 	}
 
-	secrets := make([]VerifiedSecret, len(s.Secrets))
+	secrets := make([]SecretAccess, len(s.Secrets))
 	for i, sec := range s.Secrets {
 		sec.AccessGroups = slices.Clone(sec.AccessGroups)
 		secrets[i] = sec
@@ -1194,6 +1253,6 @@ func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 		keyring:           kr,
 		pluginUI:          s.pluginUI,
 	}
-	cloned.buildIndexes()
+	cloned.BuildIndexes()
 	return cloned
 }

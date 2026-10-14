@@ -145,6 +145,19 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 			if err := r.ClearTmp(); err != nil {
 				slog.Warn("could not clear the tmp dir", slog.Any("err", err))
 			}
+
+			// sesam.yml took ours via the sesam-ours merge driver, so it still
+			// declares whatever side "ours" happened to be, not the merged audit
+			// log. Force: a config this hook can't repair in place must still be
+			// resolved somehow, and there is no one left to ask.
+			cfgReset, err := r.ConfigReset(repo.ConfigResetOpts{Force: true})
+			if err != nil {
+				return fmt.Errorf("reset config after merge: %w", err)
+			}
+
+			if err := r.GitAddConfig(cfgReset.Deleted); err != nil {
+				return fmt.Errorf("stage config after merge reset: %w", err)
+			}
 		}
 
 		return r.GitAddDotSesam()

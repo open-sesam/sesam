@@ -303,6 +303,12 @@ func (um *UserManager) UserRegenerateSignKey(user string) error {
 		return err
 	}
 
+	// Our own key was replaced: the log only accepts the new one from here on.
+	if user == um.signer.UserName() {
+		um.signer = signer
+		um.secMgr.Signer = signer
+	}
+
 	return nil
 }
 

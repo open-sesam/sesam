@@ -76,7 +76,14 @@ func (c *Config) UserChangeGroups(user string, groups []string) error {
 	src := c.MainFile
 	seq, err := groupsNode(src.RootNode)
 	if err != nil {
-		return err
+		// No groups: key yet - every target group is new, so build the whole
+		// mapping at once (mirrors addGroupMember's handling of the same gap
+		// for a brand new user).
+		newGroups := make(map[string][]string, len(groups))
+		for _, group := range groups {
+			newGroups[group] = []string{user}
+		}
+		return appendRootKey(src, map[string]map[string][]string{"groups": newGroups})
 	}
 
 	groupMap := make(map[string]bool, len(groups))

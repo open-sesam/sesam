@@ -1,11 +1,15 @@
 package config
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 // writeTwoUserMain writes a main sesam.yml with two users (each with one key),
@@ -308,4 +312,35 @@ secrets:
 	require.NoError(t, cr.Save())
 
 	require.Equal(t, []string{"keyA1", "keyA2"}, keysByUser(t, main)["axolotl"])
+}
+
+// TestUserRecipient_SSHKeyMatchesWithoutComment covers keys handed back from
+// the audit log, which records ssh keys without their comment: they must still
+// find the commented key the user pasted into sesam.yml.
+func TestUserRecipient_SSHKeyMatchesWithoutComment(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	sshPub, err := ssh.NewPublicKey(pub)
+	require.NoError(t, err)
+
+	bare := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
+	commented := bare + " axolotl@laptop"
+
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sesam.yml")
+	body := "users:\n  - name: axolotl\n    key:\n      - keyA\n      - " + commented +
+		"\ngroups:\n  admin:\n    - axolotl\nsecrets: []\n"
+	require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+
+	require.NoError(t, cr.UserAddRecipient("axolotl", []string{bare}))
+	require.NoError(t, cr.Save())
+	require.Equal(t, []string{"keyA", commented}, keysByUser(t, main)["axolotl"], "no duplicate")
+
+	require.NoError(t, cr.UserRmRecipient("axolotl", []string{bare}))
+	require.NoError(t, cr.Save())
+	require.Equal(t, []string{"keyA"}, keysByUser(t, main)["axolotl"])
 }

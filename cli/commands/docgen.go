@@ -13,7 +13,7 @@ import (
 
 	clidocs "github.com/urfave/cli-docs/v3"
 	"github.com/urfave/cli/v3"
-	"opensesam.org/sesam/config"
+	"opensesam.org/sesam/repo/config"
 )
 
 //go:embed docgen_cfg_template.md

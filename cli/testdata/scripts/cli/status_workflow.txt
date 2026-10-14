@@ -36,7 +36,8 @@ exec sesam status --json
 stdout '"modified"'
 
 # --diff shells out to git to show old (sealed) vs new (revealed) content.
-exec sesam status --diff
+# Exit code mirrors git diff: 1 means a difference was found, not a failure.
+! exec sesam status --diff
 stdout 'modified readme'
 
 # Removing the revealed plaintext reports it as unrevealed.

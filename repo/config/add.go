@@ -8,7 +8,7 @@ import (
 
 // SecretAdd adds (or updates) a single secret file in the configuration.
 //
-// It is a self-deciding upsert: if the file is already tracked by some
+// If the file is already tracked by some
 // sesam.yml the call is treated as an access-group change (delegating to
 // SecretChangeGroups); otherwise the secret is inserted.
 //
@@ -25,12 +25,12 @@ import (
 // to fill in.
 func (c *Config) SecretAdd(path string, nested bool, access []string) error {
 	rel := filepath.Clean(path)
+	tracked, err := c.trackedRevealedPaths()
+	if err != nil {
+		return err
+	}
 
-	// Self-deciding: an already-tracked file is an access change, not an add.
-	// This also keeps a file from being declared twice — including the case
-	// where it was first added to a sub-file and is now re-added to the main
-	// file, or vice versa.
-	if c.trackedRevealedPaths()[rel] {
+	if tracked[rel] {
 		if len(access) == 0 {
 			// if no groups change and secret exists, we assume no change requested.
 			// If [admin] is given explicitly we would set it explicitly.
@@ -44,9 +44,8 @@ func (c *Config) SecretAdd(path string, nested bool, access []string) error {
 }
 
 // placeSecret inserts a brand-new secret for the on-disk file at abs into the
-// appropriate sesam.yml, honoring nested (see SecretAdd). The caller supplies
-// the secret's metadata (access, description, …); placeSecret fills in Path
-// relative to the owning file's directory. abs must not already be tracked.
+// appropriate sesam.yml. The caller supplies the secret's metadata (access, description, …)
+// placeSecret fills in Path relative to the owning file's directory. abs must not already be tracked.
 func (c *Config) placeSecret(rel string, nested bool, sec Secret) error {
 	mainDir := filepath.Dir(c.MainFile.Path)
 	fileDir := filepath.Dir(rel)
@@ -121,4 +120,10 @@ func (c *Config) newFile(path string) *FileSource {
 // secrets sequence.
 func (c *Config) appendInclude(src *FileSource, includePath string) error {
 	return appendSecretsItems(src, []Secret{{Include: includePath}})
+}
+
+// sameDir reports whether a and b refer to the same directory.
+func sameDir(a, b string) bool {
+	rel, err := filepath.Rel(a, b)
+	return err == nil && rel == "."
 }

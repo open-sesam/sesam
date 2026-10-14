@@ -45,6 +45,17 @@ type Config struct {
 	// root confines all config file I/O to the repository. Every FileSource
 	// path is relative to it.
 	root *os.Root
+
+	// deleted collects the paths pruneEmptySources has removed from disk, so a
+	// caller who needs to know - reset, in particular - does not have to infer
+	// it by diffing SourceFiles before and after.
+	deleted []string
+}
+
+// Deleted returns the paths a mutator has removed from disk over this
+// Config's lifetime (see pruneEmptySources), in the order they were removed.
+func (c *Config) Deleted() []string {
+	return c.deleted
 }
 
 // secretEntry is a transient view of one real (non-include) secret, pairing its
@@ -60,11 +71,18 @@ type secretEntry struct {
 // should be passed to Load as a repo-relative path. It parses the file and
 // every transitively-included file into the AST, validating each against the
 // JSON schema as it goes.
-//
-// All FileSource paths — MainFile.Path and every path derived from it — are
-// kept relative to root, which is also the coordinate the revealed paths the
-// single-secret mutators (SecretAdd/SecretRemove/SecretMove) match against.
 func Load(root *os.Root, path string) (*Config, error) {
+	return load(root, path, true)
+}
+
+// LoadForRepair is like Load, but skips Validate()'s referential checks (an
+// unknown group member, an invalid name) - only the per-file schema and
+// structural checks (secretEntries) run.
+func LoadForRepair(root *os.Root, path string) (*Config, error) {
+	return load(root, path, false)
+}
+
+func load(root *os.Root, path string, validate bool) (*Config, error) {
 	path = filepath.Clean(path)
 
 	// Load the JSON schema from the embedded FS so every file can be validated
@@ -93,7 +111,37 @@ func Load(root *os.Root, path string) (*Config, error) {
 		return nil, fmt.Errorf("config structure seems off: %w", err)
 	}
 
+	if !validate {
+		return configRepo, nil
+	}
+
+	// Semantic checks the schema cannot express, on the same footing as the
+	// schema validation each file already went through.
+	if err := configRepo.Validate(); err != nil {
+		return nil, err
+	}
+
 	return configRepo, nil
+}
+
+// Create returns an empty config for path, held in memory only - nothing is
+// read from or written to disk until Save. It exists for the callers that
+// build a config from another source of truth rather than parse one, namely
+// `sesam config reset` when sesam.yml is gone or too broken to read.
+func Create(root *os.Root, path string) (*Config, error) {
+	sch, err := compileSchema()
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile json schema: %w", err)
+	}
+
+	c := &Config{
+		SourceFiles: map[string]*FileSource{},
+		JSONSchema:  sch,
+		root:        root,
+	}
+	c.MainFile = c.newFile(filepath.Clean(path))
+
+	return c, nil
 }
 
 var (
@@ -208,6 +256,23 @@ func (c *Config) loadTree(path string) (*FileSource, error) {
 	return src, nil
 }
 
+// primedDecoder returns a decoder whose anchor table is already populated from
+// src's whole document.
+// Anchors that are declared at the root of the file could not be read otherwise.
+func primedDecoder(src *FileSource) (*yaml.Decoder, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(nil))
+	if src.RootNode == nil {
+		return dec, nil
+	}
+
+	var discard any
+	if err := dec.DecodeFromNode(src.RootNode, &discard); err != nil {
+		return nil, fmt.Errorf("%s: resolving anchors: %w", src.Path, err)
+	}
+
+	return dec, nil
+}
+
 // secretEntries walks the main file and every included file, returning one
 // entry per real secret in include order. The list is derived fresh from the
 // AST every call.
@@ -229,6 +294,11 @@ func (c *Config) collectSecrets(src *FileSource, visiting map[string]bool) ([]se
 	seq, err := secretsNode(src.RootNode)
 	if err != nil {
 		return nil, errors.New("missing secrets: key")
+	}
+
+	dec, err := primedDecoder(src)
+	if err != nil {
+		return nil, err
 	}
 
 	var out []secretEntry
@@ -254,7 +324,7 @@ func (c *Config) collectSecrets(src *FileSource, visiting map[string]bool) ([]se
 		}
 
 		var s Secret
-		if err := yaml.NodeToValue(mapNode, &s); err != nil {
+		if err := dec.DecodeFromNode(mapNode, &s); err != nil {
 			return nil, fmt.Errorf("%s: decoding secrets[%d]: %w", src.Path, i, err)
 		}
 
@@ -275,14 +345,19 @@ func (c *Config) collectSecrets(src *FileSource, visiting map[string]bool) ([]se
 // it the basis for both global dedup and reporting which secrets a mutation
 // added. The same physical file tracked by two files collapses to one entry,
 // which is exactly the duplicate we refuse to create.
-func (c *Config) trackedRevealedPaths() map[string]bool {
+func (c *Config) trackedRevealedPaths() (map[string]bool, error) {
 	set := map[string]bool{}
 	for _, src := range c.SourceFiles {
-		for _, s := range ownSecrets(src) {
+		secrets, err := ownSecrets(src)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, s := range secrets {
 			set[filepath.Join(filepath.Dir(src.Path), s.Path)] = true
 		}
 	}
-	return set
+	return set, nil
 }
 
 // Secrets returns the merged, flattened secrets across the main file and all
@@ -308,6 +383,11 @@ func (c *Config) Users() ([]User, error) {
 		return nil, nil //nolint:nilerr // absent users: key means no users
 	}
 
+	dec, err := primedDecoder(c.MainFile)
+	if err != nil {
+		return nil, err
+	}
+
 	users := make([]User, 0, len(seq.Values))
 	for i, item := range seq.Values {
 		mapNode, ok := item.(*ast.MappingNode)
@@ -316,7 +396,7 @@ func (c *Config) Users() ([]User, error) {
 		}
 
 		var u User
-		if err := yaml.NodeToValue(mapNode, &u); err != nil {
+		if err := dec.DecodeFromNode(mapNode, &u); err != nil {
 			return nil, fmt.Errorf("%s: decoding users[%d]: %w", c.MainFile.Path, i, err)
 		}
 		users = append(users, u)
@@ -334,11 +414,65 @@ func (c *Config) Groups() (map[string][]string, error) {
 		return map[string][]string{}, nil //nolint:nilerr // absent groups: key is not an error
 	}
 
+	dec, err := primedDecoder(c.MainFile)
+	if err != nil {
+		return nil, err
+	}
+
 	var groups map[string][]string
-	if err := yaml.NodeToValue(m, &groups); err != nil {
+	if err := dec.DecodeFromNode(m, &groups); err != nil {
 		return nil, fmt.Errorf("%s: decoding groups: %w", c.MainFile.Path, err)
 	}
 	return groups, nil
+}
+
+// Merged returns the config as one document: included files are flattened
+// into secrets and their paths resolved relative to the main file, so the
+// result loads as a single sesam.yml.
+func (c *Config) Merged() (*Document, error) {
+	users, err := c.Users()
+	if err != nil {
+		return nil, err
+	}
+
+	groups, err := c.Groups()
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := c.secretEntries()
+	if err != nil {
+		return nil, err
+	}
+
+	secrets := make([]Secret, 0, len(entries))
+	for _, e := range entries {
+		s := e.secret
+		s.Path = filepath.ToSlash(filepath.Join(filepath.Dir(e.source.Path), s.Path))
+		secrets = append(secrets, s)
+	}
+
+	// Non-nil, so empty sections render as [] / {} rather than null.
+	if users == nil {
+		users = []User{}
+	}
+	if groups == nil {
+		groups = map[string][]string{}
+	}
+
+	return &Document{Users: users, Groups: groups, Secrets: secrets}, nil
+}
+
+// EnsureSecretsKey adds an empty secrets: key to the main file if it has none.
+// Load requires the key to be present even when there is nothing to list, so a
+// config built up without ever declaring a secret (e.g. ConfigReset's rebuild
+// path, when the verified state has none) still needs it to load again.
+func (c *Config) EnsureSecretsKey() error {
+	src := c.MainFile
+	if _, err := secretsNode(src.RootNode); err == nil {
+		return nil
+	}
+	return appendRootKey(src, map[string][]Secret{"secrets": {}})
 }
 
 // Save writes every loaded file back to disk. Each file's RootNode already
@@ -346,6 +480,13 @@ func (c *Config) Groups() (map[string][]string, error) {
 // re-renders the AST (comments and original formatting included) and validates
 // it before writing.
 func (c *Config) Save() error {
+	// Load rejects an invalid config and the mutators keep users and groups in
+	// step, so this is an assertion against a mutation bug rather than against
+	// bad input — cheap, and it fires before anything is written.
+	if err := c.Validate(); err != nil {
+		return err
+	}
+
 	// writeFile stages temps in .sesam/tmp; ensure it exists. In a real repo
 	// ensureSesamDirs already created it, so this is a no-op there.
 	if err := c.root.MkdirAll(core.SesamTmpDir(), 0o700); err != nil {
@@ -418,11 +559,18 @@ func fileIncludes(root ast.Node) []string {
 }
 
 // ownSecrets returns the real (non-include) secrets declared directly in src,
-// without descending into includes.
-func ownSecrets(src *FileSource) []Secret {
+// without descending into includes. A file with no secrets: key at all yields
+// no secrets and no error - Load already requires the key on anything it
+// loaded, so this is only ever reached for a legitimately empty file.
+func ownSecrets(src *FileSource) ([]Secret, error) {
 	seq, err := secretsNode(src.RootNode)
 	if err != nil {
-		return nil
+		return nil, nil //nolint:nilerr
+	}
+
+	dec, err := primedDecoder(src)
+	if err != nil {
+		return nil, err
 	}
 
 	var out []Secret
@@ -436,11 +584,12 @@ func ownSecrets(src *FileSource) []Secret {
 		}
 
 		var s Secret
-		if yaml.NodeToValue(m, &s) == nil {
-			out = append(out, s)
+		if err := dec.DecodeFromNode(m, &s); err != nil {
+			return nil, fmt.Errorf("%s: decoding secret: %w", src.Path, err)
 		}
+		out = append(out, s)
 	}
-	return out
+	return out, nil
 }
 
 func usersNode(root ast.Node) (*ast.SequenceNode, error) {
@@ -588,6 +737,19 @@ func appendSecretsItems(src *FileSource, items []Secret) error {
 		return appendRootKey(src, map[string][]Secret{"secrets": items})
 	}
 
+	// An empty secrets list is written as the flow node `secrets: []`, which
+	// cannot absorb block items: Merge would splice them into the flow node and
+	// render invalid YAML ("secrets: [   path: a.txt]"). Swap the whole value
+	// for a fresh block sequence instead.
+	if len(seq.Values) == 0 {
+		mv, err := findRootValue(src.RootNode, "secrets")
+		if err != nil {
+			return err
+		}
+
+		return replaceValue(mv, map[string][]Secret{"secrets": items})
+	}
+
 	newSeq, err := marshalSeq(items)
 	if err != nil {
 		return err
@@ -599,11 +761,49 @@ func appendSecretsItems(src *FileSource, items []Secret) error {
 	return nil
 }
 
+// replaceValue swaps the value of a mapping key for a freshly marshaled one,
+// aligning it to the key's column.
+//
+// MappingValueNode.Replace aligns to the *old value's* column, which is wrong
+// when that value sat on the same line as its key (`secrets: []`): the
+// replacement would be indented to wherever the "[]" started. v is marshaled as
+// a whole mapping so the new value arrives already laid out for a key at
+// column one.
+func replaceValue(mv *ast.MappingValueNode, v any) error {
+	body, err := marshalBody(v)
+	if err != nil {
+		return err
+	}
+
+	fresh := rootMappingValues(body)
+	if len(fresh) != 1 {
+		return fmt.Errorf("expected a single root key, got %d", len(fresh))
+	}
+
+	value := fresh[0].Value
+	value.AddColumn(mv.GetToken().Position.Column - fresh[0].GetToken().Position.Column)
+	mv.Value = value
+
+	return nil
+}
+
 // appendRootKey adds the top-level key(s) in v to src's root mapping, aligning
 // columns via MappingNode.Merge. A single-key root (*ast.MappingValueNode) is
 // normalized to a mapping first. Used to create a secrets:/users:/groups:
 // section that did not exist on disk.
 func appendRootKey(src *FileSource, v any) error {
+	// A file that only exists in memory has no document yet: build it from v,
+	// the way appendSecretsItems does for a brand-new file.
+	if src.RootNode == nil {
+		root, err := marshalBody(v)
+		if err != nil {
+			return err
+		}
+
+		src.RootNode = root
+		return nil
+	}
+
 	rootMN, ok := src.RootNode.(*ast.MappingNode)
 	if !ok {
 		mv, ok := src.RootNode.(*ast.MappingValueNode)

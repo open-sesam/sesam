@@ -311,3 +311,96 @@ func TestSecretAdd_PreservesCommentsAndIndentation(t *testing.T) {
 	require.Contains(t, got, "  - path: beta.txt\n    access:\n      - group2\n",
 		"added entry has unexpected indentation:\n%s", got)
 }
+
+// TestMutateEmptyCollections covers the shape a hand-edited (or freshly reset)
+// config has before anything is in it: `users: []`, `groups: {}`,
+// `secrets: []`. Those empty collections are flow nodes and cannot take block
+// entries, so merging into them used to render invalid YAML
+// ("users: [   name: bob").
+func TestMutateEmptyCollections(t *testing.T) {
+	const empty = "users: []\ngroups: {}\nsecrets: []\n"
+
+	tests := []struct {
+		name   string
+		body   string
+		mutate func(c *Config) error
+		want   string
+	}{
+		{
+			name:   "user into an empty list",
+			body:   empty,
+			mutate: func(c *Config) error { return c.UserTell("bob", []string{"age1x"}, []string{"dev"}) },
+			want:   "name: bob",
+		},
+		{
+			name:   "group into an empty mapping",
+			body:   empty,
+			mutate: func(c *Config) error { return c.UserTell("bob", []string{"age1x"}, []string{"dev"}) },
+			want:   "dev:",
+		},
+		{
+			name:   "member into an empty group",
+			body:   "users:\n  - name: bob\n    key: [age1x]\ngroups:\n  dev: []\nsecrets: []\n",
+			mutate: func(c *Config) error { return c.UserTell("carol", []string{"age1y"}, []string{"dev"}) },
+			want:   "carol",
+		},
+		{
+			name:   "key into an empty key list",
+			body:   "users:\n  - name: bob\n    key: []\ngroups: {}\nsecrets: []\n",
+			mutate: func(c *Config) error { return c.UserAddRecipient("bob", []string{"age1y"}) },
+			want:   "age1y",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			main := filepath.Join(dir, "sesam.yml")
+			require.NoError(t, os.WriteFile(main, []byte(tc.body), 0o644))
+
+			cfg, err := loadConfig(t, main)
+			require.NoError(t, err)
+			require.NoError(t, tc.mutate(cfg))
+
+			// Save re-parses and validates, so it fails on a broken rendering.
+			require.NoError(t, cfg.Save())
+			require.Contains(t, cfg.MainFile.RootNode.String(), tc.want)
+
+			// Re-loading proves the file on disk is valid, not just the tree.
+			_, err = loadConfig(t, main)
+			require.NoError(t, err)
+		})
+	}
+}
+
+// TestSecretAddIntoEmptySecretsList covers the shape a hand-edited config ends
+// up with once its last secret is gone: `secrets: []`. That empty list is a
+// flow node, which cannot take block items - appending into it used to render
+// invalid YAML ("secrets: [   path: a.txt]").
+func TestSecretAddIntoEmptySecretsList(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "flow style", body: "secrets: []\n"},
+		{name: "with other keys", body: "version: 1\nsecrets: []\n"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			main := filepath.Join(dir, "sesam.yml")
+			require.NoError(t, os.WriteFile(main, []byte(tc.body), 0o644))
+
+			cfg, err := loadConfig(t, main)
+			require.NoError(t, err)
+			require.NoError(t, cfg.SecretAdd("a.txt", false, []string{"dev"}))
+			require.NoError(t, cfg.Save())
+
+			// Re-loading is the real assertion: it validates against the schema
+			// and would fail outright on the broken rendering.
+			require.Equal(t, []string{"a.txt"}, resolvedPaths(t, main))
+			require.Equal(t, []string{"dev"}, accessFor(t, main, "a.txt"))
+		})
+	}
+}

@@ -20,12 +20,12 @@ func integritySetup(t *testing.T) (*SecretManager, *VerifiedState) {
 		Users: []VerifiedUser{
 			{Name: "testuser", Groups: []string{"admin"}},
 		},
-		Secrets: []VerifiedSecret{
+		Secrets: []SecretAccess{
 			{RevealedPath: "secrets/db", AccessGroups: []string{"admin"}},
 		},
 		LastSealRootHash: buildRootHash([]*secretFooter{sig}),
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	return mgr, state
 }
@@ -84,13 +84,13 @@ func TestIntegrityMultipleSecrets(t *testing.T) {
 	mgr := testSecretManager(t)
 
 	var sigs []*secretFooter
-	var secrets []VerifiedSecret
+	var secrets []SecretAccess
 	for _, p := range []string{"secrets/a", "secrets/b", "secrets/c"} {
 		s := testSecret(t, mgr, p, "content-"+p)
 		sig, err := sealSecret(mgr, s, mgr.recipientsFor(s), mgr.cryptPath(s), "testuser")
 		require.NoError(t, err)
 		sigs = append(sigs, sig)
-		secrets = append(secrets, VerifiedSecret{RevealedPath: p, AccessGroups: []string{"admin"}})
+		secrets = append(secrets, SecretAccess{RevealedPath: p, AccessGroups: []string{"admin"}})
 	}
 
 	state := &VerifiedState{
@@ -100,7 +100,7 @@ func TestIntegrityMultipleSecrets(t *testing.T) {
 		Secrets:          secrets,
 		LastSealRootHash: buildRootHash(sigs),
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	report := VerifyIntegrity(mgr.root, state, mgr.Keyring)
 	require.True(t, report.OK(), "all good with 3 secrets: %s", report.String())
@@ -172,11 +172,11 @@ func TestIntegrityRejectsUnauthorizedSealer(t *testing.T) {
 			{Name: "admin", Groups: []string{"admin"}},
 			{Name: "bob", Groups: []string{"dev"}},
 		},
-		Secrets: []VerifiedSecret{
+		Secrets: []SecretAccess{
 			{RevealedPath: "secrets/admin-only", AccessGroups: []string{"admin"}},
 		},
 	}
-	state.buildIndexes()
+	state.BuildIndexes()
 
 	// Bob is a recipient of the file (so he can derive the content-hash key
 	// and seal) but not an authorized sealer of admin-only per the policy.
