@@ -1,0 +1,47 @@
+# The cross-over of verify_truncate_orphan_merge_workflow.txt turned against
+# itself: the mainline HAD a vault, its log is deleted, and a merge brings back
+# an older log from a branch. Crossing over into that branch would skip the
+# entries only the mainline held. A side that descends from the init commit had
+# a vault, so its missing log is a deletion and has to be reported.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init'
+exec git branch side
+
+# Entries only the mainline holds.
+exec sesam add s.txt --group dev
+exec git add -A
+exec git commit -m 'add secret'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+# The hooks go from here on: without a log there is no vault for them to load.
+exec sesam hook uninstall
+
+# Delete the log on the mainline.
+exec git rm -q .sesam/audit/log.jsonl
+exec git commit --no-verify -m 'drop log'
+
+# The side branch moves on without touching the vault.
+exec git switch side
+exec git commit --allow-empty --no-verify -m 'side work'
+exec git switch -
+
+# Merge it, and put the side's older log into the merge commit.
+exec git merge --no-ff --no-edit side
+exec git show side:.sesam/audit/log.jsonl
+cp stdout .sesam/audit/log.jsonl
+exec git add -f .sesam/audit/log.jsonl
+exec git commit --amend --no-verify --no-edit
+
+# no-disk isolates the history check from the on-disk mismatches.
+! exec sesam --verify-mode no-disk verify --truncate
+stderr 'audit log was removed from history'
+
+-- s.txt --
+top secret

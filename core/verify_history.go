@@ -109,7 +109,9 @@ func auditLogHistory(
 				// the log's history continues - a vault merged in from a branch,
 				// or a merge spliced in front of one to cut this walk short and
 				// leave a shortened log with nothing to compare it against.
-				if alt, ok := logCarryingParent(repo, child, hash, auditPathRel); ok {
+				// Only if "ours" never had a vault: otherwise the log was deleted
+				// here, and crossing over would skip whatever it held.
+				if alt, ok := logCarryingParent(repo, initCommit, child, commit, auditPathRel); ok {
 					hash = alt
 					continue
 				}
@@ -185,16 +187,21 @@ func auditLogHistory(
 // carries the log is returned, so the caller cannot bounce back in here.
 func logCarryingParent(
 	repo *git.Repository,
+	initCommit *object.Commit,
 	child *object.Commit,
-	tried plumbing.Hash,
+	tried *object.Commit,
 	auditPathRel string,
 ) (plumbing.Hash, bool) {
 	if child == nil {
 		return plumbing.ZeroHash, false
 	}
 
+	if hadVault, err := initCommit.IsAncestor(tried); err != nil || hadVault {
+		return plumbing.ZeroHash, false
+	}
+
 	for _, parent := range child.ParentHashes {
-		if parent == tried {
+		if parent == tried.Hash {
 			continue
 		}
 
