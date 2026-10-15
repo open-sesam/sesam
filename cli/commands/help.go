@@ -85,7 +85,7 @@ func page(ctx context.Context, out io.Writer, text string, interactive bool) err
 	err := cmd.Run()
 	var exitErr *exec.ExitError
 	if err == nil || ctx.Err() != nil || errors.As(err, &exitErr) {
-		return nil
+		return nil //nolint:nilerr
 	}
 
 	_, err = io.WriteString(out, text)
