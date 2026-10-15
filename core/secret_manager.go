@@ -693,7 +693,18 @@ func (sm *SecretManager) footerOutdated(footer *secretFooter, revealedPath strin
 		return drifted, err
 	}
 
-	return !sm.footerVerifies(footer), nil
+	if sm.footerVerifies(footer) {
+		return false, nil
+	}
+
+	// Either the sealer's key was regenerated or the footer was tampered with.
+	// Both look the same from here, and resealing erases the evidence.
+	slog.Warn(
+		"seal: footer signature does not verify (might happen after regen-sign-key, but could be tampering)",
+		slog.String("path", revealedPath),
+		slog.String("sealed_by", footer.SealedBy),
+	)
+	return true, nil
 }
 
 // footerVerifies checks the footer signature against the current keyring. The

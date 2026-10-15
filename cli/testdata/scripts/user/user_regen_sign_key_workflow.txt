@@ -40,8 +40,10 @@ exec sesam verify
 ! exec sesam user regen-sign-key --user ghost
 
 # Regenerating admin's key orphans the footers admin sealed (README.md at init).
-# The implicit seal must re-sign them, so the deep check still passes.
+# The implicit seal must re-sign them, so the deep check still passes. Resealing
+# a footer that does not verify always warns, as tampering looks the same.
 exec sesam user regen-sign-key --user admin
+stderr 'footer signature does not verify'
 exec sesam verify --all
 ! stderr 'invalid signature'
 ! stderr 'a seal is pending'
@@ -53,6 +55,9 @@ stderr 'a seal is pending'
 stderr 'invalid signature'
 stderr 'a seal is pending'
 exec sesam seal
+stderr 'footer signature does not verify'
+exec sesam seal
+! stderr 'footer signature does not verify'
 exec sesam verify --all
 ! stderr 'invalid signature'
 ! stderr 'a seal is pending'
