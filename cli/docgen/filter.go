@@ -40,11 +40,10 @@ const manWidth = 78
 var (
 	// Only a tag at the start of a line opens a raw HTML block. Inline markup
 	// such as `git merge <branch>` inside backticks must survive untouched.
-	htmlOpenRe  = regexp.MustCompile(`^<([a-zA-Z][a-zA-Z0-9]*)(\s[^>]*)?/?>`)
-	imageRe     = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
-	linkRe      = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)`)
-	admonishRe  = regexp.MustCompile("^(?:```|~~~)admonish\\s*([a-zA-Z]*)\\s*(?:title=\"([^\"]*)\")?")
-	fenceMarker = []string{"```", "~~~"}
+	htmlOpenRe = regexp.MustCompile(`^<([a-zA-Z][a-zA-Z0-9]*)(\s[^>]*)?/?>`)
+	imageRe    = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
+	linkRe     = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)`)
+	admonishRe = regexp.MustCompile("^(?:`{3,}|~{3,})admonish\\s*([a-zA-Z]*)\\s*(?:title=\"([^\"]*)\")?")
 )
 
 // voidTags never open an HTML block: they have no closing tag, so looking for
@@ -80,31 +79,42 @@ type line struct {
 }
 
 // fence tracks fenced code blocks so the passes leave their contents alone.
+// Like CommonMark, a block only closes on a bare run of the same character at
+// least as long as the opening one, so ```` can wrap a ``` example.
 type fence struct {
-	marker string
+	char byte
+	n    int
 }
 
 // toggle reports whether text is a fence delimiter, updating the state.
 func (f *fence) toggle(text string) bool {
 	trimmed := strings.TrimLeft(text, " \t")
-	for _, m := range fenceMarker {
-		if !strings.HasPrefix(trimmed, m) {
-			continue
-		}
-		if f.marker == "" {
-			f.marker = m
-			return true
-		}
-		if f.marker == m {
-			f.marker = ""
-			return true
-		}
+	if trimmed == "" || (trimmed[0] != '`' && trimmed[0] != '~') {
+		return false
+	}
+
+	c := trimmed[0]
+	n := 0
+	for n < len(trimmed) && trimmed[n] == c {
+		n++
+	}
+	if n < 3 {
+		return false
+	}
+
+	if !f.inside() {
+		f.char, f.n = c, n
+		return true
+	}
+	if c == f.char && n >= f.n && strings.TrimSpace(trimmed[n:]) == "" {
+		f.n = 0
+		return true
 	}
 	return false
 }
 
 func (f *fence) inside() bool {
-	return f.marker != ""
+	return f.n > 0
 }
 
 // sanitizer turns one handbook page into markdown that md2man can render as a
@@ -199,17 +209,19 @@ func (s *sanitizer) dropHTML(lines []line) []line {
 	)
 
 	for _, ln := range lines {
-		if f.toggle(ln.text) || f.inside() {
-			out = append(out, ln)
+		trimmed := strings.TrimSpace(ln.text)
+
+		// Everything up to the closing tag goes, code blocks included. Fences
+		// are still tracked so a closing tag inside one does not end the block.
+		if open != "" {
+			if !f.toggle(ln.text) && !f.inside() && strings.Contains(trimmed, "</"+open+">") {
+				open = ""
+			}
 			continue
 		}
 
-		trimmed := strings.TrimSpace(ln.text)
-
-		if open != "" {
-			if strings.Contains(trimmed, "</"+open+">") {
-				open = ""
-			}
+		if f.toggle(ln.text) || f.inside() {
+			out = append(out, ln)
 			continue
 		}
 

@@ -42,6 +42,14 @@ func TestSanitizerProse(t *testing.T) {
 			},
 		},
 		{
+			name: "code block inside an html block is dropped with it",
+			src:  "# Page\n\n<details>\n<summary>more</summary>\n\n```bash\n</details>\n```\n\n</details>\n\ntext\n",
+			want: "\n\ntext\n",
+			warnings: []Warning{
+				{File: "p.md", Line: 3, Kind: WarnHTML, Detail: "dropped <details> block"},
+			},
+		},
+		{
 			name: "void tag does not swallow the rest of the page",
 			src:  "# Page\n\n<br>\n\nkept\n",
 			want: "\n\nkept\n",
@@ -71,6 +79,16 @@ func TestSanitizerProse(t *testing.T) {
 			name: "admonition kind maps to a label",
 			src:  "# Page\n\n```admonish warn\nbody\n```\n",
 			want: "\n> **Warning**\n>\n> body\n",
+		},
+		{
+			name: "longer admonition fence wraps a code block",
+			src:  "# Page\n\n````admonish tip\nrun:\n```bash\n## not a heading\n```\n````\n\n## After\n",
+			want: "\n> **Tip**\n>\n> run:\n> ```bash\n> ## not a heading\n> ```\n\n### After\n",
+		},
+		{
+			name: "fence with an info string does not close a block",
+			src:  "# Page\n\n```\n```bash\n## not a heading\n```\n\n## After\n",
+			want: "\n```\n```bash\n## not a heading\n```\n\n### After\n",
 		},
 		{
 			name: "internal link keeps only its text",
