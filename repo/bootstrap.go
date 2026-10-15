@@ -12,7 +12,6 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/Masterminds/semver/v3"
 	"github.com/go-git/go-git/v5"
 	gogitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/sahib/renameio/v2"
@@ -304,17 +303,17 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 		{"alias.sesam", "alias", "", "sesam", gitAliasCmd, true},
 	}
 
+	// An unreadable version (no git in $PATH, say) means no config-based hooks:
+	// this also runs on the read-only doctor/nudge path, where it must never
+	// fail - let alone panic on the nil version.
 	var gitSupportsConfigHooks bool
-	ver, err := ReadGitVersion(context.Background())
-	if err != nil {
+	switch ver, err := ReadGitVersion(context.Background()); {
+	case err != nil || ver == nil:
 		slog.Warn("failed to figure out git --version", slog.Any("err", err))
-	}
-
-	// See: https://github.blog/open-source/git/highlights-from-git-2-54/#h-config-based-hooks
-	if ver.GreaterThanEqual(semver.MustParse("2.54.0")) {
+	case ver.LessThan(MinGitVersion):
+		slog.Warn("hooks require git >= " + MinGitVersion.String())
+	default:
 		gitSupportsConfigHooks = true
-	} else {
-		slog.Warn("hooks require git >= 2.54.0")
 	}
 
 	if gitSupportsConfigHooks {

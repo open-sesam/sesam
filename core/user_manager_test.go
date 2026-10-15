@@ -615,6 +615,10 @@ func TestUserRegenerateSignKeySuccess(t *testing.T) {
 	require.NoError(t, err)
 	_, err = um.state.keyring.Verify(SesamDomainSignSecretTag, data, oldSig, "bob")
 	require.Error(t, err, "the replaced signing key must no longer verify")
+
+	// Footers signed with the old key are orphaned until the next seal.
+	require.Equal(t, um.state.VerifiedUntil, um.state.SealRequiredSeqID,
+		"regen must mark a seal as pending")
 }
 
 func TestUserRegenerateSignKeyReloads(t *testing.T) {

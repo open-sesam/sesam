@@ -167,7 +167,15 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 
 func HandleUserRegenerateSignKey(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	user := cmd.String("user")
+	noSeal := cmd.Bool("no-seal")
+
 	return r.Update(func(s *repo.Stage) error {
-		return s.UserRegenerateSignKey(user)
+		if err := s.UserRegenerateSignKey(user); err != nil {
+			return err
+		}
+		if noSeal {
+			return nil
+		}
+		return sealStage(cmd, r, s)
 	})
 }

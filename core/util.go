@@ -169,10 +169,23 @@ func ValidUserName(name string) error {
 	return validName("user", name)
 }
 
-// ValidGroupName applies the same character and length rules ValidUserName
-// does.
+// ValidGroupName checks a group name by the same rules as ValidUserName. An
+// access list holds both kinds of name and the two are matched against each
+// other, so a name that is legal as one must be legal as the other.
 func ValidGroupName(name string) error {
 	return validName("group", name)
+}
+
+// ValidGroupNames checks every name of a membership or access list, naming the
+// one that is wrong.
+func ValidGroupNames(groups []string) error {
+	for _, group := range groups {
+		if err := ValidGroupName(group); err != nil {
+			return fmt.Errorf("invalid group %q: %w", group, err)
+		}
+	}
+
+	return nil
 }
 
 // validName is the shared check behind ValidUserName and ValidGroupName: only
@@ -194,7 +207,7 @@ func validName(kind, name string) error {
 	}
 
 	if strings.Contains(name, "..") {
-		return fmt.Errorf("name may not include '..': %s", name)
+		return fmt.Errorf("%s name may not include '..': %s", kind, name)
 	}
 
 	return nil
@@ -209,12 +222,20 @@ var forbiddenBasenames = map[string]bool{
 	defaultSesamBase + ".lock": true,
 }
 
+// pathSegments splits a revealed path into its components. Revealed paths are
+// logical, slash-separated ones, so splitting on the OS separator alone would
+// see all of "a/.sesam/b" as a single segment on Windows - and wave it through.
+// ToSlash keeps an OS-native path working as well.
+func pathSegments(revealedPath string) []string {
+	return strings.Split(filepath.ToSlash(revealedPath), "/")
+}
+
 func IsForbiddenPath(revealedPath string) error {
 	if b := filepath.Base(revealedPath); forbiddenBasenames[b] {
 		return fmt.Errorf("you can't seal %s", b)
 	}
 
-	for _, elem := range strings.Split(revealedPath, string(filepath.Separator)) {
+	for _, elem := range pathSegments(revealedPath) {
 		if elem == ".sesam" {
 			return fmt.Errorf("encrypting files in .sesam/ is not allowed")
 		}
@@ -236,13 +257,14 @@ func validSecretPathFormat(revealedPath string) error {
 		return fmt.Errorf("empty file path not allowed: %s", revealedPath)
 	}
 
-	if revealedPath[0] == filepath.Separator {
+	// Both forms: a logical "/etc/passwd" and, on Windows, "\etc" or "C:\etc".
+	if strings.HasPrefix(filepath.ToSlash(revealedPath), "/") || filepath.IsAbs(revealedPath) {
 		return fmt.Errorf("absolute paths not allowed in revealed path: %s", revealedPath)
 	}
 
 	// Reject path traversal, but only a real ".." path segment - the substring
 	// ".." appears legitimately inside filenames (e.g. "s.a.r..geojson").
-	for _, elem := range strings.Split(revealedPath, string(filepath.Separator)) {
+	for _, elem := range pathSegments(revealedPath) {
 		if elem == ".." {
 			return fmt.Errorf("path may not include a '..' segment: %s", revealedPath)
 		}

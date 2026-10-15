@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"slices"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -73,24 +74,36 @@ func verifyInitFileUnchangedWithRepo(sesamDir string, repo *git.Repository) (str
 		return "", fmt.Errorf("git log failed: %w", err)
 	}
 
-	// Collect the distinct init blobs across the commits that carry the file, and
-	// remember the earliest such commit as the trust anchor. Commits from before
-	// init existed (or on the far side of a rename) simply lack the file at this
-	// path and are skipped.
+	// Collect the distinct init blobs across the commits that carry the file.
+	// Commits from before init existed (or on the far side of a rename) simply
+	// lack the file at this path and are skipped.
 	blobs := make(map[plumbing.Hash]struct{})
+	carriers := make(map[plumbing.Hash][]plumbing.Hash) // commit -> its parents
+	var order []plumbing.Hash
 	var wantBlob plumbing.Hash
-	var anchorHash string
 	err = logIter.ForEach(func(c *object.Commit) error {
 		f, ferr := c.File(initRel)
 		if ferr == nil {
 			blobs[f.Hash] = struct{}{}
 			wantBlob = f.Hash
-			anchorHash = c.Hash.String()
+			carriers[c.Hash] = c.ParentHashes
+			order = append(order, c.Hash)
 		}
 		return nil
 	})
 	if err != nil {
 		return "", fmt.Errorf("iterating git log: %w", err)
+	}
+
+	// The anchor is the commit that introduced the file: none of its parents
+	// carry it. Log order alone does not say which one that is - past a merge,
+	// the last commit visited may well sit on a branch that forked after init.
+	var anchorHash string
+	for _, h := range order {
+		if !slices.ContainsFunc(carriers[h], func(p plumbing.Hash) bool { _, ok := carriers[p]; return ok }) {
+			anchorHash = h.String()
+			break
+		}
 	}
 
 	switch len(blobs) {

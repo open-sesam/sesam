@@ -10,8 +10,10 @@ Existing tools only have minor or inconsequential integration in `git`. From
 our perspective, building on top of `git` makes a lot of sense. It's everywhere
 where developers are, it gives us versioning, transport to remotes and a huge
 ecosystem for free. Also, it offers plenty of integrations for tools to extend
-it. From what we know those have never been fully maxed out by existing tools
-yet.
+it. From what we know, existing tools have not fully explored those integration
+points yet. In particular, we have not found one tool that can merge secrets,
+reveal them automatically when checking out old versions and seal them before
+committing.
 
 ### 2. None of the existing decentralized tools support leveled access
 
@@ -52,7 +54,7 @@ protect against leaking secrets, but not against a person having access to the
 repo exchanging the content with something evil.
 
 Our audit-log based design can build trust and detect issues easily.
-If your secrets still get leaked we are aiming at support rotation natively.
+If your secrets still get leaked we are aiming at supporting rotation natively.
 
 ### 5. We need a modern, ergonomic & easy-to-understand tool
 

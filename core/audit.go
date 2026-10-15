@@ -171,7 +171,7 @@ func (al *AuditLog) decryptEntryLine(dst, data []byte, seqID uint64) ([]byte, er
 		}
 	}
 
-	// Older commits still carry logs in the pre-nonce container; see audit_legacy.go.
+	// Older commits still carry logs in the pre-nonce container.
 	return legacyDecryptEntry(dst, al.key, data, seqID)
 }
 
@@ -181,6 +181,13 @@ func (al *AuditLog) decryptEntryLine(dst, data []byte, seqID uint64) ([]byte, er
 // seq id and no associated data. Two branches appending at the same seq then
 // reused a (key, nonce) pair, so the format moved to XChaCha20-Poly1305 with a
 // stored random nonce.
+//
+// The container carries no version, so the two are told apart by trying the
+// current one first - one failed open, and only for entries that are not in it.
+// A version field would not retire this path either: entries written before it
+// would still carry none, and VerifyHistory decrypts the log at every commit it
+// walks, so a pre-nonce log stays readable for as long as its history does.
+// See TestLegacyAuditLogStillLoads.
 func legacyDecryptEntry(dst []byte, key [32]byte, data []byte, seqID uint64) ([]byte, error) {
 	aead, err := chacha20poly1305.New(key[:])
 	if err != nil {

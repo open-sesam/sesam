@@ -615,6 +615,19 @@ h1 .fn-mark {
 /* on narrow screens the centred wordmark reaches the corner — tuck them up */
 @media (max-width: 560px) {
   .sun, .moon { top: 5%; right: 7%; }
+
+  /* ...and slide the wordmark out from under the disc. h1 is a shrink-to-fit
+     flex item, so 50% is half the wordmark: 50vw + 50% is its right edge and
+     --disc-edge the disc's left edge (right: 7% + 60px wide, plus its glow).
+     The shift is the overlap of the two, capped by --room so the wordmark
+     never crosses the page gutter, and 0 when the disc doesn't reach it.
+     Both themes shift alike, so toggling day/night doesn't move the text. */
+  h1 {
+    --disc-edge: calc(93vw - 60px - 22px);
+    --overlap: calc(50vw + 50% - var(--disc-edge));
+    --room: calc(50vw - 50% - 12px);
+    transform: translateX(calc(-1 * clamp(0px, var(--overlap), var(--room))));
+  }
 }
 
 /* --- Cave-of-treasures backdrop, fixed to the foot of the page ---

@@ -181,8 +181,8 @@ and without a usable identity. Pass `--identity` (and, for a non-root `.sesam`,
 You might encounter one of these errors:
 
 ```text
-✘ failed to verify audit log: reading signatures for root hash check: unexpected end of JSON input
-✘ failed to verify audit log: root hash mismatch: log says abc, disk says xyz (try --verify-mode no-disk)
+● failed to verify audit log: reading signatures for root hash check: unexpected end of JSON input
+● failed to verify audit log: root hash mismatch: log says abc, disk says xyz (try --verify-mode no-disk)
 ```
 
 This means the audit log remembers a different state than what is on disk.
@@ -239,3 +239,28 @@ There are a couple workarounds:
 All of them need to be added to your `.zshrc` to stick.
 
 If you have other shells here that act up, feel free to write us.
+
+## Can I use `sesam` as password manager?
+
+Yes! In fact I use it myself as an alternative to `pass`.
+The `show` sub-command supports copying a secret to the clipboard. 
+
+To get a list of selectable secrets, using [rofi](https://github.com/davatorium/rofi), would work like this:
+
+```bash
+export SESAM_ID=/path/to/your/id-key
+export SESAM_DIR=/path/to/your/repo
+
+# 1. List all secrets paths
+# 2. Pipe them through rofi
+# 3. rofi prints the selected one to stdout
+# 4. copy it to clipboard via show
+
+sesam ls --json | \
+  jq -r  '.[].revealed_path' | \
+  rofi -dmenu -p 'Secret name' | \
+  xargs -n1 sesam show -c
+
+```
+
+Instead of `rofi` you could of course just use any other launcher or filter (e.g. `fzf`) of your choice.
