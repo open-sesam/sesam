@@ -10,9 +10,10 @@ Existing tools only have minor or inconsequential integration in `git`. From
 our perspective, building on top of `git` makes a lot of sense. It's everywhere
 where developers are, it gives us versioning, transport to remotes and a huge
 ecosystem for free. Also, it offers plenty of integrations for tools to extend
-it. From what we know those have never been fully maxed out by existing tools
-yet; no one tool can merge secrets, reveal them automatically when checking out old
-versions and sealing on pre-commit.
+it. From what we know, existing tools have not fully explored those integration
+points yet. In particular, we have not found one tool that can merge secrets,
+reveal them automatically when checking out old versions and seal them before
+committing.
 
 ### 2. None of the existing decentralized tools support leveled access
 
