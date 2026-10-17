@@ -239,6 +239,17 @@ var flagsMove = []cli.Flag{
 	},
 }
 
+var flagsRun = []cli.Flag{
+	&cli.StringSliceFlag{
+		Name:  "secret",
+		Usage: "Expose an exact secret file as VARIABLE=path; VARIABLE holds a /dev/fd path (repeatable)",
+	},
+	&cli.StringSliceFlag{
+		Name:  "env-file",
+		Usage: "Inject variables from an exact dotenv secret file (repeatable)",
+	},
+}
+
 var flagsEdit = []cli.Flag{
 	&cli.StringFlag{
 		Name:  "editor",

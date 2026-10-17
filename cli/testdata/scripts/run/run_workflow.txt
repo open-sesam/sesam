@@ -1,0 +1,78 @@
+# File secrets use unlinked read-only descriptors; dotenv values use their
+# declared names. Neither selector is revealed into the worktree.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam init --user admin
+
+cp raw-fixture raw.txt
+cp env-fixture vars.env
+exec sesam add raw.txt vars.env
+rm raw.txt vars.env
+
+env INHERITED=kept
+exec sesam run --secret RAW=raw.txt --env-file vars.env -- runprobe env INHERITED RAW TOKEN EMPTY LITERAL SESAM_SECRET_RAW_TXT
+stdout 'INHERITED="kept" exists=true'
+stdout 'RAW="/dev/fd/3" exists=true'
+stdout 'SESAM_SECRET_RAW_TXT="" exists=false'
+stdout 'TOKEN="dotenv value" exists=true'
+stdout 'EMPTY="" exists=true'
+stdout 'LITERAL="\$\(touch_owned\)" exists=true'
+! exists raw.txt
+! exists vars.env
+! exists touch_owned
+
+exec sesam run --secret RAW=raw.txt -- runprobe files RAW
+stdout 'RAW="raw-value\\n" mode=0400 links=0'
+exec runprobe no-temp-files
+
+# Binary file contents and non-UTF-8 dotenv values survive delivery unchanged.
+exec runprobe write-binary binary.dat
+exec runprobe write-binary-env binary.env
+exec sesam add binary.dat binary.env
+rm binary.dat binary.env
+exec sesam run --secret BLOB=binary.dat -- runprobe files BLOB
+stdout 'BLOB="a\\x00\\xffb\\n" mode=0400 links=0'
+exec sesam run --env-file binary.env -- runprobe env BINARY
+stdout 'BINARY="a\\xffb" exists=true'
+exec runprobe no-temp-files
+
+exec sesam run --secret RAW=raw.txt -- runprobe args 'hello world' ';touch-owned' '$HOME'
+stdout '0="hello world"'
+stdout '1=";touch-owned"'
+stdout '2="\$HOME"'
+! exists touch-owned
+
+# Dotenv-only invocations do not need file descriptors for secrets.
+exec sesam run --env-file vars.env -- runprobe env TOKEN SESAM_SECRET_VARS_ENV
+stdout 'TOKEN="dotenv value" exists=true'
+stdout 'SESAM_SECRET_VARS_ENV="" exists=false'
+
+# The repository lock is released before starting the supervised command.
+exec sesam run --secret RAW=raw.txt -- runprobe reenter
+stdout '^admin$'
+
+# Cwd-relative selectors become canonical sesam-relative paths before repo use.
+mkdir sub
+cp raw-fixture sub/nested.txt
+exec sesam add sub/nested.txt
+rm sub/nested.txt
+cd sub
+exec sesam run --secret NESTED=./nested.txt --secret ROOT=../raw.txt -- runprobe files NESTED ROOT
+stdout 'NESTED="raw-value\\n" mode=0400 links=0'
+stdout 'ROOT="raw-value\\n" mode=0400 links=0'
+! exists nested.txt
+
+# From outside the repository selectors are sesam-relative.
+cd ../..
+exec sesam --sesam-dir $WORK run --secret NESTED=sub/nested.txt -- runprobe files NESTED
+stdout 'NESTED="raw-value\\n" mode=0400 links=0'
+
+-- raw-fixture --
+raw-value
+-- env-fixture --
+# strict dotenv fixture
+export TOKEN = 'dotenv value'
+EMPTY=
+LITERAL=$(touch_owned)

@@ -1,6 +1,6 @@
 module opensesam.org/sesam
 
-go 1.27.0
+go 1.27.2
 
 require (
 	filippo.io/age v1.3.2
