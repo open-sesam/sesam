@@ -21,7 +21,7 @@ func loadTestConfig(t *testing.T, body string) *config.Config {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = root.Close() })
 
-	cfg, err := config.Load(root, "sesam.yml")
+	cfg, err := config.Load(root, "sesam.yml", nil)
 	require.NoError(t, err)
 
 	return cfg

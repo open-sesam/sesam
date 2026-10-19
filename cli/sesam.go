@@ -429,7 +429,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 					{
 						Name:   "print",
 						Flags:  flagsConfigPrint,
-						Usage:  "Print the whole config as one document, includes resolved (YAML, or JSON with --json)",
+						Usage:  "Print the whole config as one document, sub-configs merged (YAML, or JSON with --json)",
 						Action: commands.WithRepo(commands.HandleConfigPrint),
 					},
 					{

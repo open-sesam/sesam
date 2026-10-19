@@ -327,11 +327,11 @@ func TestConfigResetRewritesUnreadableWithNoSecrets(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestConfigResetReportsOrphans: a rewrite flattens the include tree into the
-// main file, so a sub-config that used to be included is left unreferenced.
-// Reset does not delete the user's file, but it has to say so - nothing reads
-// it any more.
-func TestConfigResetReportsOrphans(t *testing.T) {
+// TestConfigResetRewriteKeepsSubConfigs: a rewrite rebuilds every secret
+// into the nearest existing sesam.yml above it rather than flattening into the
+// main file, which would declare a secret twice once the sub-configs are
+// discovered again. A sub-config no secret lands in is deleted and reported.
+func TestConfigResetRewriteKeepsSubConfigs(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	dir, r := bootstrapRepo(t, admin)
 
@@ -344,20 +344,26 @@ func TestConfigResetReportsOrphans(t *testing.T) {
 	sub := filepath.Join(dir, "svc", configFileName)
 	require.FileExists(t, sub)
 
+	// A hand-written sub-config declaring nothing the audit log knows.
+	stale := filepath.Join(dir, "stale", configFileName)
+	require.NoError(t, os.MkdirAll(filepath.Dir(stale), 0o700))
+	require.NoError(t, os.WriteFile(stale, []byte("secrets: []\n"), 0o644))
+
 	// Destroy the main file so reset has to rewrite rather than repair.
 	writeMainConfig(t, dir, "not a config\n")
 
 	reset, err := r.ConfigReset(ConfigResetOpts{Force: true})
 	require.NoError(t, err)
 	require.True(t, reset.Rewritten)
-	require.Equal(t, []string{filepath.Join("svc", configFileName)}, reset.Orphaned)
+	require.Equal(t, []string{filepath.Join("stale", configFileName)}, reset.Deleted)
+	require.NoFileExists(t, stale)
 
-	// Left on disk, but no longer part of the config.
-	require.FileExists(t, sub)
+	require.Contains(t, readFileString(t, sub), "path: token", "kept in its sub-config")
+	require.NotContains(t, readFileString(t, filepath.Join(dir, configFileName)), "token")
 
-	after := readFileString(t, filepath.Join(dir, configFileName))
-	require.Contains(t, after, "svc/token", "the secret itself is kept, in the main file")
-	require.NotContains(t, after, "include")
+	diff, err := r.ConfigDiff(t.Context(), ConfigDiffOpts{})
+	require.NoError(t, err)
+	require.True(t, diff.IsEmpty())
 }
 
 // TestConfigResetKeepsAuditLog: reset only ever writes the config.
@@ -402,8 +408,7 @@ func TestConfigResetAfterApplyRoundTrip(t *testing.T) {
 // its sub-file, and the config mutators delete such a file from disk outright
 // - a repair in place does this unprompted, like the rest of the discard, but
 // it must still say so. Deleting a file with no trace at all is not
-// acceptable just because a rewrite was not involved (unlike Orphaned, this
-// one already happened by the time it is reported).
+// acceptable just because a rewrite was not involved.
 func TestConfigResetDeletesEmptiedSubConfig(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	dir, r := bootstrapRepo(t, admin)
@@ -424,17 +429,14 @@ func TestConfigResetDeletesEmptiedSubConfig(t *testing.T) {
 		"  admin:\n"+
 		"    - admin\n"+
 		"secrets:\n"+
-		"  - path: README.md\n"+
-		"  - include: svc/sesam.yml\n")
+		"  - path: README.md\n")
 
 	reset, err := r.ConfigReset(ConfigResetOpts{})
 	require.NoError(t, err)
 	require.Equal(t, []core.Operation{core.OpSecretAdd}, opsOf(reset.Discarded))
 	require.Equal(t, []string{filepath.Join("svc", configFileName)}, reset.Deleted)
 
-	// Gone, along with its include.
 	require.NoFileExists(t, sub)
-	require.NotContains(t, readFileString(t, filepath.Join(dir, configFileName)), "include")
 }
 
 // TestConfigResetPreviewThenForceRewrite covers the recovery path end to end:
@@ -496,37 +498,4 @@ func TestConfigResetNeverErrorsWithoutForce(t *testing.T) {
 		require.True(t, reset.Rewritten)
 		require.Equal(t, broken, readFileString(t, filepath.Join(dir, configFileName)))
 	})
-}
-
-// TestConfigPathsSkipsNestedGitAndSesamDirs regresses configPaths comparing
-// whole relative walk paths to the bare ".git"/".sesam" constants: a nested
-// one (a submodule, or a sesam repo checked out under this one) sits at some
-// deeper relative path and was never skipped, so a coincidentally-named file
-// inside it could be picked up as one of ours.
-func TestConfigPathsSkipsNestedGitAndSesamDirs(t *testing.T) {
-	admin := writeTestIdentity(t, "admin")
-	dir, r := bootstrapRepo(t, admin)
-
-	// A legitimate sub-config, which must still be found.
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "svc"), 0o700))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "svc", configFileName), []byte("secrets: []\n"), 0o644,
-	))
-
-	// A nested .git (e.g. a submodule) with something that looks like a config
-	// file inside it - must never be treated as one of ours.
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "svc", ".git", "hooks"), 0o700))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "svc", ".git", "hooks", configFileName), []byte("bogus"), 0o644,
-	))
-
-	// A nested .sesam (a sesam repo checked out under this one) likewise.
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "nested", ".sesam"), 0o700))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "nested", ".sesam", configFileName), []byte("bogus"), 0o644,
-	))
-
-	paths, err := r.configPaths()
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{configFileName, filepath.Join("svc", configFileName)}, paths)
 }

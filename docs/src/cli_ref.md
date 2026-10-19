@@ -186,7 +186,7 @@ Add a secret file or directory at `PATH`
 
 **--help, -h**: show help
 
-**--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file
+**--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the nearest existing one
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
@@ -206,7 +206,7 @@ Move a secret file or directory to a new name
 
 **--help, -h**: show help
 
-**--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file
+**--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the nearest existing one
 
 ## edit
 
@@ -418,7 +418,7 @@ Show the diff between config and actual state (extra args are passed to git)
 
 ### print
 
-Print the whole config as one document, includes resolved (YAML, or JSON with --json)
+Print the whole config as one document, sub-configs merged (YAML, or JSON with --json)
 
 **--help, -h**: show help
 

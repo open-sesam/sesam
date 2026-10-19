@@ -92,26 +92,25 @@ tree dir/of/secrets
     └── sesam.yml
 ```
 
-This will create a config hierarchy of `sesam.yml` files in the config:
+This will create a hierarchy of `sesam.yml` files, each declaring the secrets
+of its own directory:
 
 ```yaml
-# Main sesam.yml:
+# dir/of/secrets/sesam.yml:
 secrets:
-  - include: dir/of/secrets
-```
-
-```yaml
-# dir/of/secrets sesam.yml:
-secrets:
-  - include: sub
   - path: some_file
 ```
 
 ```yaml
-# sub sesam.yml:
+# dir/of/secrets/sub/sesam.yml:
 secrets:
   - path: another_file
 ```
+
+There is no need to reference them from the main `sesam.yml`: every
+`sesam.yml` below it is picked up automatically. Only directories that hold
+their own `.sesam` (a separate sesam repository) are skipped. Without
+`--nested`, a secret is added to the nearest existing `sesam.yml` above it.
 
 Once done you can also add descriptions to the files in the config or do more fine-tuning with the available [config keys](./config_ref.md).
 

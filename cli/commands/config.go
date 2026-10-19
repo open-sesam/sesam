@@ -164,7 +164,7 @@ func printCommittedChanges(changes []diff.Change) error {
 	return &ExitCodeError{code: 1, print: false}
 }
 
-// HandleConfigPrint prints sesam.yml with every included file flattened into
+// HandleConfigPrint prints sesam.yml with every sub-config flattened into
 // it, as YAML or, with --json, as JSON - for piping into yq or jq.
 func HandleConfigPrint(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	doc, err := r.MergedConfig()
@@ -210,13 +210,6 @@ func HandleConfigReset(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 			slog.Info("would write it fresh from the audit log - comments and descriptions would be lost")
 		}
 
-		for _, orphan := range reset.Orphaned {
-			slog.Info(fmt.Sprintf(
-				"note: %s is not included by the rewritten sesam.yml and would be ignored",
-				displayPath(r.SesamDir(), orphan),
-			))
-		}
-
 		if force {
 			printDeleted(r, reset)
 		}
@@ -234,8 +227,8 @@ func HandleConfigReset(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 	return nil
 }
 
-// printDeleted reports sub-config files the repair-in-place path emptied and
-// removed from disk.
+// printDeleted reports sub-config files the reset emptied and removed from
+// disk.
 func printDeleted(r *repo.Repo, reset *repo.ConfigReset) {
 	for _, path := range reset.Deleted {
 		slog.Info(fmt.Sprintf("note: %s is now empty and was deleted", displayPath(r.SesamDir(), path)))

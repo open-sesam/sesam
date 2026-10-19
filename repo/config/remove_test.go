@@ -43,7 +43,7 @@ func TestSecretRemove_FileFromMain(t *testing.T) {
 }
 
 // TestSecretRemove_FileFromSubfile removes the only secret in a subdirectory
-// file: the sub sesam.yml is deleted and its include dropped from main.
+// file: the sub sesam.yml is deleted.
 func TestSecretRemove_FileFromSubfile(t *testing.T) {
 	dir, main := buildConfig(t, true, "sub/api.key")
 
@@ -60,7 +60,7 @@ func TestSecretRemove_FileFromSubfile(t *testing.T) {
 }
 
 // TestSecretRemove_SubfileKeepsSecret removes one of several secrets in a
-// subdirectory file; the file (and its include) survive.
+// subdirectory file; the file survives.
 func TestSecretRemove_SubfileKeepsSecret(t *testing.T) {
 	dir, main := buildConfig(t, true, "sub/b.txt", "sub/c.txt")
 
