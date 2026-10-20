@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"path/filepath"
 	"slices"
 
@@ -92,7 +91,8 @@ func (s *Stage) ConfigApply(ctx context.Context, opts ConfigApplyOpts) ([]diff.C
 	rest := diff.Delta(s.vstate, declared)
 
 	if !rest.IsEmpty() {
-		slog.Warn("applied state differs from sesam.yml - this is a bug, nothing was changed", slog.Any("diff", rest))
+		// An error rolls the stage back, so nothing is committed.
+		return nil, fmt.Errorf("applied state differs from sesam.yml - this is a bug, nothing was changed: %v", rest.Changes)
 	}
 
 	return plan.Changes, nil
