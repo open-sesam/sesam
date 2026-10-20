@@ -750,6 +750,13 @@ func appendSecretsItems(src *FileSource, items []Secret) error {
 		return replaceValue(mv, map[string][]Secret{"secrets": items})
 	}
 
+	if err := blockRootList[Secret](src, "secrets"); err != nil {
+		return err
+	}
+	if seq, err = secretsNode(src.RootNode); err != nil {
+		return err
+	}
+
 	newSeq, err := marshalSeq(items)
 	if err != nil {
 		return err
@@ -759,6 +766,39 @@ func appendSecretsItems(src *FileSource, items []Secret) error {
 	// sequence's indentation and appends its values.
 	seq.Merge(newSeq)
 	return nil
+}
+
+// blockRootList rewrites the list under root key `key` in block style when it,
+// or one of its items, is written in flow style (`[...]`, `{...}`): block
+// items merged into those render invalid YAML. Comments inside it are lost.
+func blockRootList[T any](src *FileSource, key string) error {
+	mv, err := findRootValue(src.RootNode, key)
+	if err != nil {
+		return err
+	}
+
+	seq, ok := mv.Value.(*ast.SequenceNode)
+	if !ok || len(seq.Values) == 0 || !hasFlowStyle(seq) {
+		return nil
+	}
+
+	var items []T
+	if err := yaml.NodeToValue(seq, &items); err != nil {
+		return fmt.Errorf("%s: decoding %s: %w", src.Path, key, err)
+	}
+
+	return replaceValue(mv, map[string][]T{key: items})
+}
+
+func hasFlowStyle(seq *ast.SequenceNode) bool {
+	if seq.IsFlowStyle {
+		return true
+	}
+
+	return slices.ContainsFunc(seq.Values, func(n ast.Node) bool {
+		m, ok := n.(*ast.MappingNode)
+		return ok && m.IsFlowStyle
+	})
 }
 
 // replaceValue swaps the value of a mapping key for a freshly marshaled one,

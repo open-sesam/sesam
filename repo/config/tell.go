@@ -58,6 +58,13 @@ func (c *Config) appendUser(u User) error {
 		return replaceValue(mv, map[string][]User{"users": {u}})
 	}
 
+	if err := blockRootList[User](src, "users"); err != nil {
+		return err
+	}
+	if seq, err = usersNode(src.RootNode); err != nil {
+		return err
+	}
+
 	newSeq, err := marshalSeq([]User{u})
 	if err != nil {
 		return fmt.Errorf("%s: building user %q: %w", src.Path, u.Name, err)

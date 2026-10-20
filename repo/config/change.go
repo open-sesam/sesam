@@ -23,6 +23,13 @@ func (c *Config) changeSecretGroups(rel string, access []string) error {
 
 	for _, e := range entries {
 		if filepath.Clean(revealedPath(e)) == rel {
+			if e.node.IsFlowStyle {
+				// Rebuild as block style first; that replaces the nodes.
+				if err := blockRootList[Secret](e.source, "secrets"); err != nil {
+					return err
+				}
+				return c.changeSecretGroups(rel, access)
+			}
 			return setSecretAccess(e.node, access)
 		}
 	}
