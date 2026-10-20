@@ -642,7 +642,7 @@ func secretsNode(root ast.Node) (*ast.SequenceNode, error) {
 // nil when absent.
 func findMappingValue(m *ast.MappingNode, key string) *ast.MappingValueNode {
 	for _, mv := range m.Values {
-		if mv.Key.String() == key {
+		if mv.Key.GetToken().Value == key {
 			return mv
 		}
 	}
@@ -654,7 +654,7 @@ func findMappingValue(m *ast.MappingNode, key string) *ast.MappingValueNode {
 // true if it was present.
 func removeMappingValue(m *ast.MappingNode, key string) bool {
 	for i, mv := range m.Values {
-		if mv.Key.String() == key {
+		if mv.Key.GetToken().Value == key {
 			m.Values = append(m.Values[:i], m.Values[i+1:]...)
 			return true
 		}
@@ -669,7 +669,7 @@ func removeMappingValue(m *ast.MappingNode, key string) bool {
 // *ast.MappingNode, so both shapes are handled.
 func findRootValue(root ast.Node, key string) (*ast.MappingValueNode, error) {
 	for _, mv := range rootMappingValues(root) {
-		if mv.Key.String() == key {
+		if mv.Key.GetToken().Value == key {
 			return mv, nil
 		}
 	}
@@ -694,7 +694,7 @@ func rootMappingValues(root ast.Node) []*ast.MappingValueNode {
 
 func includePath(m *ast.MappingNode) (string, bool) {
 	for _, mv := range m.Values {
-		if mv.Key.String() == "include" {
+		if mv.Key.GetToken().Value == "include" {
 			p := mv.Value.GetToken().Value
 
 			// allow just specifying the directory itself.

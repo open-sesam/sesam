@@ -17,14 +17,14 @@ func (c *Config) renameUserInGroups(oldName, newName string) error {
 	for _, item := range seq.Values {
 		groupSeq, ok := item.Value.(*ast.SequenceNode)
 		if !ok {
-			return fmt.Errorf("%s: group %q value is not a sequence (got %T)", src.Path, item.Key.String(), item.Value)
+			return fmt.Errorf("%s: group %q value is not a sequence (got %T)", src.Path, item.Key.GetToken().Value, item.Value)
 		}
 
 		for _, userNode := range groupSeq.Values {
 			if userNode.GetToken().Value == oldName {
 				s, ok := userNode.(*ast.StringNode)
 				if !ok {
-					return fmt.Errorf("%s: group %q member is not a string (got %T)", src.Path, item.Key.String(), userNode)
+					return fmt.Errorf("%s: group %q member is not a string (got %T)", src.Path, item.Key.GetToken().Value, userNode)
 				}
 
 				s.Value = newName
@@ -94,10 +94,10 @@ func (c *Config) UserChangeGroups(user string, groups []string) error {
 	var emptyGroups []string // groups that are now empty
 
 	for _, item := range seq.Values {
-		groupName := item.Key.String()
+		groupName := item.Key.GetToken().Value
 		groupSeq, ok := item.Value.(*ast.SequenceNode)
 		if !ok {
-			return fmt.Errorf("%s: group %q value is not a sequence (got %T)", src.Path, item.Key.String(), item.Value)
+			return fmt.Errorf("%s: group %q value is not a sequence (got %T)", src.Path, item.Key.GetToken().Value, item.Value)
 		}
 
 		var userFound bool
@@ -105,7 +105,7 @@ func (c *Config) UserChangeGroups(user string, groups []string) error {
 		for idx, userNode := range groupSeq.Values {
 			if userNode.GetToken().Value == user {
 				userFound = true
-				if !groupMap[item.Key.String()] {
+				if !groupMap[item.Key.GetToken().Value] {
 					// config says user is in this group, but should not be anymore.
 					// we need to remove the node.
 					removeSeqValue(groupSeq, idx)
@@ -137,7 +137,7 @@ func (c *Config) UserChangeGroups(user string, groups []string) error {
 
 	// make sure empty groups are gone:
 	seq.Values = slices.DeleteFunc(seq.Values, func(mv *ast.MappingValueNode) bool {
-		return slices.Contains(emptyGroups, mv.Key.String())
+		return slices.Contains(emptyGroups, mv.Key.GetToken().Value)
 	})
 
 	// create the rest of the groups, if there were new ones.

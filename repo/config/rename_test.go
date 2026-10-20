@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -313,4 +314,23 @@ secrets:
 	_, groups := loadUsersGroups(t, main)
 	require.Equal(t, []string{"bravo"}, groups["dev"], "commented axolotl removed, bravo kept")
 	require.Equal(t, []string{"axolotl"}, groups["admin"])
+}
+
+// A comment after a key must not hide the key from lookups.
+func TestUserChangeGroups_KeyWithComment(t *testing.T) {
+	dir := t.TempDir()
+	main := writeGroupsMain(t, dir)
+	body, err := os.ReadFile(main)
+	require.NoError(t, err)
+	body = []byte(strings.Replace(string(body), "groups:\n  admin:\n", "groups: # teams\n  admin: # all\n", 1))
+	require.NoError(t, os.WriteFile(main, body, 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserChangeGroups("axolotl", []string{"admin", "dev", "ops"}))
+	require.NoError(t, cr.Save())
+
+	_, groups := loadUsersGroups(t, main)
+	require.Equal(t, []string{"bravo", "axolotl"}, groups["ops"])
+	require.Equal(t, []string{"axolotl", "root"}, groups["admin"])
 }
