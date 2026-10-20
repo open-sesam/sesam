@@ -555,7 +555,8 @@ func gitConfigCheck(env doctorEnv) DoctorCheck {
 		once.Do(func() { checks, loadErr = repo.CheckGitConfig(env.sesamDir) })
 	}
 
-	entry := func(path string, optional bool) DoctorCheck {
+	// Every entry is optional: each has an init flag to opt out of it.
+	entry := func(path, initFlag string) DoctorCheck {
 		return &genericCheck{name: path, run: func() DoctorDiagnosis {
 			load()
 			if loadErr != nil {
@@ -568,22 +569,15 @@ func gitConfigCheck(env doctorEnv) DoctorCheck {
 				switch {
 				case c.OK:
 					return docHealthy("set as expected")
-				case optional && c.Actual == "":
-					return docWarn(
-						"not set - optional branch-merge support is not installed",
-						"run `sesam init --install-merge` to enable it",
-					)
-				case optional:
-					return docWarn(
-						fmt.Sprintf("unexpected value %q (want %q)", c.Actual, c.Expected),
-						"run `sesam init --install-merge` to reinstall it",
-					)
 				case c.Actual == "":
-					return docIssue("not set", "run `sesam init` to (re)install sesam's git integration")
+					return docWarn(
+						"not set - this optional part is not installed",
+						fmt.Sprintf("run `sesam init --%s` to enable it", initFlag),
+					)
 				default:
-					return docIssue(
+					return docWarn(
 						fmt.Sprintf("unexpected value %q (want %q)", c.Actual, c.Expected),
-						"run `sesam init` to (re)install sesam's git integration",
+						fmt.Sprintf("run `sesam init --%s` to reinstall it", initFlag),
 					)
 				}
 			}
@@ -604,10 +598,10 @@ func gitConfigCheck(env doctorEnv) DoctorCheck {
 			return docHealthy("sesam git drivers (each checked below)")
 		},
 		subChecks: []DoctorCheck{
-			entry("merge.sesam-merge.name", true),
-			entry("merge.sesam-merge.driver", true),
-			entry("diff.sesam-diff.textconv", false),
-			entry("alias.sesam", false),
+			entry("merge.sesam-merge.name", "install-merge"),
+			entry("merge.sesam-merge.driver", "install-merge"),
+			entry("diff.sesam-diff.textconv", "install-diff"),
+			entry("alias.sesam", "install-alias"),
 		},
 	}
 }

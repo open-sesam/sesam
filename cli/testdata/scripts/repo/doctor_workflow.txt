@@ -39,6 +39,14 @@ exec sesam --clipboard-copy-cmd $WORK/copy.sh doctor
 stdout 'clipboard: `sesam show --clip` has no way to reach the clipboard'
 stdout 'must be set together'
 
+# The diff driver and the alias are opt-outs of init (--install-diff=false,
+# --install-alias=false), so missing ones only warn.
+exec git config --local --unset diff.sesam-diff.textconv
+exec git config --local --unset alias.sesam
+exec sesam doctor
+stdout 'sesam init --install-diff'
+stdout 'sesam init --install-alias'
+
 -- copy.sh --
 #!/bin/sh
 cat > /dev/null
