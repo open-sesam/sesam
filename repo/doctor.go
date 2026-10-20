@@ -145,7 +145,7 @@ func checkManagedFile(sesamDir, name, template string) (ManagedFileCheck, error)
 	for _, line := range templateLines(template) {
 		// Mirror appendMissingLines' membership test so the check agrees
 		// with what init would (not) re-append.
-		if strings.Contains(existing, line+"\n") || strings.HasSuffix(existing, line) {
+		if hasLine(existing, line) {
 			continue
 		}
 		res.Missing = append(res.Missing, line)

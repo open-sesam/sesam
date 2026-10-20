@@ -40,6 +40,12 @@ func TestAppendMissingLines(t *testing.T) {
 			want:     "a\nb\n",
 		},
 		{
+			name:     "line contained in another line is still appended",
+			existing: "build/*\n",
+			content:  "*\n",
+			want:     "build/*\n*\n",
+		},
+		{
 			name:     "existing without trailing newline gets one",
 			existing: "a",
 			content:  "a\nb\n",

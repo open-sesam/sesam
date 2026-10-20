@@ -511,6 +511,17 @@ func shellQuote(s string) string {
 	return s
 }
 
+// hasLine reports whether content holds line as a whole line. A substring test
+// would see "*" in "build/*" and skip the catch-all ignore rule.
+func hasLine(content, line string) bool {
+	for l := range strings.Lines(content) {
+		if strings.TrimSpace(l) == line {
+			return true
+		}
+	}
+	return false
+}
+
 func appendMissingLines(path, content string, mode os.FileMode) error {
 	var existing string
 	fileMissing := false
@@ -531,7 +542,7 @@ func appendMissingLines(path, content string, mode os.FileMode) error {
 			continue
 		}
 
-		if strings.Contains(existing, line+"\n") || strings.HasSuffix(existing, line) {
+		if hasLine(existing, line) {
 			continue
 		}
 
