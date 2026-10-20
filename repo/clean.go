@@ -80,6 +80,10 @@ func cleanup(
 	// never match a walked entry.
 	excluded := make(map[string]bool, len(exclude))
 	for _, p := range exclude {
+		// Identity paths may still carry a `~`, as loading them allows.
+		if expanded, err := ExpandHomeDir(p); err == nil {
+			p = expanded
+		}
 		abs, err := filepath.Abs(p)
 		if err != nil {
 			continue
