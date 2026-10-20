@@ -349,3 +349,61 @@ func TestUserRename_NumericName(t *testing.T) {
 	require.Contains(t, names, "123")
 	require.Equal(t, []string{"axolotl", "123"}, groups["dev"])
 }
+
+// writeAnchoredMain writes a config where dev reuses admin's member list.
+func writeAnchoredMain(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "sesam.yml")
+	const body = `users:
+  - name: alice
+    key:
+      - keyA
+  - name: bob
+    key:
+      - keyB
+groups:
+  admin: &team
+    - alice
+    - bob
+  dev: *team
+secrets: []
+`
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+	return path
+}
+
+func TestUserRename_AnchoredGroups(t *testing.T) {
+	main := writeAnchoredMain(t, t.TempDir())
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserRename("bob", "robert"))
+	require.NoError(t, cr.Save())
+
+	_, groups := loadUsersGroups(t, main)
+	require.Equal(t, []string{"alice", "robert"}, groups["admin"])
+	require.Equal(t, []string{"alice", "robert"}, groups["dev"])
+}
+
+func TestUserRename_NoGroupsKey(t *testing.T) {
+	main := filepath.Join(t.TempDir(), "sesam.yml")
+	require.NoError(t, os.WriteFile(main, []byte("users:\n  - name: bob\n    key:\n      - keyB\nsecrets: []\n"), 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserRename("bob", "robert"))
+}
+
+func TestUserChangeGroups_AnchoredGroups(t *testing.T) {
+	main := writeAnchoredMain(t, t.TempDir())
+
+	// Same membership in every group sharing the list: nothing to edit.
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserChangeGroups("bob", []string{"admin", "dev"}))
+
+	// Leaving dev alone would edit the list admin shares too.
+	cr, err = loadConfig(t, main)
+	require.NoError(t, err)
+	require.ErrorContains(t, cr.UserChangeGroups("bob", []string{"admin"}), "through an anchor")
+}

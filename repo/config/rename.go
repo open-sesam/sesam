@@ -9,14 +9,19 @@ import (
 
 func (c *Config) renameUserInGroups(oldName, newName string) error {
 	src := c.MainFile
+	if _, err := findRootValue(src.RootNode, "groups"); err != nil {
+		return nil //nolint:nilerr // no groups: key, nothing to rename
+	}
+
 	seq, err := groupsNode(src.RootNode)
 	if err != nil {
 		return err
 	}
 
 	for _, item := range seq.Values {
-		groupSeq, ok := item.Value.(*ast.SequenceNode)
-		if !ok {
+		// Renaming inside a shared (anchored) list is right for every group using it.
+		groupSeq, _ := resolveMemberSeq(src.RootNode, item.Value)
+		if groupSeq == nil {
 			return fmt.Errorf("%s: group %q value is not a sequence (got %T)", src.Path, item.Key.GetToken().Value, item.Value)
 		}
 
@@ -95,16 +100,23 @@ func (c *Config) UserChangeGroups(user string, groups []string) error {
 
 	for _, item := range seq.Values {
 		groupName := item.Key.GetToken().Value
-		groupSeq, ok := item.Value.(*ast.SequenceNode)
-		if !ok {
+		groupSeq, shared := resolveMemberSeq(src.RootNode, item.Value)
+		if groupSeq == nil {
 			return fmt.Errorf("%s: group %q value is not a sequence (got %T)", src.Path, item.Key.GetToken().Value, item.Value)
 		}
 
-		var userFound bool
+		userFound := slices.ContainsFunc(groupSeq.Values, func(n ast.Node) bool { return n.GetToken().Value == user })
+		if shared && userFound != groupMap[groupName] {
+			// The list is shared via an anchor; editing it would change the
+			// other groups using it too.
+			return fmt.Errorf(
+				"%s: group %q shares its member list through an anchor; change %s's membership there by hand",
+				src.Path, groupName, user,
+			)
+		}
 
 		for idx, userNode := range groupSeq.Values {
 			if userNode.GetToken().Value == user {
-				userFound = true
 				if !groupMap[item.Key.GetToken().Value] {
 					// config says user is in this group, but should not be anymore.
 					// we need to remove the node.
