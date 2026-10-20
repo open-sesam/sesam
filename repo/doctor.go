@@ -36,7 +36,7 @@ func GitWorktreeRoot(dir string) (string, error) {
 		return "", err
 	}
 
-	gitRepo, err := git.PlainOpenWithOptions(abs, &git.PlainOpenOptions{DetectDotGit: true})
+	gitRepo, err := git.PlainOpenWithOptions(abs, &git.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
 	if err != nil {
 		return "", err
 	}

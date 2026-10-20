@@ -46,7 +46,8 @@ func SesamGitPrefix(repo *git.Repository, sesamDir string) (string, error) {
 // whether to treat it as fatal).
 func verifyInitFileUnchanged(sesamDir string) (string, error) {
 	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{
-		DetectDotGit: true,
+		DetectDotGit:          true,
+		EnableDotGitCommonDir: true,
 	})
 	if err != nil {
 		return "", fmt.Errorf("not a git repository (skipping init-file history check): %w", err)

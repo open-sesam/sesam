@@ -56,7 +56,7 @@ func resolveSesamDirAndGit(sesamPath string) (string, *git.Repository, error) {
 		return "", nil, fmt.Errorf("repo path %s is not a directory", absPath)
 	}
 
-	gitRepo, err := git.PlainOpenWithOptions(absPath, &git.PlainOpenOptions{DetectDotGit: true})
+	gitRepo, err := git.PlainOpenWithOptions(absPath, &git.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
 	if err != nil {
 		return "", nil, fmt.Errorf("no git repository found at %s: %w", absPath, err)
 	}
