@@ -563,6 +563,9 @@ func (s *Stage) UserRename(oldName, newName string) error {
 	if err := s.user.UserRename(oldName, newName); err != nil {
 		return err
 	}
+	if s.whoami == oldName {
+		s.whoami = newName
+	}
 
 	cfg, err := s.cfg()
 	if err != nil {

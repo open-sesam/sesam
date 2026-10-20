@@ -57,6 +57,16 @@ func (es *ed25519Signer) UserName() string {
 	return es.user
 }
 
+// renamedSigner signs with the same key under a user's new name.
+type renamedSigner struct {
+	Signer
+	name string
+}
+
+func (rs renamedSigner) UserName() string {
+	return rs.name
+}
+
 // LoadSignKey will load a signer specific to a user and decrypt it via `userIdentity`
 func LoadSignKey(root *os.Root, user string, userIdentity age.Identity) (Signer, error) {
 	if err := ValidUserName(user); err != nil {

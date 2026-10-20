@@ -173,10 +173,20 @@ func (um *UserManager) UserRename(oldName, newName string) error {
 		return err
 	}
 
-	return um.root.Rename(
+	if err := um.root.Rename(
 		signKeyPath(um.base, oldName),
 		signKeyPath(um.base, newName),
-	)
+	); err != nil {
+		return err
+	}
+
+	// Renamed ourselves: the log only accepts the new name from here on.
+	if oldName == um.signer.UserName() {
+		um.signer = renamedSigner{Signer: um.signer, name: newName}
+		um.secMgr.Signer = um.signer
+	}
+
+	return nil
 }
 
 // UserChangeGroups records the user's new group set and returns it. When

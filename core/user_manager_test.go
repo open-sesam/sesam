@@ -324,6 +324,17 @@ func TestUserRenameSuccess(t *testing.T) {
 	require.Empty(t, um.secMgr.Keyring.Recipients([]string{"bob"}))
 }
 
+func TestUserRenameSelfKeepsSigning(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	require.NoError(t, um.UserRename("admin", "boss"))
+
+	// Entries after the rename must be signed under the new name.
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+	require.Equal(t, "boss", um.log.Entries[len(um.log.Entries)-1].ChangedBy)
+	require.Equal(t, "boss", um.secMgr.Signer.UserName())
+}
+
 func TestUserRenameNonAdmin(t *testing.T) {
 	um := nonAdminUserManager(t)
 
