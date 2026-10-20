@@ -470,11 +470,20 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, additive, nested bool)
 			continue
 		}
 
+		_, existed := s.vstate.SecretExists(rel)
 		vs, err := s.secret.SecretAdd(rel, groups, additive)
 		if err != nil {
 			return fmt.Errorf("failed to add secret %q: %w", rel, err)
 		}
-		if err := cfg.SecretAdd(rel, nested, vs.DeclaredGroups()); err != nil {
+
+		// cfg.SecretAdd reads empty groups as "no change", but for an existing
+		// secret `--group admin` declares exactly that.
+		if existed && len(groups) > 0 {
+			err = cfg.SecretChangeGroups(rel, vs.DeclaredGroups())
+		} else {
+			err = cfg.SecretAdd(rel, nested, vs.DeclaredGroups())
+		}
+		if err != nil {
 			return fmt.Errorf("failed to add secret %q to config: %w", rel, err)
 		}
 	}
