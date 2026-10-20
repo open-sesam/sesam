@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -471,7 +472,35 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, additive, nested bool)
 		}
 	}
 
+	s.warnTracked(files)
 	return nil
+}
+
+// warnTracked warns about secrets whose plaintext git already tracks:
+// .gitignore does not keep those out of the next commit.
+func (s *Stage) warnTracked(revealedPaths []string) {
+	idx, err := s.gitRepo.Storer.Index()
+	if err != nil {
+		return
+	}
+	prefix, err := core.SesamGitPrefix(s.gitRepo, s.sesamDir)
+	if err != nil {
+		return
+	}
+
+	tracked := make(map[string]bool, len(idx.Entries))
+	for _, e := range idx.Entries {
+		tracked[e.Name] = true
+	}
+
+	for _, p := range revealedPaths {
+		if tracked[path.Join(prefix, filepath.ToSlash(p))] {
+			slog.Warn(
+				"plaintext is tracked by git and will keep being committed; untrack it with `git rm --cached`",
+				slog.String("path", p),
+			)
+		}
+	}
 }
 
 // SecretRemove stops tracking the secret(s) at each path.
