@@ -258,7 +258,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 				Aliases:       []string{"reveal"},
 				Flags:         flagsReveal,
 				Action:        commands.WithRepo(commands.HandleOpen),
-				ShellComplete: completeSecrets,
+				ShellComplete: completeFlags,
 				Usage:         "Decrypt all secrets available to the current user",
 			},
 			{
