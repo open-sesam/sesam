@@ -579,6 +579,15 @@ func TestUserRmRecipientLastRecipient(t *testing.T) {
 	require.Len(t, um.state.keyring.Recipients([]string{"bob"}), 1)
 }
 
+// An empty removal would still rotate keys and reseal everything.
+func TestUserRmRecipientEmpty(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	before := len(um.state.auditLog.Entries)
+
+	require.ErrorContains(t, um.UserRmRecipient(context.Background(), "admin", nil), "no recipients to remove")
+	require.Len(t, um.state.auditLog.Entries, before)
+}
+
 func TestUserRmRecipientNonAdmin(t *testing.T) {
 	um := nonAdminUserManager(t)
 	intruder := newTestUser(t, "intruder")

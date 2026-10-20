@@ -261,6 +261,11 @@ func (um *UserManager) UserRmRecipient(ctx context.Context, user string, pubKeyS
 		return err
 	}
 
+	// Checked here, not in verify: logs may already hold such an entry.
+	if len(toDeleteRecps) == 0 {
+		return fmt.Errorf("no recipients to remove from %s", user)
+	}
+
 	if err := um.state.FeedEntry(
 		um.signer,
 		newAuditEntry(um.signer.UserName(), &DetailUserRmRecipients{

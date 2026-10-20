@@ -167,6 +167,11 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 		}
 	}
 
+	if cmd.Bool("all-except") && len(recipients) == 0 {
+		slog.Info("nothing to remove: the user only has the keys you kept", slog.String("user", user))
+		return nil
+	}
+
 	return r.Update(func(s *repo.Stage) error {
 		if err := s.UserRmRecipient(ctx, user, recipients); err != nil {
 			return err

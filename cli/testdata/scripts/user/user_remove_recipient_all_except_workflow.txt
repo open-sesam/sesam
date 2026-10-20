@@ -42,7 +42,10 @@ exec sesam verify
 
 # The short alias behaves the same and, with only the kept key left, is a no-op
 # that leaves bob's remaining recipient in place.
+cp .sesam/audit/log.jsonl before.jsonl
 exec sesam user remove-recipient --user bob -a --recipient $BOB_PUBKEY
+stderr 'nothing to remove'
+cmp .sesam/audit/log.jsonl before.jsonl
 exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl
 
 -- keys/extra.pub --
