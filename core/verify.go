@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/hdevalence/ed25519consensus"
 )
@@ -222,6 +223,18 @@ func (s *VerifiedState) UserExists(user string) (*VerifiedUser, bool) {
 // SecretExists is BaseState.Secret
 func (s *VerifiedState) SecretExists(revealedPath string) (*SecretAccess, bool) {
 	return s.Secret(revealedPath)
+}
+
+// secretCaseClash returns a secret other than except whose path equals p when
+// case is ignored. Case-insensitive filesystems store both as one file.
+func (s *VerifiedState) secretCaseClash(p, except string) (string, bool) {
+	for _, sec := range s.Secrets {
+		if sec.RevealedPath != except && strings.EqualFold(sec.RevealedPath, p) {
+			return sec.RevealedPath, true
+		}
+	}
+
+	return "", false
 }
 
 // UserHasAccess checks if `user` is in one of `grous` and has therefore access.
@@ -781,6 +794,10 @@ func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigne
 		return fmt.Errorf("cannot add already existing secret: %s", scd.RevealedPath)
 	}
 
+	if other, clash := state.secretCaseClash(scd.RevealedPath, ""); clash {
+		return fmt.Errorf("cannot add %s: differs from secret %s only in case", scd.RevealedPath, other)
+	}
+
 	hasAccess := state.UserHasAccess(entry.ChangedBy, scd.AccessGroups)
 	if !hasAccess {
 		return fmt.Errorf(
@@ -849,6 +866,10 @@ func verifySecretMove(log *AuditLog, state *VerifiedState, entry *AuditEntrySign
 
 	if _, exists := state.SecretExists(scr.NewRevealedPath); exists {
 		return fmt.Errorf("cannot move secret over existing secret: %q", scr.NewRevealedPath)
+	}
+
+	if other, clash := state.secretCaseClash(scr.NewRevealedPath, scr.OldRevealedPath); clash {
+		return fmt.Errorf("cannot move to %s: differs from secret %s only in case", scr.NewRevealedPath, other)
 	}
 
 	if _, err := state.requireSecretAccess(scr.OldRevealedPath, "move", entry); err != nil {

@@ -639,6 +639,38 @@ func TestVerifySecretRemoveNegative(t *testing.T) {
 	})
 }
 
+// On a case-insensitive filesystem db.key and DB.key are one file, so a second
+// secret under the other spelling would share the first one's plaintext.
+func TestVerifySecretCaseClash(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry *AuditEntry
+		ok    bool
+	}{
+		{"add with other case", newAuditEntry("admin", &DetailSecretAdd{RevealedPath: "DB.key"}), false},
+		{"move onto other case", newAuditEntry("admin", &DetailSecretMove{OldRevealedPath: "other", NewRevealedPath: "Db.Key"}), false},
+		{"case-only rename of itself", newAuditEntry("admin", &DetailSecretMove{OldRevealedPath: "db.key", NewRevealedPath: "DB.key"}), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sesamDir := testRepo(t)
+			admin := newTestUser(t, "admin")
+			al := initAuditLog(t, sesamDir, admin)
+			for _, p := range []string{"db.key", "other"} {
+				al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{RevealedPath: p}), nil)
+			}
+			al.AddEntry(admin.Signer, tt.entry, nil)
+
+			if tt.ok {
+				verifyState(t, al, EmptyKeyring())
+				return
+			}
+			require.ErrorContains(t, verifyStateFail(t, al, EmptyKeyring()), "only in case")
+		})
+	}
+}
+
 // --- verifySeal tests ---
 
 func TestVerifySealResetsRequirement(t *testing.T) {
