@@ -82,7 +82,7 @@ func (s *Stage) ConfigApply(ctx context.Context, opts ConfigApplyOpts) ([]diff.C
 
 	for _, change := range plan.Changes {
 		if err := s.applyChange(ctx, change); err != nil {
-			return nil, fmt.Errorf("failed to apply %q: %w", change, err)
+			return nil, fmt.Errorf("failed to apply %q: %w%s", change, err, keyMoveHint(plan.Changes, change, err))
 		}
 	}
 
@@ -96,6 +96,37 @@ func (s *Stage) ConfigApply(ctx context.Context, opts ConfigApplyOpts) ([]diff.C
 	}
 
 	return plan.Changes, nil
+}
+
+// keyMoveHint explains a key that is added to one user while still held by
+// another one the same plan removes. Additions run before removals (see
+// diff.opRank), so a key cannot move between users within one apply.
+func keyMoveHint(plan []diff.Change, failed diff.Change, err error) string {
+	var dup *core.DuplicatePubkeyError
+	if !errors.As(err, &dup) {
+		return ""
+	}
+
+	for _, c := range plan {
+		if c.User != dup.Holder() {
+			continue
+		}
+
+		switch {
+		case c.Op == core.OpUserKill && failed.Op == core.OpUserTell:
+			return fmt.Sprintf(
+				"; to rename %s to %s run `sesam user rename %s %s` instead",
+				dup.Holder(), failed.User, dup.Holder(), failed.User,
+			)
+		case c.Op == core.OpUserKill || c.Op == core.OpUserRmRecipients:
+			return fmt.Sprintf(
+				"; a key cannot move between users in one apply: remove it from %s first",
+				dup.Holder(),
+			)
+		}
+	}
+
+	return ""
 }
 
 // applyPreflight rejects plans that would fail part-way through, so the user

@@ -15,6 +15,9 @@ type DuplicatePubkeyError struct {
 	pubkey string
 }
 
+// Holder is the user who already has the key.
+func (e *DuplicatePubkeyError) Holder() string { return e.user }
+
 func (e *DuplicatePubkeyError) Error() string {
 	return fmt.Sprintf("user %s already has recipient %s", e.user, e.pubkey)
 }
