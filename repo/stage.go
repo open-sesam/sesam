@@ -46,6 +46,9 @@ type Stage struct {
 	// touched are worktree paths the stage created outside the fork, in
 	// creation order. Rollback removes them; Commit keeps them.
 	touched []string
+
+	// moved are plaintext renames (old, new) that Rollback moves back.
+	moved [][2]string
 }
 
 // Stage opens a read-write transaction. It errors if a stage is already open
@@ -312,6 +315,10 @@ func (s *Stage) Rollback() error {
 	_ = s.closeStateQuiet(false)
 	s.repo.stage = nil
 
+	for _, mv := range slices.Backward(s.moved) {
+		_ = s.repo.root.Rename(mv[1], mv[0])
+	}
+
 	// Newest first, so files go before the directories created for them.
 	// Remove, not RemoveAll: a directory something else wrote into stays.
 	for _, path := range slices.Backward(s.touched) {
@@ -575,6 +582,7 @@ func (s *Stage) SecretMove(oldRevealedPath, newRevealedPath string, nested bool)
 		if err := s.secret.SecretMove(oldRel, newRel); err != nil {
 			return fmt.Errorf("failed to move secret %q: %w", oldRel, err)
 		}
+		s.moved = append(s.moved, [2]string{oldRel, newRel})
 
 		if err := cfg.SecretMove(oldRel, newRel, nested); err != nil {
 			return fmt.Errorf("failed to move secret %q in config: %w", oldRel, err)

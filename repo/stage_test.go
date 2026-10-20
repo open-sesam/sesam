@@ -281,6 +281,37 @@ func TestStageSecretMoveRejectsForbiddenDestination(t *testing.T) {
 	}
 }
 
+func TestStageSecretMoveKeepsDestinationAndRollsBack(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	dir, r := bootstrapRepo(t, admin)
+
+	src := filepath.Join(dir, "api.token")
+	require.NoError(t, os.WriteFile(src, []byte("hunter2\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("mine\n"), 0o600))
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.SecretAdd([]string{"api.token"}, []string{"admin"}, false, false)
+	}))
+
+	err := r.Update(func(s *Stage) error {
+		return s.SecretMove("api.token", "notes.txt", false)
+	})
+	require.ErrorContains(t, err, "already exists")
+	got, err := os.ReadFile(filepath.Join(dir, "notes.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "mine\n", string(got))
+
+	// A failure after the move puts the plaintext back where it was.
+	err = r.Update(func(s *Stage) error {
+		if err := s.SecretMove("api.token", "moved.token", false); err != nil {
+			return err
+		}
+		return errors.New("later step failed")
+	})
+	require.ErrorContains(t, err, "later step failed")
+	require.FileExists(t, src)
+	require.NoFileExists(t, filepath.Join(dir, "moved.token"))
+}
+
 // captureWarnings redirects slog to a buffer for the duration of the test.
 func captureWarnings(t *testing.T) *bytes.Buffer {
 	t.Helper()

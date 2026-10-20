@@ -494,6 +494,10 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 		return fmt.Errorf("refusing to move: %w", err)
 	}
 
+	if _, err := sm.root.Lstat(newRevealedPath); !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("refusing to move: %s already exists", newRevealedPath)
+	}
+
 	_, statErr := sm.root.Stat(oldRevealedPath)
 	needsReveal := statErr != nil
 	if needsReveal {
