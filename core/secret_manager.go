@@ -490,8 +490,10 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 		return fmt.Errorf("failed to move non-existing secret: %s", oldRevealedPath)
 	}
 
-	if err := NoSymlinks(sm.root, newRevealedPath); err != nil {
-		return fmt.Errorf("refusing to move: %w", err)
+	for _, p := range []string{oldRevealedPath, newRevealedPath} {
+		if err := NoSymlinks(sm.root, p); err != nil {
+			return fmt.Errorf("refusing to move: %w", err)
+		}
 	}
 
 	if _, err := sm.root.Lstat(newRevealedPath); !errors.Is(err, fs.ErrNotExist) {

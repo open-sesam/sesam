@@ -579,6 +579,33 @@ func TestSecretMove(t *testing.T) {
 	require.Equal(t, "secret-content", string(revealed))
 }
 
+func TestSecretMoveRefuses(t *testing.T) {
+	t.Run("existing target", func(t *testing.T) {
+		mgr := sealedSecretManager(t)
+		writeSecret(t, mgr.SesamDir, "notes.txt", "mine")
+		require.ErrorContains(t, mgr.SecretMove("secrets/test", "notes.txt"), "already exists")
+		got, err := os.ReadFile(filepath.Join(mgr.SesamDir, "notes.txt"))
+		require.NoError(t, err)
+		require.Equal(t, "mine", string(got))
+	})
+
+	t.Run("symlinked target parent", func(t *testing.T) {
+		mgr := sealedSecretManager(t)
+		require.NoError(t, os.Mkdir(filepath.Join(mgr.SesamDir, "trap"), 0o700))
+		require.NoError(t, os.Symlink("trap", filepath.Join(mgr.SesamDir, "link")))
+		require.ErrorContains(t, mgr.SecretMove("secrets/test", "link/test"), "is a symlink")
+		require.NoFileExists(t, filepath.Join(mgr.SesamDir, "trap/test"))
+	})
+
+	t.Run("symlinked source parent", func(t *testing.T) {
+		mgr := sealedSecretManager(t)
+		require.NoError(t, os.Rename(filepath.Join(mgr.SesamDir, "secrets"), filepath.Join(mgr.SesamDir, "trap")))
+		require.NoError(t, os.Symlink("trap", filepath.Join(mgr.SesamDir, "secrets")))
+		require.ErrorContains(t, mgr.SecretMove("secrets/test", "moved"), "is a symlink")
+		require.FileExists(t, filepath.Join(mgr.SesamDir, "trap/test"))
+	})
+}
+
 func TestSecretMoveNotFound(t *testing.T) {
 	mgr := sealedSecretManager(t)
 

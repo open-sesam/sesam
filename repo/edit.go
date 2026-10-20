@@ -46,6 +46,12 @@ func (r *Repo) stageForEdit(revealedPath string) (string, error) {
 		return "", ErrClosed
 	}
 
+	// The copy in and out would follow a symlink and then replace it, so the
+	// seal's own check would never see it.
+	if err := core.NoSymlinks(r.root, revealedPath); err != nil {
+		return "", fmt.Errorf("refusing to edit: %w", err)
+	}
+
 	states, err := r.syncStates(SyncOpts{Paths: []string{revealedPath}})
 	if err != nil {
 		return "", err
