@@ -404,3 +404,26 @@ func TestSecretAddIntoEmptySecretsList(t *testing.T) {
 		})
 	}
 }
+
+// A sub-config included by another sub-config must not get a second include
+// from main, or each of its secrets would load twice.
+func TestSecretAdd_NestedIncludedFromSubConfig(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "sesam.yml")
+	require.NoError(t, os.WriteFile(mainPath, []byte("secrets:\n  - include: a/sesam.yml\n"), 0o644))
+	touch(t, filepath.Join(dir, "a", "sesam.yml"))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "sesam.yml"), []byte("secrets:\n  - include: b/sesam.yml\n"), 0o644))
+	touch(t, filepath.Join(dir, "a", "b", "sesam.yml"))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "b", "sesam.yml"), []byte("secrets:\n  - path: old.key\n"), 0o644))
+	touch(t, filepath.Join(dir, "a", "b", "new.key"))
+
+	cr, err := loadConfig(t, mainPath)
+	require.NoError(t, err)
+	require.NoError(t, cr.SecretAdd(filepath.Join("a", "b", "new.key"), true, nil))
+	require.NoError(t, cr.Save())
+
+	body, err := os.ReadFile(mainPath)
+	require.NoError(t, err)
+	require.Equal(t, "secrets:\n  - include: a/sesam.yml\n", string(body))
+	require.Equal(t, []string{"new.key", "old.key"}, resolvedPaths(t, mainPath))
+}
