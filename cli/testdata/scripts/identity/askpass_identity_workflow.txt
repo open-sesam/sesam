@@ -41,6 +41,10 @@ stdout 'askpass modified readme'
 exec git add -A
 exec git commit -m 'commit through askpass'
 
+# doctor loads the repo the same way and recognises the user.
+exec sesam doctor
+stdout 'recognised as user »admin«'
+
 -- modified_readme.md --
 # askpass modified readme
 

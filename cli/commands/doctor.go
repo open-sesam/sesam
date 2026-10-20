@@ -58,6 +58,8 @@ type doctorEnv struct {
 	sesamDir      string
 	identityPaths []string
 	lockTimeout   time.Duration
+	askpass       string
+	askpassReq    string
 	version       string // full version banner, as shown to the user
 	versionShort  string // bare semver, e.g. "0.1.2" - for the update check
 
@@ -392,10 +394,12 @@ func identityUserCheck(env doctorEnv) DoctorCheck {
 		}
 
 		r, err := repo.Load(env.sesamDir, env.identityPaths, repo.RepoOpts{
-			Interactive: true,
-			LockTimeout: env.lockTimeout,
-			VerifyMode:  repo.VerifyModeDefault,
-			InMerge:     mergeState(env.sesamDir).InProgress(),
+			Interactive:     true,
+			LockTimeout:     env.lockTimeout,
+			VerifyMode:      repo.VerifyModeDefault,
+			InMerge:         mergeState(env.sesamDir).InProgress(),
+			AskpassProgram:  env.askpass,
+			AskpassRequired: env.askpassReq,
 		})
 		if err != nil {
 			return docIssue(
@@ -927,6 +931,8 @@ func HandleDoctor(ctx context.Context, cmd *cli.Command) error {
 		sesamDir:      cmd.String("sesam-dir"),
 		identityPaths: cmd.StringSlice("identity"),
 		lockTimeout:   cmd.Duration("lock-timeout"),
+		askpass:       cmd.String("askpass"),
+		askpassReq:    askpassRequired(),
 		version:       version,
 		versionShort:  firstField(version),
 
