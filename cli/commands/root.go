@@ -25,8 +25,7 @@ func HandleID(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 		for _, user := range users {
 			if user.Name == whoami {
-				_ = printJSON(user)
-				return nil
+				return printJSON(user)
 			}
 		}
 
