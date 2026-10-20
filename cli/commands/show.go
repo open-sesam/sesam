@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"filippo.io/age"
 	"github.com/urfave/cli/v3"
@@ -109,7 +110,10 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 	ok, showErr := core.ShowSecret(root, ids, showPath, out)
 	if ok {
 		var noMatch *age.NoIdentityMatchError
-		if filepath.IsAbs(showPath) && errors.As(showErr, &noMatch) {
+		// Objects are what git's textconv hands over: a temp copy for one side,
+		// the in-repo object for the worktree side of `git diff`.
+		textconv := filepath.IsAbs(showPath) || strings.HasSuffix(showPath, ".sesam")
+		if textconv && errors.As(showErr, &noMatch) {
 			// textconv: an error would abort the whole git diff/log -p.
 			_, err := fmt.Fprintln(out, "<sesam: not a recipient of this secret>")
 			return err
