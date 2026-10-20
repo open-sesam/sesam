@@ -178,26 +178,23 @@ func (v *View) ListSecrets(paths []string) ([]SecretInfo, error) {
 		return nil, err
 	}
 
-	cfgSecrets, err := cfg.Secrets()
+	// Merged paths are repo-relative; Secrets() keeps them relative to the
+	// sub-config that declares them.
+	doc, err := cfg.Merged()
 	if err != nil {
 		return nil, err
 	}
 
-	// NOTE: This is probably slow for large N, but ok for the start.
+	cfgSecrets := make(map[string]sesamConf.Secret, len(doc.Secrets))
+	for _, s := range doc.Secrets {
+		cfgSecrets[filepath.FromSlash(s.Path)] = s
+	}
+
 	combinedInfo := func(vs core.SecretAccess) SecretInfo {
-		idx := slices.IndexFunc(cfgSecrets, func(s sesamConf.Secret) bool {
-			return s.Path == vs.RevealedPath
-		})
-
-		info := SecretInfo{
+		return SecretInfo{
 			SecretAccess: vs,
+			Config:       cfgSecrets[filepath.Clean(vs.RevealedPath)],
 		}
-
-		if idx >= 0 {
-			info.Config = cfgSecrets[idx]
-		}
-
-		return info
 	}
 
 	out := make([]SecretInfo, 0, len(v.vstate.Secrets))
