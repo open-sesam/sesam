@@ -11,7 +11,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/cli/commands"
 	"opensesam.org/sesam/core"
+	"opensesam.org/sesam/repo"
 )
 
 // Shell completion for the sesam CLI.
@@ -118,7 +120,8 @@ func completeSecrets(ctx context.Context, cmd *cli.Command) {
 		return
 	}
 
-	root := filepath.Join(cmd.String("sesam-dir"), core.SesamObjectsDir())
+	sesamDir := completionSesamDir(cmd)
+	root := filepath.Join(sesamDir, core.SesamObjectsDir())
 	w := cmd.Root().Writer
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".sesam") {
@@ -130,9 +133,18 @@ func completeSecrets(ctx context.Context, cmd *cli.Command) {
 			//nolint:nilerr
 			return nil
 		}
-		emit(w, strings.TrimSuffix(rel, ".sesam"))
+		emit(w, commands.DisplayPath(sesamDir, strings.TrimSuffix(rel, ".sesam")))
 		return nil
 	})
+}
+
+// completionSesamDir finds the sesam dir the way commands do, walking up
+// from the cwd, so completion also works in subdirectories.
+func completionSesamDir(cmd *cli.Command) string {
+	if dir, err := repo.ResolveSesamDir(cmd.String("sesam-dir")); err == nil {
+		return dir
+	}
+	return cmd.String("sesam-dir")
 }
 
 // completeUsers completes the value of --user with the names of users that have
@@ -141,7 +153,7 @@ func completeSecrets(ctx context.Context, cmd *cli.Command) {
 func completeUsers(ctx context.Context, cmd *cli.Command) {
 	prev := rawPrevArg()
 	if prev == "--"+flagUser || prev == "-u" {
-		root := filepath.Join(cmd.String("sesam-dir"), ".sesam", "signkeys")
+		root := filepath.Join(completionSesamDir(cmd), ".sesam", "signkeys")
 		w := cmd.Root().Writer
 		entries, _ := os.ReadDir(root)
 		for _, e := range entries {

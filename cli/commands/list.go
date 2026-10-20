@@ -42,7 +42,7 @@ func HandleListSecrets(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 	t := newTable("Secrets", "Path", "Access Groups", "Description")
 	for _, secret := range secrets {
 		t.AppendRow([]any{
-			displayPath(r.SesamDir(), secret.RevealedPath),
+			DisplayPath(r.SesamDir(), secret.RevealedPath),
 			strings.Join(secret.AccessGroups, ","),
 			dashify(secret.Config.Description),
 		})

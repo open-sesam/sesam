@@ -207,7 +207,7 @@ func printStatusTree(sesamDir string, status *repo.Status, all, showUsers bool) 
 			continue
 		}
 		// Render paths relative to the cwd, like git from a subdirectory.
-		file.RevealedPath = displayPath(sesamDir, file.RevealedPath)
+		file.RevealedPath = DisplayPath(sesamDir, file.RevealedPath)
 		root.insert(file)
 		visible++
 	}

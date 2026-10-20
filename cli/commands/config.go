@@ -212,7 +212,7 @@ func HandleConfigReset(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 		for _, orphan := range reset.Orphaned {
 			slog.Info(fmt.Sprintf(
 				"note: %s is not included by the rewritten sesam.yml and would be ignored",
-				displayPath(r.SesamDir(), orphan),
+				DisplayPath(r.SesamDir(), orphan),
 			))
 		}
 
@@ -237,7 +237,7 @@ func HandleConfigReset(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 // removed from disk.
 func printDeleted(r *repo.Repo, reset *repo.ConfigReset) {
 	for _, path := range reset.Deleted {
-		slog.Info(fmt.Sprintf("note: %s is now empty and was deleted", displayPath(r.SesamDir(), path)))
+		slog.Info(fmt.Sprintf("note: %s is now empty and was deleted", DisplayPath(r.SesamDir(), path)))
 	}
 }
 
