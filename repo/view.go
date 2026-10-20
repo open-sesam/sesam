@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -669,7 +670,7 @@ func (v *View) GitAddDotSesam() error {
 	})
 }
 
-// GitAddConfig stages sesam.yml, every config file it still includes, and
+// GitAddConfig stages sesam.yml, every config file it includes, and
 // deleted - paths a reset removed from disk - so a regenerated config tree
 // lands in git's index exactly as it sits in the worktree. Needed because the
 // sesam-ours merge driver leaves sesam.yml's own index entry untouched: only
@@ -682,10 +683,12 @@ func (v *View) GitAddConfig(deleted []string) error {
 		return ErrClosed
 	}
 
-	paths, err := v.configPaths()
+	// Only this repo's tree: a walk would also stage a nested repo's sesam.yml.
+	cfg, err := v.cfg()
 	if err != nil {
 		return err
 	}
+	paths := slices.Sorted(maps.Keys(cfg.SourceFiles))
 
 	wt, err := v.gitRepo.Worktree()
 	if err != nil {
