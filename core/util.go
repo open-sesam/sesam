@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -270,6 +271,12 @@ func validSecretPathFormat(revealedPath string) error {
 		if elem == ".." {
 			return fmt.Errorf("path may not include a '..' segment: %s", revealedPath)
 		}
+	}
+
+	// "./x" or "a//x" would share the object of "x" while carrying their own
+	// access groups.
+	if slashed := filepath.ToSlash(revealedPath); path.Clean(slashed) != slashed {
+		return fmt.Errorf("path is not in canonical form (want %s): %s", path.Clean(slashed), revealedPath)
 	}
 
 	return nil
