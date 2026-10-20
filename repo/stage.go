@@ -465,10 +465,12 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, additive, nested bool)
 		files = append(files, expanded...)
 	}
 
+	var added []string
 	for _, rel := range files {
 		if err := core.IsForbiddenPath(rel); err != nil {
 			continue
 		}
+		added = append(added, rel)
 
 		_, existed := s.vstate.SecretExists(rel)
 		vs, err := s.secret.SecretAdd(rel, groups, additive)
@@ -488,7 +490,7 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, additive, nested bool)
 		}
 	}
 
-	s.warnTracked(files)
+	s.warnTracked(added)
 	return nil
 }
 
