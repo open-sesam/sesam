@@ -428,7 +428,7 @@ func TestUserChangeGroupsLastAdmin(t *testing.T) {
 
 	_, err := um.UserChangeGroups("admin", []string{"dev"}, false)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "last admin")
+	require.Contains(t, err.Error(), "last admin admin from admin (new groups: [dev]")
 }
 
 func TestShowUserSuccess(t *testing.T) {

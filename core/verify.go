@@ -636,7 +636,7 @@ func verifyUserChangeGroups(log *AuditLog, state *VerifiedState, entry *AuditEnt
 	if adminUsersFound == 1 && adminName == user.Name {
 		if !slices.Contains(ucg.NewGroups, "admin") {
 			return fmt.Errorf(
-				"trying to change access of last admin user to %v: %s (seq_id=%d)",
+				"cannot remove the last admin %s from admin (new groups: %v, seq_id=%d)",
 				user.Name,
 				ucg.NewGroups,
 				entry.SeqID,

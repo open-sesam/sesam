@@ -95,7 +95,7 @@ func (mk *MemoryKeyring) AddRecipient(user string, recp *Recipient) (bool, error
 			if existingUser != user {
 				// another user already is using this key.
 				return false, &DuplicatePubkeyError{
-					user:   user,
+					user:   existingUser,
 					pubkey: fmt.Sprintf("%v", recp),
 				}
 			}
@@ -152,7 +152,7 @@ func (mk *MemoryKeyring) SetSignPubKey(user string, newKey ed25519.PublicKey) er
 	for existingUser, pubKey := range mk.signPubs {
 		if existingUser != user && bytes.Equal(pubKey, newKey) {
 			return &DuplicatePubkeyError{
-				user:   user,
+				user:   existingUser,
 				pubkey: fmt.Sprintf("%v", newKey),
 			}
 		}
