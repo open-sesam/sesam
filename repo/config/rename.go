@@ -159,6 +159,10 @@ func (c *Config) UserChangeGroups(user string, groups []string) error {
 	}
 
 	if len(newGroups) > 0 {
+		if seq, err = blockGroups(src); err != nil {
+			return err
+		}
+
 		newGroupNode, err := marshalMapping(newGroups)
 		if err != nil {
 			return err

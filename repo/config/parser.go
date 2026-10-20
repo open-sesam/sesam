@@ -790,6 +790,30 @@ func blockRootList[T any](src *FileSource, key string) error {
 	return replaceValue(mv, map[string][]T{key: items})
 }
 
+// blockGroups is blockRootList for the groups: mapping. It returns the
+// (possibly new) mapping node.
+func blockGroups(src *FileSource) (*ast.MappingNode, error) {
+	groups, err := groupsNode(src.RootNode)
+	if err != nil || !groups.IsFlowStyle {
+		return groups, err
+	}
+
+	var decoded map[string][]string
+	if err := yaml.NodeToValue(groups, &decoded); err != nil {
+		return nil, fmt.Errorf("%s: decoding groups: %w", src.Path, err)
+	}
+
+	mv, err := findRootValue(src.RootNode, "groups")
+	if err != nil {
+		return nil, err
+	}
+	if err := replaceValue(mv, map[string]map[string][]string{"groups": decoded}); err != nil {
+		return nil, err
+	}
+
+	return groupsNode(src.RootNode)
+}
+
 func hasFlowStyle(seq *ast.SequenceNode) bool {
 	if seq.IsFlowStyle {
 		return true

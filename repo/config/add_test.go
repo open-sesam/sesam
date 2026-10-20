@@ -491,3 +491,35 @@ func TestFlowStyleListsTakeNewItems(t *testing.T) {
 		})
 	}
 }
+
+// A flow-style groups mapping takes a new group in block style too.
+func TestFlowStyleGroupsTakeNewGroup(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config) error
+	}{
+		{"tell", func(c *Config) error { return c.UserTell("bob", []string{"keyB"}, []string{"dev"}) }},
+		{"change groups", func(c *Config) error { return c.UserChangeGroups("alice", []string{"admin", "dev"}) }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			main := filepath.Join(t.TempDir(), "sesam.yml")
+			body := "users:\n  - name: alice\n    key:\n      - keyA\ngroups: {admin: [alice]}\nsecrets: []\n"
+			require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
+
+			cr, err := loadConfig(t, main)
+			require.NoError(t, err)
+			require.NoError(t, tt.mutate(cr))
+			require.NoError(t, cr.Save())
+
+			got, err := os.ReadFile(main)
+			require.NoError(t, err)
+			require.NotContains(t, string(got), "{")
+
+			_, groups := loadUsersGroups(t, main)
+			require.Contains(t, groups, "dev")
+			require.Equal(t, []string{"alice"}, groups["admin"])
+		})
+	}
+}

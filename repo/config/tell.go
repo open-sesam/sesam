@@ -99,6 +99,10 @@ func (c *Config) addGroupMember(group, member string) error {
 
 	mv := findMappingValue(groups, group)
 	if mv == nil {
+		if groups, err = blockGroups(src); err != nil {
+			return err
+		}
+
 		newGroup, err := marshalMapping(map[string][]string{group: {member}})
 		if err != nil {
 			return fmt.Errorf("%s: building group %q: %w", src.Path, group, err)
