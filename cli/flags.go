@@ -111,8 +111,8 @@ var flagsGeneral = []cli.Flag{
 	},
 	&cli.BoolFlag{
 		Name:    "no-color",
-		Usage:   "Disable color always",
-		Sources: cli.EnvVars("NO_COLOR", "SESAM_NO_COLOR"),
+		Usage:   "Disable color always (a non-empty $NO_COLOR does the same)",
+		Sources: cli.EnvVars("SESAM_NO_COLOR"),
 	},
 	&cli.BoolFlag{
 		Name:    "verbose",
