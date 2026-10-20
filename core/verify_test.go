@@ -771,6 +771,26 @@ func TestVerifyChainIntegrity(t *testing.T) {
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
 
+	t.Run("forged entry with stale seq_id", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+
+		// Unsigned, claims to be from admin and reuses seq_id 1, which the
+		// replay has already verified when it reaches this entry.
+		mallory := newTestUser(t, "mallory")
+		forged := newAuditEntry("admin", &DetailUserTell{
+			User: "mallory", Groups: []string{"admin"},
+			PubKeys: []UserPubKey{{Key: mallory.Recipient.String(), Source: KeySourceManual}}, SignPubKey: mallory.SignPubKey,
+		})
+		forged.SeqID = 1
+		forged.PreviousHash = al.Entries[0].Hash()
+		al.Entries = append(al.Entries, AuditEntrySigned{AuditEntry: *forged, Signature: "garbage"})
+
+		err := verifyStateFail(t, al, EmptyKeyring())
+		require.ErrorContains(t, err, "seq_id 1")
+	})
+
 	t.Run("tampered entry content", func(t *testing.T) {
 		sesamDir := testRepo(t)
 		admin := newTestUser(t, "admin")

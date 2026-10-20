@@ -1143,6 +1143,12 @@ func replay(state *VerifiedState, batched bool, upTo uint64) error {
 	var previousEntry *AuditEntrySigned
 	var checks []SigCheck
 	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
+		// Without this, a forged entry with a stale seq_id takes the skip below
+		// and is never checked.
+		if entry.SeqID != uint64(idx)+1 {
+			return fmt.Errorf("entry at position %d has seq_id %d", idx+1, entry.SeqID)
+		}
+
 		if entry.SeqID <= newState.VerifiedUntil {
 			previousEntry = entry
 			return nil
