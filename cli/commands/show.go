@@ -3,11 +3,13 @@ package commands
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
+	"filippo.io/age"
 	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/core"
 	"opensesam.org/sesam/repo"
@@ -106,6 +108,12 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 
 	ok, showErr := core.ShowSecret(root, ids, showPath, out)
 	if ok {
+		var noMatch *age.NoIdentityMatchError
+		if filepath.IsAbs(showPath) && errors.As(showErr, &noMatch) {
+			// textconv: an error would abort the whole git diff/log -p.
+			_, err := fmt.Fprintln(out, "<sesam: not a recipient of this secret>")
+			return err
+		}
 		if showErr != nil {
 			return showErr
 		}
