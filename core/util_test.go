@@ -223,6 +223,9 @@ func TestIsForbiddenPathRejectsDotSesam(t *testing.T) {
 		{"git dir", "a/.git/config", ".git"},
 		{"tmp dir", "a/.sesam-tmp/x", ".sesam-tmp"},
 		{"os separator", filepath.Join("a", ".sesam", "b"), ".sesam"},
+		{"git dir other case", ".Git/hooks/post-checkout", ".git"},
+		{"sesam dir other case", "a/.SESAM/b", ".sesam"},
+		{"sesam.yml other case", "SESAM.YML", "SESAM.YML"},
 	}
 
 	for _, tc := range cases {

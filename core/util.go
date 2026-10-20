@@ -231,11 +231,13 @@ func pathSegments(revealedPath string) []string {
 }
 
 func IsForbiddenPath(revealedPath string) error {
-	if b := filepath.Base(revealedPath); forbiddenBasenames[b] {
-		return fmt.Errorf("you can't seal %s", b)
+	// Case-insensitive filesystems (macOS, Windows) treat ".Git" as ".git".
+	lower := strings.ToLower(revealedPath)
+	if b := filepath.Base(lower); forbiddenBasenames[b] {
+		return fmt.Errorf("you can't seal %s", filepath.Base(revealedPath))
 	}
 
-	for _, elem := range pathSegments(revealedPath) {
+	for _, elem := range pathSegments(lower) {
 		if elem == ".sesam" {
 			return fmt.Errorf("encrypting files in .sesam/ is not allowed")
 		}
