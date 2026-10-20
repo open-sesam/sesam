@@ -46,6 +46,8 @@ exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
 exec sesam kill --user --generate-shell-completion
 stdout '^admin$'
 stdout '^bob$'
+exec sesam kill -u --generate-shell-completion
+stdout '^bob$'
 
 # `sesam tell --user <TAB>`: unlike `kill`, `tell` adds a NEW user, so it must
 # NOT complete existing user names (and must never print the bare "help").

@@ -140,7 +140,7 @@ func completeSecrets(ctx context.Context, cmd *cli.Command) {
 // needed. Otherwise it delegates to flag completion. Use it for `sesam kill`.
 func completeUsers(ctx context.Context, cmd *cli.Command) {
 	prev := rawPrevArg()
-	if prev == "--"+flagUser || prev == "-"+flagUser {
+	if prev == "--"+flagUser || prev == "-u" {
 		root := filepath.Join(cmd.String("sesam-dir"), ".sesam", "signkeys")
 		w := cmd.Root().Writer
 		entries, _ := os.ReadDir(root)
