@@ -545,7 +545,7 @@ func signerFor(root *os.Root, ids core.Identities, kr core.Keyring) (core.Signer
 			continue
 		}
 
-		return core.LoadSignKey(root, user, id.Identity)
+		return core.LoadUserSignKey(root, user, id.Identity, kr)
 	}
 
 	return nil, fmt.Errorf("none of the supplied identities maps to a known user; cannot merge")

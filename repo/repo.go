@@ -499,7 +499,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	}
 	r.whoami = whoami
 
-	signer, err := core.LoadSignKey(root, whoami, signIdentity)
+	signer, err := core.LoadUserSignKey(root, whoami, signIdentity, r.keyring)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
 	}
