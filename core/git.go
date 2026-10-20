@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -98,12 +99,25 @@ func verifyInitFileUnchangedWithRepo(sesamDir string, repo *git.Repository) (str
 	// The anchor is the commit that introduced the file: none of its parents
 	// carry it. Log order alone does not say which one that is - past a merge,
 	// the last commit visited may well sit on a branch that forked after init.
-	var anchorHash string
+	var introducers []string
 	for _, h := range order {
 		if !slices.ContainsFunc(carriers[h], func(p plumbing.Hash) bool { _, ok := carriers[p]; return ok }) {
-			anchorHash = h.String()
-			break
+			introducers = append(introducers, h.String())
 		}
+	}
+
+	// A second introducer means init was deleted and put back. That would move
+	// the anchor and let an older log start a fresh, shorter history.
+	if len(introducers) > 1 {
+		return "", fmt.Errorf(
+			".sesam/audit/init was removed and re-added in history (introduced by %s)",
+			strings.Join(introducers, ", "),
+		)
+	}
+
+	var anchorHash string
+	if len(introducers) == 1 {
+		anchorHash = introducers[0]
 	}
 
 	switch len(blobs) {

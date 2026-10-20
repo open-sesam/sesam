@@ -53,6 +53,29 @@ func TestVerifyInitFileUnchangedMultipleCommits(t *testing.T) {
 	require.Error(t, err, "should detect init file modification")
 }
 
+// Deleting init and putting the same bytes back moves the anchor to the
+// re-adding commit, so an older log would pass as a fresh history.
+func TestVerifyInitFileUnchangedRemovedAndReadded(t *testing.T) {
+	sesamDir, repo := testGitRepo(t)
+
+	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
+	require.NoError(t, os.WriteFile(initPath, []byte("stable-hash"), 0o600))
+	gitCommitAll(t, repo, "init")
+
+	wt, err := repo.Worktree()
+	require.NoError(t, err)
+	_, err = wt.Remove(".sesam/audit/init")
+	require.NoError(t, err)
+	writeSecret(t, sesamDir, "other.txt", "data")
+	gitCommitAll(t, repo, "drop init")
+
+	require.NoError(t, os.WriteFile(initPath, []byte("stable-hash"), 0o600))
+	gitCommitAll(t, repo, "restore init")
+
+	_, err = verifyInitFileUnchanged(sesamDir)
+	require.ErrorContains(t, err, "removed and re-added")
+}
+
 func TestVerifyInitFileUnchangedMultipleCommitsUnchanged(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 
