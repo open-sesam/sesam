@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"opensesam.org/sesam/core"
+	sesamConf "opensesam.org/sesam/repo/config"
 )
 
 // forkSuffix is the sibling directory that holds the staged copy of .sesam.
@@ -480,9 +481,12 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, additive, nested bool)
 
 		// cfg.SecretAdd reads empty groups as "no change", but for an existing
 		// secret `--group admin` declares exactly that.
+		err = sesamConf.ErrNoSuchSecret
 		if existed && len(groups) > 0 {
 			err = cfg.SecretChangeGroups(rel, vs.DeclaredGroups())
-		} else {
+		}
+		if errors.Is(err, sesamConf.ErrNoSuchSecret) {
+			// New, or missing from the config (e.g. removed by hand): add it.
 			err = cfg.SecretAdd(rel, nested, vs.DeclaredGroups())
 		}
 		if err != nil {

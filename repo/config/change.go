@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -12,6 +13,9 @@ import (
 func (c *Config) SecretChangeGroups(path string, access []string) error {
 	return c.changeSecretGroups(filepath.Clean(path), access)
 }
+
+// ErrNoSuchSecret is returned when the config has no entry for a secret.
+var ErrNoSuchSecret = errors.New("no secret found")
 
 // changeSecretGroups finds the secret whose revealed path equals rel (already
 // cleaned, repo-relative) and rewrites its access list in place.
@@ -34,7 +38,7 @@ func (c *Config) changeSecretGroups(rel string, access []string) error {
 		}
 	}
 
-	return fmt.Errorf("no secret found for %q", rel)
+	return fmt.Errorf("%w for %q", ErrNoSuchSecret, rel)
 }
 
 // setSecretAccess replaces (or adds, when absent) the access: list of a single
