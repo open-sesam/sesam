@@ -18,6 +18,14 @@ exec sesam tell --user bob --recipient $BOB_PUBKEY --recipient $CAROL_PUBKEY --r
 exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl
 exec sesam --identity $CAROL_KEY show .sesam/audit/log.jsonl
 
+# Keep specs are resolved before matching: a file:// spec keeps the key it holds
+# and only carol's key goes.
+exec sesam user remove-recipient --user bob --all-except --recipient $BOB_PUBKEY --recipient file://keys/extra.pub
+exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl
+! exec sesam --identity $CAROL_KEY show .sesam/audit/log.jsonl
+exec sesam user list --json
+stdout 'age1gtfhwme5a3sg9r7sp9vqu5awdzft4xd5qjesdq8lhry5wy8tfsfqw7fgt6'
+
 # Keep only bob's own key; carol and the extra device are removed at once.
 exec sesam user remove-recipient --user bob --all-except --recipient $BOB_PUBKEY
 
@@ -36,3 +44,6 @@ exec sesam verify
 # that leaves bob's remaining recipient in place.
 exec sesam user remove-recipient --user bob -a --recipient $BOB_PUBKEY
 exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl
+
+-- keys/extra.pub --
+age1gtfhwme5a3sg9r7sp9vqu5awdzft4xd5qjesdq8lhry5wy8tfsfqw7fgt6

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"slices"
 	"strings"
 
@@ -138,13 +139,25 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 			return fmt.Errorf("--all-except needs at least one recipient not to delete")
 		}
 
+		// Specs like github:bob or file:// only match stored keys once resolved.
+		root, err := os.OpenRoot(r.SesamDir())
+		if err != nil {
+			return err
+		}
+		defer func() { _ = root.Close() }()
+
+		keep, err := core.ParseAndResolveRecipients(ctx, root, recipients, nil)
+		if err != nil {
+			return err
+		}
+
 		recipientsToDelete := []string{}
 		for _, u := range users {
 			if u.Name == user {
 				// kick away all but the one mentioned:
-				for _, r := range u.Recps {
-					if !slices.Contains(recipients, r.String()) {
-						recipientsToDelete = append(recipientsToDelete, r.String())
+				for _, recp := range u.Recps {
+					if !slices.ContainsFunc(keep, func(k *core.Recipient) bool { return k.Equal(recp) }) {
+						recipientsToDelete = append(recipientsToDelete, recp.String())
 					}
 				}
 
