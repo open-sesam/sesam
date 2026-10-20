@@ -47,6 +47,13 @@ exec sesam doctor
 stdout 'sesam init --install-diff'
 stdout 'sesam init --install-alias'
 
+# --sesam-dir points doctor at the repo even from outside any git repo.
+cd $TMPDIR
+exec sesam --sesam-dir $WORK doctor
+stdout 'git-repository'
+! stdout 'not inside a git repository'
+cd $WORK
+
 -- copy.sh --
 #!/bin/sh
 cat > /dev/null

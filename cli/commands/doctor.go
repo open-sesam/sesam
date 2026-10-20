@@ -109,7 +109,7 @@ func buildCategories(ctx context.Context, env doctorEnv) []doctorCategory {
 		{"Installation", []DoctorCheck{sesamInPathCheck(), versionCheck(ctx, env)}},
 		{"Identity", []DoctorCheck{identityCheck(env)}},
 		{"Environment", []DoctorCheck{askpassCheck(), editorCheck(), clipboardCheck(ctx, env), completionCheck()}},
-		{"Git", []DoctorCheck{gitRepoCheck(), gitCheck(ctx, env)}},
+		{"Git", []DoctorCheck{gitRepoCheck(env), gitCheck(ctx, env)}},
 		{"Repository", []DoctorCheck{sesamDirCheck(env)}},
 	}
 }
@@ -490,13 +490,19 @@ func completionCheck() DoctorCheck {
 	}}
 }
 
-func gitRepoCheck() DoctorCheck {
+func gitRepoCheck(env doctorEnv) DoctorCheck {
 	return &genericCheck{name: "git-repository", run: func() DoctorDiagnosis {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return docFailed(fmt.Sprintf("could not determine the working directory: %v", err))
 		}
-		root, err := repo.GitWorktreeRoot(cwd)
+
+		// The repo --sesam-dir names, not necessarily the one around the cwd.
+		dir := cwd
+		if resolved, err := repo.ResolveSesamDir(env.sesamDir); err == nil {
+			dir = resolved
+		}
+		root, err := repo.GitWorktreeRoot(dir)
 		if err != nil {
 			return docIssue("not inside a git repository", "run `git init` or cd into your repository")
 		}
