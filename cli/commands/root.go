@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/core"
@@ -38,19 +37,4 @@ func HandleID(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 func HandleKeyringClearCache(_ context.Context, _ *cli.Command) error {
 	return core.DeleteAllCachedPassphrases()
-}
-
-func commaJoined(values []string) string {
-	if len(values) == 0 {
-		return ""
-	}
-
-	var out strings.Builder
-	out.WriteString(values[0])
-	for _, v := range values[1:] {
-		out.WriteString(",")
-		out.WriteString(v)
-	}
-
-	return out.String()
 }
