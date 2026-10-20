@@ -222,7 +222,7 @@ func SealStream(
 		return nil, err
 	}
 
-	if len(sigJSONBytes) > maxFooterSize {
+	if len(sigJSONBytes) >= maxFooterSize { // the reader also needs the newline before it
 		// This might in theory happen for very very long paths and/or exceedingly long users.
 		// If this ever becomes a real use case/problem we could go and make this dynamic.
 		return nil, fmt.Errorf("footer bigger than page: %d - please file a bug", len(sigJSONBytes))
