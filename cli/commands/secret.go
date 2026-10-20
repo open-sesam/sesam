@@ -2,9 +2,10 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
-	"path/filepath"
 
 	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/repo"
@@ -55,7 +56,16 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
+	var removed []string
 	if err := r.Update(func(s *repo.Stage) error {
+		secrets, err := s.ListSecrets(paths)
+		if err != nil {
+			return err
+		}
+		for _, secret := range secrets {
+			removed = append(removed, secret.RevealedPath)
+		}
+
 		if err := s.SecretRemove(paths); err != nil {
 			return err
 		}
@@ -68,9 +78,21 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return nil
 	}
 
-	// The plaintext lives at the sesam-relative path, which is not the argument
-	// as typed once the cwd is outside the sesam subtree.
-	return os.RemoveAll(filepath.Join(r.SesamDir(), paths[0]))
+	// Only the plaintext of the removed secrets: the argument may be a
+	// directory that also holds files sesam does not manage.
+	root, err := os.OpenRoot(r.SesamDir())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+
+	for _, p := range removed {
+		if err := root.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove plaintext %s: %w", p, err)
+		}
+	}
+
+	return nil
 }
 
 func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
