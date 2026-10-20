@@ -75,14 +75,14 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	showPath := object
-	if !filepath.IsAbs(object) {
-		cwd, _ := os.Getwd()
-		rel, relErr := toShowPath(sesamDir, cwd, object)
-		if relErr != nil {
-			return relErr
+	cwd, _ := os.Getwd()
+	showPath, err := toShowPath(sesamDir, cwd, object)
+	if err != nil {
+		if !filepath.IsAbs(object) {
+			return err
 		}
-		showPath = rel
+		// An absolute path outside the repo is git's textconv temp file.
+		showPath = object
 	}
 
 	root, rootErr := os.OpenRoot(sesamDir)
