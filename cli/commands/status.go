@@ -249,8 +249,10 @@ func printStatusTree(sesamDir string, status *repo.Status, all, showUsers bool) 
 
 func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	diff := cmd.Bool("diff")
+	json := cmd.Bool("json")
 	status, err := r.Status(repo.StatusOpts{
-		WriteDiffDirs: diff,
+		// JSON output has no diff and nobody would remove the decrypted copies.
+		WriteDiffDirs: diff && !json,
 		// The diff dir is for managed secrets only; the tree needs unmanaged
 		// files so the footer can count them (they are hidden unless --all).
 		IgnoreUnmanaged: diff,
@@ -260,7 +262,7 @@ func HandleStatus(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
-	if cmd.Bool("json") {
+	if json {
 		return printJSON(status)
 	}
 
