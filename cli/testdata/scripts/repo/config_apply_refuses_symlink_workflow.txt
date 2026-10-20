@@ -1,0 +1,17 @@
+# apply creates an empty file for a declared secret that is missing on disk.
+# A dangling symlink looks missing, but creating it would write its target.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+mkdir trap
+symlink x.env -> trap/created
+exec sh -c 'printf "  - path: x.env\n" >> sesam.yml'
+! exec sesam config apply
+stderr 'is a symlink'
+! exists trap/created

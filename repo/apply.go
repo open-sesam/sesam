@@ -210,6 +210,11 @@ func (s *Stage) applyChange(ctx context.Context, change diff.Change) error {
 // touchIfMissing creates an empty file at path (and its parent directories)
 // if nothing is there yet, recording what it created so Rollback can undo it.
 func (s *Stage) touchIfMissing(path string) error {
+	// Stat follows a dangling link and calls it missing; Create would follow it too.
+	if err := core.NoSymlinks(s.root, path); err != nil {
+		return fmt.Errorf("refusing to create: %w", err)
+	}
+
 	_, err := s.root.Stat(path)
 	if err == nil {
 		return nil
