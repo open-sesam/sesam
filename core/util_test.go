@@ -405,3 +405,33 @@ func TestPruneEmptyDirs(t *testing.T) {
 		})
 	}
 }
+
+func TestNoSymlinks(t *testing.T) {
+	sesamDir, root := testRepoRoot(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(sesamDir, "dir"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(sesamDir, "dir/file"), nil, 0o600))
+	require.NoError(t, os.Symlink("dir", filepath.Join(sesamDir, "linkdir")))
+	require.NoError(t, os.Symlink("dir/file", filepath.Join(sesamDir, "linkfile")))
+
+	cases := []struct {
+		path string
+		ok   bool
+	}{
+		{"dir/file", true},
+		{"dir/missing", true},
+		{"missing/deeper", true},
+		{"linkfile", false},
+		{"linkdir/file", false},
+		{"linkdir/missing", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			err := noSymlinks(root, tc.path)
+			if tc.ok {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "is a symlink")
+			}
+		})
+	}
+}

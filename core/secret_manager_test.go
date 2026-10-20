@@ -186,6 +186,30 @@ func TestSealAndRevealAll(t *testing.T) {
 	require.Equal(t, "secret-content", string(got))
 }
 
+// A committed symlink in place of the plaintext must not make the seal encrypt
+// whatever it points at (possibly a secret the target group cannot read).
+func TestSealRefusesSymlinkedPlaintext(t *testing.T) {
+	mgr := testSecretManagerFull(t)
+	writeSecret(t, mgr.SesamDir, "other", "admin-only")
+	require.NoError(t, os.MkdirAll(filepath.Join(mgr.SesamDir, "secrets"), 0o700))
+	require.NoError(t, os.Symlink("../other", filepath.Join(mgr.SesamDir, "secrets/test")))
+
+	require.ErrorContains(t, mgr.Seal(true, nil), "is a symlink")
+	require.NoFileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
+}
+
+// A committed symlinked directory (here secrets -> .git) must not let reveal
+// write into the place it points at.
+func TestRevealRefusesSymlinkedParent(t *testing.T) {
+	mgr := sealedSecretManager(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(mgr.SesamDir, "secrets")))
+	require.NoError(t, os.Mkdir(filepath.Join(mgr.SesamDir, "target"), 0o700))
+	require.NoError(t, os.Symlink("target", filepath.Join(mgr.SesamDir, "secrets")))
+
+	require.ErrorContains(t, mgr.RevealAll(), "is a symlink")
+	require.NoFileExists(t, filepath.Join(mgr.SesamDir, "target/test"))
+}
+
 func TestSealFailsMissingPlaintext(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	// Don't write the secret file - seal should fail.

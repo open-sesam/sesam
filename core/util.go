@@ -2,6 +2,7 @@ package core
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -289,6 +290,10 @@ func validSecretPath(root *os.Root, revealedPath string) error {
 		return err
 	}
 
+	if err := noSymlinks(root, revealedPath); err != nil {
+		return err
+	}
+
 	info, err := root.Stat(revealedPath)
 	if err != nil {
 		return fmt.Errorf("failed to stat %s: %w", revealedPath, err)
@@ -296,6 +301,28 @@ func validSecretPath(root *os.Root, revealedPath string) error {
 
 	if m := info.Mode(); !m.IsRegular() {
 		return fmt.Errorf("%s is not a regular file: %v", revealedPath, m)
+	}
+
+	return nil
+}
+
+// noSymlinks fails if path or one of its parents is a symlink. os.Root only
+// stops links that leave the root; one pointing inside (say at .git) would
+// still redirect sesam's reads and writes. Missing components are fine.
+func noSymlinks(root *os.Root, path string) error {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
+	for i := range parts {
+		p := filepath.Join(parts[:i+1]...)
+		info, err := root.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink", p)
+		}
 	}
 
 	return nil

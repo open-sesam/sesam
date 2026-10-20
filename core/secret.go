@@ -300,6 +300,10 @@ func revealSecretToPath(sm *SecretManager, revealedPath, dstPath string) error {
 
 	defer closeLogged(srcFd)
 
+	if err := noSymlinks(sm.root, dstPath); err != nil {
+		return fmt.Errorf("refusing to reveal: %w", err)
+	}
+
 	if err := sm.root.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
 		return fmt.Errorf("failed to create revealed dir: %w", err)
 	}

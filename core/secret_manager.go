@@ -290,6 +290,10 @@ func (sm *SecretManager) sealOrPreserve(revealedPath string, all bool, advice Se
 		return nil, fmt.Errorf("create objects subdir: %w", err)
 	}
 
+	if err := noSymlinks(sm.root, revealedPath); err != nil {
+		return nil, fmt.Errorf("refusing to seal: %w", err)
+	}
+
 	switch _, err := sm.root.Stat(revealedPath); {
 	case err == nil:
 		sealer := sm.Signer.UserName()
@@ -484,6 +488,10 @@ func (sm *SecretManager) SecretRemove(revealedPath string) error {
 func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) error {
 	if _, exists := sm.State.SecretExists(oldRevealedPath); !exists {
 		return fmt.Errorf("failed to move non-existing secret: %s", oldRevealedPath)
+	}
+
+	if err := noSymlinks(sm.root, newRevealedPath); err != nil {
+		return fmt.Errorf("refusing to move: %w", err)
 	}
 
 	_, statErr := sm.root.Stat(oldRevealedPath)
