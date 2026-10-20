@@ -497,16 +497,9 @@ we assume 'sesam show path/to/secret' as convenience.`,
 			_ = os.Setenv("NO_COLOR", "1")
 		}
 
-		logLevels := map[int]slog.Level{
-			-1: slog.LevelWarn,
-			+0: slog.LevelInfo,
-			+1: slog.LevelDebug,
-		}
-
-		logLevel, ok := logLevels[flagsVerboseCount-flagsQuietCount]
-		if !ok {
-			logLevel = slog.LevelDebug
-		}
+		// Each -v/-q moves one slog level (4 apart) from Info, clamped to Debug..Error.
+		logLevel := slog.LevelInfo - slog.Level(4*(flagsVerboseCount-flagsQuietCount))
+		logLevel = min(max(logLevel, slog.LevelDebug), slog.LevelError)
 
 		slog.SetDefault(slog.New(newPrettyHandler(os.Stderr, logLevel)))
 

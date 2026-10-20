@@ -1,0 +1,21 @@
+# Each -v/-q moves the log level one step from Info. Piling up -q must keep it
+# quiet, not wrap around to debug output.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+
+# `config diff` logs "in sync" at debug level.
+exec sesam -v config diff
+stderr 'in sync'
+
+exec sesam config diff
+! stderr 'in sync'
+
+exec sesam -qq config diff
+! stderr 'in sync'
+
+exec sesam -qqq config diff
+! stderr 'in sync'
