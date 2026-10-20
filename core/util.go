@@ -290,7 +290,7 @@ func validSecretPath(root *os.Root, revealedPath string) error {
 		return err
 	}
 
-	if err := noSymlinks(root, revealedPath); err != nil {
+	if err := NoSymlinks(root, revealedPath); err != nil {
 		return err
 	}
 
@@ -306,10 +306,10 @@ func validSecretPath(root *os.Root, revealedPath string) error {
 	return nil
 }
 
-// noSymlinks fails if path or one of its parents is a symlink. os.Root only
+// NoSymlinks fails if path or one of its parents is a symlink. os.Root only
 // stops links that leave the root; one pointing inside (say at .git) would
 // still redirect sesam's reads and writes. Missing components are fine.
-func noSymlinks(root *os.Root, path string) error {
+func NoSymlinks(root *os.Root, path string) error {
 	parts := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
 	for i := range parts {
 		p := filepath.Join(parts[:i+1]...)

@@ -317,7 +317,7 @@ func revealSecretToPath(sm *SecretManager, revealedPath, dstPath string) error {
 
 	defer closeLogged(srcFd)
 
-	if err := noSymlinks(sm.root, dstPath); err != nil {
+	if err := NoSymlinks(sm.root, dstPath); err != nil {
 		return fmt.Errorf("refusing to reveal: %w", err)
 	}
 

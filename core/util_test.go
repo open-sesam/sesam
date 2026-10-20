@@ -426,7 +426,7 @@ func TestNoSymlinks(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
-			err := noSymlinks(root, tc.path)
+			err := NoSymlinks(root, tc.path)
 			if tc.ok {
 				require.NoError(t, err)
 			} else {

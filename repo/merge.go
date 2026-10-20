@@ -488,6 +488,10 @@ func sealMergedSecret(root *os.Root, ids core.Identities, ours *localState, reve
 
 // writeRevealedFile atomically writes data to a revealed (root-relative) path.
 func writeRevealedFile(root *os.Root, relPath string, data []byte) error {
+	if err := core.NoSymlinks(root, relPath); err != nil {
+		return fmt.Errorf("refusing to write merged secret: %w", err)
+	}
+
 	if dir := filepath.Dir(relPath); dir != "." {
 		if err := root.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("create dir for %s: %w", relPath, err)
