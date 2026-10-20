@@ -2,6 +2,7 @@ package core
 
 import (
 	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,13 @@ import (
 	"slices"
 	"strings"
 )
+
+// JSONError marshals to its message; encoding/json turns a plain error into {}.
+type JSONError struct{ Err error }
+
+func (e JSONError) Error() string                { return e.Err.Error() }
+func (e JSONError) Unwrap() error                { return e.Err }
+func (e JSONError) MarshalJSON() ([]byte, error) { return json.Marshal(e.Err.Error()) }
 
 // PruneEmptyDirs removes directories beneath dir (a root-relative path) whose
 // subtree contains no regular files, deepest first. dir itself is never

@@ -101,7 +101,7 @@ func VerifyForgeIds(ctx context.Context, root *os.Root, vstate *VerifiedState, k
 					errMap[job.User] = append(errMap[job.User], ForgeReportError{
 						User:   job.User,
 						Source: job.Source,
-						Error:  err,
+						Error:  JSONError{Err: err},
 					})
 					mapMu.Unlock()
 					continue
