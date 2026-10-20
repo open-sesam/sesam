@@ -211,7 +211,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 			{
 				Name:          "rm",
 				Category:      catSecrets,
-				ArgsUsage:     "<path>",
+				ArgsUsage:     "<path> [<path>]...",
 				Flags:         flagsRm,
 				Action:        commands.WithRepo(commands.HandleRemove),
 				ShellComplete: completeSecrets,

@@ -46,12 +46,11 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 // HandleRemove removes a secret path from sesam metadata.
 func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
-	revealedPath := cmd.Args().First()
-	if revealedPath == "" {
+	if cmd.Args().Len() == 0 {
 		return fmt.Errorf("missing secret path: pass a path argument")
 	}
 
-	paths, err := toRepoPaths(r.SesamDir(), []string{revealedPath})
+	paths, err := toRepoPaths(r.SesamDir(), cmd.Args().Slice())
 	if err != nil {
 		return err
 	}
