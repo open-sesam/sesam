@@ -64,7 +64,7 @@ Alternatively:
 
 Alternatively:
 
-1. Edit `sesam.yml` and add the user there.
+1. Edit `sesam.yml` and remove the secret there.
 2. Run `sesam apply`.
 
 ## Removing persons

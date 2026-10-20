@@ -92,23 +92,26 @@ tree dir/of/secrets
     └── sesam.yml
 ```
 
-This will create a config hierarchy of `sesam.yml` files in the config:
+This creates one `sesam.yml` per directory, each included from the main one:
 
 ```yaml
 # Main sesam.yml:
 secrets:
-  - include: dir/of/secrets
+  - path: README.md
+    access:
+      - admin
+  - include: dir/of/secrets/sesam.yml
+  - include: dir/of/secrets/sub/sesam.yml
 ```
 
 ```yaml
-# dir/of/secrets sesam.yml:
+# dir/of/secrets/sesam.yml:
 secrets:
-  - include: sub
   - path: some_file
 ```
 
 ```yaml
-# sub sesam.yml:
+# dir/of/secrets/sub/sesam.yml:
 secrets:
   - path: another_file
 ```
@@ -117,8 +120,8 @@ Once done you can also add descriptions to the files in the config or do more fi
 
 ```admonish note
 If you ever create new files in the sub directories they do not automatically get added.
-Instead you need to run `sesam add` again. This will also remove secrets that are not there anymore, if any.
-In that sense, it works a bit like `git add`.
+Instead you need to run `sesam add` again. In that sense, it works a bit like `git add`.
+Secrets whose files you deleted stay tracked; remove them with `sesam rm`.
 ```
 
 ## Modifying secrets
@@ -191,13 +194,19 @@ be back with the old path.
 
 ```bash
 sesam ls
-├── README.sesam
-└── dir
-    └── of
-        └── secrets
-            ├── some_file
-            └── sub
-                └── another_file
+╭───────────────────────────────────────────────────────────────╮
+│                            Secrets                            │
+├─────────────────────────────────┬───────────────┬─────────────┤
+│ Path                            │ Access Groups │ Description │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ README.md                       │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ dir/of/secrets/some_file        │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ dir/of/secrets/sub/another_file │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│                                 │               │ 3 secrets   │
+╰─────────────────────────────────┴───────────────┴─────────────╯
 ```
 
 You can also use the ``--json`` switch to print it in a more scriptable way.

@@ -55,7 +55,7 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 
 **--memprofile**="": Write a heap profile at exit to `FILE` (pprof format) \[$SESAM_MEMPROFILE\]
 
-**--no-color**: Disable color always \[$NO_COLOR, $SESAM_NO_COLOR\]
+**--no-color**: Disable color always (a non-empty $NO_COLOR does the same) \[$SESAM_NO_COLOR\]
 
 **--quiet, -q**: Print less log output
 
