@@ -334,3 +334,18 @@ func TestUserChangeGroups_KeyWithComment(t *testing.T) {
 	require.Equal(t, []string{"bravo", "axolotl"}, groups["ops"])
 	require.Equal(t, []string{"axolotl", "root"}, groups["admin"])
 }
+
+// A new name YAML would read as a number must stay a string.
+func TestUserRename_NumericName(t *testing.T) {
+	dir := t.TempDir()
+	main := writeGroupsMain(t, dir)
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserRename("bravo", "123"))
+	require.NoError(t, cr.Save())
+
+	names, groups := loadUsersGroups(t, main)
+	require.Contains(t, names, "123")
+	require.Equal(t, []string{"axolotl", "123"}, groups["dev"])
+}

@@ -20,14 +20,14 @@ func (c *Config) renameUserInGroups(oldName, newName string) error {
 			return fmt.Errorf("%s: group %q value is not a sequence (got %T)", src.Path, item.Key.GetToken().Value, item.Value)
 		}
 
-		for _, userNode := range groupSeq.Values {
+		for i, userNode := range groupSeq.Values {
 			if userNode.GetToken().Value == oldName {
-				s, ok := userNode.(*ast.StringNode)
-				if !ok {
-					return fmt.Errorf("%s: group %q member is not a string (got %T)", src.Path, item.Key.GetToken().Value, userNode)
+				// Marshalled, so a name like `123` stays a quoted string.
+				n, err := marshalBody(newName)
+				if err != nil {
+					return err
 				}
-
-				s.Value = newName
+				groupSeq.Values[i] = n
 			}
 		}
 	}
