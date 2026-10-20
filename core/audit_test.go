@@ -437,6 +437,25 @@ func TestAddEntryAfterCloseRejected(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrClosed)
 }
 
+// A failed write must not leave the entry in memory for the next one to chain
+// onto, and the log refuses further appends.
+func TestAddEntryFailedWriteIsDropped(t *testing.T) {
+	sesamDir := testRepo(t)
+	admin := newTestUser(t, "admin")
+	al := initAuditLog(t, sesamDir, admin)
+	before := len(al.Entries)
+	require.NoError(t, al.fd.Close()) // writes now fail
+
+	seal := func() error {
+		_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSeal{RootHash: "x"}), nil)
+		return err
+	}
+	require.Error(t, seal())
+	require.Len(t, al.Entries, before)
+	require.ErrorContains(t, seal(), "unusable after a failed write")
+	require.Len(t, al.Entries, before)
+}
+
 func TestCloseIsIdempotent(t *testing.T) {
 	sesamDir := testRepo(t)
 	admin := newTestUser(t, "admin")

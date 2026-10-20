@@ -461,6 +461,9 @@ type AuditLog struct {
 	aead cipher.AEAD `json:"-"`
 
 	closed bool `json:"-"`
+
+	// writeErr is set once an append failed to reach disk.
+	writeErr error `json:"-"`
 }
 
 // operationFor returns the operation type for a given detail struct.
@@ -846,6 +849,9 @@ func (al *AuditLog) AddEntry(signer Signer, e *AuditEntry, verify func() error) 
 	if al.closed {
 		return nil, os.ErrClosed
 	}
+	if al.writeErr != nil {
+		return nil, fmt.Errorf("audit log unusable after a failed write: %w", al.writeErr)
+	}
 
 	e.SeqID = uint64(len(al.Entries)) + 1
 
@@ -880,20 +886,41 @@ func (al *AuditLog) AddEntry(signer Signer, e *AuditEntry, verify func() error) 
 		return aes, nil
 	}
 
-	b64EntryData, err := aes.Encrypt(al.aead)
-	if err != nil {
-		return nil, fmt.Errorf("encrypt entry: %w", err)
-	}
-
-	if _, err := al.fd.Write(b64EntryData); err != nil {
-		return nil, fmt.Errorf("append entry to log: %w", err)
-	}
-
-	if err := al.fd.Sync(); err != nil {
-		return nil, fmt.Errorf("sync audit log: %w", err)
+	if err := al.persist(aes); err != nil {
+		// The verified state already counts this entry, so later entries
+		// would chain onto one that is not on disk. Refuse them instead;
+		// the caller rolls back.
+		al.Entries = al.Entries[:len(al.Entries)-1]
+		al.writeErr = err
+		return nil, err
 	}
 
 	return aes, nil
+}
+
+// persist appends one entry to the log file, cutting off a partial write.
+func (al *AuditLog) persist(aes *AuditEntrySigned) error {
+	b64EntryData, err := aes.Encrypt(al.aead)
+	if err != nil {
+		return fmt.Errorf("encrypt entry: %w", err)
+	}
+
+	info, err := al.fd.Stat()
+	if err != nil {
+		return fmt.Errorf("stat audit log: %w", err)
+	}
+
+	if _, err := al.fd.Write(b64EntryData); err != nil {
+		_ = al.fd.Truncate(info.Size())
+		return fmt.Errorf("append entry to log: %w", err)
+	}
+
+	if err := al.fd.Sync(); err != nil {
+		_ = al.fd.Truncate(info.Size())
+		return fmt.Errorf("sync audit log: %w", err)
+	}
+
+	return nil
 }
 
 // AsJSON encodes the audit log as JSON to the specified writer
