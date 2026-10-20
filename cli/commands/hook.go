@@ -46,10 +46,12 @@ func silentWithRepo(verifyMode repo.VerifyMode, action RepoAction) cli.ActionFun
 		}
 
 		r, err := repo.Load(sesamDir, cmd.StringSlice("identity"), repo.RepoOpts{
-			Interactive: true,
-			LockTimeout: cmd.Duration("lock-timeout"),
-			VerifyMode:  verifyMode,
-			InMerge:     mergeState(sesamDir).InProgress(),
+			Interactive:     true,
+			LockTimeout:     cmd.Duration("lock-timeout"),
+			AskpassProgram:  cmd.String("askpass"),
+			AskpassRequired: askpassRequired(),
+			VerifyMode:      verifyMode,
+			InMerge:         mergeState(sesamDir).InProgress(),
 		})
 		if err != nil {
 			return err
