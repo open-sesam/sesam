@@ -298,7 +298,7 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 		{"merge.sesam-merge.driver", "merge", "sesam-merge-secret" + suffix, "driver", mergeSecretCmd, true},
 		{"merge.sesam-merge.name", "merge", "sesam-merge-log" + suffix, "name", "sesam-audit-log merge driver", false},
 		{"merge.sesam-merge.driver", "merge", "sesam-merge-log" + suffix, "driver", mergeLogCmd, false},
-		{"merge.sesam-ours.driver", "merge", "sesam-ours", "driver", "true", false},
+		{"merge.sesam-ours.driver", "merge", "sesam-ours" + suffix, "driver", "true", false},
 		{"diff.sesam-diff.textconv", "diff", "sesam-diff" + suffix, "textconv", textconvCmd, true},
 		{"alias.sesam", "alias", "", "sesam", gitAliasCmd, true},
 	}
