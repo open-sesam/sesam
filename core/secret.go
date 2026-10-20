@@ -237,6 +237,23 @@ func SealStream(
 
 // readFooter seeks to the footer & parses it.
 // It returns a reader that sees only the age content and the parsed signature.
+// cipherTextMatches hashes the ciphertext in ageRd (as returned by readFooter)
+// and compares it with the footer's CipherTextHash.
+func cipherTextMatches(ageRd io.Reader, footer *secretFooter, revealedPath string) (bool, error) {
+	newHash, _, err := hasherForStored(footer.CipherTextHash)
+	if err != nil {
+		return false, err
+	}
+
+	h := newHash()
+	if _, err := io.Copy(h, ageRd); err != nil {
+		return false, err
+	}
+	_, _ = h.Write([]byte(revealedPath))
+
+	return hashEqual(footer.CipherTextHash, h.Sum(nil))
+}
+
 func readFooter(fd io.ReadSeeker) (io.ReadSeeker, *secretFooter, error) {
 	fileSize, err := fd.Seek(0, io.SeekEnd)
 	if err != nil {

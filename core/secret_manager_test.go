@@ -997,6 +997,20 @@ func TestNeedsSeal(t *testing.T) {
 		require.True(t, needs)
 		require.NotNil(t, footer)
 	})
+
+	t.Run("ciphertext not matching the footer needs a seal", func(t *testing.T) {
+		mgr, path := seal(t, "x")
+		obj := filepath.Join(mgr.SesamDir, mgr.cryptPath(path))
+		data, err := os.ReadFile(obj)
+		require.NoError(t, err)
+		// Last ciphertext byte, right before the footer line.
+		data[bytes.LastIndexByte(data, '\n')-1] ^= 0xff
+		require.NoError(t, os.WriteFile(obj, data, 0o600))
+
+		needs, _, err := mgr.needsSeal(path)
+		require.NoError(t, err)
+		require.True(t, needs)
+	})
 }
 
 // TestMatchObject pins down the check every sync state rests on: a plaintext

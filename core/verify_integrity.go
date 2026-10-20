@@ -2,7 +2,6 @@ package core
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"slices"
 )
@@ -85,21 +84,7 @@ func verifyIntegritySingleSecret(
 		return
 	}
 
-	newHash, _, err := hasherForStored(sig.CipherTextHash)
-	if err != nil {
-		report.add(vs.RevealedPath, fmt.Sprintf("bad footer: %v", err))
-		return
-	}
-
-	h := newHash()
-	if _, err := io.Copy(h, ageRd); err != nil {
-		report.add(vs.RevealedPath, fmt.Sprintf("failed to hash .sesam file: %v", err))
-		return
-	}
-
-	_, _ = h.Write([]byte(vs.RevealedPath))
-
-	ok, err := hashEqual(sig.CipherTextHash, h.Sum(nil))
+	ok, err := cipherTextMatches(ageRd, sig, vs.RevealedPath)
 	if err != nil {
 		report.add(vs.RevealedPath, fmt.Sprintf("failed to check ciphertext hash: %v", err))
 		return
