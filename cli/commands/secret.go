@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/core"
 	"opensesam.org/sesam/repo"
 )
 
@@ -55,6 +56,16 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
+	force := cmd.Bool("force")
+
+	// Only the plaintext of the removed secrets: the argument may be a
+	// directory that also holds files sesam does not manage.
+	root, err := os.OpenRoot(r.SesamDir())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+
 	var removed []string
 	if err := r.Update(func(s *repo.Stage) error {
 		secrets, err := s.ListSecrets(paths)
@@ -62,6 +73,12 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 			return err
 		}
 		for _, secret := range secrets {
+			// Checked before anything is committed, so a refusal changes nothing.
+			if force {
+				if err := core.NoSymlinks(root, secret.RevealedPath); err != nil {
+					return fmt.Errorf("refusing to remove plaintext: %w", err)
+				}
+			}
 			removed = append(removed, secret.RevealedPath)
 		}
 
@@ -73,17 +90,9 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return err
 	}
 
-	if !cmd.Bool("force") {
+	if !force {
 		return nil
 	}
-
-	// Only the plaintext of the removed secrets: the argument may be a
-	// directory that also holds files sesam does not manage.
-	root, err := os.OpenRoot(r.SesamDir())
-	if err != nil {
-		return err
-	}
-	defer func() { _ = root.Close() }()
 
 	for _, p := range removed {
 		if err := root.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {

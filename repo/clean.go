@@ -46,6 +46,9 @@ func deleteRevealedSecrets(root *os.Root, secrets []core.SecretAccess, checkFn f
 		}
 
 		if allow {
+			if err := core.NoSymlinks(root, secret.RevealedPath); err != nil {
+				return fmt.Errorf("refusing to delete: %w", err)
+			}
 			if err := root.Remove(secret.RevealedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("failed to delete %s: %w", secret.RevealedPath, err)
 			}
