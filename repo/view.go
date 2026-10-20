@@ -356,7 +356,7 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 
 	if opts.Integrity {
 		report.Integrity = core.VerifyIntegrity(v.root, v.vstate, v.keyring)
-		if report.Integrity.IsZero() {
+		if report.Integrity.OK() {
 			report.Integrity = nil
 		}
 	}

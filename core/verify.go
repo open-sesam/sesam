@@ -247,20 +247,7 @@ func (s *VerifiedState) UsersForSecret(revealedPath string) []string {
 		return nil
 	}
 
-	secret := &s.Secrets[idx]
-	groups := groupsToMap(secret.AccessGroups)
-
-	var users []string
-	for _, user := range s.Users {
-		for _, g := range user.Groups {
-			if groups[g] {
-				users = append(users, user.Name)
-				break
-			}
-		}
-	}
-
-	return users
+	return s.UserForGroups(s.Secrets[idx].AccessGroups)
 }
 
 func (s *VerifiedState) AdminUserCount() (adminUsersFound int, adminName string) {
@@ -1272,22 +1259,9 @@ func replay(state *VerifiedState, batched bool, upTo uint64) error {
 // (a stage's forked audit log and cloned keyring). The user/secret slices are
 // deep-copied so staged FeedEntry calls cannot mutate the live view.
 func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
-	users := make([]VerifiedUser, len(s.Users))
-	for i, u := range s.Users {
-		u.Groups = slices.Clone(u.Groups)
-		u.Recps = slices.Clone(u.Recps)
-		users[i] = u
-	}
-
-	secrets := make([]SecretAccess, len(s.Secrets))
-	for i, sec := range s.Secrets {
-		sec.AccessGroups = slices.Clone(sec.AccessGroups)
-		secrets[i] = sec
-	}
-
 	cloned := &VerifiedState{
-		Users:             users,
-		Secrets:           secrets,
+		Users:             cloneVerifiedUsers(s.Users),
+		Secrets:           cloneVerifiedSecrets(s.Secrets),
 		SealRequiredSeqID: s.SealRequiredSeqID,
 		VerifiedUntil:     s.VerifiedUntil,
 		LastSealRootHash:  s.LastSealRootHash,

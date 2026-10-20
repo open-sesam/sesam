@@ -388,20 +388,7 @@ func readFileLimitedRoot(root *os.Root, path string, size int64) ([]byte, error)
 		return nil, err
 	}
 
-	info, err := fd.Stat()
-	if err != nil {
-		_ = fd.Close()
-		return nil, err
-	}
-
-	if is := info.Size(); is > size {
-		_ = fd.Close()
-		return nil, fmt.Errorf("file would be limited: %s: %d > %d", path, is, size)
-	}
-
-	//nolint:errcheck
-	defer fd.Close()
-	return io.ReadAll(io.LimitReader(fd, size))
+	return readLimited(fd, path, size)
 }
 
 func ReadFileLimited(path string, size int64) ([]byte, error) {
@@ -411,18 +398,22 @@ func ReadFileLimited(path string, size int64) ([]byte, error) {
 		return nil, err
 	}
 
+	return readLimited(fd, path, size)
+}
+
+// readLimited reads fd in full, refusing files larger than size. It closes fd.
+func readLimited(fd *os.File, path string, size int64) ([]byte, error) {
+	//nolint:errcheck
+	defer fd.Close()
+
 	info, err := fd.Stat()
 	if err != nil {
-		_ = fd.Close()
 		return nil, err
 	}
 
 	if is := info.Size(); is > size {
-		_ = fd.Close()
 		return nil, fmt.Errorf("file would be limited: %s: %d > %d", path, is, size)
 	}
 
-	//nolint:errcheck
-	defer fd.Close()
 	return io.ReadAll(io.LimitReader(fd, size))
 }

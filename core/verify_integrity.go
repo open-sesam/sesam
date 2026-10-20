@@ -21,10 +21,6 @@ type IntegrityReport struct {
 	Errors []IntegrityError `json:"errors,omitempty"`
 }
 
-func (ir *IntegrityReport) IsZero() bool {
-	return len(ir.Errors) == 0
-}
-
 func (ie IntegrityError) Error() string {
 	if ie.RevealedPath != "" {
 		return fmt.Sprintf("%s: %s", ie.RevealedPath, ie.Message)
