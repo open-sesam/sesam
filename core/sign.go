@@ -70,12 +70,12 @@ func LoadSignKey(root *os.Root, user string, userIdentity age.Identity) (Signer,
 		return nil, fmt.Errorf("failed to load sign key %s: %w", signKeyPath, err)
 	}
 
+	defer closeLogged(cryptedSignPrivKeyFd)
+
 	dr, err := age.Decrypt(io.LimitReader(cryptedSignPrivKeyFd, 16*1024), userIdentity)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt header of signing key: %w", err)
 	}
-
-	defer closeLogged(cryptedSignPrivKeyFd)
 
 	signingKeyEncoded, err := io.ReadAll(dr)
 	if err != nil {
