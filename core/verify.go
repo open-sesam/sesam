@@ -760,6 +760,8 @@ func verifyUserRmRecipients(log *AuditLog, state *VerifiedState, entry *AuditEnt
 		})
 	}
 
+	// The removed key still decrypts every object until the next seal.
+	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
 
@@ -892,6 +894,7 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 	})
 	state.rebuildSecretIndex() // positions shifted
 
+	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
 

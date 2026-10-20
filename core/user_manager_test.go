@@ -522,6 +522,7 @@ func TestUserRmRecipientSuccess(t *testing.T) {
 	vu, _ := um.state.UserExists("bob")
 	require.Len(t, vu.Recps, 1)
 	require.True(t, vu.Recps[0].Equal(bob.Recipient), "the surviving recipient must be the one we kept")
+	require.Equal(t, um.state.VerifiedUntil, um.state.SealRequiredSeqID, "removing a key must mark a seal as pending")
 
 	// The audit key was rotated: the removed device is locked out of the log...
 	_, err := LoadAuditLog(um.root, Identities{bobDevice.Identity})

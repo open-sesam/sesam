@@ -607,6 +607,7 @@ func TestVerifySecretRemoveBasic(t *testing.T) {
 	state := verifyState(t, al, EmptyKeyring())
 	_, exists := state.SecretExists("secrets/db")
 	require.False(t, exists)
+	require.Equal(t, state.VerifiedUntil, state.SealRequiredSeqID)
 }
 
 func TestVerifySecretRemoveNegative(t *testing.T) {
