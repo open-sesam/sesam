@@ -78,8 +78,7 @@ func HandleConfigApply(ctx context.Context, cmd *cli.Command, r *repo.Repo) erro
 			return nil
 		}
 
-		_, err = s.Seal(repo.SealOpts{All: cmd.Bool("seal-all")})
-		return err
+		return sealStage(cmd, r, s)
 	}); err != nil {
 		var committedErr *repo.CommittedChangesError
 		if errors.As(err, &committedErr) {

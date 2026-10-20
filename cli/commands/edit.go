@@ -52,5 +52,5 @@ func HandleEditSecret(ctx context.Context, cmd *cli.Command, r *repo.Repo) error
 		editorCmd.Stdout = os.Stdout
 		editorCmd.Stderr = os.Stderr
 		return editorCmd.Run()
-	}, cmd.Bool("seal-all"))
+	}, repo.SealOpts{All: cmd.Bool("seal-all"), Sync: syncOpts(r.SesamDir())})
 }
