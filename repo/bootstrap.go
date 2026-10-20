@@ -4,16 +4,17 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
 
 	"github.com/go-git/go-git/v5"
-	gogitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/sahib/renameio/v2"
 	"opensesam.org/sesam/core"
 )
@@ -233,6 +234,14 @@ type gitConfigEntry struct {
 	report     bool
 }
 
+// key is the real git-config key; display may leave out the per-repo suffix.
+func (e gitConfigEntry) key() string {
+	if e.subsection == "" {
+		return e.section + "." + e.option
+	}
+	return e.section + "." + e.subsection + "." + e.option
+}
+
 // gitAliasCmd is what `git sesam` runs. git executes `!` aliases from the
 // worktree root, so with a nested sesam dir a bare `!sesam` would look for
 // `.sesam/` at the root and resolve relative arguments against it. git exports
@@ -333,93 +342,91 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 }
 
 func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) error {
-	cfg, err := r.ConfigScoped(gogitconfig.LocalScope)
-	if err != nil {
-		return fmt.Errorf("read local git config: %w", err)
-	}
-
 	entries, err := expectedGitConfig(r, sesamDir)
 	if err != nil {
 		return err
 	}
-	val := func(display string) string {
-		for _, e := range entries {
-			if e.display == display {
-				return e.value
-			}
-		}
-		return ""
-	}
 
-	if opts.GitConfigOpts.InstallMerge {
-		opts.PrintStep("  • Installing merge driver…")
+	set := func(prefix string) error {
 		for _, entry := range entries {
-			if strings.HasPrefix(entry.display, "merge.") {
-				section := cfg.Raw.Section(entry.section).Subsection(entry.subsection)
-				section.SetOption(entry.option, entry.value)
+			if strings.HasPrefix(entry.display, prefix) {
+				if err := gitConfigLocal(sesamDir, "--replace-all", entry.key(), entry.value); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
 	}
 
-	if opts.GitConfigOpts.InstallDiff {
-		opts.PrintStep("  • installing diff driver…")
-		for _, entry := range entries {
-			if strings.HasPrefix(entry.display, "diff.") {
-				section := cfg.Raw.Section(entry.section).Subsection(entry.subsection)
-				section.SetOption(entry.option, entry.value)
-			}
+	steps := []struct {
+		enabled bool
+		msg     string
+		prefix  string
+	}{
+		{opts.GitConfigOpts.InstallMerge, "  • Installing merge driver…", "merge."},
+		{opts.GitConfigOpts.InstallDiff, "  • installing diff driver…", "diff."},
+		{opts.GitConfigOpts.InstallAlias, "  • Making sure sesam can be called as `git sesam`…", "alias.sesam"},
+		{opts.GitConfigOpts.InstallHooks, "  • Installing pre-commit+post-checkout hooks…", "hook."},
+	}
+	for _, step := range steps {
+		if !step.enabled {
+			continue
 		}
-	}
-
-	if opts.GitConfigOpts.InstallAlias {
-		opts.PrintStep("  • Making sure sesam can be called as `git sesam`…")
-		aliasSection := cfg.Raw.Section("alias")
-		aliasSection.SetOption("sesam", val("alias.sesam"))
-	}
-
-	if opts.GitConfigOpts.InstallHooks {
-		opts.PrintStep("  • Installing pre-commit+post-checkout hooks…")
-		for _, entry := range entries {
-			if strings.HasPrefix(entry.display, "hook.") {
-				section := cfg.Raw.Section(entry.section).Subsection(entry.subsection)
-				section.SetOption(entry.option, entry.value)
-			}
+		opts.PrintStep(step.msg)
+		if err := set(step.prefix); err != nil {
+			return err
 		}
-	}
-
-	if err := r.SetConfig(cfg); err != nil {
-		return fmt.Errorf("write git config: %w", err)
 	}
 
 	return nil
 }
 
 func clearGitConfig(r *git.Repository, sesamDir, sectionPrefix string) error {
-	cfg, err := r.ConfigScoped(gogitconfig.LocalScope)
-	if err != nil {
-		return fmt.Errorf("read local git config: %w", err)
-	}
-
 	entries, err := expectedGitConfig(r, sesamDir)
 	if err != nil {
 		return fmt.Errorf("expected config: %w", err)
 	}
 
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.section, sectionPrefix) {
-			if entry.subsection == "" {
-				cfg.Raw.Section(entry.section).RemoveOption(entry.option)
-			} else {
-				cfg.Raw = cfg.Raw.RemoveSubsection(entry.section, entry.subsection)
-			}
+		if !strings.HasPrefix(entry.section, sectionPrefix) {
+			continue
+		}
+
+		if entry.subsection == "" {
+			err = gitConfigLocal(sesamDir, "--unset-all", entry.key())
+		} else {
+			err = gitConfigLocal(sesamDir, "--remove-section", entry.section+"."+entry.subsection)
+		}
+		if err != nil && !errors.Is(err, errGitConfigMissing) {
+			return err
 		}
 	}
 
-	if err := r.SetConfig(cfg); err != nil {
-		return fmt.Errorf("write git config: %w", err)
+	return nil
+}
+
+// errGitConfigMissing is returned by gitConfigLocal when the key or section to
+// remove does not exist.
+var errGitConfigMissing = errors.New("not set")
+
+// gitConfigLocal runs `git config --local` in sesamDir. go-git's SetConfig
+// would rewrite the whole file through its own model, dropping comments,
+// repeated keys such as insteadOf and turning pushurl into a second url.
+func gitConfigLocal(sesamDir string, args ...string) error {
+	//nolint:gosec // fixed git subcommand; keys and values are sesam's own.
+	cmd := exec.CommandContext(context.Background(), "git", append([]string{"-C", sesamDir, "config", "--local"}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
 	}
 
-	return nil
+	// --unset-all exits 5 for a missing key, --remove-section 128 with this message.
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && (exitErr.ExitCode() == 5 || bytes.Contains(out, []byte("no such section"))) {
+		return errGitConfigMissing
+	}
+
+	return fmt.Errorf("git config %s: %w: %s", strings.Join(args, " "), err, bytes.TrimSpace(out))
 }
 
 // sesamSubsectionSuffix returns the suffix appended to sesam's git-config
