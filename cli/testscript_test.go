@@ -341,7 +341,8 @@ func runProbe() {
 			os.Exit(2)
 		}
 	case "signal":
-		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		// SIGKILL: the race runtime may defer a catchable signal past os.Exit.
+		if err := syscall.Kill(os.Getpid(), syscall.SIGKILL); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}

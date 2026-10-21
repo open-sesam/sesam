@@ -244,7 +244,7 @@ Run a command with secret files and dotenv variables
 
 **--env-file**="": Inject variables from an exact dotenv secret file (repeatable)
 
-**--env-pattern**="": Additional regex matching sesam-relative dotenv paths; .env suffixes are always recognized (repeatable)
+**--env-pattern**="": Additional regex matching sesam-relative dotenv paths; .env suffixes are always recognized (repeatable) \[$SESAM_RUN_ENV_PATTERN\]
 
 **--help, -h**: show help
 

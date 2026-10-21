@@ -361,6 +361,24 @@ Decrypt all secrets available to the current user
 .PP
 \fB--help, -h\fP: show help
 
+.SS run
+Run a command with secret files and dotenv variables
+
+.PP
+\fB--all\fP: Select all managed secrets accessible to the current identity
+
+.PP
+\fB--env-file\fP="": Inject variables from an exact dotenv secret file (repeatable)
+
+.PP
+\fB--env-pattern\fP="": Additional regex matching sesam-relative dotenv paths; .env suffixes are always recognized (repeatable) [$SESAM_RUN_ENV_PATTERN]
+
+.PP
+\fB--help, -h\fP: show help
+
+.PP
+\fB--secret\fP="": Select path or VARIABLE=path; unnamed dotenv files are parsed, other files use SESAM_PATH names holding /dev/fd paths (repeatable)
+
 .SS status, s
 Show overview over repo state (revealed, sealed, unmanaged, ...)
 
@@ -1109,6 +1127,81 @@ versions \fBgit\fR holds, so nothing has to be remembered on your machine:
 \fBR\fR recipients changed: the content agrees, but who may read it changed. \fBsesam seal\fR re-encrypts it.
 .IP \(bu 2
 \fBU\fR conflicted: a merge left conflict markers in the plaintext.
+
+.SS Running a command with secrets
+Use \fBsesam run\fR to give a command access to selected secrets without revealing
+them in your worktree:
+
+.EX
+sesam run \\
+  --secret TLS_CERT=certs/client.pem \\
+  --env-file deploy/production.env \\
+  -- ./deploy
+.EE
+
+.IP \(bu 2
+\fB--secret TLS_CERT=certs/client.pem\fR gives the command a read-only file and sets
+\fBTLS_CERT\fR to its path, such as \fB/dev/fd/3\fR\&. Have your program read that variable;
+it must keep the inherited file descriptor open to use the path.
+.IP \(bu 2
+\fB--env-file deploy/production.env\fR adds the variables declared in that dotenv
+file to the command's environment. Sesam parses the file without shell expansion.
+
+.PP
+Both options select managed files and can be repeated. Sesam verifies the secrets
+and your access before starting the command. It rejects conflicting variable
+names, including names already set in your environment, and releases the
+repository lock before the command starts.
+
+.PP
+Sesam starts the command as a direct child, forwards \fBSIGHUP\fR and \fBSIGTERM\fR,
+and waits for it. \fBSIGINT\fR and \fBSIGQUIT\fR are not forwarded: the terminal
+delivers them to the command directly, so sesam only keeps waiting. It
+returns the command's exit code, or
+\fB128 + signal\fR if a signal terminates it. If sesam is killed with \fBSIGKILL\fR or
+crashes, the command may keep running and retain access to its inherited secret
+descriptors.
+
+.PP
+On Linux, each secret lives in an anonymous memory file (\fBmemfd\fR) that never
+touches a filesystem and is sealed read-only before the command starts. On
+macOS, sesam removes each temporary file's name before writing secret bytes.
+Either way the open file works through \fB/dev/fd\fR, and the OS releases it when
+the last reference closes.
+
+.SS Automatic selection and names
+Without an explicit variable name, sesam recognizes paths ending in \fB\&.env\fR as
+dotenv files. Other files get a \fBSESAM_\fR variable derived from their
+sesam-relative path: ASCII letters are uppercased and characters other than
+ASCII letters and digits become underscores. The variable still contains a
+descriptor path, not the file's contents:
+
+.EX
+sesam run --secret postgres/backup/password.txt -- ./my-service
+# SESAM_POSTGRES_BACKUP_PASSWORD_TXT=/dev/fd/3
+
+sesam run --secret deploy/production.env -- ./my-service
+# Variables declared in deploy/production.env are injected directly.
+.EE
+
+.PP
+Use \fB--all\fR to select every managed secret accessible to your current identity.
+Automatically selected paths are processed in sorted order. Additional dotenv
+filename regexes can be supplied with repeatable \fB--env-pattern\fR flags or the
+\fBSESAM_RUN_ENV_PATTERN\fR environment variable. Regexes match sesam-relative paths
+with \fB/\fR separators; the \fB\&.env\fR suffix is always recognized.
+
+.EX
+sesam run --all --env-pattern '(^|/)\\.env\\.' -- ./my-service
+.EE
+
+.PP
+Explicit selectors take precedence over \fB--all\fR\&. For example,
+\fB--secret CONFIG=production.env\fR forces file-descriptor delivery even for a
+dotenv filename. \fB--env-file\fR forces literal dotenv parsing regardless of the
+filename. Generated names that collide with each other, dotenv variables, or
+the inherited environment are rejected rather than overwritten. Existing size
+limits also apply to \fB--all\fR; it does not bypass them.
 
 .SS Removing secrets
 If you have deleted files you can run this:
