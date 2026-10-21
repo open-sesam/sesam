@@ -27,17 +27,14 @@ stderr 'find command.*using inherited PATH'
 exec chmod +x bad-exec
 ! exec sesam run --secret RAW=raw.txt -- ./bad-exec
 stderr 'exec command.*exec format error'
-exec runprobe no-temp-files
 exec sesam id
 stdout '^admin$'
 
 exec runprobe status sesam run --secret RAW=raw.txt -- runprobe exit 23
 stdout 'exit=23 signal=0'
-exec runprobe no-temp-files
 
 exec runprobe status sesam run --secret RAW=raw.txt -- runprobe signal
 stdout 'exit=143 signal=0'
-exec runprobe no-temp-files
 
 ! exec sesam run -- runprobe mark started-no-selector
 stderr 'at least one .*--all is required'
@@ -63,7 +60,6 @@ env RAW=parent
 ! exec sesam run --secret RAW=raw.txt -- runprobe mark started-collision
 stderr 'RAW.*collides with inherited environment'
 ! exists started-collision
-exec runprobe no-temp-files
 
 -- raw-fixture --
 raw

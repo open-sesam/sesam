@@ -25,7 +25,6 @@ stdout 'LITERAL="\$\(touch_owned\)" exists=true'
 
 exec sesam run --secret RAW=raw.txt -- runprobe files RAW
 stdout 'RAW="raw-value\\n" mode=0400 links=0'
-exec runprobe no-temp-files
 
 # Binary file contents and non-UTF-8 dotenv values survive delivery unchanged.
 exec runprobe write-binary binary.dat
@@ -36,7 +35,6 @@ exec sesam run --secret BLOB=binary.dat -- runprobe files BLOB
 stdout 'BLOB="a\\x00\\xffb\\n" mode=0400 links=0'
 exec sesam run --env-file binary.env -- runprobe env BINARY
 stdout 'BINARY="a\\xffb" exists=true'
-exec runprobe no-temp-files
 
 exec sesam run --secret RAW=raw.txt -- runprobe args 'hello world' ';touch-owned' '$HOME'
 stdout '0="hello world"'

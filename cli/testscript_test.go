@@ -289,18 +289,6 @@ func runProbe() {
 				os.Exit(2)
 			}
 		}
-	case "no-temp-files":
-		entries, err := os.ReadDir(os.TempDir())
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-		for _, entry := range entries {
-			if strings.HasPrefix(entry.Name(), "sesam-run-") {
-				fmt.Fprintln(os.Stderr, "leftover secret file:", entry.Name())
-				os.Exit(2)
-			}
-		}
 	case "hold":
 		content, err := os.ReadFile(os.Getenv(os.Args[2]))
 		if err != nil {

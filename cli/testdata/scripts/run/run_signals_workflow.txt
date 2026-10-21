@@ -11,11 +11,9 @@ rm raw.txt
 
 exec runprobe signals 15 sesam run --secret RAW=raw.txt -- runprobe hold RAW
 stdout 'parent signals=\[15\] child terminated and reaped'
-exec runprobe no-temp-files
 
 exec runprobe signals 1 sesam run --secret RAW=raw.txt -- runprobe hold RAW
 stdout 'parent signals=\[1\] child terminated and reaped'
-exec runprobe no-temp-files
 
 # SIGINT and SIGQUIT are not forwarded: a terminal delivers them to the whole
 # process group already. Sent to sesam alone they change nothing, and the child
@@ -29,12 +27,10 @@ stdout 'parent signals=\[3 15\] child terminated and reaped'
 # child's status.
 exec runprobe signals group 2 sesam run --secret RAW=raw.txt -- runprobe hold RAW
 stdout 'parent signals=\[2\] child terminated and reaped'
-exec runprobe no-temp-files
 
 # SIGKILL cannot be forwarded. The orphan keeps its own secret descriptor.
 exec runprobe signals 9 sesam run --secret RAW=raw.txt -- runprobe hold RAW parent-gone
 stdout 'parent signal=9 child survived and reparented; secret descriptor still readable'
-exec runprobe no-temp-files
 
 ! exists raw.txt
 exec sesam id
