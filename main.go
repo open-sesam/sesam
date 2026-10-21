@@ -12,6 +12,7 @@ import (
 	"github.com/muesli/termenv"
 	"opensesam.org/sesam/cli"
 	"opensesam.org/sesam/cli/commands"
+	"opensesam.org/sesam/repo"
 )
 
 func printError(msg string) {
@@ -30,9 +31,9 @@ func main() {
 
 	// A command run by `sesam run` reported its own failure already; sesam only
 	// reproduces its status.
-	var exitErr *commands.ExitError
+	var exitErr *repo.ExitError
 	if errors.As(err, &exitErr) {
-		exitErr.Terminate()
+		os.Exit(exitErr.ExitCode())
 	}
 
 	mergeExitErr := new(commands.ExitCodeError)

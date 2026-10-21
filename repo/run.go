@@ -2,18 +2,27 @@ package repo
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
-	"unsafe"
+	"syscall"
 
 	"opensesam.org/sesam/core"
 )
 
 // RunOptions contains canonical sesam-relative selectors for sesam run.
 type RunOptions struct {
-	Secrets  []RunSecret
-	EnvFiles []string
+	All         bool
+	Secrets     []RunSecret
+	EnvFiles    []string
+	EnvPatterns []string
 }
 
 type RunSecret struct {
@@ -32,6 +41,21 @@ type RunPreparation struct {
 	entries []runEntry
 }
 
+// RunCommand is the process Run starts: a resolved executable, its arguments,
+// and the environment to inherit.
+type RunCommand struct {
+	Path string
+	Args []string
+	Env  []string
+}
+
+// ExitError carries how a command started by Run terminated so that the
+// caller can reproduce that status. Exactly one of Code and Signal is set.
+type ExitError struct {
+	Code   int
+	Signal syscall.Signal
+}
+
 type runEntry struct {
 	name  string
 	value []byte
@@ -45,7 +69,6 @@ const (
 	runMaxValueSize         = 64 * 1024
 	runMaxInjectedSize      = 64 * 1024
 	runMaxInjectedVars      = 256
-	runMaxProcessSize       = 96 * 1024
 )
 
 // PrepareRun reads selected encrypted objects without revealing worktree files.
@@ -56,15 +79,32 @@ func (v *View) PrepareRun(opts RunOptions) (*RunPreparation, error) {
 	if v.isClosed() {
 		return nil, ErrClosed
 	}
+	if opts.All {
+		selected := make(map[string]bool)
+		for _, secret := range opts.Secrets {
+			selected[secret.Path] = true
+		}
+		for _, path := range opts.EnvFiles {
+			selected[path] = true
+		}
+		var paths []string
+		for _, secret := range v.vstate.Secrets {
+			if !selected[secret.RevealedPath] && v.vstate.UserHasAccess(v.whoami, secret.AccessGroups) {
+				paths = append(paths, secret.RevealedPath)
+			}
+		}
+		sort.Strings(paths)
+		opts.Secrets = append([]RunSecret(nil), opts.Secrets...)
+		for _, path := range paths {
+			opts.Secrets = append(opts.Secrets, RunSecret{Path: path})
+		}
+	}
 	return prepareRun(opts, v.secret.RevealSecretBytes)
 }
 
 // Environment binds file paths to explicit names and validates the complete
 // child environment without changing the caller's environment.
-func (p *RunPreparation) Environment(inherited, arguments, filePaths []string) ([]string, error) {
-	if len(arguments) == 0 || arguments[0] == "" {
-		return nil, fmt.Errorf("a command is required after --")
-	}
+func (p *RunPreparation) Environment(inherited, filePaths []string) ([]string, error) {
 	if len(filePaths) != len(p.Files) {
 		return nil, fmt.Errorf("expected %d secret file paths, got %d", len(p.Files), len(filePaths))
 	}
@@ -114,18 +154,118 @@ func (p *RunPreparation) Environment(inherited, arguments, filePaths []string) (
 			return nil, err
 		}
 	}
-	if size := runProcessSize(arguments, env); size > runMaxProcessSize {
-		return nil, fmt.Errorf("command arguments and environment require %d bytes, exceeding %d-byte budget", size, runMaxProcessSize)
-	}
 	return env, nil
+}
+
+// Run starts the command with file secrets as inherited descriptors and dotenv
+// entries in its environment, forwards signals, and waits for it. Close the
+// repository first: the command may run for hours and may call sesam itself.
+func (p *RunPreparation) Run(ctx context.Context, command RunCommand) error {
+	filePaths := make([]string, len(p.Files))
+	for i := range filePaths {
+		filePaths[i] = fmt.Sprintf("/dev/fd/%d", 3+i)
+	}
+	env, err := p.Environment(command.Env, filePaths)
+	if err != nil {
+		return err
+	}
+
+	files := make([]*os.File, 0, len(p.Files))
+	defer func() {
+		for _, file := range files {
+			_ = file.Close()
+		}
+	}()
+	for _, secret := range p.Files {
+		file, err := runSecretFile(secret.Content)
+		if err != nil {
+			return fmt.Errorf("prepare file secret %q: %w", secret.Name, err)
+		}
+		files = append(files, file)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	signals := make(chan os.Signal, 8)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGHUP, syscall.SIGTERM)
+	defer signal.Stop(signals)
+
+	child := exec.Cmd{
+		Path:       command.Path,
+		Args:       command.Args,
+		Env:        env,
+		Stdin:      os.Stdin,
+		Stdout:     os.Stdout,
+		Stderr:     os.Stderr,
+		ExtraFiles: files,
+	}
+	if err := child.Start(); err != nil {
+		return fmt.Errorf("exec command %q: %w", command.Args[0], err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- child.Wait() }()
+	cancelled := ctx.Done()
+	for {
+		select {
+		case err := <-done:
+			return commandStatus(command.Args[0], err)
+		case received := <-signals:
+			// The terminal delivers SIGINT and SIGQUIT to the whole process group,
+			// so the child already has them; forwarding would deliver them twice.
+			if received != syscall.SIGINT && received != syscall.SIGQUIT {
+				_ = child.Process.Signal(received)
+			}
+		case <-cancelled:
+			_ = child.Process.Signal(syscall.SIGTERM)
+			cancelled = nil
+		}
+	}
+}
+
+func (e *ExitError) Error() string {
+	if e.Signal != 0 {
+		return fmt.Sprintf("command terminated by signal %d (%s)", e.Signal, e.Signal)
+	}
+	return fmt.Sprintf("command exited with status %d", e.Code)
+}
+
+// ExitCode uses the shell convention of 128+signal for signaled commands.
+func (e *ExitError) ExitCode() int {
+	if e.Signal != 0 {
+		return 128 + int(e.Signal)
+	}
+	return e.Code
 }
 
 func prepareRun(opts RunOptions, reveal runRevealFunc) (*RunPreparation, error) {
 	if len(opts.Secrets)+len(opts.EnvFiles) == 0 {
-		return nil, fmt.Errorf("at least one --secret or --env-file is required")
+		if opts.All {
+			return nil, fmt.Errorf("no accessible secrets selected")
+		}
+		return nil, fmt.Errorf("at least one --secret, --env-file, or --all is required")
 	}
 	if err := validateRunSelectors(opts.Secrets, opts.EnvFiles); err != nil {
 		return nil, err
+	}
+	patterns := make([]*regexp.Regexp, 0, len(opts.EnvPatterns))
+	for _, pattern := range opts.EnvPatterns {
+		compiled, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid env pattern %q: %w", pattern, err)
+		}
+		patterns = append(patterns, compiled)
+	}
+	isEnvFile := func(path string) bool {
+		if strings.HasSuffix(path, ".env") {
+			return true
+		}
+		for _, pattern := range patterns {
+			if pattern.MatchString(filepath.ToSlash(path)) {
+				return true
+			}
+		}
+		return false
 	}
 
 	prepared := &RunPreparation{}
@@ -144,13 +284,31 @@ func prepareRun(opts RunOptions, reveal runRevealFunc) (*RunPreparation, error) 
 		}
 		return plaintext, nil
 	}
+	addEnvFile := func(path string, document []byte) error {
+		entries, err := parseDotenv(document)
+		if err != nil {
+			return fmt.Errorf("parse env file %s: %w", path, err)
+		}
+		prepared.entries = append(prepared.entries, entries...)
+		return nil
+	}
 
 	for _, secret := range opts.Secrets {
 		value, err := read(secret.Path)
 		if err != nil {
 			return nil, fmt.Errorf("read secret %s: %w", secret.Path, err)
 		}
-		prepared.Files = append(prepared.Files, RunFile{Name: secret.Name, Content: value})
+		name := secret.Name
+		if name == "" {
+			if isEnvFile(secret.Path) {
+				if err := addEnvFile(secret.Path, value); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			name = runSecretName(secret.Path)
+		}
+		prepared.Files = append(prepared.Files, RunFile{Name: name, Content: value})
 	}
 
 	for _, path := range opts.EnvFiles {
@@ -158,14 +316,25 @@ func prepareRun(opts RunOptions, reveal runRevealFunc) (*RunPreparation, error) 
 		if err != nil {
 			return nil, fmt.Errorf("read env file %s: %w", path, err)
 		}
-		entries, err := parseDotenv(document)
-		if err != nil {
-			return nil, fmt.Errorf("parse env file %s: %w", path, err)
+		if err := addEnvFile(path, document); err != nil {
+			return nil, err
 		}
-		prepared.entries = append(prepared.entries, entries...)
 	}
 
 	return prepared, nil
+}
+
+func runSecretName(path string) string {
+	return "SESAM_" + strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r - 'a' + 'A'
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		default:
+			return '_'
+		}
+	}, filepath.ToSlash(path))
 }
 
 func validateRunSelectors(secrets []RunSecret, envFiles []string) error {
@@ -178,14 +347,14 @@ func validateRunSelectors(secrets []RunSecret, envFiles []string) error {
 			if previous == mode {
 				return fmt.Errorf("duplicate %s selector %q", mode, path)
 			}
-			return fmt.Errorf("path %q selected as both secret and env file", path)
+			return fmt.Errorf("path %q selected as both %s and %s", path, previous, mode)
 		}
 		seen[path] = mode
 		return nil
 	}
 
 	for _, secret := range secrets {
-		if secret.Name == "" || !isDotenvNameStart(secret.Name[0]) {
+		if secret.Name != "" && !isDotenvNameStart(secret.Name[0]) {
 			return fmt.Errorf("invalid secret variable name %q", secret.Name)
 		}
 		for i := 1; i < len(secret.Name); i++ {
@@ -307,13 +476,19 @@ func isDotenvNameByte(b byte) bool {
 	return isDotenvNameStart(b) || b >= '0' && b <= '9'
 }
 
-func runProcessSize(arguments, environment []string) int {
-	size := (len(arguments) + len(environment) + 2) * int(unsafe.Sizeof(uintptr(0)))
-	for _, argument := range arguments {
-		size += len(argument) + 1
+// commandStatus translates the result of waiting into an ExitError describing
+// how the command terminated, or into a plain error if waiting itself failed.
+func commandStatus(name string, waitErr error) error {
+	if waitErr == nil {
+		return nil
 	}
-	for _, entry := range environment {
-		size += len(entry) + 1
+
+	var exitErr *exec.ExitError
+	if !errors.As(waitErr, &exitErr) {
+		return fmt.Errorf("wait for command %q: %w", name, waitErr)
 	}
-	return size
+	if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+		return &ExitError{Signal: status.Signal()}
+	}
+	return &ExitError{Code: exitErr.ExitCode()}
 }

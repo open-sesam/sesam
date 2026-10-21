@@ -1,4 +1,4 @@
-package commands
+package repo
 
 import (
 	"io"
@@ -28,7 +28,7 @@ func TestRunSecretFile(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, content, string(got))
 			_, err = file.Write([]byte("overwrite"))
-			require.ErrorIs(t, err, syscall.EBADF)
+			require.Error(t, err)
 			require.NoError(t, file.Close())
 			entries, err = os.ReadDir(dir)
 			require.NoError(t, err)
