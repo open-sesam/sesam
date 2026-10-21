@@ -1,6 +1,7 @@
 package config
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,7 +11,8 @@ import (
 )
 
 // loadConfig opens a root on the config's directory and loads it relative to
-// that root, mirroring how the repo wires config in production.
+// that root, mirroring how the repo wires config in production. Every
+// sesam.yml below the main file's directory is loaded as a sub-config.
 func loadConfig(t *testing.T, mainPath string) (*Config, error) {
 	t.Helper()
 	root, err := os.OpenRoot(filepath.Dir(mainPath))
@@ -18,7 +20,23 @@ func loadConfig(t *testing.T, mainPath string) (*Config, error) {
 		return nil, err
 	}
 	t.Cleanup(func() { _ = root.Close() })
-	return Load(root, filepath.Base(mainPath))
+
+	main := filepath.Base(mainPath)
+	var subs []string
+	err = fs.WalkDir(root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && d.Name() == "sesam.yml" && p != main {
+			subs = append(subs, filepath.FromSlash(p))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return Load(root, main, subs)
 }
 
 // fileSourceFromYAML builds a *FileSource straight from a YAML body, without
@@ -76,11 +94,11 @@ func Test_readYamlFile(t *testing.T) {
 	require.Equal(t, map[string][]string{"group1": {"test_user"}}, groups)
 }
 
-// Test_resolveIncludeSecretsOnly verifies that a sub-file carrying only a
+// Test_resolveSubSecretsOnly verifies that a sub-file carrying only a
 // top-level secrets: key (which goccy parses as a single *ast.MappingValueNode
 // rather than an *ast.MappingNode) resolves and merges into the main file.
-func Test_resolveIncludeSecretsOnly(t *testing.T) {
-	cr, err := loadConfig(t, "testdata/main_with_include.yaml")
+func Test_resolveSubSecretsOnly(t *testing.T) {
+	cr, err := loadConfig(t, "testdata/main.yaml")
 	require.NoError(t, err)
 
 	secrets, err := cr.Secrets()
@@ -91,26 +109,25 @@ func Test_resolveIncludeSecretsOnly(t *testing.T) {
 		paths = append(paths, s.Path)
 	}
 
-	// The included secrets-only sub-file is flattened ahead of the main file's
-	// own secret, in include order.
-	require.Equal(t, []string{"nested.txt", "top.txt"}, paths)
+	// The main file's own secrets come first, then the sub-file's.
+	require.Equal(t, []string{"top.txt", "nested.txt"}, paths)
 }
 
 func TestMerged(t *testing.T) {
-	cr, err := loadConfig(t, "testdata/main_with_include.yaml")
+	cr, err := loadConfig(t, "testdata/main.yaml")
 	require.NoError(t, err)
 
 	doc, err := cr.Merged()
 	require.NoError(t, err)
 
-	// The include is flattened in place and its path made relative to the
-	// main file.
+	// The sub-file is flattened after the main file and its path made
+	// relative to the main file.
 	require.Equal(t, &Document{
 		Users:  []User{{Name: "test_user", Key: []string{"key"}}},
 		Groups: map[string][]string{"group1": {"test_user"}},
 		Secrets: []Secret{
-			{Path: "sub/nested.txt", Access: []string{"group1"}},
 			{Path: "top.txt", Access: []string{"group1"}},
+			{Path: "sub/nested.txt", Access: []string{"group1"}},
 		},
 	}, doc)
 }
@@ -141,9 +158,6 @@ func TestSchema_MatchesStructs(t *testing.T) {
 		{"swap unknown field", "secrets:\n  - path: a\n    swap:\n      - cmd: x\n        bogus: y\n", false},
 		{"swap without cmd", "secrets:\n  - path: a\n    swap:\n      - {}\n", false},
 		{"unknown secret field", "secrets:\n  - path: a\n    bogus: 1\n", false},
-
-		// Include entries are their own form and take nothing else.
-		{"include with extra field", "secrets:\n  - include: sub\n    desc: hi\n", false},
 
 		// Only the root tolerates x- keys, so anchors have somewhere to live.
 		{"toplevel x- key", "x-anchors:\n  access:\n    - g1\nsecrets:\n  - path: a\n", true},
@@ -259,28 +273,56 @@ secrets:
 	require.Contains(t, string(out), "<<: *shared", "alias must not be expanded on Save")
 }
 
-// TestLoad_RejectsSelfInclude: a file that includes itself must be rejected
-// rather than recursing forever.
-func TestLoad_RejectsSelfInclude(t *testing.T) {
-	dir := t.TempDir()
-	main := filepath.Join(dir, "sesam.yml")
-	require.NoError(t, os.WriteFile(main, []byte("secrets:\n  - include: sesam.yml\n"), 0o644))
+// TestLoad_RejectsInclude: the include: form was replaced by discovery, so a
+// leftover entry - in the main file or a sub-file - fails with a hint
+// instead of a generic schema error.
+func TestLoad_RejectsInclude(t *testing.T) {
+	tests := []struct {
+		name string
+		main string
+		sub  string
+	}{
+		{"in main", "secrets:\n  - include: sub\n", "secrets: []\n"},
+		{"in sub", "secrets: []\n", "secrets:\n  - path: a\n  - include: ..\n"},
+	}
 
-	_, err := loadConfig(t, main)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "include loop")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			main := filepath.Join(dir, "sesam.yml")
+			require.NoError(t, os.WriteFile(main, []byte(tt.main), 0o644))
+			require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "sesam.yml"), []byte(tt.sub), 0o644))
+
+			_, err := loadConfig(t, main)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "include is no longer supported")
+		})
+	}
 }
 
-// TestLoad_RejectsIncludeCycle: a cycle across several files (main → a → main)
-// must be detected, so parsing terminates instead of looping endlessly.
-func TestLoad_RejectsIncludeCycle(t *testing.T) {
+// TestCreate_PrunesUnusedSubs: Create registers known sub-configs as empty, so
+// a rebuild puts secrets back into them and Prune deletes the ones that got
+// nothing - otherwise their stale content would be loaded next to the rebuild.
+func TestCreate_PrunesUnusedSubs(t *testing.T) {
 	dir := t.TempDir()
-	main := filepath.Join(dir, "sesam.yml")
-	require.NoError(t, os.WriteFile(main, []byte("secrets:\n  - include: sub\n"), 0o644))
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "sesam.yml"), []byte("secrets:\n  - include: ..\n"), 0o644))
+	for _, sub := range []string{"keep", "drop"} {
+		touch(t, filepath.Join(dir, sub, "x.txt"))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, sub, "sesam.yml"), []byte("secrets:\n  - path: x.txt\n"), 0o644))
+	}
 
-	_, err := loadConfig(t, main)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "include loop")
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
+
+	cr, err := Create(root, "sesam.yml", []string{filepath.Join("keep", "sesam.yml"), filepath.Join("drop", "sesam.yml")})
+	require.NoError(t, err)
+	require.NoError(t, cr.SecretAdd(filepath.Join("keep", "x.txt"), false, nil))
+	require.NoError(t, cr.EnsureSecretsKey())
+	require.NoError(t, cr.Prune())
+	require.NoError(t, cr.Save())
+
+	require.Equal(t, []string{filepath.Join("drop", "sesam.yml")}, cr.Deleted())
+	require.False(t, exists(filepath.Join(dir, "drop", "sesam.yml")))
+	require.Equal(t, []string{"x.txt"}, resolvedPaths(t, filepath.Join(dir, "sesam.yml")))
 }

@@ -1,0 +1,77 @@
+# Every sesam.yml below the main one is part of the config - there is no
+# include: to wire it up. Directories holding their own .sesam belong to a
+# separate repo and are skipped.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# --nested gives the directory its own sesam.yml, and the main file does not
+# reference it.
+mkdir svc
+cp token.env svc/token.env
+exec sesam add --nested svc/token.env
+exists svc/sesam.yml
+grep 'path: token.env' svc/sesam.yml
+! grep 'include' sesam.yml
+! grep 'token' sesam.yml
+
+# Without --nested, a secret lands in the nearest existing sesam.yml.
+mkdir svc/deep
+cp token.env svc/deep/other.env
+exec sesam add svc/deep/other.env
+grep 'path: deep/other.env' svc/sesam.yml
+! exists svc/deep/sesam.yml
+
+# A hand-written sub-config is picked up by diff and apply.
+mkdir app
+cp token.env app/key.env
+cp app.yml app/sesam.yml
+! exec sesam config diff
+stdout 'declared/app/sesam.yml'
+stdout '\+  - path: key.env'
+exec sesam apply
+exec sesam config diff
+! stdout .
+
+# A separate sesam repo below this one is not part of its config.
+mkdir other/.sesam
+cp broken.yml other/sesam.yml
+exec sesam config diff
+! stdout .
+
+# A broken sub-config fails the load, naming the file.
+mkdir junk
+cp broken.yml junk/sesam.yml
+! exec sesam config diff
+stderr 'junk/sesam.yml'
+rm junk
+
+# A leftover include fails with a hint instead of a schema error.
+cp sesam.yml sesam.yml.bak
+exec sh -c 'printf "  - include: svc\n" >> sesam.yml'
+! exec sesam config diff
+stderr 'include is no longer supported'
+cp sesam.yml.bak sesam.yml
+
+# A rewrite from the audit log keeps each secret in its sub-config.
+cp broken.yml sesam.yml
+exec sesam config reset --force
+stderr 'wrote it fresh'
+grep 'path: token.env' svc/sesam.yml
+grep 'path: key.env' app/sesam.yml
+! grep 'token' sesam.yml
+exec sesam config diff
+! stdout .
+
+-- token.env --
+TOKEN=hunter2
+-- app.yml --
+secrets:
+  - path: key.env
+-- broken.yml --
+this: is: not valid yaml at all

@@ -153,8 +153,7 @@ func TestConfigDiffLeavesLiveTreeAlone(t *testing.T) {
 		"  admin:\n"+
 		"    - admin\n"+
 		"secrets:\n"+
-		"  - path: README.md\n"+
-		"  - include: svc/sesam.yml\n")
+		"  - path: README.md\n")
 
 	changes, err := r.ConfigDiff(t.Context(), ConfigDiffOpts{WriteDiffDir: true})
 	require.NoError(t, err)
@@ -167,10 +166,9 @@ func TestConfigDiffLeavesLiveTreeAlone(t *testing.T) {
 	require.Contains(t, readFileString(t, subPath), "token")
 
 	// In the copies, the declared side keeps it and the verified side has it
-	// pruned - including the include that pointed at it.
+	// pruned.
 	require.Contains(t, readDiffFile(t, changes.DiffDir, DeclaredTreeDir, "svc/sesam.yml"), "token")
 	require.NoFileExists(t, filepath.Join(changes.DiffDir, VerifiedTreeDir, "svc", configFileName))
-	require.NotContains(t, readDiffFile(t, changes.DiffDir, VerifiedTreeDir, configFileName), "include")
 }
 
 // TestConfigDiffRejectsUnappliable checks that, when validating, a declaration

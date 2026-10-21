@@ -242,7 +242,7 @@ Add a secret file or directory at `PATH`
 
 **--help, -h**: show help
 
-**--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file
+**--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the nearest existing one
 
 **--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
 
@@ -262,7 +262,7 @@ Move a secret file or directory to a new name
 
 **--help, -h**: show help
 
-**--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file
+**--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the nearest existing one
 
 ### edit
 
@@ -474,7 +474,7 @@ Show the diff between config and actual state (extra args are passed to git)
 
 ### config print
 
-Print the whole config as one document, includes resolved (YAML, or JSON with --json)
+Print the whole config as one document, sub-configs merged (YAML, or JSON with --json)
 
 **--help, -h**: show help
 
@@ -828,26 +828,25 @@ tree dir/of/secrets
     └── sesam.yml
 ```
 
-This will create a config hierarchy of `sesam.yml` files in the config:
+This will create a hierarchy of `sesam.yml` files, each declaring the secrets
+of its own directory:
 
 ```yaml
-# Main sesam.yml:
+# dir/of/secrets/sesam.yml:
 secrets:
-  - include: dir/of/secrets
-```
-
-```yaml
-# dir/of/secrets sesam.yml:
-secrets:
-  - include: sub
   - path: some_file
 ```
 
 ```yaml
-# sub sesam.yml:
+# dir/of/secrets/sub/sesam.yml:
 secrets:
   - path: another_file
 ```
+
+There is no need to reference them from the main `sesam.yml`: every
+`sesam.yml` below it is picked up automatically. Only directories that hold
+their own `.sesam` (a separate sesam repository) are skipped. Without
+`--nested`, a secret is added to the nearest existing `sesam.yml` above it.
 
 Once done you can also add descriptions to the files in the config or do more fine-tuning with the available config keys.
 
@@ -1535,8 +1534,6 @@ We can model such a case using **template secrets**:
       - type: password
         name: smtp_password
         encoding: shell # json, url, ...
-      # You can also include other files in here if you want to.
-      - include: other.yml
 ```
 
 # KEY ROTATION

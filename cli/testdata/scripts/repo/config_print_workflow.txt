@@ -1,5 +1,5 @@
 # `sesam config print` renders the whole config as one document, with every
-# include flattened into it - YAML by default, JSON with --json.
+# sub-config flattened into it - YAML by default, JSON with --json.
 
 exec git init
 exec git config user.email test@sesam.dev
@@ -8,7 +8,7 @@ exec git config user.name 'Sesam Test'
 exec sesam init --user admin
 exec sesam tell --user bob --recipient age1tdy2pxsfwpxxe0c9cuwty8zpsv6uuhf4zyug5f9lfl982lh3tctqrw2ll7 --group dev
 
-# A secret in a sub-config, included from the main file.
+# A secret in a sub-config of its own.
 mkdir svc
 cp token.env svc/token.env
 exec sesam add --nested --group dev svc/token.env
