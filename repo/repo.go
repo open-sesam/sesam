@@ -289,7 +289,6 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, err
 	}
 
-	// A fresh repo has no sub-configs yet.
 	configRepo, err := sesamConf.Load(root, "sesam.yml", nil)
 	if err != nil {
 		return nil, err
