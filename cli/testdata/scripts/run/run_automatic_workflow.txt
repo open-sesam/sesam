@@ -1,0 +1,60 @@
+# Unnamed selectors and --all classify dotenv files and generate file names.
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam init --user admin
+mkdir postgres
+mkdir postgres/backup
+cp raw-fixture postgres/backup/password.txt
+cp env-fixture production.env
+cp custom-fixture .env.production
+exec sesam add postgres/backup/password.txt production.env .env.production
+rm postgres/backup/password.txt production.env .env.production
+
+exec sesam run --secret postgres/backup/password.txt -- runprobe files SESAM_POSTGRES_BACKUP_PASSWORD_TXT
+stdout 'SESAM_POSTGRES_BACKUP_PASSWORD_TXT="raw-value\\n" mode=0400 links=0'
+
+exec sesam run --secret production.env -- runprobe env AUTO_TOKEN SESAM_PRODUCTION_ENV
+stdout 'AUTO_TOKEN="dotenv-value" exists=true'
+stdout 'SESAM_PRODUCTION_ENV="" exists=false'
+
+exec sesam run --secret .env.production --env-pattern '\.vars$' --env-pattern '^\.env\.[a-z]{1,12}$' -- runprobe env CUSTOM_TOKEN
+stdout 'CUSTOM_TOKEN="custom-value" exists=true'
+
+env SESAM_RUN_ENV_PATTERN='^\.env\.[a-z]{1,12}$'
+exec sesam run --secret .env.production -- runprobe env CUSTOM_TOKEN
+stdout 'CUSTOM_TOKEN="custom-value" exists=true'
+env SESAM_RUN_ENV_PATTERN=
+
+# Explicit mappings force file delivery even for dotenv suffixes.
+exec sesam run --secret CONFIG=production.env -- runprobe files CONFIG
+stdout 'CONFIG="AUTO_TOKEN=dotenv-value\\n" mode=0400 links=0'
+
+exec sesam run --all --env-pattern '^\.env\.' -- runprobe env AUTO_TOKEN CUSTOM_TOKEN SESAM_POSTGRES_BACKUP_PASSWORD_TXT SESAM_README_MD
+stdout 'AUTO_TOKEN="dotenv-value" exists=true'
+stdout 'CUSTOM_TOKEN="custom-value" exists=true'
+stdout 'SESAM_POSTGRES_BACKUP_PASSWORD_TXT="/dev/fd/[0-9]+" exists=true'
+stdout 'SESAM_README_MD="/dev/fd/[0-9]+" exists=true'
+
+exec sesam run --all --secret PASS=postgres/backup/password.txt --env-file production.env --env-pattern '^\.env\.' -- runprobe files PASS
+stdout 'PASS="raw-value\\n" mode=0400 links=0'
+
+# Names are derived after cwd-relative paths have been canonicalized.
+cd postgres/backup
+exec sesam run --secret ./password.txt -- runprobe files SESAM_POSTGRES_BACKUP_PASSWORD_TXT
+stdout 'SESAM_POSTGRES_BACKUP_PASSWORD_TXT="raw-value\\n" mode=0400 links=0'
+cd ../..
+
+! exec sesam run --secret production.env --env-pattern '[' -- runprobe mark started-pattern
+stderr 'invalid env pattern'
+! exists started-pattern
+! exists postgres/backup/password.txt
+! exists production.env
+! exists .env.production
+
+-- raw-fixture --
+raw-value
+-- env-fixture --
+AUTO_TOKEN=dotenv-value
+-- custom-fixture --
+CUSTOM_TOKEN=custom-value
