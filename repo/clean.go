@@ -31,10 +31,10 @@ func CleanAggressive(_ context.Context, sesamDir string, identityPaths []string,
 	return cleanup(root, gr, opts.CheckFunc, identityPaths...)
 }
 
-// deleteRevealedSecrets removes the plaintext copy on disk for every
-// VerifiedSecret in `secrets`, ignoring already-absent files. checkFn, when
-// non-nil, gates each removal and receives the sesam-relative path.
-func deleteRevealedSecrets(root *os.Root, secrets []core.VerifiedSecret, checkFn func(path string) (bool, error)) error {
+// deleteRevealedSecrets removes the plaintext copy on disk for every secret in
+// `secrets`, ignoring already-absent files. checkFn, when non-nil, gates each
+// removal and receives the sesam-relative path.
+func deleteRevealedSecrets(root *os.Root, secrets []core.SecretAccess, checkFn func(path string) (bool, error)) error {
 	for _, secret := range secrets {
 		allow := true
 		if checkFn != nil {

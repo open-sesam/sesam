@@ -39,27 +39,27 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 
 # GLOBAL OPTIONS
 
-**--askpass**="": Askpass helper for encrypted identities
+**--askpass**="": Askpass helper for encrypted identities \[$SESAM_ASKPASS, $GIT_ASKPASS, $SSH_ASKPASS\]
 
-**--clipboard-copy-cmd**="": Command reading the secret on stdin, instead of the system clipboard
+**--clipboard-copy-cmd**="": Command reading the secret on stdin, instead of the system clipboard \[$SESAM_CLIPBOARD_COPY_CMD\]
 
-**--clipboard-paste-cmd**="": Command printing the clipboard, instead of the system clipboard
+**--clipboard-paste-cmd**="": Command printing the clipboard, instead of the system clipboard \[$SESAM_CLIPBOARD_PASTE_CMD\]
 
-**--cpuprofile**="": Write a CPU profile of this invocation to `FILE` (pprof format)
+**--cpuprofile**="": Write a CPU profile of this invocation to `FILE` (pprof format) \[$SESAM_CPUPROFILE\]
 
 **--help, -h**: show help
 
-**--identity, -i**="": Path to the age identity (can be given several times)
+**--identity, -i**="": Path to the age identity (can be given several times) \[$SESAM_ID, $SESAM_IDENTITY\]
 
-**--lock-timeout**="": Repository lock wait timeout (e.g. 5s, 30s, 2m) (default: 5s)
+**--lock-timeout**="": Repository lock wait timeout (e.g. 5s, 30s, 2m) \[$SESAM_LOCK_TIMEOUT\] (default: 5s)
 
-**--memprofile**="": Write a heap profile at exit to `FILE` (pprof format)
+**--memprofile**="": Write a heap profile at exit to `FILE` (pprof format) \[$SESAM_MEMPROFILE\]
 
-**--no-color**: Disable color always
+**--no-color**: Disable color always \[$NO_COLOR, $SESAM_NO_COLOR\]
 
 **--quiet, -q**: Print less log output
 
-**--sesam-dir, -r, --repo**="": Directory where .sesam lives (default: ".")
+**--sesam-dir, -r, --repo**="": Directory where .sesam lives \[$SESAM_DIR\] (default: ".")
 
 **--verbose, -v**: Print more log output
 
@@ -101,6 +101,8 @@ Removes git integration and optionally all of the sesam repo
 Verify sesam signatures and encryption state
 
 **--all**: Run all verifications
+
+**--config**: Check sesam.yml does not declare a change that already arrived committed (not part of --all)
 
 **--forge-check**: Verify the forge public keys did not change since adding users
 
@@ -386,6 +388,10 @@ Regenerate the signing key of a specific user
 
 **--help, -h**: show help
 
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
+
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
+
 **--user, -u**="": Regenerate the signing key for a user
 
 ### rename
@@ -404,37 +410,57 @@ Config management commands
 
 Apply config differences to audit log and metadata
 
+**--force, -f**: Also apply changes that arrived already committed (see the docs on modified configs)
+
 **--help, -h**: show help
+
+**--json**: Print output as JSON
+
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
+
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 ### diff
 
-Show the diff between config and actual state
+Show the diff between config and actual state (extra args are passed to git)
 
 **--help, -h**: show help
 
-### get
+**--json**: Print output as JSON
 
-Get specific config keys
+**--validate**: Fail if 'sesam config apply --force' would refuse the config (dry run, needs admin rights)
 
-**--help, -h**: show help
+### print
 
-### set
-
-Set specific config keys
+Print the whole config as one document, includes resolved (YAML, or JSON with --json)
 
 **--help, -h**: show help
+
+**--json**: Print output as JSON
 
 ### reset
 
 Derive config from audit log
 
+**--force, -f**: Rewrite sesam.yml from scratch when it cannot be repaired in place, losing comments and descriptions
+
 **--help, -h**: show help
+
+**--json**: Print output as JSON
 
 ## apply
 
 alias for `sesam config apply`
 
+**--force, -f**: Also apply changes that arrived already committed (see the docs on modified configs)
+
 **--help, -h**: show help
+
+**--json**: Print output as JSON
+
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
+
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 ## id
 
@@ -465,3 +491,8 @@ Show the audit log of secret changes
 **--help, -h**: show help
 
 **--json**: Print output as JSON
+
+## help, h
+
+Show the built-in manual, or the help of a command
+

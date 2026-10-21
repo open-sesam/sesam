@@ -10,6 +10,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/go-git/go-git/v5"
+	"github.com/sahib/renameio/v2"
 	"opensesam.org/sesam/core"
 )
 
@@ -116,6 +117,11 @@ func openGitRepo(sesamDir string) (*git.Repository, error) {
 	return repo, nil
 }
 
+// MinGitVersion is the oldest git that supports config-based hooks, which is
+// what sesam installs its hooks as.
+// See: https://github.blog/open-source/git/highlights-from-git-2-54/#h-config-based-hooks
+var MinGitVersion = semver.MustParse("2.54.0")
+
 // ReadGitVersion runs `git --version` and parses the result into a semver.
 func ReadGitVersion(ctx context.Context) (*semver.Version, error) {
 	out, err := exec.CommandContext(ctx, "git", "--version").Output()
@@ -161,4 +167,47 @@ func isUnder(dir, path string) bool {
 	}
 
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// scratchDir makes a private throwaway directory inside the repository's own
+// tmp space and returns its absolute path plus a func that removes it again.
+func scratchDir(sesamDir, prefix string) (dir string, cleanup func(), err error) {
+	parent := filepath.Join(sesamDir, core.SesamTmpDir())
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return "", nil, fmt.Errorf("create scratch parent %s: %w", parent, err)
+	}
+
+	tmpDir, err := os.MkdirTemp(parent, prefix)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to make scratch dir: %w", err)
+	}
+
+	return tmpDir, func() { _ = os.RemoveAll(tmpDir) }, nil
+}
+
+// writeFileCopies writes each path under destDir, sourcing its content from
+// read. A read that reports skip leaves that path out of the copy entirely
+// (used where a missing source is not an error, e.g. a path not yet
+// committed). read is responsible for wrapping its own errors with context.
+func writeFileCopies(destDir string, paths []string, read func(path string) (data []byte, skip bool, err error)) error {
+	for _, path := range paths {
+		data, skip, err := read(path)
+		if err != nil {
+			return err
+		}
+		if skip {
+			continue
+		}
+
+		dst := filepath.Join(destDir, path)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return fmt.Errorf("make dir for %s: %w", dst, err)
+		}
+
+		if err := renameio.WriteFile(dst, data, 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", dst, err)
+		}
+	}
+
+	return nil
 }

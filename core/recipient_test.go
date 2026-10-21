@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"filippo.io/age"
@@ -38,6 +40,41 @@ func TestParseRecipientSSH(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, r)
 	require.NotEmpty(t, r.String())
+}
+
+func TestCanonicalKeySpec(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	sshPub, err := ssh.NewPublicKey(pub)
+	require.NoError(t, err)
+
+	bare := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
+	ageKey := newTestUser(t, "alice").Recipient.String()
+
+	tests := []struct {
+		name string
+		spec string
+		want string
+	}{
+		{name: "bare ssh key", spec: bare, want: bare},
+		{name: "ssh key with comment", spec: bare + " user@host", want: bare},
+		{name: "ssh key with trailing newline", spec: bare + "\n", want: bare},
+		{name: "unparseable ssh key", spec: "ssh-ed25519 garbage", want: "ssh-ed25519 garbage"},
+		{name: "age key", spec: ageKey, want: ageKey},
+		{name: "forge id", spec: "github:bob", want: "github:bob"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, CanonicalKeySpec(tc.spec))
+		})
+	}
+
+	// The canonical form is exactly what a parsed recipient records.
+	r, err := ParseRecipient(bare+" user@host", nil)
+	require.NoError(t, err)
+	require.Equal(t, r.String(), CanonicalKeySpec(bare+" user@host"))
 }
 
 func TestParseRecipientPluginHRP(t *testing.T) {
@@ -73,6 +110,29 @@ func TestParseRecipientInvalidInputs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ParseRecipient(tc.key, nil)
 			require.Error(t, err)
+		})
+	}
+}
+
+// TestParseRecipientEmptyInput regresses a confusing message: an empty (or
+// whitespace/comment-only) recipient was reported as "this is a private key
+// (empty)", which makes no sense - there is no key here at all, private or
+// otherwise.
+func TestParseRecipientEmptyInput(t *testing.T) {
+	cases := []struct {
+		name string
+		key  string
+	}{
+		{"empty string", ""},
+		{"whitespace only", "   \n\t"},
+		{"comment only", "# public key: age1testkey\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseRecipient(tc.key, nil)
+			require.ErrorContains(t, err, "empty")
+			require.NotContains(t, err.Error(), "private key")
 		})
 	}
 }
@@ -114,6 +174,32 @@ func TestRecipientsUserPubKeys(t *testing.T) {
 
 func TestRecipientsUserPubKeysEmpty(t *testing.T) {
 	require.Empty(t, Recipients{}.UserPubKeys())
+}
+
+// TestRecipientSpec_ZeroSource regresses Spec() returning "" for a recipient
+// whose Source was never set (e.g. unmarshaled from an older or malformed
+// audit entry) - reset would otherwise write it back as `key: [""]`.
+func TestRecipientSpec_ZeroSource(t *testing.T) {
+	alice := newTestUser(t, "alice")
+
+	tests := []struct {
+		name   string
+		source KeySource
+	}{
+		{"manual", KeySourceManual},
+		{"zero value", ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			recp := &Recipient{
+				Recipient:           alice.Recipient.Recipient,
+				comparablePublicKey: alice.Recipient.comparablePublicKey,
+				Source:              tc.source,
+			}
+			require.Equal(t, alice.Recipient.String(), recp.Spec())
+		})
+	}
 }
 
 func TestForgeIdToUser(t *testing.T) {
@@ -247,6 +333,63 @@ func TestResolveLinkNonHTTPS(t *testing.T) {
 	require.Contains(t, err.Error(), "unsupported protocol")
 }
 
+// A forge answering with a redirect to http:// must not get the key material
+// fetched in the clear: net/http follows such a hop by default, and whatever
+// comes back would become a recipient on the next `tell`.
+func TestResolveLinkRefusesHTTPSToHTTPRedirect(t *testing.T) {
+	var plainHits atomic.Int32
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		plainHits.Add(1)
+		fmt.Fprintln(w, "age1attackerkey")
+	}))
+	defer plain.Close()
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+"/keys", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	got, err := resolveLink(context.Background(), srv.URL+"/keys", srv.Client())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "non-https")
+	require.Empty(t, got)
+	require.Zero(t, plainHits.Load(), "the plaintext server must never be contacted")
+}
+
+// Staying on https is still allowed - the policy is about the scheme, not
+// about redirects as such.
+func TestResolveLinkFollowsHTTPSRedirect(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/moved" {
+			http.Redirect(w, r, "/moved", http.StatusFound)
+			return
+		}
+
+		fmt.Fprintln(w, "age1keydata")
+	}))
+	defer srv.Close()
+
+	got, err := resolveLink(context.Background(), srv.URL+"/keys", srv.Client())
+	require.NoError(t, err)
+	require.Equal(t, []string{"age1keydata"}, got)
+}
+
+// Our CheckRedirect replaces net/http's own limit, so the chain has to be
+// capped here - an endless redirect loop must end in an error, not a hang.
+func TestResolveLinkTooManyRedirects(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.Redirect(w, r, fmt.Sprintf("/keys-%d", hits.Load()), http.StatusFound)
+	}))
+	defer srv.Close()
+
+	_, err := resolveLink(context.Background(), srv.URL+"/keys", srv.Client())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "redirects")
+	require.LessOrEqual(t, hits.Load(), int32(maxKeyRedirects))
+}
+
 func TestResolveLinkHTTP4xx(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -283,4 +426,115 @@ func TestIdentitiesRecipientStringsMatchesRecipient(t *testing.T) {
 
 	strs := ids.RecipientStrings()
 	require.Equal(t, []string{id.Recipient().String()}, strs)
+}
+
+// ageKeygenFile is what `age-keygen -o key.age` writes: two header comments
+// and the private key.
+func ageKeygenFile(t *testing.T) (content string, recipient, private string) {
+	t.Helper()
+
+	id, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+
+	return fmt.Sprintf(
+		"# created: 2026-09-13T14:00:52+02:00\n# public key: %s\n%s\n",
+		id.Recipient(), id,
+	), id.Recipient().String(), id.String()
+}
+
+// fileRoot writes content to name in a fresh root and returns the root.
+func fileRoot(t *testing.T, name, content string) *os.Root {
+	t.Helper()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
+
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
+
+	return root
+}
+
+// TestResolveRecipientFileSkipsComments covers key files that carry headers -
+// age-keygen writes them, and so do most hand-kept key files.
+func TestResolveRecipientFileSkipsComments(t *testing.T) {
+	const content = "# created: 2026-09-13T14:00:52+02:00\n" +
+		"# public key: age1testkey\n" +
+		"\n" +
+		"age1testkey\n"
+
+	root := fileRoot(t, "key.pub", content)
+
+	got, _, err := ResolveRecipient(t.Context(), root, "file://key.pub")
+	require.NoError(t, err)
+	require.Equal(t, []string{"age1testkey"}, got)
+}
+
+// TestParseAndResolveRecipientsIdentityFile covers an easy mistake: pointing a
+// recipient at the age-keygen identity file instead of at the public key. The
+// error has to say so - and must never echo the private key, which would leak
+// it into the terminal, the shell history and CI logs.
+func TestParseAndResolveRecipientsIdentityFile(t *testing.T) {
+	content, _, private := ageKeygenFile(t)
+	root := fileRoot(t, "key.age", content)
+
+	_, err := ParseAndResolveRecipients(
+		t.Context(), root, []string{"file://key.age"}, NewNonInteractivePluginUI(),
+	)
+
+	require.ErrorContains(t, err, "private key")
+	require.ErrorContains(t, err, "file://key.age")
+	require.NotContains(t, err.Error(), private, "the private key must not appear in the error")
+}
+
+// TestParseAndResolveRecipientsPrivateKeySpec covers giving a private key
+// directly as a recipient spec, rather than via file://, a forge id or a URL.
+// The spec IS the material in this case (KeySourceManual), so it must not be
+// echoed back into the wrapping error the way it is safe to for a file:// path
+// or forge id - that would undo the redaction ParseRecipient already did.
+func TestParseAndResolveRecipientsPrivateKeySpec(t *testing.T) {
+	_, _, private := ageKeygenFile(t)
+
+	_, err := ParseAndResolveRecipients(
+		t.Context(), nil, []string{private}, NewNonInteractivePluginUI(),
+	)
+
+	require.ErrorContains(t, err, "private key")
+	require.NotContains(t, err.Error(), private, "the private key material must not appear in the error")
+}
+
+// TestParseAndResolveRecipientsWithoutKeys covers a file (or forge account)
+// that holds no usable key: without a check the caller would carry on with an
+// empty recipient list and fail much later with something unrelated.
+func TestParseAndResolveRecipientsWithoutKeys(t *testing.T) {
+	root := fileRoot(t, "key.pub", "# public key: age1testkey\n")
+
+	_, err := ParseAndResolveRecipients(
+		t.Context(), root, []string{"file://key.pub"}, NewNonInteractivePluginUI(),
+	)
+	require.ErrorContains(t, err, "no public key")
+}
+
+// TestParseRecipientPrivateKey checks that every private-key form is named as
+// such instead of being reported as an unknown recipient type.
+func TestParseRecipientPrivateKey(t *testing.T) {
+	_, _, private := ageKeygenFile(t)
+
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{name: "age x25519", key: private},
+		{name: "age plugin", key: "AGE-PLUGIN-YUBIKEY-1ABC"},
+		{name: "ssh", key: "-----BEGIN OPENSSH PRIVATE KEY-----"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseRecipient(tc.key, NewNonInteractivePluginUI())
+			require.ErrorContains(t, err, "private key")
+			require.NotContains(t, err.Error(), tc.key, "the key must not appear in the error")
+		})
+	}
 }

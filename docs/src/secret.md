@@ -40,13 +40,6 @@ What this means for you:
 
 ## Adding a secret via config (declarative)
 
-```admonish warning
-The `sesam apply` feature is not yet implemented.
-Please see here to view the [plan](https://github.com/open-sesam/sesam/issues/62).
-
-The documentation here is just a preview.
-```
-
 Adding secrets via CLI is nice for scripts. `sesam` also supports describing
 the desired state in a declarative way via `sesam.yml`. If you executed the
 above command you will notice the secret was added already to the config:
@@ -66,7 +59,18 @@ sesam apply
 
 This will automatically check what the state is in the repo and how it differs
 from the state in the config. The changes are then resolved by adding/removing
-secrets or adding/removing users.
+secrets or adding/removing users. Either all of them are recorded or none is,
+so a step that cannot be carried out leaves the repository as it was.
+
+To see the difference before applying it, use `sesam config diff`. It renders
+`sesam.yml` against the state the audit log describes, using whatever diff
+tooling your git is configured with.
+
+```admonish warning
+`sesam apply` only carries out changes that are still uncommitted in your
+working tree. A config change that arrived with a `git pull` is refused - see
+[Applying a changed config](users.md#applying-a-changed-config).
+```
 
 ## Adding multiple secrets
 

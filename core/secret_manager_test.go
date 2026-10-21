@@ -69,11 +69,41 @@ func TestSecretChangeGroupsKeepsAdminImplicit(t *testing.T) {
 func TestSecretChangeGroupsNonExistent(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
-	// No plaintext on disk and not tracked in state: path validation rejects
-	// it before any audit entry is written.
+	// Not tracked in state: the verification layer refuses the entry, so
+	// nothing is recorded.
 	err := mgr.SecretChangeGroups("secrets/nope", []string{"dev"})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid secret path")
+	require.Contains(t, err.Error(), "non-existing secret")
+	require.Len(t, mgr.State.Secrets, 1)
+}
+
+// An empty access list is a meaningful value - "admin only" - and must be
+// recorded rather than treated as "nothing was asked for" the way the
+// SecretAdd upsert does. Without this there is no way back from a widened
+// access list.
+func TestSecretChangeGroupsToAdminOnly(t *testing.T) {
+	mgr := sealedSecretManager(t)
+	require.NoError(t, mgr.SecretChangeGroups("secrets/test", []string{"dev"}))
+
+	require.NoError(t, mgr.SecretChangeGroups("secrets/test", nil))
+
+	vs, exists := mgr.State.SecretExists("secrets/test")
+	require.True(t, exists)
+	require.Equal(t, []string{"admin"}, vs.AccessGroups)
+	require.Empty(t, vs.DeclaredGroups())
+}
+
+// Who may read a secret is independent of whether this machine has it
+// revealed, so an access change must not require the plaintext.
+func TestSecretChangeGroupsWithoutPlaintext(t *testing.T) {
+	mgr := sealedSecretManager(t)
+	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/test")))
+
+	require.NoError(t, mgr.SecretChangeGroups("secrets/test", []string{"dev"}))
+
+	vs, exists := mgr.State.SecretExists("secrets/test")
+	require.True(t, exists)
+	require.ElementsMatch(t, []string{"dev", "admin"}, vs.AccessGroups)
 }
 
 // A user without access to a secret must not be able to change its access
@@ -207,7 +237,7 @@ func TestRevealSecretBytesRejectsUnknownAndUnauthorized(t *testing.T) {
 		mgr := testSecretManager(t)
 		mgr.State.Users[0].Groups = []string{"dev"}
 		writeSecret(t, mgr.SesamDir, "secrets/admin", "payload")
-		mgr.State.addSecret(VerifiedSecret{
+		mgr.State.addSecret(SecretAccess{
 			RevealedPath: "secrets/admin",
 			AccessGroups: []string{"admin"},
 		})
@@ -429,6 +459,46 @@ func TestSealDischargesObligationWithoutRecipientChange(t *testing.T) {
 	after, err := os.ReadFile(obj)
 	require.NoError(t, err)
 	require.Equal(t, before, after, "an unchanged recipient set must not re-encrypt the object")
+}
+
+// TestSealIncrementalResealsOnOrphanedSignature pins that Seal(false) re-seals
+// an unchanged secret whose footer no longer verifies because the sealer's
+// signing key was regenerated. Recipients stay the same, so drift alone would
+// leave the stale footer behind and verification would fail.
+func TestSealIncrementalResealsOnOrphanedSignature(t *testing.T) {
+	tcs := []struct {
+		name   string
+		advice SealAdvice
+	}{
+		{"compare", AdviceCompare},
+		{"unchanged", AdviceUnchanged},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := sealedSecretManager(t) // admin sealed secrets/test
+			obj := filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test"))
+
+			before, err := os.ReadFile(obj)
+			require.NoError(t, err)
+
+			um, err := BuildUserManager(mgr.root, mgr.Signer, mgr.AuditLog, mgr.State, mgr)
+			require.NoError(t, err)
+			require.NoError(t, um.UserRegenerateSignKey("admin"))
+
+			report := VerifyIntegrity(mgr.root, mgr.State, mgr.Keyring)
+			require.False(t, report.OK(), "old footer must not verify after regen")
+
+			require.NoError(t, mgr.Seal(false, map[string]SealAdvice{"secrets/test": tc.advice}))
+
+			after, err := os.ReadFile(obj)
+			require.NoError(t, err)
+			require.NotEqual(t, before, after, "orphaned footer must trigger a re-seal")
+
+			report = VerifyIntegrity(mgr.root, mgr.State, mgr.Keyring)
+			require.True(t, report.OK(), report.String())
+		})
+	}
 }
 
 func TestRevealFailsMissingAge(t *testing.T) {
@@ -1021,7 +1091,7 @@ func TestNeedsSeal(t *testing.T) {
 		// but recipientsFor now differs from the sealed footer's hash.
 		bob := newTestUser(t, "bob")
 		mustAddRecipient(t, mgr.Keyring, bob.Name, bob.Recipient)
-		mgr.State.addUser(VerifiedUser{Name: bob.Name, Groups: []string{"admin"}})
+		mgr.State.addUser(VerifiedUser{Membership: Membership{Name: bob.Name, Groups: []string{"admin"}}})
 
 		needs, footer, err := mgr.needsSeal(path)
 		require.NoError(t, err)
@@ -1078,7 +1148,7 @@ func TestMatchObject(t *testing.T) {
 		writeSecret(t, mgr.SesamDir, path, "v2")
 		bob := newTestUser(t, "bob")
 		mustAddRecipient(t, mgr.Keyring, bob.Name, bob.Recipient)
-		mgr.State.addUser(VerifiedUser{Name: bob.Name, Groups: []string{"admin"}})
+		mgr.State.addUser(VerifiedUser{Membership: Membership{Name: bob.Name, Groups: []string{"admin"}}})
 
 		got, err := mgr.MatchObject(path, bytes.NewReader(v2))
 		require.NoError(t, err)

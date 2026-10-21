@@ -228,6 +228,8 @@ $ git commit -am 'merge'
 
 ### Internal flow
 
+<!-- man:skip -->
+
 This is purely informal, for normal usage you do not need to understand this.
 This is the set-up for you via `.gitattributes` and the `sesam-merge-*` entries in your repo's `.git/config`:
 

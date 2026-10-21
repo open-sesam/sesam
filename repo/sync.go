@@ -195,7 +195,7 @@ func classify(f syncFacts) SecretState {
 
 // probeWorktree gathers what plaintext and worktree object say on their own,
 // plus the object's git blob hash for the history lookup.
-func (v *View) probeWorktree(s core.VerifiedSecret) (syncFacts, plumbing.Hash, error) {
+func (v *View) probeWorktree(s core.SecretAccess) (syncFacts, plumbing.Hash, error) {
 	f := syncFacts{access: v.vstate.UserHasAccess(v.whoami, s.AccessGroups)}
 	if !f.access {
 		return f, plumbing.ZeroHash, nil

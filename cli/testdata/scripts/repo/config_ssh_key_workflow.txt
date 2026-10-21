@@ -1,0 +1,46 @@
+# A verbatim ssh key keeps its comment in sesam.yml, while the audit log records
+# it without one. The two must still be recognised as the same key, or the key
+# shows up as a diff forever.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+
+# Declare bob with a key as pasted from his id_ed25519.pub.
+cp declared.yml sesam.yml
+envsubst sesam.yml
+exec sesam config apply
+stdout 'told bob into dev'
+
+# Applied, so in sync - the comment is not a difference.
+exec sesam config diff
+! stdout .
+exec sesam config apply
+! stdout .
+
+# Removing the key via the CLI (which passes the recorded, comment-less form)
+# still finds the commented entry in sesam.yml.
+exec sesam tell --user bob --recipient age1tdy2pxsfwpxxe0c9cuwty8zpsv6uuhf4zyug5f9lfl982lh3tctqrw2ll7
+exec sesam user remove-recipient --user bob --recipient 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGton+aQGCo+e3c/DPpR6qXCZwBNlh15Aqwua74O/SFA'
+! grep 'bob@laptop' sesam.yml
+exec sesam config diff
+! stdout .
+
+-- declared.yml --
+users:
+  - name: admin
+    key:
+      - $ADMIN_PUBKEY
+  - name: bob
+    key:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGton+aQGCo+e3c/DPpR6qXCZwBNlh15Aqwua74O/SFA bob@laptop
+
+groups:
+  admin:
+    - admin
+  dev:
+    - bob
+
+secrets: []

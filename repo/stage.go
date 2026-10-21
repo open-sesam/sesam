@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"opensesam.org/sesam/core"
@@ -22,6 +23,11 @@ const forkSuffix = ".sesam-tmp"
 // was already committed or rolled back.
 var ErrStageFinalized = errors.New("stage already finalized")
 
+// ErrStageOpen is returned when a second stage is opened while one is still
+// running. Stages do not nest: handing out the open one would let the inner
+// Commit make the outer transaction's half-finished work live.
+var ErrStageOpen = errors.New("a stage is already open")
+
 // Stage is a read-write transaction over a forked copy of .sesam.
 //
 // Repo.Stage() hardlinks the live .sesam into .sesam-tmp (byte-copying the
@@ -35,6 +41,10 @@ type Stage struct {
 
 	repo *Repo
 	done bool
+
+	// touched are worktree paths the stage created outside the fork, in
+	// creation order. Rollback removes them; Commit keeps them.
+	touched []string
 }
 
 // Stage opens a read-write transaction. It errors if a stage is already open
@@ -47,8 +57,7 @@ func (r *Repo) Stage() (*Stage, error) {
 		return nil, ErrClosed
 	}
 	if r.stage != nil {
-		// stage exists already; return again.
-		return r.stage, nil
+		return nil, ErrStageOpen
 	}
 
 	// Drop any fork left behind by a crashed previous run before re-forking.
@@ -73,6 +82,9 @@ func (r *Repo) Stage() (*Stage, error) {
 
 // Update runs fn inside a stage, committing on success and rolling back on any
 // error or panic. It is the convenience entry point RW CLI commands use.
+//
+// Updates do not nest: an Update from inside fn fails with ErrStageOpen, which
+// aborts the outer one as well. Do the work on the stage fn was handed.
 func (r *Repo) Update(fn func(*Stage) error) error {
 	s, err := r.Stage()
 	if err != nil {
@@ -298,6 +310,12 @@ func (s *Stage) Rollback() error {
 
 	_ = s.closeStateQuiet(false)
 	s.repo.stage = nil
+
+	// Newest first, so files go before the directories created for them.
+	// Remove, not RemoveAll: a directory something else wrote into stays.
+	for _, path := range slices.Backward(s.touched) {
+		_ = s.repo.root.Remove(path)
+	}
 
 	// Repo's live state was never touched, so nothing to restore.
 	return s.repo.root.RemoveAll(forkSuffix)

@@ -1,0 +1,129 @@
+package config
+
+import (
+	"fmt"
+	"path/filepath"
+	"slices"
+)
+
+// SecretAdd adds (or updates) a single secret file in the configuration.
+//
+// If the file is already tracked by some
+// sesam.yml the call is treated as an access-group change (delegating to
+// SecretChangeGroups); otherwise the secret is inserted.
+//
+// Where a newly inserted secret lands depends on nested:
+//   - false: the secret is added straight to the main sesam.yml, its Path kept
+//     relative to the main file's directory (subdirectory prefix preserved).
+//   - true: a file in a subdirectory gets its own sesam.yml in that directory
+//     (created or reused) and included from the main file; its Path is recorded
+//     relative to that sub-file. A file next to the main sesam.yml always lands
+//     in the main file regardless of nested.
+//
+// Directory expansion is the caller's job (repo): SecretAdd only ever touches a
+// single file. Per-file metadata other than access is left empty for the user
+// to fill in.
+func (c *Config) SecretAdd(path string, nested bool, access []string) error {
+	rel := filepath.Clean(path)
+	tracked, err := c.trackedRevealedPaths()
+	if err != nil {
+		return err
+	}
+
+	if tracked[rel] {
+		if len(access) == 0 {
+			// if no groups change and secret exists, we assume no change requested.
+			// If [admin] is given explicitly we would set it explicitly.
+			return nil
+		}
+
+		return c.changeSecretGroups(rel, access)
+	}
+
+	return c.placeSecret(rel, nested, Secret{Access: access})
+}
+
+// placeSecret inserts a brand-new secret for the on-disk file at abs into the
+// appropriate sesam.yml. The caller supplies the secret's metadata (access, description, …)
+// placeSecret fills in Path relative to the owning file's directory. abs must not already be tracked.
+func (c *Config) placeSecret(rel string, nested bool, sec Secret) error {
+	mainDir := filepath.Dir(c.MainFile.Path)
+	fileDir := filepath.Dir(rel)
+
+	src := c.MainFile
+	if nested && !sameDir(fileDir, mainDir) {
+		sesamPath := filepath.Join(fileDir, "sesam.yml")
+		s, err := c.loadOrCreate(sesamPath)
+		if err != nil {
+			return fmt.Errorf("failed to load sub-config %q: %w", sesamPath, err)
+		}
+
+		if err := c.includeFromMain(sesamPath); err != nil {
+			return err
+		}
+
+		src = s
+	}
+
+	secRel, err := filepath.Rel(filepath.Dir(src.Path), rel)
+	if err != nil {
+		return fmt.Errorf("failed to locate %q under %q: %w", rel, filepath.Dir(src.Path), err)
+	}
+
+	sec.Path = secRel
+	return appendSecretsItems(src, []Secret{sec})
+}
+
+// includeFromMain adds an include of sesamPath to MainFile, unless one is
+// already present.
+func (c *Config) includeFromMain(sesamPath string) error {
+	incPath, err := filepath.Rel(filepath.Dir(c.MainFile.Path), sesamPath)
+	if err != nil {
+		return fmt.Errorf("failed to relativize include %q: %w", sesamPath, err)
+	}
+
+	if slices.Contains(fileIncludes(c.MainFile.RootNode), incPath) {
+		return nil
+	}
+
+	if err := c.appendInclude(c.MainFile, incPath); err != nil {
+		return fmt.Errorf("failed to add include %q: %w", incPath, err)
+	}
+	return nil
+}
+
+// loadOrCreate returns the FileSource for `path`, loading it (and every file it
+// includes) from disk if it exists, or bootstrapping an empty in-memory
+// FileSource that Save() will write out once it has its first item.
+func (c *Config) loadOrCreate(path string) (*FileSource, error) {
+	if existing, ok := c.SourceFiles[path]; ok {
+		return existing, nil
+	}
+
+	if _, err := c.root.Stat(path); err == nil {
+		return c.loadTree(path)
+	}
+
+	return c.newFile(path), nil
+}
+
+// newFile registers an in-memory FileSource for a path that doesn't exist on
+// disk yet. Its RootNode stays nil until the first secret/include is added,
+// which builds the document; Save writes it like any other file.
+func (c *Config) newFile(path string) *FileSource {
+	src := &FileSource{Path: path}
+	c.SourceFiles[path] = src
+	return src
+}
+
+// appendInclude inserts an include node pointing at includePath into src's
+// secrets sequence.
+func (c *Config) appendInclude(src *FileSource, includePath string) error {
+	return appendSecretsItems(src, []Secret{{Include: includePath}})
+}
+
+// sameDir reports whether a and b refer to the same directory.
+func sameDir(a, b string) bool {
+	rel, err := filepath.Rel(a, b)
+	return err == nil && rel == "."
+}

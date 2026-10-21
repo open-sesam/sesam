@@ -29,13 +29,17 @@ type logLine struct {
 	desc  string
 }
 
+// shortIDLen is how much of an id a shortened rendering keeps.
+const shortIDLen = 12
+
 // shortID truncates long ids (audit root hashes, init UUIDs) to a git-style
-// prefix, unless full output was requested.
+// prefix, unless full output was requested. Anything already at most that long
+// is returned as is - key specs like "github:bob" are shorter than the cut.
 func shortID(s string, full bool) string {
-	if full || len(s) <= 8 {
+	if full || len(s) <= shortIDLen {
 		return s
 	}
-	return s[:12]
+	return s[:shortIDLen]
 }
 
 func formatLogTime(t time.Time, full bool) string {
@@ -45,22 +49,53 @@ func formatLogTime(t time.Time, full bool) string {
 	return t.Format("2006 Jan 02 15:04")
 }
 
-// groupsOrAdmin renders an access-group list, defaulting to the implicit
-// "admin" when no groups are set.
-func groupsOrAdmin(groups []string) string {
+// accessGroupsOrAdmin renders a secret's access-group list, defaulting to the
+// implicit "admin" when no groups are set
+func accessGroupsOrAdmin(groups []string) string {
 	if len(groups) == 0 {
 		return "admin"
 	}
 	return strings.Join(groups, ", ")
 }
 
+// userGroups renders a user's group list as-is. Unlike a secret's access
+// groups, a user's Groups is never legitimately empty
+func userGroups(groups []string) string {
+	return strings.Join(groups, ", ")
+}
+
+// shortMaterialLen is longer than shortIDLen: an SSH key's wire format repeats
+// its algorithm name inside the base64 blob itself, so two different
+// ed25519 keys share a prefix well past 12 characters
+const shortMaterialLen = 32
+
 func shortPubKeys(pubs []core.UserPubKey, full bool) string {
 	ids := make([]string, 0, len(pubs))
 	for _, pub := range pubs {
-		ids = append(ids, shortID(pub.Key, full))
+		ids = append(ids, shortKeyMaterial(pub.Key, full))
 	}
 
 	return strings.Join(ids, ", ")
+}
+
+// shortKeyMaterial shortens a key the way shortID shortens a hash, but keeps
+// an SSH key's algorithm prefix intact and cuts only the material after it,
+// at shortMaterialLen rather than shortIDLen (see shortMaterialLen).
+func shortKeyMaterial(key string, full bool) string {
+	if full {
+		return key
+	}
+
+	algo, material, found := strings.Cut(key, " ")
+	if !found {
+		return shortID(key, false)
+	}
+
+	if len(material) <= shortMaterialLen {
+		return key
+	}
+
+	return algo + " " + material[:shortMaterialLen]
 }
 
 // describeLogEntry maps an audit entry to a glyph (the action), a color (the
@@ -96,7 +131,7 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 		}
 		return logLine{
 			"+", userColor,
-			"told " + c(d.User, userColor) + " into " + c(groupsOrAdmin(d.Groups), groupColor),
+			"told " + c(d.User, userColor) + " into " + c(userGroups(d.Groups), groupColor),
 		}
 
 	case core.OpUserKill:
@@ -123,7 +158,7 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 		}
 		return logLine{
 			"~", userColor,
-			"set groups of " + c(d.User, userColor) + " to " + c(groupsOrAdmin(d.NewGroups), groupColor),
+			"set groups of " + c(d.User, userColor) + " to " + c(userGroups(d.NewGroups), groupColor),
 		}
 
 	case core.OpUserAddRecipients:
@@ -163,7 +198,7 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 		}
 		return logLine{
 			"+", secretColor,
-			"added " + c(d.RevealedPath, secretColor) + " (" + c(groupsOrAdmin(d.AccessGroups), groupColor) + ")",
+			"added " + c(d.RevealedPath, secretColor) + " (" + c(accessGroupsOrAdmin(d.AccessGroups), groupColor) + ")",
 		}
 
 	case core.OpSecretRemove:
@@ -190,7 +225,7 @@ func describeLogEntry(out *termenv.Output, e *core.AuditEntrySigned, full bool) 
 		}
 		return logLine{
 			"~", secretColor,
-			"changed access of " + c(d.RevealedPath, secretColor) + " to " + c(groupsOrAdmin(d.AccessGroups), groupColor),
+			"changed access of " + c(d.RevealedPath, secretColor) + " to " + c(accessGroupsOrAdmin(d.AccessGroups), groupColor),
 		}
 
 	case core.OpSeal:

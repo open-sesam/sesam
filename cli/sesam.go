@@ -431,35 +431,35 @@ we assume 'sesam show path/to/secret' as convenience.`,
 				Commands: []*cli.Command{
 					{
 						Name:   "apply",
+						Flags:  flagsConfigApply,
 						Usage:  "Apply config differences to audit log and metadata",
-						Action: commands.HandleStub,
+						Action: commands.WithRepo(commands.HandleConfigApply),
 					},
 					{
 						Name:   "diff",
-						Usage:  "Show the diff between config and actual state",
-						Action: commands.HandleStub,
+						Flags:  flagsConfigDiff,
+						Usage:  "Show the diff between config and actual state (extra args are passed to git)",
+						Action: commands.WithRepo(commands.HandleConfigDiff),
 					},
 					{
-						Name:   "get",
-						Usage:  "Get specific config keys",
-						Action: commands.HandleStub,
-					},
-					{
-						Name:   "set",
-						Usage:  "Set specific config keys",
-						Action: commands.HandleStub,
+						Name:   "print",
+						Flags:  flagsConfigPrint,
+						Usage:  "Print the whole config as one document, includes resolved (YAML, or JSON with --json)",
+						Action: commands.WithRepo(commands.HandleConfigPrint),
 					},
 					{
 						Name:   "reset",
+						Flags:  flagsConfigReset,
 						Usage:  "Derive config from audit log",
-						Action: commands.HandleStub,
+						Action: commands.WithRepo(commands.HandleConfigReset),
 					},
 				},
 			},
 			{
 				Name:     "apply",
 				Category: catConfig,
-				Action:   commands.HandleStub,
+				Flags:    flagsConfigApply,
+				Action:   commands.WithRepo(commands.HandleConfigApply),
 				Usage:    "alias for `sesam config apply`",
 			},
 
@@ -491,24 +491,18 @@ we assume 'sesam show path/to/secret' as convenience.`,
 				Usage:    "Show the audit log of secret changes",
 			},
 			{
-				Name:   "docgen",
-				Hidden: true,
-				Usage:  "Generate reference documentation",
-				Commands: []*cli.Command{
-					{
-						Name:   "cli",
-						Action: commands.HandleDocGenCLI,
-						Usage:  "Write a markdown CLI reference to stdout",
-					},
-					{
-						Name:   "config",
-						Action: commands.HandleDocGenConfig,
-						Usage:  "Write a markdown config reference to stdout",
-					},
-				},
+				Name:      "help",
+				Aliases:   []string{"h"},
+				Category:  catMeta,
+				HideHelp:  true,
+				Action:    commands.HandleHelp,
+				Usage:     "Show the built-in manual, or the help of a command",
+				ArgsUsage: "[command]",
 			},
 		},
 	}
+
+	app.Commands = append(app.Commands, docgenCommands()...)
 
 	var activeProfile *profileState
 	var runInvocation bool

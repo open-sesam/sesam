@@ -9,7 +9,7 @@ on:
       - "docs/**"
       - "cli/**"
       # docgen:cfg renders the config reference from the schema.
-      - "config/sesam_schema.json"
+      - "repo/config/sesam_schema.json"
       - "Taskfile.yml"
       - ".github/workflows/docs.yml"
       # go.mod (module path) and the generator drive the vanity-import pages.

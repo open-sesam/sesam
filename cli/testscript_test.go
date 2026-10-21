@@ -20,6 +20,7 @@ import (
 	"filippo.io/age/armor"
 	"github.com/rogpeppe/go-internal/testscript"
 	"opensesam.org/sesam/cli/commands"
+	"opensesam.org/sesam/cli/docgen"
 	"opensesam.org/sesam/repo"
 )
 
@@ -149,6 +150,14 @@ func TestWorkflows(t *testing.T) {
 		e.Setenv("PLUGIN_KEY", pluginKeyPath)
 		e.Setenv("PLUGIN_PUBKEY", MockPluginRecipient())
 
+		// Scripts run in a temp dir, so the doc generator cannot find the
+		// handbook by its repo-relative default.
+		handbook, err := filepath.Abs(filepath.Join("..", docgen.DefaultHandbook))
+		if err != nil {
+			return err
+		}
+		e.Setenv("HANDBOOK", handbook)
+
 		// SESAM_ID points to admin's key so all commands run as admin by default.
 		e.Setenv("SESAM_ID", filepath.Join(idDir, "ADMIN.age"))
 		return nil
@@ -173,6 +182,14 @@ func TestWorkflows(t *testing.T) {
 				Setup: setup,
 				Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
 					"sesam-repo": sesamRepoCmd,
+					"envsubst":   cmdEnvsubst,
+					"hide-git":   cmdHideGit,
+				},
+				Condition: func(cond string) (bool, error) {
+					if cond == "docgen" {
+						return docgenEnabled, nil
+					}
+					return false, fmt.Errorf("unknown condition %q", cond)
 				},
 			})
 		})
@@ -180,6 +197,47 @@ func TestWorkflows(t *testing.T) {
 	if !ran {
 		t.Fatalf("no testscript categories found under %s", root)
 	}
+}
+
+// cmdEnvsubst expands $VAR references inside the named files, in place.
+// Txtar bodies are copied verbatim (only their names are expanded), so a
+// fixture that has to carry a generated value - a real public key, say -
+// needs this.
+func cmdEnvsubst(ts *testscript.TestScript, neg bool, args []string) {
+	if neg || len(args) == 0 {
+		ts.Fatalf("usage: envsubst file...")
+	}
+
+	for _, arg := range args {
+		path := ts.MkAbs(arg)
+
+		data, err := os.ReadFile(path)
+		ts.Check(err)
+
+		expanded := os.Expand(string(data), ts.Getenv)
+		ts.Check(os.WriteFile(path, []byte(expanded), 0o644))
+	}
+}
+
+// cmdHideGit trims $PATH down to the directory testscript.Main put the command
+// binaries in, so `git` is gone while `sesam` itself stays runnable. That is
+// the "git is not installed" case; everything sesam does through go-git has to
+// keep working.
+func cmdHideGit(ts *testscript.TestScript, neg bool, args []string) {
+	if neg || len(args) > 0 {
+		ts.Fatalf("usage: hide-git")
+	}
+
+	for _, dir := range filepath.SplitList(ts.Getenv("PATH")) {
+		if _, err := os.Stat(filepath.Join(dir, "sesam")); err != nil {
+			continue
+		}
+
+		ts.Setenv("PATH", dir)
+		return
+	}
+
+	ts.Fatalf("no $PATH entry holds the sesam test binary")
 }
 
 func writeEncryptedIdentity(path string, plaintext []byte, passphrase string) error {

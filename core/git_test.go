@@ -121,6 +121,37 @@ func TestVerifyInitFileUnchangedMergeSameContent(t *testing.T) {
 	require.NoError(t, err, "merge re-touching init with identical content is not a modification")
 }
 
+// The anchor is the commit that introduced init, not whichever carrier the log
+// walk visits last: past a merge, that is a commit on the merged-in branch.
+func TestVerifyInitFileUnchangedAnchorAcrossMerge(t *testing.T) {
+	sesamDir, repo := testGitRepo(t)
+	wt, err := repo.Worktree()
+	require.NoError(t, err)
+
+	commit := func(msg string, parents ...plumbing.Hash) plumbing.Hash {
+		writeSecret(t, sesamDir, "file.txt", msg)
+		_, err := wt.Add(".")
+		require.NoError(t, err)
+		h, err := wt.Commit(msg, &git.CommitOptions{
+			Author:  &object.Signature{Name: "Test", Email: "t@t.com", When: time.Now()},
+			Parents: parents,
+		})
+		require.NoError(t, err)
+		return h
+	}
+
+	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
+	require.NoError(t, os.WriteFile(initPath, []byte("stable-hash"), 0o600))
+	initCommit := commit("init")
+	mainLine := commit("main", initCommit)
+	side := commit("side", initCommit)
+	commit("merge", mainLine, side)
+
+	anchor, err := verifyInitFileUnchanged(sesamDir)
+	require.NoError(t, err)
+	require.Equal(t, initCommit.String(), anchor)
+}
+
 func TestVerifyInitFileUnchangedNotAGitRepo(t *testing.T) {
 	sesamDir := testRepo(t) // no git init
 

@@ -1,0 +1,22 @@
+# Every repo-backed command runs the git-integration nudge, which reads
+# `git --version`. Without git on $PATH there is no version to compare against -
+# that has to degrade to "no config-based hooks", not take the command down.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec git add -A
+exec git commit -m 'init sesam'
+
+# hide-git keeps only the directory holding the sesam test binary on $PATH.
+hide-git
+! exec git --version
+
+exec sesam status
+stdout 'in sync'
+stderr 'failed to figure out git --version'
+
+exec sesam log
+stdout 'initialized repo'

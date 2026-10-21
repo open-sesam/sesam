@@ -37,11 +37,22 @@ func verifyOpts(cmd *cli.Command) repo.VerifyOptions {
 		anySpecified = true
 	}
 
+	if cmd.Bool("config") {
+		opts.Config = true
+		anySpecified = true
+	}
+
 	if cmd.Bool("all") || !anySpecified {
 		opts.Integrity = true
 		opts.ForgeCheck = true
 		opts.KeyReuse = true
 		opts.Truncation = true
+		// Config is deliberately not part of --all: sesam.yml's plain-text
+		// merge and the audit log's own semantic merge can legitimately
+		// disagree right after an ordinary merge (see VerifyOptions.Config),
+		// which would make ordinary verify fail after routine merge activity.
+		// Pass --config explicitly to check for it, e.g. before applying a
+		// branch you did not author yourself.
 	}
 
 	return opts
@@ -148,6 +159,21 @@ func printReport(opts repo.VerifyOptions, report *repo.VerifyReport) {
 					orange(spk.PubKey),
 				))
 			}
+		}
+	}
+
+	if opts.Config {
+		if len(report.CommittedConfigChanges) == 0 {
+			slog.Info(fmt.Sprintf("Config: %s", green("ok")))
+		} else {
+			slog.Error(fmt.Sprintf(
+				"Config: %s",
+				red("sesam.yml declares changes that already arrived committed"),
+			))
+			for _, change := range report.CommittedConfigChanges {
+				slog.Error(fmt.Sprintf("  %s", orange(change.String())))
+			}
+			slog.Error("check where they came from (git log -p -- sesam.yml) before running apply")
 		}
 	}
 }

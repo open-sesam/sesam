@@ -610,8 +610,12 @@ func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourP
 		return nil, fmt.Errorf("serialize merged audit log: %w", err)
 	}
 
-	// TODO: We'd also need to adjust sesam.yml accordingly, otherwise we'd have a diff.
-	//       `sesam config reset` basically needs to be set once that feature has been build.
+	// sesam.yml is not touched here: it takes "ours" via the sesam-ours git merge
+	// driver (repo/assets/gitattributes.default) and is reset against the merged
+	// log later, in the pre-commit hook's finalize step (cli/commands/hook.go),
+	// which has a real git worktree handle to re-stage it with. Doing that reset
+	// here instead desyncs the index from the worktree, since this driver only
+	// ever writes back %A for the audit log itself.
 
 	// merge driver should write back to %A (i.e. ourPath)
 	if err := renameio.WriteFile(ourPath, mergedBuf.Bytes(), 0o600); err != nil {

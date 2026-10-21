@@ -26,5 +26,37 @@ stderr 'must be relative'
 # A path escaping the repository via .. is confined by the repo root.
 ! exec sesam tell --user mallory --recipient file://../outside.pub --group dev
 
+# Key files carry headers - age-keygen writes two of them - so comments are
+# skipped rather than taken for key material.
+exec sesam tell --user paula --recipient file://keys/paula.pub --group dev
+exec sesam user list
+stdout 'paula'
+
+# Pointing at the age-keygen *identity* file instead of the public key is an
+# easy mistake (it is the same file `sesam init -i` takes). It has to be named
+# as such, and the private key must never be echoed back.
+! exec sesam tell --user percy --recipient file://keys/percy.age --group dev
+stderr 'private key'
+! stderr 'AGE-SECRET-KEY'
+! stdout 'AGE-SECRET-KEY'
+
+# A file without any usable key fails on the spot, not somewhere downstream.
+! exec sesam tell --user pam --recipient file://keys/pam.pub --group dev
+stderr 'no public key'
+
+exec sesam verify
+
 -- keys/peter.pub --
 age1gtfhwme5a3sg9r7sp9vqu5awdzft4xd5qjesdq8lhry5wy8tfsfqw7fgt6
+-- keys/paula.pub --
+# paula, laptop key
+# created: 2026-09-13T14:00:52+02:00
+
+age1dzsks48f0xuf59qma3mv5a9hxrq4yq5eymd0d4ajg74gu6xnj3dqc9j0rl
+-- keys/percy.age --
+# The payload is not a real key - only its prefix decides how sesam reads it.
+# created: 2026-09-13T14:00:52+02:00
+# public key: age1r95e9036u9hyt6cemhmecgk2vykha3w7jfv9g6n45295w9k0rvxql0nkp2
+AGE-SECRET-KEY-1NOTAREALKEYNOTAREALKEYNOTAREALKEYNOTAREALKEYNOTAREALKEYXXXXX
+-- keys/pam.pub --
+# public key: age1r95e9036u9hyt6cemhmecgk2vykha3w7jfv9g6n45295w9k0rvxql0nkp2

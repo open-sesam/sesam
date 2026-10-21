@@ -62,7 +62,7 @@ func newForgeFixture(t *testing.T) *forgeFixture {
 
 func (f *forgeFixture) addUser(t *testing.T, name string, recps ...*Recipient) {
 	t.Helper()
-	f.State.Users = append(f.State.Users, VerifiedUser{Name: name, Recps: recps})
+	f.State.Users = append(f.State.Users, VerifiedUser{Membership: Membership{Name: name}, Recps: recps})
 	for _, r := range recps {
 		f.Kr.AddRecipient(name, r)
 	}

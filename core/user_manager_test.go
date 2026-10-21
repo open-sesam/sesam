@@ -533,6 +533,25 @@ func TestUserRmRecipientSuccess(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestSignerChangingOwnRecipientsKeepsSigning regresses a signer changing its
+// own keys: that regenerates its signing key, and every later entry must be
+// signed with the new one or the log rejects it.
+func TestSignerChangingOwnRecipientsKeepsSigning(t *testing.T) {
+	um, admin := buildTestUserManager(t)
+	ctx := context.Background()
+	newKey := newTestUser(t, "admin")
+	bob := newTestUser(t, "bob")
+
+	require.NoError(t, um.UserAddRecipient(ctx, "admin", []string{newKey.Recipient.String()}))
+	require.NoError(t, um.UserTell(ctx, "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+
+	require.NoError(t, um.UserRmRecipient(ctx, "admin", []string{admin.Recipient.String()}))
+	_, err := um.UserChangeGroups("bob", []string{"ops"}, false)
+	require.NoError(t, err)
+
+	require.Same(t, um.signer, um.secMgr.Signer, "both managers must sign as the same key")
+}
+
 func TestUserRmRecipientLastRecipient(t *testing.T) {
 	um, _ := buildTestUserManager(t)
 	bob := newTestUser(t, "bob")
@@ -596,6 +615,10 @@ func TestUserRegenerateSignKeySuccess(t *testing.T) {
 	require.NoError(t, err)
 	_, err = um.state.keyring.Verify(SesamDomainSignSecretTag, data, oldSig, "bob")
 	require.Error(t, err, "the replaced signing key must no longer verify")
+
+	// Footers signed with the old key are orphaned until the next seal.
+	require.Equal(t, um.state.VerifiedUntil, um.state.SealRequiredSeqID,
+		"regen must mark a seal as pending")
 }
 
 func TestUserRegenerateSignKeyReloads(t *testing.T) {

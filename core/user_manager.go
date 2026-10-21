@@ -60,6 +60,10 @@ func (um *UserManager) UserTell(
 		return fmt.Errorf("invalid user name: %w", err)
 	}
 
+	if err := ValidGroupNames(groups); err != nil {
+		return err
+	}
+
 	if !um.signUser.IsAdmin() {
 		return fmt.Errorf("need to be admin for telling users")
 	}
@@ -301,6 +305,12 @@ func (um *UserManager) UserRegenerateSignKey(user string) error {
 		}),
 	); err != nil {
 		return err
+	}
+
+	// Our own key was replaced: the log only accepts the new one from here on.
+	if user == um.signer.UserName() {
+		um.signer = signer
+		um.secMgr.Signer = signer
 	}
 
 	return nil
