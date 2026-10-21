@@ -240,13 +240,22 @@ var flagsMove = []cli.Flag{
 }
 
 var flagsRun = []cli.Flag{
+	&cli.BoolFlag{
+		Name:  "all",
+		Usage: "Select all managed secrets accessible to the current identity",
+	},
 	&cli.StringSliceFlag{
 		Name:  "secret",
-		Usage: "Expose an exact secret file as VARIABLE=path; VARIABLE holds a /dev/fd path (repeatable)",
+		Usage: "Select path or VARIABLE=path; unnamed dotenv files are parsed, other files use SESAM_PATH names holding /dev/fd paths (repeatable)",
 	},
 	&cli.StringSliceFlag{
 		Name:  "env-file",
 		Usage: "Inject variables from an exact dotenv secret file (repeatable)",
+	},
+	&cli.StringSliceFlag{
+		Name:    "env-pattern",
+		Usage:   "Additional regex matching sesam-relative dotenv paths; .env suffixes are always recognized (repeatable)",
+		Sources: cli.EnvVars("SESAM_RUN_ENV_PATTERN"),
 	},
 }
 

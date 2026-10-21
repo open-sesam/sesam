@@ -33,9 +33,6 @@ const (
 // build managers, defer Close) and hand it to the handler; the wrapping
 // makes it obvious which commands need an initialized sesam repository.
 func Main(args []string) error {
-	if len(args) == 2 && args[1] == "__run-supervisor" {
-		return commands.RunSupervisor()
-	}
 	installHelpOrdering()
 
 	cli.VersionFlag = &cli.BoolFlag{

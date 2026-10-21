@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,6 +20,7 @@ import (
 	"filippo.io/age/armor"
 	"github.com/rogpeppe/go-internal/testscript"
 	"opensesam.org/sesam/cli/commands"
+	"opensesam.org/sesam/repo"
 )
 
 type runProbeState struct {
@@ -38,9 +38,9 @@ func TestMain(m *testing.M) {
 				return
 			}
 
-			var runExitErr *commands.ExitError
+			var runExitErr *repo.ExitError
 			if errors.As(err, &runExitErr) {
-				runExitErr.Terminate()
+				os.Exit(runExitErr.ExitCode())
 			}
 
 			// Mirror main.go: the merge drivers talk to git through exit codes,
@@ -244,19 +244,32 @@ func runProbe() {
 			}
 		}
 	case "hold":
-		if len(os.Args) > 3 && os.Args[3] == "ignore-term" {
-			signal.Ignore(syscall.SIGTERM)
-		}
-		if _, err := os.ReadFile(os.Getenv(os.Args[2])); err != nil {
+		content, err := os.ReadFile(os.Getenv(os.Args[2]))
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
-		if err := json.NewEncoder(os.Stdout).Encode(runProbeState{PID: os.Getpid(), PPID: os.Getppid()}); err != nil {
+		parent := os.Getppid()
+		encoder := json.NewEncoder(os.Stdout)
+		if err := encoder.Encode(runProbeState{PID: os.Getpid(), PPID: parent}); err != nil {
 			os.Exit(2)
 		}
+		if len(os.Args) > 3 && os.Args[3] == "parent-gone" {
+			for os.Getppid() == parent {
+				time.Sleep(10 * time.Millisecond)
+			}
+			after, err := os.ReadFile(os.Getenv(os.Args[2]))
+			if err != nil || !bytes.Equal(content, after) {
+				fmt.Fprintln(os.Stderr, "secret descriptor unreadable after parent death:", err)
+				os.Exit(2)
+			}
+			if err := encoder.Encode(runProbeState{PID: os.Getpid(), PPID: os.Getppid()}); err != nil {
+				os.Exit(2)
+			}
+		}
 		time.Sleep(time.Hour)
-	case "supervise":
-		if err := runProbeSupervision(os.Args[2:]); err != nil {
+	case "signals":
+		if err := runProbeSignals(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
@@ -364,10 +377,22 @@ func runProbeFile(name string) error {
 	return nil
 }
 
-func runProbeSupervision(args []string) error {
-	sig, err := strconv.Atoi(args[0])
-	if err != nil {
-		return err
+// runProbeSignals sends the leading numeric signals to sesam in order, or to
+// its process group when "group" comes first, and checks sesam's exit status
+// against the last one.
+func runProbeSignals(args []string) error {
+	group := args[0] == "group"
+	if group {
+		args = args[1:]
+	}
+	var sigs []syscall.Signal
+	for len(args) > 0 {
+		n, err := strconv.Atoi(args[0])
+		if err != nil {
+			break
+		}
+		sigs = append(sigs, syscall.Signal(n))
+		args = args[1:]
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -377,17 +402,21 @@ func runProbeSupervision(args []string) error {
 	}
 	defer reader.Close()
 	defer writer.Close()
-	command := exec.CommandContext(ctx, args[1], args[2:]...)
+	command := exec.CommandContext(ctx, args[0], args[1:]...)
 	command.Stdout = writer
 	command.Stderr = os.Stderr
+	if group {
+		command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 	if err := command.Start(); err != nil {
 		return err
 	}
 	defer command.Process.Kill()
 	_ = writer.Close()
 	var state runProbeState
+	decoder := json.NewDecoder(reader)
 	ready := make(chan error, 1)
-	go func() { ready <- json.NewDecoder(reader).Decode(&state) }()
+	go func() { ready <- decoder.Decode(&state) }()
 	select {
 	case err := <-ready:
 		if err != nil {
@@ -398,41 +427,66 @@ func runProbeSupervision(args []string) error {
 		_ = command.Wait()
 		return ctx.Err()
 	}
-	if state.PID <= 0 || state.PPID <= 0 || state.PPID == command.Process.Pid {
-		return fmt.Errorf("command does not have a separate supervisor: %+v", state)
+	if state.PID <= 0 || state.PPID != command.Process.Pid {
+		return fmt.Errorf("command is not a direct child of sesam: %+v", state)
 	}
 	defer syscall.Kill(state.PID, syscall.SIGKILL)
-	defer syscall.Kill(state.PPID, syscall.SIGKILL)
-	closed := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(io.Discard, reader)
-		closed <- err
-	}()
-	if err := command.Process.Signal(syscall.Signal(sig)); err != nil {
-		return err
+	target := command.Process.Pid
+	if group {
+		target = -target
 	}
+	for _, sig := range sigs {
+		if err := syscall.Kill(target, sig); err != nil {
+			return err
+		}
+	}
+	sig := int(sigs[len(sigs)-1])
 	waitErr := command.Wait()
 	var exitErr *exec.ExitError
 	if !errors.As(waitErr, &exitErr) {
 		return fmt.Errorf("expected signal exit, got %v", waitErr)
 	}
 	status := exitErr.Sys().(syscall.WaitStatus)
-	if sig == int(syscall.SIGKILL) && (!status.Signaled() || int(status.Signal()) != sig) ||
-		sig != int(syscall.SIGKILL) && (!status.Exited() || status.ExitStatus() != 128+sig) {
+	if sig == int(syscall.SIGKILL) {
+		if !status.Signaled() || status.Signal() != syscall.SIGKILL {
+			return fmt.Errorf("unexpected parent wait status: %v", status)
+		}
+		var orphan runProbeState
+		go func() { ready <- decoder.Decode(&orphan) }()
+		select {
+		case err := <-ready:
+			if err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if orphan.PID != state.PID || orphan.PPID <= 0 || orphan.PPID == state.PPID {
+			return fmt.Errorf("child was not reparented: before=%+v after=%+v", state, orphan)
+		}
+		fmt.Println("parent signal=9 child survived and reparented; secret descriptor still readable")
+		return nil
+	}
+	if !status.Exited() || status.ExitStatus() != 128+sig {
 		return fmt.Errorf("unexpected parent wait status: %v", status)
 	}
+	closed := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, reader)
+		closed <- err
+	}()
 	select {
 	case err := <-closed:
 		if err != nil {
 			return err
 		}
 	case <-ctx.Done():
-		return fmt.Errorf("child or supervisor survived parent termination: %w", ctx.Err())
+		return fmt.Errorf("child survived parent termination: %w", ctx.Err())
 	}
 	if err := syscall.Kill(state.PID, 0); !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("child was not reaped: %v", err)
 	}
-	fmt.Printf("parent signal=%d child terminated and reaped\n", sig)
+	fmt.Printf("parent signals=%d child terminated and reaped\n", sigs)
 	return nil
 }
 

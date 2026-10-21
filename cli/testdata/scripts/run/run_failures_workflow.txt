@@ -40,11 +40,11 @@ stdout 'exit=143 signal=0'
 exec runprobe no-temp-files
 
 ! exec sesam run -- runprobe mark started-no-selector
-stderr 'at least one --secret or --env-file is required'
+stderr 'at least one .*--all is required'
 ! exists started-no-selector
 
-! exec sesam run --secret raw.txt -- runprobe mark started-invalid-mapping
-stderr 'must be VARIABLE=path'
+! exec sesam run --secret =raw.txt -- runprobe mark started-invalid-mapping
+stderr 'must be path or VARIABLE=path'
 ! exists started-invalid-mapping
 
 ! exec sesam run --secret BAD-NAME=raw.txt -- runprobe mark started-invalid-name
