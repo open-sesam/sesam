@@ -179,16 +179,56 @@ names, including names already set in your environment, and releases the
 repository lock before the command starts.
 
 <div style="text-align: center;">
-  <img class="arch-diagram arch-light" src="run_light.svg" width="900" alt="Sesam starts a supervisor and command, passing file secrets as open files and dotenv entries as environment variables." />
-  <img class="arch-diagram arch-dark" src="run_dark.svg" width="900" alt="Sesam starts a supervisor and command, passing file secrets as open files and dotenv entries as environment variables." />
+  <img class="arch-diagram arch-light" src="run_light.svg" width="900" alt="Sesam starts the command directly, passing file secrets as open files and dotenv entries as environment variables." />
+  <img class="arch-diagram arch-dark" src="run_dark.svg" width="900" alt="Sesam starts the command directly, passing file secrets as open files and dotenv entries as environment variables." />
 </div>
 
-Sesam waits for the command and returns its exit code, or `128 + signal` if a
-signal terminates it. On Linux and macOS, sesam removes each temporary file's
-name before writing secret bytes. The open file still works through `/dev/fd`;
-the OS releases it when the last reference closes. If sesam receives `SIGKILL`,
-its surviving supervisor kills and waits for the immediate child. This does not
-cover the command's descendants.
+Sesam starts the command as a direct child, forwards `SIGHUP` and `SIGTERM`,
+and waits for it. `SIGINT` and `SIGQUIT` are not forwarded: the terminal
+delivers them to the command directly, so sesam only keeps waiting. It
+returns the command's exit code, or
+`128 + signal` if a signal terminates it. If sesam is killed with `SIGKILL` or
+crashes, the command may keep running and retain access to its inherited secret
+descriptors.
+
+On Linux, each secret lives in an anonymous memory file (`memfd`) that never
+touches a filesystem and is sealed read-only before the command starts. On
+macOS, sesam removes each temporary file's name before writing secret bytes.
+Either way the open file works through `/dev/fd`, and the OS releases it when
+the last reference closes.
+
+### Automatic selection and names
+
+Without an explicit variable name, sesam recognizes paths ending in `.env` as
+dotenv files. Other files get a `SESAM_` variable derived from their
+sesam-relative path: ASCII letters are uppercased and characters other than
+ASCII letters and digits become underscores. The variable still contains a
+descriptor path, not the file's contents:
+
+```bash
+sesam run --secret postgres/backup/password.txt -- ./my-service
+# SESAM_POSTGRES_BACKUP_PASSWORD_TXT=/dev/fd/3
+
+sesam run --secret deploy/production.env -- ./my-service
+# Variables declared in deploy/production.env are injected directly.
+```
+
+Use `--all` to select every managed secret accessible to your current identity.
+Automatically selected paths are processed in sorted order. Additional dotenv
+filename regexes can be supplied with repeatable `--env-pattern` flags or the
+`SESAM_RUN_ENV_PATTERN` environment variable. Regexes match sesam-relative paths
+with `/` separators; the `.env` suffix is always recognized.
+
+```bash
+sesam run --all --env-pattern '(^|/)\.env\.' -- ./my-service
+```
+
+Explicit selectors take precedence over `--all`. For example,
+`--secret CONFIG=production.env` forces file-descriptor delivery even for a
+dotenv filename. `--env-file` forces literal dotenv parsing regardless of the
+filename. Generated names that collide with each other, dotenv variables, or
+the inherited environment are rejected rather than overwritten. Existing size
+limits also apply to `--all`; it does not bypass them.
 
 ## Removing secrets
 

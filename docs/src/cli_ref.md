@@ -238,11 +238,15 @@ Decrypt all secrets available to the current user
 
 Run a command with secret files and dotenv variables
 
+**--all**: Select all managed secrets accessible to the current identity
+
 **--env-file**="": Inject variables from an exact dotenv secret file (repeatable)
+
+**--env-pattern**="": Additional regex matching sesam-relative dotenv paths; .env suffixes are always recognized (repeatable)
 
 **--help, -h**: show help
 
-**--secret**="": Expose an exact secret file as VARIABLE=path; VARIABLE holds a /dev/fd path (repeatable)
+**--secret**="": Select path or VARIABLE=path; unnamed dotenv files are parsed, other files use SESAM_PATH names holding /dev/fd paths (repeatable)
 
 ## status, s
 
@@ -461,4 +465,3 @@ Show the audit log of secret changes
 **--help, -h**: show help
 
 **--json**: Print output as JSON
-
