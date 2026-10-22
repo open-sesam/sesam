@@ -35,6 +35,13 @@ exec sesam rm --generate-shell-completion
 stdout 'README\.md'
 ! stdout '^help$'
 
+# From a subdirectory the repo is still found, and paths are cwd-relative.
+mkdir sub
+cd sub
+exec sesam rm --generate-shell-completion
+stdout '^\.\./README\.md$'
+cd $WORK
+
 # `sesam rm -<TAB>`: flag completion folds in both command and global flags.
 exec sesam rm - --generate-shell-completion
 stdout '--identity'
@@ -45,6 +52,8 @@ exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
 # `sesam kill --user <TAB>`: completes known user names from .sesam/signkeys.
 exec sesam kill --user --generate-shell-completion
 stdout '^admin$'
+stdout '^bob$'
+exec sesam kill -u --generate-shell-completion
 stdout '^bob$'
 
 # `sesam tell --user <TAB>`: unlike `kill`, `tell` adds a NEW user, so it must

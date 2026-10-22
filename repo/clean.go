@@ -46,6 +46,9 @@ func deleteRevealedSecrets(root *os.Root, secrets []core.SecretAccess, checkFn f
 		}
 
 		if allow {
+			if err := core.NoSymlinks(root, secret.RevealedPath); err != nil {
+				return fmt.Errorf("refusing to delete: %w", err)
+			}
 			if err := root.Remove(secret.RevealedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("failed to delete %s: %w", secret.RevealedPath, err)
 			}
@@ -80,6 +83,10 @@ func cleanup(
 	// never match a walked entry.
 	excluded := make(map[string]bool, len(exclude))
 	for _, p := range exclude {
+		// Identity paths may still carry a `~`, as loading them allows.
+		if expanded, err := ExpandHomeDir(p); err == nil {
+			p = expanded
+		}
 		abs, err := filepath.Abs(p)
 		if err != nil {
 			continue

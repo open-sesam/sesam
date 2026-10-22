@@ -147,7 +147,7 @@ Deeper support for \fBenv\fR files.
 \fB--memprofile\fP="": Write a heap profile at exit to \fBFILE\fR (pprof format) [$SESAM_MEMPROFILE]
 
 .PP
-\fB--no-color\fP: Disable color always [$NO_COLOR, $SESAM_NO_COLOR]
+\fB--no-color\fP: Disable color always (a non-empty $NO_COLOR does the same) [$SESAM_NO_COLOR]
 
 .PP
 \fB--quiet, -q\fP: Print less log output
@@ -685,7 +685,7 @@ Create \fB\&.gitattributes\fR that tells \fBgit\fR what to do with the encrypted
 .IP \(bu 2
 It will also do a couple other \fBgit\fR operations that are described here.
 .IP \(bu 2
-It will also create a first secret: \fBREADME.sesam\fR\&. Read it for a very condensed version of this tutorial.
+It will also create a first secret: \fBREADME.md\fR\&. Read it for a very condensed version of this tutorial.
 .IP \(bu 2
 We will guess the initial user's name from your \fBgit config\fR\&. If you want a different name then use the \fB--user\fR parameter or rename later.
 .IP \(bu 2
@@ -1030,23 +1030,26 @@ tree dir/of/secrets
 .EE
 
 .PP
-This will create a config hierarchy of \fBsesam.yml\fR files in the config:
+This creates one \fBsesam.yml\fR per directory, each included from the main one:
 
 .EX
 # Main sesam.yml:
 secrets:
-  - include: dir/of/secrets
+  - path: README.md
+    access:
+      - admin
+  - include: dir/of/secrets/sesam.yml
+  - include: dir/of/secrets/sub/sesam.yml
 .EE
 
 .EX
-# dir/of/secrets sesam.yml:
+# dir/of/secrets/sesam.yml:
 secrets:
-  - include: sub
   - path: some_file
 .EE
 
 .EX
-# sub sesam.yml:
+# dir/of/secrets/sub/sesam.yml:
 secrets:
   - path: another_file
 .EE
@@ -1062,8 +1065,8 @@ Once done you can also add descriptions to the files in the config or do more fi
 
 .PP
 If you ever create new files in the sub directories they do not automatically get added.
-Instead you need to run \fBsesam add\fR again. This will also remove secrets that are not there anymore, if any.
-In that sense, it works a bit like \fBgit add\fR\&.
+Instead you need to run \fBsesam add\fR again. In that sense, it works a bit like \fBgit add\fR\&.
+Secrets whose files you deleted stay tracked; remove them with \fBsesam rm\fR\&.
 
 .RE
 
@@ -1153,13 +1156,19 @@ be back with the old path.
 .SS Listing secrets
 .EX
 sesam ls
-├── README.sesam
-└── dir
-    └── of
-        └── secrets
-            ├── some_file
-            └── sub
-                └── another_file
+╭───────────────────────────────────────────────────────────────╮
+│                            Secrets                            │
+├─────────────────────────────────┬───────────────┬─────────────┤
+│ Path                            │ Access Groups │ Description │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ README.md                       │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ dir/of/secrets/some_file        │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ dir/of/secrets/sub/another_file │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│                                 │               │ 3 secrets   │
+╰─────────────────────────────────┴───────────────┴─────────────╯
 .EE
 
 .PP
@@ -1287,7 +1296,7 @@ secrets:
 .EE
 
 .PP
-If you run \fBsesam apply\fR again, other users will have access. You have to commit (if you did not use \fB--commit\fR of course) and push it via git, of course. Then the others can pull the changes:
+If you run \fBsesam apply\fR again, other users will have access. You have to commit and push it via git, of course. Then the others can pull the changes:
 
 .EX
 # on the laptop of alice:
@@ -1371,7 +1380,7 @@ sesam tell --user alice --group a --group b
 
 .EX
 # Add one or more recipients to an existing user
-sesam user add-recipient --user alice -r "..." -r "..."
+sesam user add-recipient --user alice --recipient "..." --recipient "..."
 
 # Can be also done by tell for existing users:
 sesam tell --user alice --recipient "..."
@@ -1379,10 +1388,10 @@ sesam tell --user alice --recipient "..."
 
 .EX
 # Remove one or more recipients from an existing user.
-sesam user remove-recipient --user alice -r "..."
+sesam user remove-recipient --user alice --recipient "..."
 
 # Alternatively, invert it and delete all but the specified:
-sesam user remove-recipient --user alice --all-except -r "..."
+sesam user remove-recipient --user alice --all-except --recipient "..."
 .EE
 
 .EX

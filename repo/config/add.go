@@ -53,13 +53,17 @@ func (c *Config) placeSecret(rel string, nested bool, sec Secret) error {
 	src := c.MainFile
 	if nested && !sameDir(fileDir, mainDir) {
 		sesamPath := filepath.Join(fileDir, "sesam.yml")
+		// Already loaded means already included, maybe by another sub-config.
+		_, included := c.SourceFiles[sesamPath]
 		s, err := c.loadOrCreate(sesamPath)
 		if err != nil {
 			return fmt.Errorf("failed to load sub-config %q: %w", sesamPath, err)
 		}
 
-		if err := c.includeFromMain(sesamPath); err != nil {
-			return err
+		if !included {
+			if err := c.includeFromMain(sesamPath); err != nil {
+				return err
+			}
 		}
 
 		src = s

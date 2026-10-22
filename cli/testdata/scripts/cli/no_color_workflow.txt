@@ -1,0 +1,14 @@
+# NO_COLOR means "no color" for any non-empty value (no-color.org), so values
+# like `yes` must not fail flag parsing, which would also block the hooks.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+
+env NO_COLOR=yes
+exec sesam ls
+stdout 'README.md'
+exec git add -A
+exec git commit -m 'commit with NO_COLOR=yes'

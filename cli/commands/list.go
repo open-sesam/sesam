@@ -42,8 +42,8 @@ func HandleListSecrets(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 	t := newTable("Secrets", "Path", "Access Groups", "Description")
 	for _, secret := range secrets {
 		t.AppendRow([]any{
-			displayPath(r.SesamDir(), secret.RevealedPath),
-			commaJoined(secret.AccessGroups),
+			DisplayPath(r.SesamDir(), secret.RevealedPath),
+			strings.Join(secret.AccessGroups, ","),
 			dashify(secret.Config.Description),
 		})
 	}
@@ -81,7 +81,7 @@ func HandleListUsers(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		t.AppendRow([]any{
 			user.Name,
 			adminMark(user.IsAdmin()),
-			commaJoined(user.Groups),
+			strings.Join(user.Groups, ","),
 			multiline(elideKeys(recipientKeys(user.Recps))),
 			multiline(elideKeys([]string{user.SignPubKey})),
 			dashify(user.Config.Description),

@@ -187,7 +187,9 @@ func HandleVerify(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	}
 
 	if cmd.Bool("json") {
-		_ = printJSON(report)
+		if err := printJSON(report); err != nil {
+			return err
+		}
 	} else {
 		printReport(opts, report)
 	}

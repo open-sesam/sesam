@@ -607,6 +607,7 @@ func TestVerifySecretRemoveBasic(t *testing.T) {
 	state := verifyState(t, al, EmptyKeyring())
 	_, exists := state.SecretExists("secrets/db")
 	require.False(t, exists)
+	require.Equal(t, state.VerifiedUntil, state.SealRequiredSeqID)
 }
 
 func TestVerifySecretRemoveNegative(t *testing.T) {
@@ -636,6 +637,38 @@ func TestVerifySecretRemoveNegative(t *testing.T) {
 		al.AddEntry(bob.Signer, newAuditEntry("bob", &DetailSecretRemove{RevealedPath: "secrets/db"}), nil)
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
 	})
+}
+
+// On a case-insensitive filesystem db.key and DB.key are one file, so a second
+// secret under the other spelling would share the first one's plaintext.
+func TestVerifySecretCaseClash(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry *AuditEntry
+		ok    bool
+	}{
+		{"add with other case", newAuditEntry("admin", &DetailSecretAdd{RevealedPath: "DB.key"}), false},
+		{"move onto other case", newAuditEntry("admin", &DetailSecretMove{OldRevealedPath: "other", NewRevealedPath: "Db.Key"}), false},
+		{"case-only rename of itself", newAuditEntry("admin", &DetailSecretMove{OldRevealedPath: "db.key", NewRevealedPath: "DB.key"}), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sesamDir := testRepo(t)
+			admin := newTestUser(t, "admin")
+			al := initAuditLog(t, sesamDir, admin)
+			for _, p := range []string{"db.key", "other"} {
+				al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailSecretAdd{RevealedPath: p}), nil)
+			}
+			al.AddEntry(admin.Signer, tt.entry, nil)
+
+			if tt.ok {
+				verifyState(t, al, EmptyKeyring())
+				return
+			}
+			require.ErrorContains(t, verifyStateFail(t, al, EmptyKeyring()), "only in case")
+		})
+	}
 }
 
 // --- verifySeal tests ---
@@ -769,6 +802,26 @@ func TestVerifyChainIntegrity(t *testing.T) {
 		// Remove middle entry - chain breaks.
 		al.Entries = append(al.Entries[:1], al.Entries[2:]...)
 		require.Error(t, verifyStateFail(t, al, EmptyKeyring()))
+	})
+
+	t.Run("forged entry with stale seq_id", func(t *testing.T) {
+		sesamDir := testRepo(t)
+		admin := newTestUser(t, "admin")
+		al := initAuditLog(t, sesamDir, admin)
+
+		// Unsigned, claims to be from admin and reuses seq_id 1, which the
+		// replay has already verified when it reaches this entry.
+		mallory := newTestUser(t, "mallory")
+		forged := newAuditEntry("admin", &DetailUserTell{
+			User: "mallory", Groups: []string{"admin"},
+			PubKeys: []UserPubKey{{Key: mallory.Recipient.String(), Source: KeySourceManual}}, SignPubKey: mallory.SignPubKey,
+		})
+		forged.SeqID = 1
+		forged.PreviousHash = al.Entries[0].Hash()
+		al.Entries = append(al.Entries, AuditEntrySigned{AuditEntry: *forged, Signature: "garbage"})
+
+		err := verifyStateFail(t, al, EmptyKeyring())
+		require.ErrorContains(t, err, "seq_id 1")
 	})
 
 	t.Run("tampered entry content", func(t *testing.T) {

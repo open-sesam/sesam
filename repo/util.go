@@ -110,7 +110,7 @@ func loadIdentitiesWith(identityPaths []string, newProvider func(keyFingerprint 
 // walks up parent directories, so this works whether .sesam lives at the
 // worktree root or in a subdir.
 func openGitRepo(sesamDir string) (*git.Repository, error) {
-	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{DetectDotGit: true})
+	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
 	if err != nil {
 		return nil, fmt.Errorf("open git repo at %s: %w", sesamDir, err)
 	}

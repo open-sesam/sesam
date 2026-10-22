@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"path/filepath"
 	"slices"
 
@@ -83,7 +82,7 @@ func (s *Stage) ConfigApply(ctx context.Context, opts ConfigApplyOpts) ([]diff.C
 
 	for _, change := range plan.Changes {
 		if err := s.applyChange(ctx, change); err != nil {
-			return nil, fmt.Errorf("failed to apply %q: %w", change, err)
+			return nil, fmt.Errorf("failed to apply %q: %w%s", change, err, keyMoveHint(plan.Changes, change, err))
 		}
 	}
 
@@ -92,10 +91,42 @@ func (s *Stage) ConfigApply(ctx context.Context, opts ConfigApplyOpts) ([]diff.C
 	rest := diff.Delta(s.vstate, declared)
 
 	if !rest.IsEmpty() {
-		slog.Warn("applied state differs from sesam.yml - this is a bug, nothing was changed", slog.Any("diff", rest))
+		// An error rolls the stage back, so nothing is committed.
+		return nil, fmt.Errorf("applied state differs from sesam.yml - this is a bug, nothing was changed: %v", rest.Changes)
 	}
 
 	return plan.Changes, nil
+}
+
+// keyMoveHint explains a key that is added to one user while still held by
+// another one the same plan removes. Additions run before removals (see
+// diff.opRank), so a key cannot move between users within one apply.
+func keyMoveHint(plan []diff.Change, failed diff.Change, err error) string {
+	var dup *core.DuplicatePubkeyError
+	if !errors.As(err, &dup) {
+		return ""
+	}
+
+	for _, c := range plan {
+		if c.User != dup.Holder() {
+			continue
+		}
+
+		switch {
+		case c.Op == core.OpUserKill && failed.Op == core.OpUserTell:
+			return fmt.Sprintf(
+				"; to rename %s to %s run `sesam user rename %s %s` instead",
+				dup.Holder(), failed.User, dup.Holder(), failed.User,
+			)
+		case c.Op == core.OpUserKill || c.Op == core.OpUserRmRecipients:
+			return fmt.Sprintf(
+				"; a key cannot move between users in one apply: remove it from %s first",
+				dup.Holder(),
+			)
+		}
+	}
+
+	return ""
 }
 
 // applyPreflight rejects plans that would fail part-way through, so the user
@@ -210,6 +241,11 @@ func (s *Stage) applyChange(ctx context.Context, change diff.Change) error {
 // touchIfMissing creates an empty file at path (and its parent directories)
 // if nothing is there yet, recording what it created so Rollback can undo it.
 func (s *Stage) touchIfMissing(path string) error {
+	// Stat follows a dangling link and calls it missing; Create would follow it too.
+	if err := core.NoSymlinks(s.root, path); err != nil {
+		return fmt.Errorf("refusing to create: %w", err)
+	}
+
 	_, err := s.root.Stat(path)
 	if err == nil {
 		return nil

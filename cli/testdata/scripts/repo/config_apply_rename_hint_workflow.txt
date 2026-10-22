@@ -1,0 +1,17 @@
+# Renaming a user in sesam.yml, keeping the key, cannot be applied: the new user
+# is told before the old one is killed, and keys are unique per user. apply
+# names the command that does it.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'init'
+
+exec sed -i 's/bob/robert/g' sesam.yml
+! exec sesam config apply
+stderr 'already has recipient'
+stderr 'sesam user rename bob robert'

@@ -112,7 +112,7 @@ built another tool.
 
 **--memprofile**="": Write a heap profile at exit to `FILE` (pprof format) \[$SESAM_MEMPROFILE\]
 
-**--no-color**: Disable color always \[$NO_COLOR, $SESAM_NO_COLOR\]
+**--no-color**: Disable color always (a non-empty $NO_COLOR does the same) \[$SESAM_NO_COLOR\]
 
 **--quiet, -q**: Print less log output
 
@@ -561,7 +561,7 @@ This command will do the following:
 - Create a `.gitignore` that ignores everything but `.sesam/` and `.sesam.yml`. This is to protect revealed secret so they **never get accidentally added to git**.
 - Create `.gitattributes` that tells `git` what to do with the encrypted files.
 - It will also do a couple other `git` operations that are described here.
-- It will also create a first secret: `README.sesam`. Read it for a very condensed version of this tutorial.
+- It will also create a first secret: `README.md`. Read it for a very condensed version of this tutorial.
 - We will guess the initial user's name from your `git config`. If you want a different name then use the `--user` parameter or rename later.
 - The initial user will automatically be an `admin` user. `sesam` has the concept of users with different access levels.
 - Every user needs an **identity** - a cryptographic way to prove he is this specific user.
@@ -828,23 +828,26 @@ tree dir/of/secrets
     └── sesam.yml
 ```
 
-This will create a config hierarchy of `sesam.yml` files in the config:
+This creates one `sesam.yml` per directory, each included from the main one:
 
 ```yaml
 # Main sesam.yml:
 secrets:
-  - include: dir/of/secrets
+  - path: README.md
+    access:
+      - admin
+  - include: dir/of/secrets/sesam.yml
+  - include: dir/of/secrets/sub/sesam.yml
 ```
 
 ```yaml
-# dir/of/secrets sesam.yml:
+# dir/of/secrets/sesam.yml:
 secrets:
-  - include: sub
   - path: some_file
 ```
 
 ```yaml
-# sub sesam.yml:
+# dir/of/secrets/sub/sesam.yml:
 secrets:
   - path: another_file
 ```
@@ -854,8 +857,8 @@ Once done you can also add descriptions to the files in the config or do more fi
 > **Note**
 >
 > If you ever create new files in the sub directories they do not automatically get added.
-> Instead you need to run `sesam add` again. This will also remove secrets that are not there anymore, if any.
-> In that sense, it works a bit like `git add`.
+> Instead you need to run `sesam add` again. In that sense, it works a bit like `git add`.
+> Secrets whose files you deleted stay tracked; remove them with `sesam rm`.
 
 ### Modifying secrets
 
@@ -927,13 +930,19 @@ sesam mv old_name new_name
 
 ```bash
 sesam ls
-├── README.sesam
-└── dir
-    └── of
-        └── secrets
-            ├── some_file
-            └── sub
-                └── another_file
+╭───────────────────────────────────────────────────────────────╮
+│                            Secrets                            │
+├─────────────────────────────────┬───────────────┬─────────────┤
+│ Path                            │ Access Groups │ Description │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ README.md                       │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ dir/of/secrets/some_file        │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ dir/of/secrets/sub/another_file │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│                                 │               │ 3 secrets   │
+╰─────────────────────────────────┴───────────────┴─────────────╯
 ```
 
 You can also use the ``--json`` switch to print it in a more scriptable way.
@@ -1039,7 +1048,7 @@ secrets:
 +   - deployment
 ```
 
-If you run `sesam apply` again, other users will have access. You have to commit (if you did not use ``--commit`` of course) and push it via git, of course. Then the others can pull the changes:
+If you run `sesam apply` again, other users will have access. You have to commit and push it via git, of course. Then the others can pull the changes:
 
 ```bash
 # on the laptop of alice:
@@ -1116,7 +1125,7 @@ sesam tell --user alice --group a --group b
 
 ```bash
 # Add one or more recipients to an existing user
-sesam user add-recipient --user alice -r "..." -r "..."
+sesam user add-recipient --user alice --recipient "..." --recipient "..."
 
 # Can be also done by tell for existing users:
 sesam tell --user alice --recipient "..."
@@ -1124,10 +1133,10 @@ sesam tell --user alice --recipient "..."
 
 ```bash
 # Remove one or more recipients from an existing user.
-sesam user remove-recipient --user alice -r "..."
+sesam user remove-recipient --user alice --recipient "..."
 
 # Alternatively, invert it and delete all but the specified:
-sesam user remove-recipient --user alice --all-except -r "..."
+sesam user remove-recipient --user alice --all-except --recipient "..."
 ```
 
 ```bash

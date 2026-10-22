@@ -324,6 +324,17 @@ func TestUserRenameSuccess(t *testing.T) {
 	require.Empty(t, um.secMgr.Keyring.Recipients([]string{"bob"}))
 }
 
+func TestUserRenameSelfKeepsSigning(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	require.NoError(t, um.UserRename("admin", "boss"))
+
+	// Entries after the rename must be signed under the new name.
+	bob := newTestUser(t, "bob")
+	require.NoError(t, um.UserTell(context.Background(), "bob", []string{bob.Recipient.String()}, []string{"dev"}))
+	require.Equal(t, "boss", um.log.Entries[len(um.log.Entries)-1].ChangedBy)
+	require.Equal(t, "boss", um.secMgr.Signer.UserName())
+}
+
 func TestUserRenameNonAdmin(t *testing.T) {
 	um := nonAdminUserManager(t)
 
@@ -417,7 +428,7 @@ func TestUserChangeGroupsLastAdmin(t *testing.T) {
 
 	_, err := um.UserChangeGroups("admin", []string{"dev"}, false)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "last admin")
+	require.Contains(t, err.Error(), "last admin admin from admin (new groups: [dev]")
 }
 
 func TestShowUserSuccess(t *testing.T) {
@@ -522,6 +533,7 @@ func TestUserRmRecipientSuccess(t *testing.T) {
 	vu, _ := um.state.UserExists("bob")
 	require.Len(t, vu.Recps, 1)
 	require.True(t, vu.Recps[0].Equal(bob.Recipient), "the surviving recipient must be the one we kept")
+	require.Equal(t, um.state.VerifiedUntil, um.state.SealRequiredSeqID, "removing a key must mark a seal as pending")
 
 	// The audit key was rotated: the removed device is locked out of the log...
 	_, err := LoadAuditLog(um.root, Identities{bobDevice.Identity})
@@ -565,6 +577,15 @@ func TestUserRmRecipientLastRecipient(t *testing.T) {
 
 	// The rejected removal must leave the last recipient intact.
 	require.Len(t, um.state.keyring.Recipients([]string{"bob"}), 1)
+}
+
+// An empty removal would still rotate keys and reseal everything.
+func TestUserRmRecipientEmpty(t *testing.T) {
+	um, _ := buildTestUserManager(t)
+	before := len(um.state.auditLog.Entries)
+
+	require.ErrorContains(t, um.UserRmRecipient(context.Background(), "admin", nil), "no recipients to remove")
+	require.Len(t, um.state.auditLog.Entries, before)
 }
 
 func TestUserRmRecipientNonAdmin(t *testing.T) {

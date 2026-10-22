@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -177,26 +178,23 @@ func (v *View) ListSecrets(paths []string) ([]SecretInfo, error) {
 		return nil, err
 	}
 
-	cfgSecrets, err := cfg.Secrets()
+	// Merged paths are repo-relative; Secrets() keeps them relative to the
+	// sub-config that declares them.
+	doc, err := cfg.Merged()
 	if err != nil {
 		return nil, err
 	}
 
-	// NOTE: This is probably slow for large N, but ok for the start.
+	cfgSecrets := make(map[string]sesamConf.Secret, len(doc.Secrets))
+	for _, s := range doc.Secrets {
+		cfgSecrets[filepath.FromSlash(s.Path)] = s
+	}
+
 	combinedInfo := func(vs core.SecretAccess) SecretInfo {
-		idx := slices.IndexFunc(cfgSecrets, func(s sesamConf.Secret) bool {
-			return s.Path == vs.RevealedPath
-		})
-
-		info := SecretInfo{
+		return SecretInfo{
 			SecretAccess: vs,
+			Config:       cfgSecrets[filepath.Clean(vs.RevealedPath)],
 		}
-
-		if idx >= 0 {
-			info.Config = cfgSecrets[idx]
-		}
-
-		return info
 	}
 
 	out := make([]SecretInfo, 0, len(v.vstate.Secrets))
@@ -356,7 +354,7 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 
 	if opts.Integrity {
 		report.Integrity = core.VerifyIntegrity(v.root, v.vstate, v.keyring)
-		if report.Integrity.IsZero() {
+		if report.Integrity.OK() {
 			report.Integrity = nil
 		}
 	}
@@ -371,9 +369,11 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 	if opts.Truncation {
 		// The anchor comes from the load-time Verify, which already walked the
 		// history for it - VerifyHistory would otherwise walk it a second time.
-		report.TruncateError = core.VerifyHistory(
+		if err := core.VerifyHistory(
 			v.sesamDir, v.gitRepo, v.identities, v.opts.pluginUI(), v.vstate.InitCommit(),
-		)
+		); err != nil {
+			report.TruncateError = core.JSONError{Err: err}
+		}
 	}
 
 	if opts.KeyReuse {
@@ -669,7 +669,7 @@ func (v *View) GitAddDotSesam() error {
 	})
 }
 
-// GitAddConfig stages sesam.yml, every config file it still includes, and
+// GitAddConfig stages sesam.yml, every config file it includes, and
 // deleted - paths a reset removed from disk - so a regenerated config tree
 // lands in git's index exactly as it sits in the worktree. Needed because the
 // sesam-ours merge driver leaves sesam.yml's own index entry untouched: only
@@ -682,10 +682,12 @@ func (v *View) GitAddConfig(deleted []string) error {
 		return ErrClosed
 	}
 
-	paths, err := v.configPaths()
+	// Only this repo's tree: a walk would also stage a nested repo's sesam.yml.
+	cfg, err := v.cfg()
 	if err != nil {
 		return err
 	}
+	paths := slices.Sorted(maps.Keys(cfg.SourceFiles))
 
 	wt, err := v.gitRepo.Worktree()
 	if err != nil {

@@ -99,7 +99,7 @@ secrets:
 +   - deployment
 ```
 
-If you run `sesam apply` again, other users will have access. You have to commit (if you did not use ``--commit`` of course) and push it via git, of course. Then the others can pull the changes:
+If you run `sesam apply` again, other users will have access. You have to commit and push it via git, of course. Then the others can pull the changes:
 
 ```bash
 # on the laptop of alice:
@@ -176,7 +176,7 @@ sesam tell --user alice --group a --group b
 
 ```bash
 # Add one or more recipients to an existing user
-sesam user add-recipient --user alice -r "..." -r "..."
+sesam user add-recipient --user alice --recipient "..." --recipient "..."
 
 # Can be also done by tell for existing users:
 sesam tell --user alice --recipient "..."
@@ -184,10 +184,10 @@ sesam tell --user alice --recipient "..."
 
 ```bash
 # Remove one or more recipients from an existing user.
-sesam user remove-recipient --user alice -r "..."
+sesam user remove-recipient --user alice --recipient "..."
 
 # Alternatively, invert it and delete all but the specified:
-sesam user remove-recipient --user alice --all-except -r "..."
+sesam user remove-recipient --user alice --all-except --recipient "..."
 ```
 
 ```bash

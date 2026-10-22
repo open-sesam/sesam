@@ -194,3 +194,27 @@ func TestPruneOrphanSignKeysMissingDir(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, pruned)
 }
+
+// A planted key file holding someone else's key, encrypted to the user, must
+// not load as the user's signer.
+func TestLoadUserSignKeyRejectsForeignKey(t *testing.T) {
+	sesamDir := testRepo(t)
+	alice := newTestUser(t, "alice")
+	root := testRoot(t, sesamDir)
+
+	real, err := GenerateSignKeyAt(root, "", "alice", []age.Recipient{alice.Recipient.Recipient})
+	require.NoError(t, err)
+
+	kr := EmptyKeyring()
+	require.NoError(t, kr.SetSignPubKey("alice", real.PublicKey()))
+
+	_, err = LoadUserSignKey(root, "alice", alice.Identity, kr)
+	require.NoError(t, err)
+
+	// Overwrite with a fresh key, still decryptable by alice.
+	_, err = GenerateSignKeyAt(root, "", "alice", []age.Recipient{alice.Recipient.Recipient})
+	require.NoError(t, err)
+
+	_, err = LoadUserSignKey(root, "alice", alice.Identity, kr)
+	require.ErrorContains(t, err, "does not hold the sign key")
+}
