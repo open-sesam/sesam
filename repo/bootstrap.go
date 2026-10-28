@@ -637,37 +637,8 @@ func ensureSesamReadme(sesamDir string) error {
 	return nil
 }
 
-func stageInitFiles(r *git.Repository, sesamDir, configPath string) error {
-	files := []string{
-		configPath,
-		filepath.Join(sesamDir, ".gitignore"),
-		filepath.Join(sesamDir, ".gitattributes"),
-		filepath.Join(sesamDir, ".sesam"),
+func stageInitFiles(sesamDir string) {
+	if err := gitAdd(sesamDir, "sesam.yml", ".gitignore", ".gitattributes", sesamSuffix); err != nil {
+		slog.Warn("failed to stage init files", slog.Any("error", err))
 	}
-
-	wt, err := r.Worktree()
-	if err != nil {
-		slog.Warn("failed to open git worktree for staging", slog.Any("error", err))
-		return nil
-	}
-
-	worktreeRoot := wt.Filesystem.Root()
-	for _, filePath := range files {
-		relPath, err := filepath.Rel(worktreeRoot, filePath)
-		if err != nil {
-			slog.Warn("failed to resolve path for staging", slog.String("path", filePath), slog.Any("error", err))
-			continue
-		}
-
-		if strings.HasPrefix(relPath, "..") {
-			slog.Warn("skipping path outside git worktree", slog.String("path", filePath))
-			continue
-		}
-
-		if _, err := wt.Add(relPath); err != nil {
-			slog.Warn("failed to stage path", slog.String("path", relPath), slog.Any("error", err))
-		}
-	}
-
-	return nil
 }

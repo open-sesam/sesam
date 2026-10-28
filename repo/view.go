@@ -650,23 +650,7 @@ func (v *View) GitAddDotSesam() error {
 		return ErrClosed
 	}
 
-	wt, err := v.gitRepo.Worktree()
-	if err != nil {
-		return err
-	}
-
-	// go-git addresses index paths relative to the worktree root, and .sesam may
-	// sit in a subdirectory (nested layout), so relativize against it. Adding the
-	// directory pulls in its untracked objects too.
-	prefix, err := core.SesamGitPrefix(v.gitRepo, v.sesamDir)
-	if err != nil {
-		return err
-	}
-
-	return wt.AddWithOptions(&git.AddOptions{
-		All:  false, // true would add all files and ignore the path.
-		Path: path.Join(prefix, sesamSuffix),
-	})
+	return gitAdd(v.sesamDir, sesamSuffix)
 }
 
 // GitAddConfig stages sesam.yml, every config file it includes, and
@@ -689,25 +673,7 @@ func (v *View) GitAddConfig(deleted []string) error {
 	}
 	paths := slices.Sorted(maps.Keys(cfg.SourceFiles))
 
-	wt, err := v.gitRepo.Worktree()
-	if err != nil {
-		return err
-	}
-
-	prefix, err := core.SesamGitPrefix(v.gitRepo, v.sesamDir)
-	if err != nil {
-		return err
-	}
-
-	for _, p := range slices.Concat(paths, deleted) {
-		if err := wt.AddWithOptions(&git.AddOptions{
-			Path: path.Join(prefix, filepath.ToSlash(p)),
-		}); err != nil {
-			return fmt.Errorf("git add %s: %w", p, err)
-		}
-	}
-
-	return nil
+	return gitAdd(v.sesamDir, slices.Concat(paths, deleted)...)
 }
 
 // Status computes a comparison between the revealed and sealed state.
