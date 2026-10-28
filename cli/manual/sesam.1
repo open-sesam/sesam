@@ -1141,16 +1141,23 @@ sesam run \\
 
 .IP \(bu 2
 \fB--secret TLS_CERT=certs/client.pem\fR gives the command a read-only file and sets
-\fBTLS_CERT\fR to its path, such as \fB/dev/fd/3\fR\&. Have your program read that variable;
-it must keep the inherited file descriptor open to use the path.
+\fBTLS_CERT\fR to its descriptor path, such as \fB/dev/fd/3\fR\&. Your program reads the
+secret from that path.
 .IP \(bu 2
 \fB--env-file deploy/production.env\fR adds the variables declared in that dotenv
 file to the command's environment. Sesam parses the file without shell expansion.
+Duplicate assignments within one file produce a warning; the last value wins.
+
+.PP
+Dotenv files support \fBNAME=value\fR and \fBexport NAME=value\fR assignments, blank
+lines, and comments starting with \fB#\fR\&. They are parsed as data, not executed as
+shell scripts. Shell commands such as \fBset -euo pipefail\fR and malformed
+assignments cause an error rather than being silently skipped.
 
 .PP
 Both options select managed files and can be repeated. Sesam verifies the secrets
-and your access before starting the command. It rejects conflicting variable
-names, including names already set in your environment, and releases the
+and your access before starting the command. It rejects variable collisions
+between selected files or with the inherited environment, and releases the
 repository lock before the command starts.
 
 .PP
