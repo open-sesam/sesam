@@ -12,43 +12,48 @@ exec sesam add raw.txt vars.env
 rm raw.txt vars.env
 
 env INHERITED=kept
-exec sesam run --secret RAW=raw.txt --env-file vars.env -- runprobe env INHERITED RAW TOKEN EMPTY LITERAL SESAM_SECRET_RAW_TXT
-stdout 'INHERITED="kept" exists=true'
-stdout 'RAW="/dev/fd/3" exists=true'
-stdout 'SESAM_SECRET_RAW_TXT="" exists=false'
-stdout 'TOKEN="dotenv value" exists=true'
-stdout 'EMPTY="" exists=true'
-stdout 'LITERAL="\$\(touch_owned\)" exists=true'
+exec sesam run --secret RAW=raw.txt --env-file vars.env -- env
+stderr 'duplicate dotenv variable'
+stderr 'TOKEN'
+! stderr 'discarded-token|dotenv value'
+stdout '^INHERITED=kept$'
+stdout '^RAW=/dev/fd/3$'
+! stdout '^SESAM_SECRET_RAW_TXT='
+stdout '^TOKEN=dotenv value$'
+stdout '^EMPTY=$'
+stdout '^LITERAL=\$\(touch_owned\)$'
 ! exists raw.txt
 ! exists vars.env
 ! exists touch_owned
 
-exec sesam run --secret RAW=raw.txt -- runprobe files RAW
-stdout 'RAW="raw-value\\n" mode=0400 links=0'
+exec sesam run --secret RAW=raw.txt -- sh -c 'cat "$RAW"'
+cmp stdout raw-fixture
 
 # Binary file contents and non-UTF-8 dotenv values survive delivery unchanged.
-exec runprobe write-binary binary.dat
-exec runprobe write-binary-env binary.env
+exec sh -c 'printf "a\000\377b\n" > "$TMPDIR/binary.expected"'
+cp $TMPDIR/binary.expected binary.dat
+exec sh -c 'printf "BINARY=\"a\377b\"\n" > binary.env'
+exec sh -c 'printf "a\377b" > "$TMPDIR/env.expected"'
 exec sesam add binary.dat binary.env
 rm binary.dat binary.env
-exec sesam run --secret BLOB=binary.dat -- runprobe files BLOB
-stdout 'BLOB="a\\x00\\xffb\\n" mode=0400 links=0'
-exec sesam run --env-file binary.env -- runprobe env BINARY
-stdout 'BINARY="a\\xffb" exists=true'
+exec sesam run --secret BLOB=binary.dat -- sh -c 'cat "$BLOB"'
+cmp stdout $TMPDIR/binary.expected
+exec sesam run --env-file binary.env -- sh -c 'printf "%s" "$BINARY"'
+cmp stdout $TMPDIR/env.expected
 
-exec sesam run --secret RAW=raw.txt -- runprobe args 'hello world' ';touch-owned' '$HOME'
-stdout '0="hello world"'
-stdout '1=";touch-owned"'
-stdout '2="\$HOME"'
+exec sesam run --secret RAW=raw.txt -- printf '<%s>\n' 'hello world' ';touch-owned' '$HOME'
+stdout '^<hello world>$'
+stdout '^<;touch-owned>$'
+stdout '^<\$HOME>$'
 ! exists touch-owned
 
 # Dotenv-only invocations do not need file descriptors for secrets.
-exec sesam run --env-file vars.env -- runprobe env TOKEN SESAM_SECRET_VARS_ENV
-stdout 'TOKEN="dotenv value" exists=true'
-stdout 'SESAM_SECRET_VARS_ENV="" exists=false'
+exec sesam run --env-file vars.env -- env
+stdout '^TOKEN=dotenv value$'
+! stdout '^SESAM_SECRET_VARS_ENV='
 
-# The repository lock is released before starting the supervised command.
-exec sesam run --secret RAW=raw.txt -- runprobe reenter
+# The repository lock is released before starting the command.
+exec sesam run --secret RAW=raw.txt -- sesam id
 stdout '^admin$'
 
 # Cwd-relative selectors become canonical sesam-relative paths before repo use.
@@ -57,20 +62,23 @@ cp raw-fixture sub/nested.txt
 exec sesam add sub/nested.txt
 rm sub/nested.txt
 cd sub
-exec sesam run --secret NESTED=./nested.txt --secret ROOT=../raw.txt -- runprobe files NESTED ROOT
-stdout 'NESTED="raw-value\\n" mode=0400 links=0'
-stdout 'ROOT="raw-value\\n" mode=0400 links=0'
+exec sesam run --secret NESTED=./nested.txt --secret ROOT=../raw.txt -- sh -c 'cat "$NESTED"; cat "$ROOT"'
+cmp stdout ../two-files.expected
 ! exists nested.txt
 
 # From outside the repository selectors are sesam-relative.
 cd ../..
-exec sesam --sesam-dir $WORK run --secret NESTED=sub/nested.txt -- runprobe files NESTED
-stdout 'NESTED="raw-value\\n" mode=0400 links=0'
+exec sesam --sesam-dir $WORK run --secret NESTED=sub/nested.txt -- sh -c 'cat "$NESTED"'
+cmp stdout $WORK/raw-fixture
 
 -- raw-fixture --
 raw-value
+-- two-files.expected --
+raw-value
+raw-value
 -- env-fixture --
 # strict dotenv fixture
+TOKEN=discarded-token
 export TOKEN = 'dotenv value'
 EMPTY=
 LITERAL=$(touch_owned)

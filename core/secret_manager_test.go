@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -187,15 +188,15 @@ func TestSealAndRevealAll(t *testing.T) {
 	require.Equal(t, "secret-content", string(got))
 }
 
-func TestRevealSecretBytes(t *testing.T) {
+func TestReveal(t *testing.T) {
 	tests := []struct {
 		name    string
 		content []byte
 	}{
-		{name: "empty"},
+		{name: "empty", content: []byte{}},
 		{name: "trailing newline", content: []byte("token\n")},
-		{name: "binary bytes", content: []byte{0x01, 0x02, 0xfe, 0xff, '\n'}},
-		{name: "at limit", content: bytes.Repeat([]byte{'x'}, MaxInMemorySecretSize)},
+		{name: "binary bytes", content: []byte{0, 0x01, 0x02, 0xfe, 0xff, '\n'}},
+		{name: "large stream", content: bytes.Repeat([]byte{'x'}, 1<<20)},
 	}
 
 	for _, tc := range tests {
@@ -206,30 +207,32 @@ func TestRevealSecretBytes(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, path)))
 
-			got, err := mgr.RevealSecretBytes(path)
-			require.NoError(t, err)
-			require.Equal(t, tc.content, got)
+			var got bytes.Buffer
+			require.NoError(t, mgr.Reveal(path, &got))
+			require.Equal(t, tc.content, got.Bytes())
 			require.NoFileExists(t, filepath.Join(mgr.SesamDir, path))
 		})
 	}
 }
 
-func TestRevealSecretBytesRejectsOversize(t *testing.T) {
+func TestRevealPropagatesWriterError(t *testing.T) {
 	mgr := testSecretManager(t)
-	path := testSecret(t, mgr, "secrets/large", string(bytes.Repeat([]byte{'x'}, MaxInMemorySecretSize+1)))
+	path := testSecret(t, mgr, "secrets/value", "payload")
 	_, err := sealSecret(mgr, path, mgr.recipientsFor(path), mgr.cryptPath(path), mgr.Signer.UserName())
 	require.NoError(t, err)
 	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, path)))
 
-	_, err = mgr.RevealSecretBytes(path)
-	require.ErrorContains(t, err, "exceeds 65536 bytes")
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	require.NoError(t, reader.Close())
+	require.ErrorIs(t, mgr.Reveal(path, writer), io.ErrClosedPipe)
 	require.NoFileExists(t, filepath.Join(mgr.SesamDir, path))
 }
 
-func TestRevealSecretBytesRejectsUnknownAndUnauthorized(t *testing.T) {
+func TestRevealRejectsUnknownAndUnauthorized(t *testing.T) {
 	t.Run("unknown", func(t *testing.T) {
 		mgr := testSecretManager(t)
-		_, err := mgr.RevealSecretBytes("secrets/unknown")
+		err := mgr.Reveal("secrets/unknown", io.Discard)
 		require.ErrorContains(t, err, "no such secret")
 	})
 
@@ -250,12 +253,21 @@ func TestRevealSecretBytesRejectsUnknownAndUnauthorized(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		_, err = mgr.RevealSecretBytes("secrets/admin")
+		var dst bytes.Buffer
+		err = mgr.Reveal("secrets/admin", &dst)
 		require.ErrorContains(t, err, "has no access")
+		require.Empty(t, dst.Bytes(), "denied access must not write plaintext")
+
+		destination := "secrets/existing"
+		writeSecret(t, mgr.SesamDir, destination, "keep original")
+		require.ErrorContains(t, mgr.RevealTo("secrets/admin", destination), "has no access")
+		content, err := os.ReadFile(filepath.Join(mgr.SesamDir, destination))
+		require.NoError(t, err)
+		require.Equal(t, "keep original", string(content))
 	})
 }
 
-func TestRevealSecretBytesRejectsCorruption(t *testing.T) {
+func TestRevealRejectsCorruption(t *testing.T) {
 	mgr := testSecretManager(t)
 	path := testSecret(t, mgr, "secrets/value", "payload")
 	_, err := sealSecret(mgr, path, mgr.recipientsFor(path), mgr.cryptPath(path), mgr.Signer.UserName())
@@ -267,11 +279,15 @@ func TestRevealSecretBytesRejectsCorruption(t *testing.T) {
 	object[len(object)/3] ^= 0xff
 	require.NoError(t, os.WriteFile(objectPath, object, 0o600))
 
-	_, err = mgr.RevealSecretBytes(path)
+	err = mgr.Reveal(path, io.Discard)
 	require.Error(t, err)
+	require.Error(t, mgr.RevealTo(path, path))
+	content, err := os.ReadFile(filepath.Join(mgr.SesamDir, path))
+	require.NoError(t, err)
+	require.Equal(t, "payload", string(content), "failed verification must not replace existing plaintext")
 }
 
-func TestRevealSecretBytesRejectsChangedFooterContentHash(t *testing.T) {
+func TestRevealRejectsChangedFooterContentHash(t *testing.T) {
 	mgr := testSecretManager(t)
 	path := testSecret(t, mgr, "secrets/value", "payload")
 	_, err := sealSecret(mgr, path, mgr.recipientsFor(path), mgr.cryptPath(path), mgr.Signer.UserName())
@@ -290,11 +306,11 @@ func TestRevealSecretBytesRejectsChangedFooterContentHash(t *testing.T) {
 	object = append(object[:footerStart+1], encodedFooter...)
 	require.NoError(t, os.WriteFile(objectPath, object, 0o600))
 
-	_, err = mgr.RevealSecretBytes(path)
+	err = mgr.Reveal(path, io.Discard)
 	require.ErrorContains(t, err, "content hash changed")
 }
 
-func TestRevealSecretBytesRejectsFooterPathMismatch(t *testing.T) {
+func TestRevealRejectsFooterPathMismatch(t *testing.T) {
 	mgr := testSecretManager(t)
 	source := testSecret(t, mgr, "secrets/source", "payload")
 	target := testSecret(t, mgr, "secrets/target", "unused")
@@ -307,7 +323,7 @@ func TestRevealSecretBytesRejectsFooterPathMismatch(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(targetObject), 0o700))
 	require.NoError(t, os.WriteFile(targetObject, object, 0o600))
 
-	_, err = mgr.RevealSecretBytes(target)
+	err = mgr.Reveal(target, io.Discard)
 	require.ErrorContains(t, err, "does not match expected path")
 }
 
@@ -768,6 +784,8 @@ func TestRevealSurvivesSealerRename(t *testing.T) {
 	um, err := BuildUserManager(mgr.root, mgr.Signer, mgr.AuditLog, mgr.State, mgr)
 	require.NoError(t, err)
 	require.NoError(t, um.UserRename("admin", "root"))
+	mgr.Signer, err = LoadSignKey(mgr.root, "root", mgr.Identities[0])
+	require.NoError(t, err)
 
 	require.Len(t, mgr.Keyring.Recipients([]string{"root"}), 1)
 	require.Empty(t, mgr.Keyring.Recipients([]string{"admin"}),

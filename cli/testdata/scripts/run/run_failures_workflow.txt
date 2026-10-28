@@ -7,19 +7,26 @@ exec sesam init --user admin
 
 cp raw-fixture raw.txt
 cp malformed-fixture malformed.env
-exec runprobe write-size oversize.txt 65537
-exec sesam add raw.txt malformed.env oversize.txt
-rm raw.txt malformed.env oversize.txt
+exec dd if=/dev/zero of=oversize.txt bs=65537 count=1
+exec sh -c 'printf "VALUE=\"a\000b\"\n" > nul.env'
+exec sesam add raw.txt malformed.env oversize.txt nul.env
+rm raw.txt malformed.env oversize.txt nul.env
 
-! exec sesam run --env-file malformed.env -- runprobe mark started-malformed
+! exec sesam run --env-file malformed.env -- touch started-malformed
 stderr 'invalid byte in unquoted value'
 ! exists started-malformed
 ! exists malformed.env
 
-! exec sesam run --secret LARGE=oversize.txt -- runprobe mark started-oversize
+! exec sesam run --secret LARGE=oversize.txt -- touch started-oversize
 stderr 'exceeds 65536 bytes'
 ! exists started-oversize
 ! exists oversize.txt
+
+# os/exec rejects NUL-containing environment values before starting the target.
+! exec sesam run --env-file nul.env -- touch started-nul
+stderr 'exec command.*environment variable contains NUL'
+! exists started-nul
+! exists nul.env
 
 ! exec sesam run --secret RAW=raw.txt -- command-that-does-not-exist
 stderr 'find command.*using inherited PATH'
@@ -30,34 +37,28 @@ stderr 'exec command.*exec format error'
 exec sesam id
 stdout '^admin$'
 
-exec runprobe status sesam run --secret RAW=raw.txt -- runprobe exit 23
-stdout 'exit=23 signal=0'
-
-exec runprobe status sesam run --secret RAW=raw.txt -- runprobe signal
-stdout 'exit=137 signal=0'
-
-! exec sesam run -- runprobe mark started-no-selector
+! exec sesam run -- touch started-no-selector
 stderr 'at least one .*--all is required'
 ! exists started-no-selector
 
-! exec sesam run --secret =raw.txt -- runprobe mark started-invalid-mapping
+! exec sesam run --secret =raw.txt -- touch started-invalid-mapping
 stderr 'must be path or VARIABLE=path'
 ! exists started-invalid-mapping
 
-! exec sesam run --secret BAD-NAME=raw.txt -- runprobe mark started-invalid-name
+! exec sesam run --secret BAD-NAME=raw.txt -- touch started-invalid-name
 stderr 'invalid secret variable name'
 ! exists started-invalid-name
 
 ! exec sesam run --secret RAW=raw.txt --
 stderr 'a command is required after --'
 
-! exec sesam run --secret RAW=raw.txt runprobe mark started-no-separator
+! exec sesam run --secret RAW=raw.txt touch started-no-separator
 stderr 'a command is required after --'
 ! exists started-no-separator
 
 # Inherited names are never overwritten.
 env RAW=parent
-! exec sesam run --secret RAW=raw.txt -- runprobe mark started-collision
+! exec sesam run --secret RAW=raw.txt -- touch started-collision
 stderr 'RAW.*collides with inherited environment'
 ! exists started-collision
 

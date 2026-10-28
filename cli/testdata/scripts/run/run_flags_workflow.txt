@@ -8,23 +8,23 @@ cp raw-fixture raw.txt
 exec sesam add raw.txt
 rm raw.txt
 
-! exec sesam --verify-mode no-disk run --secret RAW=raw.txt -- runprobe mark started-no-disk
+! exec sesam --verify-mode no-disk run --secret RAW=raw.txt -- touch started-no-disk
 stderr 'sesam run does not support --verify-mode=no-disk'
 ! exists started-no-disk
 
-exec sesam --cpuprofile cpu.pprof run --secret RAW=raw.txt -- runprobe mark started-cpu
+exec sesam --cpuprofile cpu.pprof run --secret RAW=raw.txt -- touch started-cpu
 exists cpu.pprof
 exists started-cpu
 
-exec sesam run --secret RAW=raw.txt --cpuprofile cpu-after.pprof -- runprobe mark started-cpu-after
+exec sesam run --secret RAW=raw.txt --cpuprofile cpu-after.pprof -- touch started-cpu-after
 exists cpu-after.pprof
 exists started-cpu-after
 
-exec sesam --memprofile mem.pprof run --secret RAW=raw.txt -- runprobe mark started-mem
+exec sesam --memprofile mem.pprof run --secret RAW=raw.txt -- touch started-mem
 exists mem.pprof
 exists started-mem
 
-! exec sesam run --secret RAW=raw.txt --verify-mode no-disk -- runprobe mark started-no-disk-after
+! exec sesam run --secret RAW=raw.txt --verify-mode no-disk -- touch started-no-disk-after
 stderr 'sesam run does not support --verify-mode=no-disk'
 ! exists started-no-disk-after
 

@@ -290,16 +290,6 @@ func revealSecret(sm *SecretManager, revealedPath string) error {
 }
 
 func revealSecretToPath(sm *SecretManager, revealedPath, dstPath string) error {
-	cryptPath := sm.cryptPath(revealedPath)
-
-	srcFd, err := sm.root.Open(cryptPath)
-	if err != nil {
-		// if it does not exist, it probably means that the secret was not encrypted yet.
-		return fmt.Errorf("opening secret file failed: %w", err)
-	}
-
-	defer closeLogged(srcFd)
-
 	if err := sm.root.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
 		return fmt.Errorf("failed to create revealed dir: %w", err)
 	}
@@ -315,15 +305,7 @@ func revealSecretToPath(sm *SecretManager, revealedPath, dstPath string) error {
 		_ = dstFd.Cleanup()
 	}()
 
-	ids := sm.Identities.AgeIdentities()
-	if _, err := RevealStreamAndVerify(
-		srcFd,
-		dstFd,
-		ids,
-		sm.Keyring,
-		sm.State.SealerAuthorized,
-		revealedPath,
-	); err != nil {
+	if err := sm.Reveal(revealedPath, dstFd); err != nil {
 		return err
 	}
 

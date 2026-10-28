@@ -172,14 +172,20 @@ sesam run \
 ```
 
 - `--secret TLS_CERT=certs/client.pem` gives the command a read-only file and sets
-  `TLS_CERT` to its path, such as `/dev/fd/3`. Have your program read that variable;
-  it must keep the inherited file descriptor open to use the path.
+  `TLS_CERT` to its descriptor path, such as `/dev/fd/3`. Your program reads the
+  secret from that path.
 - `--env-file deploy/production.env` adds the variables declared in that dotenv
   file to the command's environment. Sesam parses the file without shell expansion.
+  Duplicate assignments within one file produce a warning; the last value wins.
+
+Dotenv files support `NAME=value` and `export NAME=value` assignments, blank
+lines, and comments starting with `#`. They are parsed as data, not executed as
+shell scripts. Shell commands such as `set -euo pipefail` and malformed
+assignments cause an error rather than being silently skipped.
 
 Both options select managed files and can be repeated. Sesam verifies the secrets
-and your access before starting the command. It rejects conflicting variable
-names, including names already set in your environment, and releases the
+and your access before starting the command. It rejects variable collisions
+between selected files or with the inherited environment, and releases the
 repository lock before the command starts.
 
 <div style="text-align: center;">

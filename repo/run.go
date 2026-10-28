@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -13,8 +14,6 @@ import (
 	"sort"
 	"strings"
 	"syscall"
-
-	"opensesam.org/sesam/core"
 )
 
 // RunOptions contains canonical sesam-relative selectors for sesam run.
@@ -63,8 +62,14 @@ type runEntry struct {
 
 type runRevealFunc func(path string) ([]byte, error)
 
+type boundedBuffer struct {
+	buf      bytes.Buffer
+	limit    int
+	overflow bool
+}
+
 const (
-	runMaxSelectorPlaintext = core.MaxInMemorySecretSize
+	runMaxSelectorPlaintext = 64 * 1024
 	runMaxTotalPlaintext    = 64 * 1024
 	runMaxValueSize         = 64 * 1024
 	runMaxInjectedSize      = 64 * 1024
@@ -99,7 +104,27 @@ func (v *View) PrepareRun(opts RunOptions) (*RunPreparation, error) {
 			opts.Secrets = append(opts.Secrets, RunSecret{Path: path})
 		}
 	}
-	return prepareRun(opts, v.secret.RevealSecretBytes)
+	return prepareRun(opts, func(path string) ([]byte, error) {
+		dst := &boundedBuffer{limit: runMaxSelectorPlaintext}
+		if err := v.secret.Reveal(path, dst); err != nil {
+			return nil, err
+		}
+		if dst.overflow {
+			return nil, fmt.Errorf("secret %s exceeds %d bytes", path, runMaxSelectorPlaintext)
+		}
+		return dst.buf.Bytes(), nil
+	})
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	remaining := b.limit - b.buf.Len()
+	if remaining > 0 {
+		_, _ = b.buf.Write(p[:min(len(p), remaining)])
+	}
+	if len(p) > remaining {
+		b.overflow = true
+	}
+	return len(p), nil
 }
 
 // Environment binds file paths to explicit names and validates the complete
@@ -121,9 +146,6 @@ func (p *RunPreparation) Environment(inherited, filePaths []string) ([]string, e
 	add := func(entry runEntry, source string) error {
 		if len(entry.value) > runMaxValueSize {
 			return fmt.Errorf("value for %s exceeds %d bytes", source, runMaxValueSize)
-		}
-		if bytes.IndexByte(entry.value, 0) >= 0 {
-			return fmt.Errorf("value for %s contains NUL", source)
 		}
 		if previous, exists := owners[entry.name]; exists {
 			return fmt.Errorf("environment variable %q from %s collides with %s", entry.name, source, previous)
@@ -239,6 +261,37 @@ func (e *ExitError) ExitCode() int {
 }
 
 func prepareRun(opts RunOptions, reveal runRevealFunc) (*RunPreparation, error) {
+	secrets, err := resolveRunSelectors(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	prepared := &RunPreparation{}
+	totalPlaintext := 0
+	for _, secret := range secrets {
+		value, err := readRunSecret(secret.Path, reveal, &totalPlaintext)
+		if err != nil {
+			return nil, fmt.Errorf("read secret %s: %w", secret.Path, err)
+		}
+		if secret.Name != "" {
+			prepared.Files = append(prepared.Files, RunFile{Name: secret.Name, Content: value})
+		} else if err := prepared.addEnvFile(secret.Path, value); err != nil {
+			return nil, err
+		}
+	}
+	for _, path := range opts.EnvFiles {
+		document, err := readRunSecret(path, reveal, &totalPlaintext)
+		if err != nil {
+			return nil, fmt.Errorf("read env file %s: %w", path, err)
+		}
+		if err := prepared.addEnvFile(path, document); err != nil {
+			return nil, err
+		}
+	}
+	return prepared, nil
+}
+
+func resolveRunSelectors(opts RunOptions) ([]RunSecret, error) {
 	if len(opts.Secrets)+len(opts.EnvFiles) == 0 {
 		if opts.All {
 			return nil, fmt.Errorf("no accessible secrets selected")
@@ -268,60 +321,37 @@ func prepareRun(opts RunOptions, reveal runRevealFunc) (*RunPreparation, error) 
 		return false
 	}
 
-	prepared := &RunPreparation{}
-	totalPlaintext := 0
-	read := func(path string) ([]byte, error) {
-		plaintext, err := reveal(path)
-		if err != nil {
-			return nil, err
+	secrets := append([]RunSecret(nil), opts.Secrets...)
+	for i, secret := range secrets {
+		if secret.Name == "" && !isEnvFile(secret.Path) {
+			secrets[i].Name = runSecretName(secret.Path)
 		}
-		if len(plaintext) > runMaxSelectorPlaintext {
-			return nil, fmt.Errorf("selector %s exceeds %d bytes", path, runMaxSelectorPlaintext)
-		}
-		totalPlaintext += len(plaintext)
-		if totalPlaintext > runMaxTotalPlaintext {
-			return nil, fmt.Errorf("total decrypted selector plaintext exceeds %d bytes", runMaxTotalPlaintext)
-		}
-		return plaintext, nil
 	}
-	addEnvFile := func(path string, document []byte) error {
-		entries, err := parseDotenv(document)
-		if err != nil {
-			return fmt.Errorf("parse env file %s: %w", path, err)
-		}
-		prepared.entries = append(prepared.entries, entries...)
-		return nil
-	}
+	return secrets, nil
+}
 
-	for _, secret := range opts.Secrets {
-		value, err := read(secret.Path)
-		if err != nil {
-			return nil, fmt.Errorf("read secret %s: %w", secret.Path, err)
-		}
-		name := secret.Name
-		if name == "" {
-			if isEnvFile(secret.Path) {
-				if err := addEnvFile(secret.Path, value); err != nil {
-					return nil, err
-				}
-				continue
-			}
-			name = runSecretName(secret.Path)
-		}
-		prepared.Files = append(prepared.Files, RunFile{Name: name, Content: value})
+func readRunSecret(path string, reveal runRevealFunc, totalPlaintext *int) ([]byte, error) {
+	plaintext, err := reveal(path)
+	if err != nil {
+		return nil, err
 	}
-
-	for _, path := range opts.EnvFiles {
-		document, err := read(path)
-		if err != nil {
-			return nil, fmt.Errorf("read env file %s: %w", path, err)
-		}
-		if err := addEnvFile(path, document); err != nil {
-			return nil, err
-		}
+	if len(plaintext) > runMaxSelectorPlaintext {
+		return nil, fmt.Errorf("selector %s exceeds %d bytes", path, runMaxSelectorPlaintext)
 	}
+	*totalPlaintext += len(plaintext)
+	if *totalPlaintext > runMaxTotalPlaintext {
+		return nil, fmt.Errorf("total decrypted selector plaintext exceeds %d bytes", runMaxTotalPlaintext)
+	}
+	return plaintext, nil
+}
 
-	return prepared, nil
+func (p *RunPreparation) addEnvFile(path string, document []byte) error {
+	entries, err := parseDotenv(document)
+	if err != nil {
+		return fmt.Errorf("parse env file %s: %w", path, err)
+	}
+	p.entries = append(p.entries, entries...)
+	return nil
 }
 
 func runSecretName(path string) string {
@@ -381,7 +411,7 @@ func parseDotenv(document []byte) ([]runEntry, error) {
 		}
 	}
 
-	seen := make(map[string]bool)
+	seen := make(map[string]int)
 	var entries []runEntry
 	for idx, rawLine := range bytes.Split(document, []byte{'\n'}) {
 		lineNumber := idx + 1
@@ -389,13 +419,13 @@ func parseDotenv(document []byte) ([]runEntry, error) {
 		if len(line) > 0 && line[len(line)-1] == '\r' {
 			line = line[:len(line)-1]
 		}
-		line = trimLeftHorizontal(line)
+		line = bytes.TrimLeft(line, " \t")
 		if len(line) == 0 || line[0] == '#' {
 			continue
 		}
 
 		if len(line) > len("export") && bytes.Equal(line[:len("export")], []byte("export")) && isHorizontal(line[len("export")]) {
-			line = trimLeftHorizontal(line[len("export"):])
+			line = bytes.TrimLeft(line[len("export"):], " \t")
 		}
 		if len(line) == 0 || !isDotenvNameStart(line[0]) {
 			return nil, fmt.Errorf("line %d: invalid variable name", lineNumber)
@@ -406,12 +436,12 @@ func parseDotenv(document []byte) ([]runEntry, error) {
 			nameEnd++
 		}
 		name := string(line[:nameEnd])
-		line = trimLeftHorizontal(line[nameEnd:])
+		line = bytes.TrimLeft(line[nameEnd:], " \t")
 		if len(line) == 0 || line[0] != '=' {
 			return nil, fmt.Errorf("line %d: expected '=' after variable name", lineNumber)
 		}
 
-		valueText := trimLeftHorizontal(line[1:])
+		valueText := bytes.TrimLeft(line[1:], " \t")
 		var value []byte
 		switch {
 		case len(valueText) == 0:
@@ -423,7 +453,7 @@ func parseDotenv(document []byte) ([]runEntry, error) {
 				return nil, fmt.Errorf("line %d: unterminated quoted value", lineNumber)
 			}
 			closing++
-			if len(trimHorizontal(valueText[closing+1:])) != 0 {
+			if len(bytes.Trim(valueText[closing+1:], " \t")) != 0 {
 				return nil, fmt.Errorf("line %d: unexpected bytes after quoted value", lineNumber)
 			}
 			value = valueText[1:closing]
@@ -436,10 +466,12 @@ func parseDotenv(document []byte) ([]runEntry, error) {
 			}
 		}
 
-		if seen[name] {
-			return nil, fmt.Errorf("line %d: duplicate variable %q", lineNumber, name)
+		if previous, exists := seen[name]; exists {
+			slog.Warn("duplicate dotenv variable; using last value", slog.String("name", name), slog.Int("line", lineNumber))
+			entries[previous].value = value
+			continue
 		}
-		seen[name] = true
+		seen[name] = len(entries)
 		entries = append(entries, runEntry{name: name, value: value})
 	}
 
@@ -448,24 +480,6 @@ func parseDotenv(document []byte) ([]runEntry, error) {
 
 func isHorizontal(b byte) bool {
 	return b == ' ' || b == '\t'
-}
-
-func trimLeftHorizontal(value []byte) []byte {
-	for len(value) > 0 && isHorizontal(value[0]) {
-		value = value[1:]
-	}
-	return value
-}
-
-func trimRightHorizontal(value []byte) []byte {
-	for len(value) > 0 && isHorizontal(value[len(value)-1]) {
-		value = value[:len(value)-1]
-	}
-	return value
-}
-
-func trimHorizontal(value []byte) []byte {
-	return trimRightHorizontal(trimLeftHorizontal(value))
 }
 
 func isDotenvNameStart(b byte) bool {
