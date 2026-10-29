@@ -146,7 +146,7 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 		}
 		defer func() { _ = root.Close() }()
 
-		keep, err := core.ParseAndResolveRecipients(ctx, root, recipients, nil)
+		keep, err := core.ParseAndResolveRecipients(ctx, root, recipients, r.PluginUI())
 		if err != nil {
 			return err
 		}

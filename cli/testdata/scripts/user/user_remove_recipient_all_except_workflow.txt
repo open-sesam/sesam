@@ -48,5 +48,11 @@ stderr 'nothing to remove'
 cmp .sesam/audit/log.jsonl before.jsonl
 exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl
 
+# A plugin recipient as keep spec needs a PluginUI to parse.
+exec sesam user add-recipient --user bob --recipient $PLUGIN_PUBKEY
+exec sesam user remove-recipient --user bob --all-except --recipient $PLUGIN_PUBKEY
+! exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl
+exec sesam --identity $PLUGIN_KEY show .sesam/audit/log.jsonl
+
 -- keys/extra.pub --
 age1gtfhwme5a3sg9r7sp9vqu5awdzft4xd5qjesdq8lhry5wy8tfsfqw7fgt6

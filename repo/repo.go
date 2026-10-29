@@ -538,6 +538,11 @@ func (r *Repo) SesamDir() string {
 	return r.sesamDir
 }
 
+// PluginUI returns the plugin UI matching the repo's interactivity.
+func (r *Repo) PluginUI() *core.PluginUI {
+	return r.pluginUI
+}
+
 // Close releases the on-disk lock and closes the audit log.
 func (r *Repo) Close() error {
 	r.mu.Lock()
