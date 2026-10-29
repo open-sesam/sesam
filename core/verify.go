@@ -1153,11 +1153,10 @@ func replay(state *VerifiedState, batched bool, upTo uint64) error {
 
 	var previousEntry *AuditEntrySigned
 	var checks []SigCheck
-	var position uint64
 	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
 		// Without this, a forged entry with a stale seq_id takes the skip below
-		// and is never checked.
-		position++
+		// and is never checked. Relies on Iterate starting at the first entry.
+		position := uint64(idx) + 1 //nolint:gosec // slice index, never negative.
 		if entry.SeqID != position {
 			return fmt.Errorf("entry at position %d has seq_id %d", position, entry.SeqID)
 		}
@@ -1244,12 +1243,12 @@ func replay(state *VerifiedState, batched bool, upTo uint64) error {
 		if previousEntry != nil {
 			ok, err := previousEntry.HashMatches(entry.PreviousHash)
 			if err != nil {
-				return fmt.Errorf("checking chain at idx %d: %w", idx, err)
+				return fmt.Errorf("checking chain at position %d: %w", position, err)
 			}
 			if !ok {
 				return fmt.Errorf(
-					"broken chain at idx %d: %s does not match previous entry",
-					idx,
+					"broken chain at position %d: %s does not match previous entry",
+					position,
 					entry.PreviousHash,
 				)
 			}
