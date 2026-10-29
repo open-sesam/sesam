@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"opensesam.org/sesam/core"
 	"opensesam.org/sesam/repo/diff"
@@ -137,11 +138,22 @@ func (s *Stage) applyPreflight(changes []diff.Change, opts ConfigApplyOpts) erro
 		return fmt.Errorf("user %s is not part of this repository", s.whoami)
 	}
 
+	// User operations are admin-only. Secret operations are open to anyone
+	// with access to the secret, which verify checks per step.
 	if !me.IsAdmin() {
-		return fmt.Errorf(
-			"applying the config needs admin rights, but %s is only in %v",
-			s.whoami, me.Groups,
-		)
+		var userChanges []string
+		for _, change := range changes {
+			if change.User != "" {
+				userChanges = append(userChanges, change.String())
+			}
+		}
+
+		if len(userChanges) > 0 {
+			return fmt.Errorf(
+				"%s is not an admin and can only apply secret changes, but sesam.yml also declares: %s",
+				s.whoami, strings.Join(userChanges, "; "),
+			)
+		}
 	}
 
 	// Every step is signed by whoever is applying, and verified against the

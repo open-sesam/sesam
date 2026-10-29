@@ -371,7 +371,7 @@ var flagsID = []cli.Flag{flagJSON}
 var flagsConfigDiff = []cli.Flag{
 	&cli.BoolFlag{
 		Name:  "validate",
-		Usage: "Fail if 'sesam config apply --force' would refuse the config (dry run, needs admin rights)",
+		Usage: "Fail if 'sesam config apply --force' would refuse the config (dry run as the current user)",
 	},
 	flagJSON,
 }
