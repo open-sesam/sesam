@@ -23,8 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
 	"github.com/gofrs/flock"
 	"opensesam.org/sesam/core"
 	sesamConf "opensesam.org/sesam/repo/config"
@@ -178,22 +176,28 @@ func LoadIdentities(identityPaths []string, opts RepoOpts) (core.Identities, err
 	return loadIdentitiesWith(identityPaths, opts.passphraseProvider, opts.pluginUI())
 }
 
-func guessInitUserNameFromGitConfig(repo *git.Repository) (string, error) {
+func guessInitUserNameFromGitConfig(repo *core.Git) (string, error) {
 	// This checks:
 	// - repo .git/config
 	// - ~/.gitconfig
 	// - /etc/gitconfig
-	cfg, err := repo.ConfigScoped(config.SystemScope)
+	// and whatever they include.
+	email, err := gitConfigGet(repo.Root(), "user.email")
 	if err != nil {
 		return "", fmt.Errorf("failed to read git config: %w", err)
 	}
 
-	if cfg.User.Email != "" {
-		return strings.ToLower(cfg.User.Email), nil
+	if email != "" {
+		return strings.ToLower(email), nil
 	}
 
-	if cfg.User.Name != "" {
-		n := cfg.User.Name
+	name, err := gitConfigGet(repo.Root(), "user.name")
+	if err != nil {
+		return "", fmt.Errorf("failed to read git config: %w", err)
+	}
+
+	if name != "" {
+		n := name
 		n = strings.ReplaceAll(n, " ", "_")
 		n = strings.ReplaceAll(n, "/", "_")
 		n = strings.ToLower(n)
@@ -516,7 +520,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	return r, nil
 }
 
-func newRepo(sesamDir string, root *os.Root, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
+func newRepo(sesamDir string, root *os.Root, gitRepo *core.Git, ids []string, opts RepoOpts) *Repo {
 	// sesamDir is already absolute - resolveSesamDirAndGit normalizes it, the
 	// single place that resolves it against the cwd. config stays nil and is
 	// lazy-loaded on first use (View.cfg); Init sets it eagerly after writing it.

@@ -501,18 +501,18 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, additive, nested bool)
 // warnTracked warns about secrets whose plaintext git already tracks:
 // .gitignore does not keep those out of the next commit.
 func (s *Stage) warnTracked(revealedPaths []string) {
-	idx, err := s.gitRepo.Storer.Index()
-	if err != nil {
-		return
-	}
 	prefix, err := core.SesamGitPrefix(s.gitRepo, s.sesamDir)
 	if err != nil {
 		return
 	}
+	trackedFiles, err := s.gitRepo.TrackedFiles(prefix)
+	if err != nil {
+		return
+	}
 
-	tracked := make(map[string]bool, len(idx.Entries))
-	for _, e := range idx.Entries {
-		tracked[e.Name] = true
+	tracked := make(map[string]bool, len(trackedFiles))
+	for _, name := range trackedFiles {
+		tracked[name] = true
 	}
 
 	for _, p := range revealedPaths {

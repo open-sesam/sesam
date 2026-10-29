@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/go-git/go-git/v5"
 	"github.com/sahib/renameio/v2"
 	"opensesam.org/sesam/core"
 )
@@ -107,20 +106,19 @@ func loadIdentitiesWith(identityPaths []string, newProvider func(keyFingerprint 
 	return identities, nil
 }
 
-// openGitRepo opens the git repository that contains sesamRoot. DetectDotGit
-// walks up parent directories, so this works whether .sesam lives at the
-// worktree root or in a subdir.
-func openGitRepo(sesamDir string) (*git.Repository, error) {
-	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
+// openGitRepo opens the git repository that contains sesamRoot. git walks up
+// parent directories, so this works whether .sesam lives at the worktree root
+// or in a subdir.
+func openGitRepo(sesamDir string) (*core.Git, error) {
+	repo, err := core.OpenGit(sesamDir)
 	if err != nil {
 		return nil, fmt.Errorf("open git repo at %s: %w", sesamDir, err)
 	}
 	return repo, nil
 }
 
-// gitAdd runs `git add -A` on sesam-relative paths. go-git's Add runs a full
-// worktree Status first, which takes minutes in large repos, and ignores
-// GIT_INDEX_FILE, which git sets for hooks.
+// gitAdd runs `git add -A` on sesam-relative paths. It honors GIT_INDEX_FILE,
+// which git sets for hooks.
 func gitAdd(sesamDir string, paths ...string) error {
 	args := append([]string{"--literal-pathspecs", "-C", sesamDir, "add", "-A", "--"}, paths...)
 	//nolint:gosec // fixed git subcommand; paths are sesam's own and passed after "--".

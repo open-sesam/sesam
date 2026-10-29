@@ -15,7 +15,6 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/go-git/go-git/v5"
 	"github.com/sahib/renameio/v2"
 	"opensesam.org/sesam/core"
 )
@@ -38,7 +37,7 @@ var configTemplate string
 // It starts at sesamPath and walks upward until the git worktree root,
 // returning the first directory that contains .sesam. If none is found, it
 // returns sesamPath (used by init before .sesam exists).
-func resolveSesamDirAndGit(sesamPath string) (string, *git.Repository, error) {
+func resolveSesamDirAndGit(sesamPath string) (string, *core.Git, error) {
 	if strings.TrimSpace(sesamPath) == "" {
 		sesamPath = "."
 	}
@@ -57,17 +56,12 @@ func resolveSesamDirAndGit(sesamPath string) (string, *git.Repository, error) {
 		return "", nil, fmt.Errorf("repo path %s is not a directory", absPath)
 	}
 
-	gitRepo, err := git.PlainOpenWithOptions(absPath, &git.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
+	gitRepo, err := core.OpenGit(absPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("no git repository found at %s: %w", absPath, err)
 	}
 
-	wt, err := gitRepo.Worktree()
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to access git worktree: %w", err)
-	}
-
-	worktreeRoot := filepath.Clean(wt.Filesystem.Root())
+	worktreeRoot := filepath.Clean(gitRepo.Root())
 	current := absPath
 	for {
 		if _, err := os.Stat(filepath.Join(current, sesamSuffix)); err == nil {
@@ -175,7 +169,7 @@ func quoteYAMLString(value string) string {
 	return "'" + escaped + "'"
 }
 
-func configureGitIntegration(gitRepo *git.Repository, sesamDir string, opts RepoInitOpts) error {
+func configureGitIntegration(gitRepo *core.Git, sesamDir string, opts RepoInitOpts) error {
 	opts.PrintStep("Adjusting .gitignore to ignore all revealed files…")
 	if err := ensureDefaultGitIgnore(sesamDir); err != nil {
 		return err
@@ -254,7 +248,7 @@ const gitAliasCmd = `!cd -- "${GIT_PREFIX:-.}" && exec sesam`
 // repository at sesamDir. It is the single source of truth for both writing the
 // config (ensureGitConfig) and checking it (CheckGitConfig); the driver command
 // strings come from sesamCmd, so writer and checker can never drift.
-func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, error) {
+func expectedGitConfig(r *core.Git, sesamDir string) ([]gitConfigEntry, error) {
 	// Every git driver below is `sesam <subcommand>` run through the
 	// shell with cwd = worktree root; for nested layouts each one
 	// needs the same --sesam-dir treatment to find `.sesam/`.
@@ -342,7 +336,7 @@ func expectedGitConfig(r *git.Repository, sesamDir string) ([]gitConfigEntry, er
 	return baseEntries, nil
 }
 
-func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) error {
+func ensureGitConfig(r *core.Git, sesamDir string, opts RepoInitOpts) error {
 	entries, err := expectedGitConfig(r, sesamDir)
 	if err != nil {
 		return err
@@ -382,7 +376,7 @@ func ensureGitConfig(r *git.Repository, sesamDir string, opts RepoInitOpts) erro
 	return nil
 }
 
-func clearGitConfig(r *git.Repository, sesamDir, sectionPrefix string) error {
+func clearGitConfig(r *core.Git, sesamDir, sectionPrefix string) error {
 	entries, err := expectedGitConfig(r, sesamDir)
 	if err != nil {
 		return fmt.Errorf("expected config: %w", err)
@@ -452,6 +446,25 @@ func gitConfigHasSection(sesamDir, section string) (bool, error) {
 	}
 }
 
+// gitConfigGet runs `git config --get` in dir, e.g. with "--local", key. It
+// returns the last value when the key is set several times, "" when it is unset.
+func gitConfigGet(dir string, args ...string) (string, error) {
+	//nolint:gosec // fixed git subcommand; keys are sesam's own.
+	cmd := exec.CommandContext(context.Background(), "git", append([]string{"-C", dir, "config", "--get"}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		// --get exits 1 for a missing key.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return "", nil
+		}
+
+		return "", fmt.Errorf("git config --get %s: %w", strings.Join(args, " "), err)
+	}
+
+	return strings.TrimSuffix(string(out), "\n"), nil
+}
+
 // sesamSubsectionSuffix returns the suffix appended to sesam's git-config
 // subsection names (and the driver names in .gitattributes) so several sesam
 // repos can coexist in one git repo without clobbering each other. It is empty
@@ -462,7 +475,7 @@ func gitConfigHasSection(sesamDir, section string) (bool, error) {
 // Note: the suffix pins the sesam dir at install time. Moving the sesam dir
 // (e.g. `git mv`) leaves stale names and a wrong --sesam-dir in the command;
 // re-run `sesam init` to refresh the git integration after such a move.
-func sesamSubsectionSuffix(r *git.Repository, sesamDir string) (string, error) {
+func sesamSubsectionSuffix(r *core.Git, sesamDir string) (string, error) {
 	rel, err := core.SesamGitPrefix(r, sesamDir)
 	if err != nil {
 		return "", err
@@ -507,7 +520,7 @@ func wrapHookCmd(sesamHookCmd string) string {
 // The flag is positioned at the top level (`sesam --sesam-dir=... sub`)
 // so it's uniformly attached to the binary regardless of how deep the
 // subcommand path is.
-func sesamCmd(r *git.Repository, sesamDir string, args ...string) (string, error) {
+func sesamCmd(r *core.Git, sesamDir string, args ...string) (string, error) {
 	rel, err := core.SesamGitPrefix(r, sesamDir)
 	if err != nil {
 		return "", err

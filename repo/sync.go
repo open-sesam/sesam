@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
 	"path"
@@ -12,8 +11,6 @@ import (
 	"runtime"
 	"sort"
 
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"golang.org/x/sync/errgroup"
 	"opensesam.org/sesam/core"
 )
@@ -64,13 +61,14 @@ type syncFacts struct {
 // only when some plaintext did not match its worktree object.
 type objectHistory struct {
 	prefix string
+	objs   *core.GitObjects
 
-	// older are the trees to look for earlier object versions in: Before alone
-	// when it is known, else HEAD and the candidates. Resolvable ones only.
-	older []*object.Tree
+	// older are the commits to look for earlier object versions in: Before
+	// alone when it is known, else HEAD and the candidates. Resolvable ones only.
+	older []string
 
-	// before is the tree at SyncOpts.Before; nil when none was given.
-	before *object.Tree
+	// before is the commit at SyncOpts.Before; "" when none was given.
+	before string
 
 	// unmerged holds the worktree-relative paths git lists as conflicted.
 	unmerged map[string]bool
@@ -128,7 +126,7 @@ func (v *View) syncStates(opts SyncOpts) (SyncStates, error) {
 	}
 
 	facts := make([]syncFacts, len(secrets))
-	hashes := make([]plumbing.Hash, len(secrets))
+	hashes := make([]string, len(secrets))
 
 	g := new(errgroup.Group)
 	g.SetLimit(4 * runtime.GOMAXPROCS(0))
@@ -155,6 +153,7 @@ func (v *View) syncStates(opts SyncOpts) (SyncStates, error) {
 				if hist, err = v.openObjectHistory(opts); err != nil {
 					return nil, err
 				}
+				defer func() { _ = hist.objs.Close() }()
 			}
 
 			if err := v.consultHistory(hist, s.RevealedPath, hashes[i], &f); err != nil {
@@ -195,70 +194,64 @@ func classify(f syncFacts) SecretState {
 
 // probeWorktree gathers what plaintext and worktree object say on their own,
 // plus the object's git blob hash for the history lookup.
-func (v *View) probeWorktree(s core.SecretAccess) (syncFacts, plumbing.Hash, error) {
+func (v *View) probeWorktree(s core.SecretAccess) (syncFacts, string, error) {
 	f := syncFacts{access: v.vstate.UserHasAccess(v.whoami, s.AccessGroups)}
 	if !f.access {
-		return f, plumbing.ZeroHash, nil
+		return f, "", nil
 	}
 
 	if _, err := v.root.Stat(s.RevealedPath); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return f, plumbing.ZeroHash, nil
+			return f, "", nil
 		}
 
-		return f, plumbing.ZeroHash, fmt.Errorf("stat %s: %w", s.RevealedPath, err)
+		return f, "", fmt.Errorf("stat %s: %w", s.RevealedPath, err)
 	}
 	f.plaintext = true
 
 	data, err := v.root.ReadFile(v.secret.SealedPath(s.RevealedPath))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return f, plumbing.ZeroHash, nil
+			return f, "", nil
 		}
 
-		return f, plumbing.ZeroHash, fmt.Errorf("read object of %s: %w", s.RevealedPath, err)
+		return f, "", fmt.Errorf("read object of %s: %w", s.RevealedPath, err)
 	}
 	f.object = true
 
 	match, err := v.secret.MatchObject(s.RevealedPath, bytes.NewReader(data))
 	if err != nil {
-		return f, plumbing.ZeroHash, fmt.Errorf("compare %s with its object: %w", s.RevealedPath, err)
+		return f, "", fmt.Errorf("compare %s with its object: %w", s.RevealedPath, err)
 	}
 
 	f.matchesObject = match.Content
 	f.recipientsChanged = !match.Recipients
-	return f, plumbing.ComputeHash(plumbing.BlobObject, data), nil
+	return f, v.gitRepo.BlobHash(data), nil
 }
 
 // consultHistory fills in what only git can tell about a plaintext that does
 // not match its worktree object: is it an earlier version, and did the
 // operation in progress replace the object.
-func (v *View) consultHistory(h *objectHistory, revealedPath string, worktree plumbing.Hash, f *syncFacts) error {
+func (v *View) consultHistory(h *objectHistory, revealedPath string, worktree string, f *syncFacts) error {
 	treePath := path.Join(h.prefix, filepath.ToSlash(core.ObjectPath(revealedPath)))
 	f.unmerged = h.unmerged[treePath]
 
-	seen := map[plumbing.Hash]bool{worktree: true}
-	for _, tree := range h.older {
-		file, err := tree.File(treePath)
-		if errors.Is(err, object.ErrFileNotFound) {
-			continue
-		}
+	seen := map[string]bool{worktree: true}
+	for _, commit := range h.older {
+		hash, ok, err := h.objs.Blob(commit + ":" + treePath)
 		if err != nil {
 			return fmt.Errorf("look up %s in history: %w", treePath, err)
 		}
-
-		if seen[file.Hash] {
+		if !ok {
 			continue
 		}
-		seen[file.Hash] = true
 
-		rd, err := file.Reader()
-		if err != nil {
-			return fmt.Errorf("read %s from history: %w", treePath, err)
+		if seen[hash] {
+			continue
 		}
+		seen[hash] = true
 
-		blob, err := io.ReadAll(rd)
-		_ = rd.Close()
+		blob, _, err := h.objs.ReadBlob(hash)
 		if err != nil {
 			return fmt.Errorf("read %s from history: %w", treePath, err)
 		}
@@ -274,42 +267,60 @@ func (v *View) consultHistory(h *objectHistory, revealedPath string, worktree pl
 		}
 	}
 
-	if h.before != nil {
-		file, err := h.before.File(treePath)
+	if h.before != "" {
+		hash, ok, err := h.objs.Blob(h.before + ":" + treePath)
 		switch {
-		case errors.Is(err, object.ErrFileNotFound):
-			f.objectMoved = true // the operation added it
 		case err != nil:
 			return fmt.Errorf("look up %s before the operation: %w", treePath, err)
+		case !ok:
+			f.objectMoved = true // the operation added it
 		default:
-			f.objectMoved = file.Hash != worktree
+			f.objectMoved = hash != worktree
 		}
 	}
 
 	return nil
 }
 
-// openObjectHistory resolves the trees and index state one pass needs.
+// openObjectHistory starts the object reader and resolves the commits and
+// index state one pass needs. The caller must close h.objs.
 func (v *View) openObjectHistory(opts SyncOpts) (*objectHistory, error) {
 	prefix, err := core.SesamGitPrefix(v.gitRepo, v.sesamDir)
 	if err != nil {
 		return nil, err
 	}
 
-	h := &objectHistory{prefix: prefix, unmerged: map[string]bool{}}
-	seen := map[plumbing.Hash]bool{}
+	objs, err := v.gitRepo.Objects()
+	if err != nil {
+		return nil, err
+	}
 
-	// add resolves a commit's tree once and appends it to older. Unresolvable
+	h := &objectHistory{prefix: prefix, objs: objs, unmerged: map[string]bool{}}
+	if err := h.resolve(v, opts); err != nil {
+		_ = objs.Close()
+		return nil, err
+	}
+
+	return h, nil
+}
+
+// resolve fills in the commits and index state one pass needs.
+func (h *objectHistory) resolve(v *View, opts SyncOpts) error {
+	seen := map[string]bool{}
+
+	// add resolves a commit once and appends it to older. Unresolvable
 	// candidates are skipped, they are hints; Before is a fact the caller
 	// asserted and has to resolve.
 	add := func(rev string, required bool) error {
-		hash := plumbing.NewHash(rev)
-		if seen[hash] {
+		if seen[rev] {
 			return nil
 		}
-		seen[hash] = true
+		seen[rev] = true
 
-		commit, err := v.gitRepo.CommitObject(hash)
+		commit, ok, err := h.objs.Commit(rev)
+		if err == nil && !ok {
+			err = errors.New("no such commit")
+		}
 		if err != nil {
 			if required {
 				return fmt.Errorf("resolve commit %s: %w", rev, err)
@@ -319,18 +330,13 @@ func (v *View) openObjectHistory(opts SyncOpts) (*objectHistory, error) {
 			return nil
 		}
 
-		tree, err := commit.Tree()
-		if err != nil {
-			return fmt.Errorf("tree of %s: %w", rev, err)
-		}
-
-		h.older = append(h.older, tree)
+		h.older = append(h.older, commit.Hash)
 		return nil
 	}
 
 	if opts.Before != "" {
 		if err := add(opts.Before, true); err != nil {
-			return nil, err
+			return err
 		}
 
 		h.before = h.older[0]
@@ -339,19 +345,19 @@ func (v *View) openObjectHistory(opts SyncOpts) (*objectHistory, error) {
 
 	head, err := v.gitRepo.Head()
 	switch {
-	case errors.Is(err, plumbing.ErrReferenceNotFound):
-		// no commit yet: nothing older to compare with
 	case err != nil:
-		return nil, fmt.Errorf("resolve HEAD: %w", err)
+		return fmt.Errorf("resolve HEAD: %w", err)
+	case head == "":
+		// no commit yet: nothing older to compare with
 	default:
-		if err := add(head.Hash().String(), true); err != nil {
-			return nil, err
+		if err := add(head, true); err != nil {
+			return err
 		}
 	}
 
 	for _, rev := range opts.Candidates {
 		if err := add(rev, false); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
@@ -359,17 +365,15 @@ func (v *View) openObjectHistory(opts SyncOpts) (*objectHistory, error) {
 }
 
 // finish reads which paths git still lists as conflicted.
-func (h *objectHistory) finish(v *View) (*objectHistory, error) {
-	idx, err := v.gitRepo.Storer.Index()
+func (h *objectHistory) finish(v *View) error {
+	unmerged, err := v.gitRepo.UnmergedFiles()
 	if err != nil {
-		return nil, fmt.Errorf("read git index: %w", err)
+		return fmt.Errorf("read git index: %w", err)
 	}
 
-	for _, e := range idx.Entries {
-		if e.Stage != 0 {
-			h.unmerged[e.Name] = true
-		}
+	for _, p := range unmerged {
+		h.unmerged[p] = true
 	}
 
-	return h, nil
+	return nil
 }

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/go-git/go-git/v5"
 	"opensesam.org/sesam/core"
 )
 
@@ -70,7 +69,7 @@ func deleteRevealedSecrets(root *os.Root, secrets []core.SecretAccess, checkFn f
 // happen to live inside the worktree. All file I/O is confined to root.
 func cleanup(
 	root *os.Root,
-	gitRepo *git.Repository,
+	gitRepo *core.Git,
 	checkFn func(path string) (bool, error),
 	exclude ...string,
 ) error {
@@ -96,16 +95,6 @@ func cleanup(
 		}
 	}
 
-	idx, err := gitRepo.Storer.Index()
-	if err != nil {
-		return fmt.Errorf("read git index: %w", err)
-	}
-
-	tracked := make(map[string]struct{}, len(idx.Entries))
-	for _, e := range idx.Entries {
-		tracked[filepath.FromSlash(e.Name)] = struct{}{}
-	}
-
 	// Index entries are worktree-relative, but the walk below yields
 	// sesam-relative paths. For a nested sesam dir they differ by the
 	// worktree->sesamDir prefix; without prepending it every tracked lookup
@@ -119,6 +108,16 @@ func cleanup(
 	prefix, err := core.SesamGitPrefix(gitRepo, absSesamDir)
 	if err != nil {
 		return fmt.Errorf("resolve sesam dir within worktree: %w", err)
+	}
+
+	trackedFiles, err := gitRepo.TrackedFiles(prefix)
+	if err != nil {
+		return fmt.Errorf("read git index: %w", err)
+	}
+
+	tracked := make(map[string]struct{}, len(trackedFiles))
+	for _, name := range trackedFiles {
+		tracked[filepath.FromSlash(name)] = struct{}{}
 	}
 	prefix = filepath.FromSlash(prefix)
 	if prefix == "." {

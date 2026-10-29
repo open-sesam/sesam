@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/go-git/go-git/v5"
 	"github.com/stretchr/testify/require"
+	"opensesam.org/sesam/core"
 )
 
 // TestCommittedConfigPaths checks discovery on a committed tree: the same
@@ -43,16 +43,12 @@ func TestCommittedConfigPaths(t *testing.T) {
 			}
 			gitCommitAll(t, dir, "configs")
 
-			gr, err := git.PlainOpen(dir)
+			g, err := core.OpenGit(dir)
 			require.NoError(t, err)
-			head, err := gr.Head()
-			require.NoError(t, err)
-			commit, err := gr.CommitObject(head.Hash())
-			require.NoError(t, err)
-			tree, err := commit.Tree()
+			head, err := g.Head()
 			require.NoError(t, err)
 
-			paths, err := committedConfigPaths(tree, tt.prefix)
+			paths, err := committedConfigPaths(g, head, tt.prefix)
 			require.NoError(t, err)
 
 			want := make([]string, len(tt.want))
@@ -76,12 +72,8 @@ func TestGitAddConfigOnlyOwnTree(t *testing.T) {
 
 	require.NoError(t, r.GitAddConfig(nil))
 
-	idx, err := r.gitRepo.Storer.Index()
+	staged, err := r.gitRepo.TrackedFiles(".")
 	require.NoError(t, err)
-	var staged []string
-	for _, e := range idx.Entries {
-		staged = append(staged, e.Name)
-	}
 	require.Contains(t, staged, "sesam.yml")
 	require.NotContains(t, staged, "nested/sesam.yml")
 }

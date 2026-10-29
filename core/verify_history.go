@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
@@ -11,22 +12,18 @@ import (
 	"time"
 
 	"filippo.io/age"
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 // auditLogSnapshot pairs an audit log with the commit it was read from,
 // so callers can attribute errors to a specific revision.
 type auditLogSnapshot struct {
-	Commit plumbing.Hash
-	// Log is nil when we have no access to it; the walk ends there.
-	Log *AuditLog
+	Commit string
+	Log    *AuditLog
 }
 
 func auditLogHistory(
 	sesamDir string,
-	repo *git.Repository,
+	g *Git,
 	ids Identities,
 	fromRev string,
 	initCommitRev string,
@@ -35,7 +32,7 @@ func auditLogHistory(
 		// No anchor handed down, so the init-file check has not run for this
 		// state (VerifyChain, or a caller without one): walk history for it.
 		var err error
-		if initCommitRev, err = verifyInitFileUnchangedWithRepo(sesamDir, repo); err != nil {
+		if initCommitRev, err = verifyInitFileUnchangedWithRepo(sesamDir, g); err != nil {
 			return nil, fmt.Errorf("verify init file: %w", err)
 		}
 	}
@@ -44,12 +41,12 @@ func auditLogHistory(
 		return func(yield func(*auditLogSnapshot, error) bool) {}, nil
 	}
 
-	fromCommit, err := repo.ResolveRevision(plumbing.Revision(fromRev))
+	fromCommit, err := g.ResolveCommit(fromRev)
 	if err != nil {
 		return nil, fmt.Errorf("resolve revision %q: %w", fromRev, err)
 	}
 
-	prefix, err := SesamGitPrefix(repo, sesamDir)
+	prefix, err := SesamGitPrefix(g, sesamDir)
 	if err != nil {
 		return nil, err
 	}
@@ -65,48 +62,48 @@ func auditLogHistory(
 	}
 	initHash := strings.TrimSpace(string(initData))
 
-	initCommit, err := repo.CommitObject(plumbing.NewHash(initCommitRev))
+	initHasLog, err := hasBlob(g, initCommitRev+":"+auditPathRel)
 	if err != nil {
-		return nil, fmt.Errorf("read init commit %s: %w", initCommitRev, err)
-	}
-	initTree, err := initCommit.Tree()
-	if err != nil {
-		return nil, fmt.Errorf("read init tree at %s: %w", initCommitRev, err)
-	}
-	switch _, err := initTree.File(auditPathRel); {
-	case errors.Is(err, object.ErrFileNotFound):
-		return func(yield func(*auditLogSnapshot, error) bool) {}, nil
-	case err != nil:
 		return nil, fmt.Errorf("read audit log at init commit %s: %w", initCommitRev, err)
+	}
+	if !initHasLog {
+		return func(yield func(*auditLogSnapshot, error) bool) {}, nil
 	}
 
 	return func(yield func(*auditLogSnapshot, error) bool) {
+		objs, err := g.Objects()
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		defer func() { _ = objs.Close() }()
+
 		// Walk FIRST-PARENT (which is always "ours"). On merge commits we take
 		// the route the merge driver should have taken as well - except where
 		// "ours" never had a vault at all, see the cross-over below.
-		hash := *fromCommit
-		var lastBlob plumbing.Hash
+		hash := fromCommit
+		var lastBlob string
 		var sawGap bool
-		var child *object.Commit // the newer commit this one was reached from
+		var child *GitCommit // the newer commit this one was reached from
 		for {
-			commit, err := repo.CommitObject(hash)
+			commit, ok, err := objs.Commit(hash)
+			if err == nil && !ok {
+				err = errors.New("no such commit")
+			}
 			if err != nil {
 				yield(nil, fmt.Errorf("read commit %s: %w", hash, err))
 				return
 			}
 
 			// stop iterating after the first commit in which the sesam repo existed.
-			isInitCommit := commit.Hash.String() == initCommitRev
+			isInitCommit := commit.Hash == initCommitRev
 
-			tree, err := commit.Tree()
-			if err != nil {
-				yield(nil, fmt.Errorf("read tree at commit %s: %w", commit.Hash, err))
-				return
-			}
-
-			file, err := tree.File(auditPathRel)
+			blob, found, err := objs.Blob(commit.Hash + ":" + auditPathRel)
 			switch {
-			case errors.Is(err, object.ErrFileNotFound):
+			case err != nil:
+				yield(nil, fmt.Errorf("read audit log at commit %s: %w", commit.Hash, err))
+				return
+			case !found:
 				// "Ours" carries no vault here. If this commit was reached from a
 				// merge whose other side still holds the log, that side is where
 				// the log's history continues - a vault merged in from a branch,
@@ -114,7 +111,7 @@ func auditLogHistory(
 				// leave a shortened log with nothing to compare it against.
 				// Only if "ours" never had a vault: otherwise the log was deleted
 				// here, and crossing over would skip whatever it held.
-				if alt, ok := logCarryingParent(repo, initCommit, child, commit, auditPathRel); ok {
+				if alt, ok := logCarryingParent(g, objs, initCommitRev, child, commit, auditPathRel); ok {
 					hash = alt
 					continue
 				}
@@ -126,10 +123,7 @@ func auditLogHistory(
 				// back would mean it was deleted in between, which is tampering and
 				// still has to be caught.
 				sawGap = true
-				file = nil
-			case err != nil:
-				yield(nil, fmt.Errorf("read audit log at commit %s: %w", commit.Hash, err))
-				return
+				blob = ""
 			case sawGap:
 				yield(nil, fmt.Errorf(
 					"audit log was removed from history: present at commit %s but missing in a newer one",
@@ -141,17 +135,16 @@ func auditLogHistory(
 			// Only load (and decrypt) when the log blob actually changed from the
 			// child we last yielded - unchanged logs are trivially a prefix of each
 			// other. This keeps the walk as cheap as the old path-filtered one.
-			if file != nil && file.Hash != lastBlob {
-				lastBlob = file.Hash
+			if blob != "" && blob != lastBlob {
+				lastBlob = blob
 
-				rd, err := file.Reader()
+				data, _, err := objs.ReadBlob(blob)
 				if err != nil {
 					yield(nil, fmt.Errorf("open audit log at commit %s: %w", commit.Hash, err))
 					return
 				}
 
-				auditLog, err := loadAuditLogFromReader(rd, ids)
-				_ = rd.Close()
+				auditLog, err := loadAuditLogFromReader(bytes.NewReader(data), ids)
 				if err != nil {
 					nie := &age.NoIdentityMatchError{}
 					if errors.As(err, &nie) {
@@ -175,12 +168,12 @@ func auditLogHistory(
 				}
 			}
 
-			if isInitCommit || len(commit.ParentHashes) == 0 {
+			if isInitCommit || len(commit.Parents) == 0 {
 				return
 			}
 
 			child = commit
-			hash = commit.ParentHashes[0] // follow the mainline (ours) first
+			hash = commit.Parents[0] // follow the mainline (ours) first
 		}
 	}, nil
 }
@@ -190,41 +183,44 @@ func auditLogHistory(
 // rather than the mainline where the two part ways. Only a parent that really
 // carries the log is returned, so the caller cannot bounce back in here.
 func logCarryingParent(
-	repo *git.Repository,
-	initCommit *object.Commit,
-	child *object.Commit,
-	tried *object.Commit,
+	g *Git,
+	objs *GitObjects,
+	initCommit string,
+	child *GitCommit,
+	tried *GitCommit,
 	auditPathRel string,
-) (plumbing.Hash, bool) {
+) (string, bool) {
 	if child == nil {
-		return plumbing.ZeroHash, false
+		return "", false
 	}
 
-	if hadVault, err := initCommit.IsAncestor(tried); err != nil || hadVault {
-		return plumbing.ZeroHash, false
+	if hadVault, err := g.IsAncestor(initCommit, tried.Hash); err != nil || hadVault {
+		return "", false
 	}
 
-	for _, parent := range child.ParentHashes {
+	for _, parent := range child.Parents {
 		if parent == tried.Hash {
 			continue
 		}
 
-		commit, err := repo.CommitObject(parent)
-		if err != nil {
-			continue
-		}
-
-		tree, err := commit.Tree()
-		if err != nil {
-			continue
-		}
-
-		if _, err := tree.File(auditPathRel); err == nil {
+		if _, ok, err := objs.Blob(parent + ":" + auditPathRel); err == nil && ok {
 			return parent, true
 		}
 	}
 
-	return plumbing.ZeroHash, false
+	return "", false
+}
+
+// hasBlob reports whether rev, e.g. "<commit>:<path>", names a blob.
+func hasBlob(g *Git, rev string) (bool, error) {
+	objs, err := g.Objects()
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = objs.Close() }()
+
+	_, ok, err := objs.Blob(rev)
+	return ok, err
 }
 
 // auditLogIsPrefix tests if `old` is a prefix of `new`
@@ -369,14 +365,14 @@ func entryOriginKey(e *AuditEntrySigned) string {
 // but there will edge cases too if the file was renamed and a user was rotated (git looks for 50% matching content).
 func VerifyHistory(
 	sesamDir string,
-	repo *git.Repository,
+	g *Git,
 	ids Identities,
 	pluginUI *PluginUI,
 	initCommitRev string,
 ) (stoppedAt string, err error) {
 	auditLogIter, err := auditLogHistory(
 		sesamDir,
-		repo,
+		g,
 		ids,
 		"HEAD",
 		initCommitRev,
@@ -392,7 +388,7 @@ func VerifyHistory(
 		}
 
 		if curr.Log == nil {
-			return curr.Commit.String(), nil
+			return curr.Commit, nil
 		}
 
 		if prev == nil {
