@@ -476,7 +476,7 @@ Show the diff between config and actual state (extra args are passed to git)
 
 **--json**: Print output as JSON
 
-**--validate**: Fail if 'sesam config apply --force' would refuse the config (dry run, needs admin rights)
+**--validate**: Fail if 'sesam config apply --force' would refuse the config (dry run as the current user)
 
 ### config print
 
