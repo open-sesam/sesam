@@ -19,12 +19,8 @@ func TestGitAddConfigOnlyOwnTree(t *testing.T) {
 
 	require.NoError(t, r.GitAddConfig(nil))
 
-	idx, err := r.gitRepo.Storer.Index()
+	staged, err := r.gitRepo.TrackedFiles(".")
 	require.NoError(t, err)
-	var staged []string
-	for _, e := range idx.Entries {
-		staged = append(staged, e.Name)
-	}
 	require.Contains(t, staged, "sesam.yml")
 	require.NotContains(t, staged, "nested/sesam.yml")
 }
