@@ -12,10 +12,10 @@ import (
 )
 
 func HandleEditSecret(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
-	revealedPath := cmd.Args().First()
-	if revealedPath == "" {
-		return fmt.Errorf("missing secret path: pass a path argument")
+	if cmd.Args().Len() != 1 {
+		return fmt.Errorf("edit takes exactly one secret path, got %d", cmd.Args().Len())
 	}
+	revealedPath := cmd.Args().First()
 
 	paths, err := toRepoPaths(r.SesamDir(), []string{revealedPath})
 	if err != nil {

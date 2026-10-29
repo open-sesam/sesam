@@ -57,6 +57,7 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	}
 
 	force := cmd.Bool("force")
+	noSeal := cmd.Bool("no-seal")
 
 	// Only the plaintext of the removed secrets: the argument may be a
 	// directory that also holds files sesam does not manage.
@@ -84,6 +85,9 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 		if err := s.SecretRemove(paths); err != nil {
 			return err
+		}
+		if noSeal {
+			return nil
 		}
 		return sealStage(cmd, r, s)
 	}); err != nil {

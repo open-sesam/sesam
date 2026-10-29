@@ -319,6 +319,12 @@ Remove a secret file or directory
 .PP
 \fB--help, -h\fP: show help
 
+.PP
+\fB--no-seal\fP: Do not run 'sesam seal' afterwards - useful when batching
+
+.PP
+\fB--seal-all, --all\fP: Seal every secret from its plaintext as it is, stale and diverged ones included
+
 .SS mv
 Move a secret file or directory to a new name
 
@@ -327,6 +333,9 @@ Move a secret file or directory to a new name
 
 .PP
 \fB--nested\fP: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file
+
+.PP
+\fB--seal-all, --all\fP: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 .SS edit
 Open secret in $VISUAL or $EDITOR and immediately seal it afterwards
@@ -524,7 +533,7 @@ Remove a recipient from an existing user (may not be the last one)
 \fB--seal-all, --all\fP: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 .PP
-\fB--user, -u\fP="": Which user looses the specified recipient
+\fB--user, -u\fP="": Which user loses the specified recipient
 
 .SS user regen-sign-key, rsk
 Regenerate the signing key of a specific user
@@ -539,7 +548,7 @@ Regenerate the signing key of a specific user
 \fB--seal-all, --all\fP: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 .PP
-\fB--user, -u\fP="": Regenerate the signing key for a user
+\fB--user, -u\fP="": Which user gets a new signing key
 
 .SS user rename
 Give a user a different name

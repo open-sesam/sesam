@@ -230,6 +230,8 @@ var flagsRm = []cli.Flag{
 		Aliases: []string{"f"},
 		Usage:   "Also remove the revealed secrets",
 	},
+	flagNoSeal,
+	flagSeal,
 }
 
 var flagsMove = []cli.Flag{
@@ -237,6 +239,7 @@ var flagsMove = []cli.Flag{
 		Name:  "nested",
 		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file",
 	},
+	flagSeal,
 }
 
 var flagsEdit = []cli.Flag{
@@ -288,7 +291,7 @@ var flagsUserAddRecipient = []cli.Flag{
 }
 
 var flagsUserRemoveRecipient = []cli.Flag{
-	userFlag(true, "Which user looses the specified recipient"),
+	userFlag(true, "Which user loses the specified recipient"),
 	recipientsFlag(true),
 	flagNoSeal,
 	flagSeal,
@@ -300,7 +303,7 @@ var flagsUserRemoveRecipient = []cli.Flag{
 }
 
 var flagsUserRegenerateSignKey = []cli.Flag{
-	userFlag(true, "Regenerate the signing key for a user"),
+	userFlag(true, "Which user gets a new signing key"),
 	flagNoSeal,
 	flagSeal,
 }
