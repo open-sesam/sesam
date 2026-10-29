@@ -311,10 +311,10 @@ Add a secret file or directory at \fBPATH\fR
 \fB--seal-all, --all\fP: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 .SS rm
-Remove a secret file or directory
+Remove a secret file or directory, plaintext included
 
 .PP
-\fB--force, -f\fP: Also remove the revealed secrets
+\fB--force, -f\fP: Delete the plaintext even when it has unsealed changes
 
 .PP
 \fB--help, -h\fP: show help
@@ -1123,11 +1123,17 @@ versions \fBgit\fR holds, so nothing has to be remembered on your machine:
 \fBU\fR conflicted: a merge left conflict markers in the plaintext.
 
 .SS Removing secrets
-If you have deleted files you can run this:
+To stop managing secrets and delete their plaintext:
 
 .EX
 sesam rm files/ dir/
 .EE
+
+.PP
+\fBrm\fR refuses plaintext with changes that were never sealed, since it is the
+only copy of them. Seal first to keep them in history, or pass \fB--force\fR to
+delete them anyway. To keep the content outside sesam, copy it with
+\fBsesam show path > elsewhere\fR before removing.
 
 .PP
 .RS

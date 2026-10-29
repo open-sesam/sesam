@@ -250,9 +250,9 @@ Add a secret file or directory at `PATH`
 
 ### rm
 
-Remove a secret file or directory
+Remove a secret file or directory, plaintext included
 
-**--force, -f**: Also remove the revealed secrets
+**--force, -f**: Delete the plaintext even when it has unsealed changes
 
 **--help, -h**: show help
 
@@ -906,11 +906,16 @@ versions `git` holds, so nothing has to be remembered on your machine:
 
 ### Removing secrets
 
-If you have deleted files you can run this:
+To stop managing secrets and delete their plaintext:
 
 ```bash
 sesam rm files/ dir/
 ```
+
+`rm` refuses plaintext with changes that were never sealed, since it is the
+only copy of them. Seal first to keep them in history, or pass `--force` to
+delete them anyway. To keep the content outside sesam, copy it with
+`sesam show path > elsewhere` before removing.
 
 > **Warning**
 >

@@ -67,22 +67,40 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	}
 	defer func() { _ = root.Close() }()
 
-	var removed []string
-	if err := r.Update(func(s *repo.Stage) error {
-		secrets, err := s.ListSecrets(paths)
+	secrets, err := r.ListSecrets(paths)
+	if err != nil {
+		return err
+	}
+
+	// Checked before anything is committed, so a refusal changes nothing.
+	removed := make([]string, 0, len(secrets))
+	for _, secret := range secrets {
+		if err := core.NoSymlinks(root, secret.RevealedPath); err != nil {
+			return fmt.Errorf("refusing to remove plaintext: %w", err)
+		}
+		removed = append(removed, secret.RevealedPath)
+	}
+
+	if !force && len(removed) > 0 {
+		// Edited or never sealed plaintext is the only copy of its content.
+		opts := syncOpts(r.SesamDir())
+		opts.Paths = removed
+		states, err := r.SyncStates(opts)
 		if err != nil {
 			return err
 		}
-		for _, secret := range secrets {
-			// Checked before anything is committed, so a refusal changes nothing.
-			if force {
-				if err := core.NoSymlinks(root, secret.RevealedPath); err != nil {
-					return fmt.Errorf("refusing to remove plaintext: %w", err)
-				}
-			}
-			removed = append(removed, secret.RevealedPath)
-		}
 
+		if unsealed := states.Paths(repo.SecretStateNotInSync, repo.SecretStateDiverged, repo.SecretStateNoSealedPath); len(unsealed) > 0 {
+			printNote(
+				fmt.Sprintf("refusing to remove %d unsealed %s:", len(unsealed), pluralize("secret", len(unsealed))),
+				unsealed,
+				"`sesam seal` keeps the edits in history, `sesam rm --force` deletes them.",
+			)
+			return fmt.Errorf("plaintext has unsealed changes")
+		}
+	}
+
+	if err := r.Update(func(s *repo.Stage) error {
 		if err := s.SecretRemove(paths); err != nil {
 			return err
 		}
@@ -92,10 +110,6 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		return sealStage(cmd, r, s)
 	}); err != nil {
 		return err
-	}
-
-	if !force {
-		return nil
 	}
 
 	for _, p := range removed {

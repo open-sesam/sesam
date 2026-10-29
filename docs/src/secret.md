@@ -164,11 +164,16 @@ versions `git` holds, so nothing has to be remembered on your machine:
 
 ## Removing secrets
 
-If you have deleted files you can run this:
+To stop managing secrets and delete their plaintext:
 
 ```bash
 sesam rm files/ dir/
 ```
+
+`rm` refuses plaintext with changes that were never sealed, since it is the
+only copy of them. Seal first to keep them in history, or pass `--force` to
+delete them anyway. To keep the content outside sesam, copy it with
+`sesam show path > elsewhere` before removing.
 
 ```admonish warning
 Please do not delete secrets just with `rm`. This will just remove the revealed file, but the

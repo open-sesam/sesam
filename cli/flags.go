@@ -228,7 +228,7 @@ var flagsRm = []cli.Flag{
 	&cli.BoolFlag{
 		Name:    "force",
 		Aliases: []string{"f"},
-		Usage:   "Also remove the revealed secrets",
+		Usage:   "Delete the plaintext even when it has unsealed changes",
 	},
 	flagNoSeal,
 	flagSeal,

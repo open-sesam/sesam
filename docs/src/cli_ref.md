@@ -194,9 +194,9 @@ Add a secret file or directory at `PATH`
 
 ## rm
 
-Remove a secret file or directory
+Remove a secret file or directory, plaintext included
 
-**--force, -f**: Also remove the revealed secrets
+**--force, -f**: Delete the plaintext even when it has unsealed changes
 
 **--help, -h**: show help
 

@@ -215,7 +215,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 				Flags:         flagsRm,
 				Action:        commands.WithRepo(commands.HandleRemove),
 				ShellComplete: completeSecrets,
-				Usage:         "Remove a secret file or directory",
+				Usage:         "Remove a secret file or directory, plaintext included",
 			},
 			{
 				Name:          "mv",
