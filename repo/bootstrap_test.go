@@ -257,3 +257,25 @@ func TestExpectedGitConfigWithoutGitBinary(t *testing.T) {
 	require.Contains(t, sections, "merge", "version-independent entries must survive")
 	require.Contains(t, sections, "alias")
 }
+
+func TestGitConfigHasSection(t *testing.T) {
+	dir := freshGitRepo(t)
+	require.NoError(t, gitConfigLocal(dir, "hook.sesam-precommit-a%2Fb.event", "pre-commit"))
+
+	tests := []struct {
+		section string
+		want    bool
+	}{
+		{"hook.sesam-precommit-a%2Fb", true},
+		{"hook.sesam-precommit", false}, // a prefix of the existing one
+		{"hook.nope", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.section, func(t *testing.T) {
+			got, err := gitConfigHasSection(dir, tt.section)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}

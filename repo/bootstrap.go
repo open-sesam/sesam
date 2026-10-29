@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -395,7 +396,11 @@ func clearGitConfig(r *git.Repository, sesamDir, sectionPrefix string) error {
 		if entry.subsection == "" {
 			err = gitConfigLocal(sesamDir, "--unset-all", entry.key())
 		} else {
-			err = gitConfigLocal(sesamDir, "--remove-section", entry.section+"."+entry.subsection)
+			section := entry.section + "." + entry.subsection
+			var exists bool
+			if exists, err = gitConfigHasSection(sesamDir, section); err == nil && exists {
+				err = gitConfigLocal(sesamDir, "--remove-section", section)
+			}
 		}
 		if err != nil && !errors.Is(err, errGitConfigMissing) {
 			return err
@@ -405,8 +410,8 @@ func clearGitConfig(r *git.Repository, sesamDir, sectionPrefix string) error {
 	return nil
 }
 
-// errGitConfigMissing is returned by gitConfigLocal when the key or section to
-// remove does not exist.
+// errGitConfigMissing is returned by gitConfigLocal when the key to unset does
+// not exist.
 var errGitConfigMissing = errors.New("not set")
 
 // gitConfigLocal runs `git config --local` in sesamDir. go-git's SetConfig
@@ -420,13 +425,31 @@ func gitConfigLocal(sesamDir string, args ...string) error {
 		return nil
 	}
 
-	// --unset-all exits 5 for a missing key, --remove-section 128 with this message.
+	// --unset-all exits 5 for a missing key.
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && (exitErr.ExitCode() == 5 || bytes.Contains(out, []byte("no such section"))) {
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 5 {
 		return errGitConfigMissing
 	}
 
 	return fmt.Errorf("git config %s: %w: %s", strings.Join(args, " "), err, bytes.TrimSpace(out))
+}
+
+// gitConfigHasSection reports whether the local git config has any key in
+// section ("<name>.<subsection>"). --remove-section on a missing section only
+// says so in a translated message, so we ask first.
+func gitConfigHasSection(sesamDir, section string) (bool, error) {
+	err := gitConfigLocal(sesamDir, "--get-regexp", "^"+regexp.QuoteMeta(section)+`\.`)
+
+	// --get-regexp exits 1 when nothing matches.
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &exitErr) && exitErr.ExitCode() == 1:
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 // sesamSubsectionSuffix returns the suffix appended to sesam's git-config
