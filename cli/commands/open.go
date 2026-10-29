@@ -11,6 +11,11 @@ import (
 // HandleOpen reveals what is missing or stale and keeps plaintext edited here,
 // naming it. --all overwrites everything.
 func HandleOpen(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+	if cmd.Args().Present() {
+		// Revealing single files is not supported (yet); don't pretend it is.
+		return fmt.Errorf("reveal takes no paths, it reveals every secret: %v", cmd.Args().Slice())
+	}
+
 	if cmd.Bool("all") {
 		return r.RevealAll()
 	}

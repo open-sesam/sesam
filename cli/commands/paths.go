@@ -84,10 +84,10 @@ func toRepoPaths(sesamDir string, args []string) ([]string, error) {
 	return out, nil
 }
 
-// displayPath renders a sesam-relative path for output. When the cwd is inside
+// DisplayPath renders a sesam-relative path for output. When the cwd is inside
 // the sesam subtree the path is shown relative to the cwd (like git); when the
 // cwd is outside it, the sesam-relative path is returned unchanged.
-func displayPath(sesamDir, rel string) string {
+func DisplayPath(sesamDir, rel string) string {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return rel
@@ -95,7 +95,7 @@ func displayPath(sesamDir, rel string) string {
 	return displayPathFrom(sesamDir, cwd, rel)
 }
 
-// displayPathFrom is displayPath with the cwd passed in, so the cwd-relative
+// displayPathFrom is DisplayPath with the cwd passed in, so the cwd-relative
 // rendering can be tested without changing the process directory.
 func displayPathFrom(sesamDir, cwd, rel string) string {
 	cwdRel, err := filepath.Rel(sesamDir, cwd)

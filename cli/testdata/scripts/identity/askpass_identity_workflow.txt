@@ -37,6 +37,14 @@ exec git diff HEAD -- .sesam/objects/README.md.sesam
 stdout '# Sesam Cheatsheet'
 stdout 'askpass modified readme'
 
+# The pre-commit hook loads the repo too and must not fall back to a TTY prompt.
+exec git add -A
+exec git commit -m 'commit through askpass'
+
+# doctor loads the repo the same way and recognises the user.
+exec sesam doctor
+stdout 'recognised as user »admin«'
+
 -- modified_readme.md --
 # askpass modified readme
 

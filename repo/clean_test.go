@@ -76,6 +76,18 @@ func TestCleanupRemovesUntrackedFiles(t *testing.T) {
 	require.True(t, exists(t, filepath.Join(root, ".gitattributes")), "tracked file should be preserved")
 }
 
+// An identity inside the worktree, given as ~/..., is not deleted.
+func TestCleanupKeepsHomeRelativeIdentity(t *testing.T) {
+	root, repo := initSesamRepo(t, map[string]string{"sesam.yml": "config\n"})
+	t.Setenv("HOME", root)
+
+	id := filepath.Join(root, "vault", "id.age")
+	writeFile(t, id, "AGE-SECRET-KEY-1")
+
+	require.NoError(t, cleanup(openCleanRoot(t, root), repo, nil, "~/vault/id.age"))
+	require.True(t, exists(t, id))
+}
+
 func TestCleanupPreservesModifiedTrackedFiles(t *testing.T) {
 	root, repo := initSesamRepo(t, map[string]string{
 		"sesam.yml": "original\n",

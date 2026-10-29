@@ -349,16 +349,16 @@ func TestConfigApplyPreflight(t *testing.T) {
 			want: "takes admin from admin",
 		},
 		{
-			name:    "applied by a non-admin",
+			name:    "non-admin applies a user change",
 			applyAs: bob,
 			config: func(admin, bob *testIdentity) string {
 				return "users:\n" +
 					"  - name: admin\n    key:\n      - " + admin.Recipient + "\n" +
 					"  - name: bob\n    key:\n      - " + bob.Recipient + "\n" +
-					"groups:\n  admin:\n    - admin\n  dev:\n    - bob\n" +
-					"secrets:\n  - path: README.md\n    access:\n      - dev\n"
+					"groups:\n  admin:\n    - admin\n  dev:\n    - bob\n  ops:\n    - bob\n" +
+					"secrets:\n  - path: README.md\n"
 			},
-			want: "needs admin rights",
+			want: "bob is not an admin and can only apply secret changes",
 		},
 	}
 
@@ -379,6 +379,123 @@ func TestConfigApplyPreflight(t *testing.T) {
 			_, err := applyConfig(t, applyAs)
 			require.ErrorContains(t, err, tc.want)
 			require.Equal(t, before, entryCount(t, applyAs))
+		})
+	}
+}
+
+// TestConfigApplyNonAdmin covers what a non-admin may apply: secret changes on
+// secrets and groups they have access to, and nothing else. A refused plan
+// leaves the repository as it was.
+func TestConfigApplyNonAdmin(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	bob := writeTestIdentity(t, "bob")
+	carol := writeTestIdentity(t, "carol")
+
+	users := "users:\n" +
+		"  - name: admin\n    key:\n      - " + admin.Recipient + "\n" +
+		"  - name: bob\n    key:\n      - " + bob.Recipient + "\n" +
+		"  - name: carol\n    key:\n      - " + carol.Recipient + "\n"
+	groups := "groups:\n  admin:\n    - admin\n  dev:\n    - bob\n  ops:\n    - carol\n"
+
+	// README.md is admin-only, dev.env is bob's.
+	readme := "  - path: README.md\n"
+	devEnv := "  - path: dev.env\n    access:\n      - dev\n"
+
+	tests := []struct {
+		name   string
+		config string
+		want   string
+		ops    []core.Operation
+	}{
+		{
+			name:   "add secret for own group",
+			config: users + groups + "secrets:\n" + readme + devEnv + "  - path: new.env\n    access:\n      - dev\n",
+			ops:    []core.Operation{core.OpSecretAdd},
+		},
+		{
+			name:   "widen access of own secret",
+			config: users + groups + "secrets:\n" + readme + "  - path: dev.env\n    access:\n      - dev\n      - ops\n",
+			ops:    []core.Operation{core.OpSecretChangeAccess},
+		},
+		{
+			name:   "remove own secret",
+			config: users + groups + "secrets:\n" + readme,
+			ops:    []core.Operation{core.OpSecretRemove},
+		},
+		{
+			name: "kill user",
+			config: "users:\n" +
+				"  - name: admin\n    key:\n      - " + admin.Recipient + "\n" +
+				"  - name: bob\n    key:\n      - " + bob.Recipient + "\n" +
+				"groups:\n  admin:\n    - admin\n  dev:\n    - bob\n" +
+				"secrets:\n" + readme + devEnv,
+			want: "can only apply secret changes",
+		},
+		{
+			name:   "change own groups",
+			config: users + "groups:\n  admin:\n    - admin\n  dev:\n    - bob\n  ops:\n    - bob\n    - carol\n" + "secrets:\n" + readme + devEnv,
+			want:   "can only apply secret changes",
+		},
+		{
+			name: "secret change alongside a user change",
+			config: users + "groups:\n  admin:\n    - admin\n    - bob\n  dev:\n    - bob\n  ops:\n    - carol\n" +
+				"secrets:\n" + readme + devEnv + "  - path: new.env\n    access:\n      - dev\n",
+			want: "can only apply secret changes",
+		},
+		{
+			name:   "add secret for foreign group",
+			config: users + groups + "secrets:\n" + readme + devEnv + "  - path: new.env\n    access:\n      - ops\n",
+			want:   "would add secret that bob has no access to: new.env",
+		},
+		{
+			name:   "change access of foreign secret",
+			config: users + groups + "secrets:\n" + "  - path: README.md\n    access:\n      - dev\n" + devEnv,
+			want:   `user bob has no access to "README.md", cannot change access of`,
+		},
+		{
+			name:   "remove foreign secret",
+			config: users + groups + "secrets:\n" + devEnv,
+			want:   `user bob has no access to "README.md", cannot remove`,
+		},
+		{
+			name:   "hand own secret to foreign group",
+			config: users + groups + "secrets:\n" + readme + "  - path: dev.env\n    access:\n      - ops\n",
+			want:   `would change access of "dev.env" to groups that bob has no access to`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, r := bootstrapRepo(t, admin)
+			tellUser(t, r, bob, "dev")
+			tellUser(t, r, carol, "ops")
+
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "dev.env"), []byte("pw=1"), 0o600))
+			require.NoError(t, r.Update(func(s *Stage) error {
+				return s.SecretAdd([]string{"dev.env"}, []string{"dev"}, false, false)
+			}))
+			require.NoError(t, r.Close())
+
+			writeMainConfig(t, dir, tc.config)
+			r = reloadSesamRepo(t, dir, bob)
+			before := entryCount(t, r)
+
+			applied, err := applyConfig(t, r)
+			if tc.want != "" {
+				require.ErrorContains(t, err, tc.want)
+				require.Equal(t, before, entryCount(t, r))
+				require.NoFileExists(t, filepath.Join(dir, "new.env"))
+				require.NoDirExists(t, filepath.Join(dir, ".sesam-tmp"))
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, tc.ops, opsOf(applied))
+
+			// The plan closed the gap.
+			applied, err = applyConfig(t, r)
+			require.NoError(t, err)
+			require.Empty(t, applied)
 		})
 	}
 }

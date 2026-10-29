@@ -7,11 +7,13 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	"opensesam.org/sesam/core"
+	sesamConf "opensesam.org/sesam/repo/config"
 )
 
 // forkSuffix is the sibling directory that holds the staged copy of .sesam.
@@ -45,6 +47,9 @@ type Stage struct {
 	// touched are worktree paths the stage created outside the fork, in
 	// creation order. Rollback removes them; Commit keeps them.
 	touched []string
+
+	// moved are plaintext renames (old, new) that Rollback moves back.
+	moved [][2]string
 }
 
 // Stage opens a read-write transaction. It errors if a stage is already open
@@ -311,6 +316,10 @@ func (s *Stage) Rollback() error {
 	_ = s.closeStateQuiet(false)
 	s.repo.stage = nil
 
+	for _, mv := range slices.Backward(s.moved) {
+		_ = s.repo.root.Rename(mv[1], mv[0])
+	}
+
 	// Newest first, so files go before the directories created for them.
 	// Remove, not RemoveAll: a directory something else wrote into stays.
 	for _, path := range slices.Backward(s.touched) {
@@ -457,21 +466,63 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, additive, nested bool)
 		files = append(files, expanded...)
 	}
 
+	var added []string
 	for _, rel := range files {
 		if err := core.IsForbiddenPath(rel); err != nil {
 			continue
 		}
+		added = append(added, rel)
 
+		_, existed := s.vstate.SecretExists(rel)
 		vs, err := s.secret.SecretAdd(rel, groups, additive)
 		if err != nil {
 			return fmt.Errorf("failed to add secret %q: %w", rel, err)
 		}
-		if err := cfg.SecretAdd(rel, nested, vs.DeclaredGroups()); err != nil {
+
+		// cfg.SecretAdd reads empty groups as "no change", but for an existing
+		// secret `--group admin` declares exactly that.
+		err = sesamConf.ErrNoSuchSecret
+		if existed && len(groups) > 0 {
+			err = cfg.SecretChangeGroups(rel, vs.DeclaredGroups())
+		}
+		if errors.Is(err, sesamConf.ErrNoSuchSecret) {
+			// New, or missing from the config (e.g. removed by hand): add it.
+			err = cfg.SecretAdd(rel, nested, vs.DeclaredGroups())
+		}
+		if err != nil {
 			return fmt.Errorf("failed to add secret %q to config: %w", rel, err)
 		}
 	}
 
+	s.warnTracked(added)
 	return nil
+}
+
+// warnTracked warns about secrets whose plaintext git already tracks:
+// .gitignore does not keep those out of the next commit.
+func (s *Stage) warnTracked(revealedPaths []string) {
+	idx, err := s.gitRepo.Storer.Index()
+	if err != nil {
+		return
+	}
+	prefix, err := core.SesamGitPrefix(s.gitRepo, s.sesamDir)
+	if err != nil {
+		return
+	}
+
+	tracked := make(map[string]bool, len(idx.Entries))
+	for _, e := range idx.Entries {
+		tracked[e.Name] = true
+	}
+
+	for _, p := range revealedPaths {
+		if tracked[path.Join(prefix, filepath.ToSlash(p))] {
+			slog.Warn(
+				"plaintext is tracked by git and will keep being committed; untrack it with `git rm --cached`",
+				slog.String("path", p),
+			)
+		}
+	}
 }
 
 // SecretRemove stops tracking the secret(s) at each path.
@@ -546,6 +597,7 @@ func (s *Stage) SecretMove(oldRevealedPath, newRevealedPath string, nested bool)
 		if err := s.secret.SecretMove(oldRel, newRel); err != nil {
 			return fmt.Errorf("failed to move secret %q: %w", oldRel, err)
 		}
+		s.moved = append(s.moved, [2]string{oldRel, newRel})
 
 		if err := cfg.SecretMove(oldRel, newRel, nested); err != nil {
 			return fmt.Errorf("failed to move secret %q in config: %w", oldRel, err)
@@ -562,6 +614,9 @@ func (s *Stage) UserRename(oldName, newName string) error {
 
 	if err := s.user.UserRename(oldName, newName); err != nil {
 		return err
+	}
+	if s.whoami == oldName {
+		s.whoami = newName
 	}
 
 	cfg, err := s.cfg()

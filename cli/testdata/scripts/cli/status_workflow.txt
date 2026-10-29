@@ -40,6 +40,11 @@ stdout '"modified"'
 ! exec sesam status --diff
 stdout 'modified readme'
 
+# With --json no decrypted diff copies are left behind.
+exec sesam status --diff --json
+exec find .sesam -name 'status-diff-*'
+! stdout .
+
 # Removing the revealed plaintext reports it as unrevealed.
 rm README.md
 exec sesam status --json

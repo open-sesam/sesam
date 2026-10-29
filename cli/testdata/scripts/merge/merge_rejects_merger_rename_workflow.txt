@@ -26,8 +26,11 @@ exec git checkout ours
 stderr 'renames the merging admin admin'
 stderr 'abort the merge'
 
-# The refusal has to be reachable: the repo still loads, and aborting restores it.
-exec git merge --abort
+# The refusal has to be reachable: git aborts the merge itself and leaves the
+# worktree untouched, so the repo still loads.
+! exists .git/MERGE_HEAD
+exec git status --porcelain
+! stdout .
 exec sesam verify
 exec sesam show .sesam/audit/log.jsonl
 ! stdout 'boss'

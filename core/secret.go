@@ -222,7 +222,7 @@ func SealStream(
 		return nil, err
 	}
 
-	if len(sigJSONBytes) > maxFooterSize {
+	if len(sigJSONBytes) >= maxFooterSize { // the reader also needs the newline before it
 		// This might in theory happen for very very long paths and/or exceedingly long users.
 		// If this ever becomes a real use case/problem we could go and make this dynamic.
 		return nil, fmt.Errorf("footer bigger than page: %d - please file a bug", len(sigJSONBytes))
@@ -233,6 +233,23 @@ func SealStream(
 	}
 
 	return &ss, nil
+}
+
+// cipherTextMatches hashes the ciphertext in ageRd (as returned by readFooter)
+// and compares it with the footer's CipherTextHash.
+func cipherTextMatches(ageRd io.Reader, footer *secretFooter, revealedPath string) (bool, error) {
+	newHash, _, err := hasherForStored(footer.CipherTextHash)
+	if err != nil {
+		return false, err
+	}
+
+	h := newHash()
+	if _, err := io.Copy(h, ageRd); err != nil {
+		return false, err
+	}
+	_, _ = h.Write([]byte(revealedPath))
+
+	return hashEqual(footer.CipherTextHash, h.Sum(nil))
 }
 
 // readFooter seeks to the footer & parses it.
@@ -299,6 +316,10 @@ func revealSecretToPath(sm *SecretManager, revealedPath, dstPath string) error {
 	}
 
 	defer closeLogged(srcFd)
+
+	if err := NoSymlinks(sm.root, dstPath); err != nil {
+		return fmt.Errorf("refusing to reveal: %w", err)
+	}
 
 	if err := sm.root.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
 		return fmt.Errorf("failed to create revealed dir: %w", err)

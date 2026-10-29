@@ -1,6 +1,6 @@
 [tools]
 task = "3.51.1"
-go = "1.27.2"
+go = "1.27.3"
 golangci-lint = "2.14.0"
 gotestsum = "1.13.0"
 gofumpt = "0.12.0"

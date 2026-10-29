@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -313,4 +314,96 @@ secrets:
 	_, groups := loadUsersGroups(t, main)
 	require.Equal(t, []string{"bravo"}, groups["dev"], "commented axolotl removed, bravo kept")
 	require.Equal(t, []string{"axolotl"}, groups["admin"])
+}
+
+// A comment after a key must not hide the key from lookups.
+func TestUserChangeGroups_KeyWithComment(t *testing.T) {
+	dir := t.TempDir()
+	main := writeGroupsMain(t, dir)
+	body, err := os.ReadFile(main)
+	require.NoError(t, err)
+	body = []byte(strings.Replace(string(body), "groups:\n  admin:\n", "groups: # teams\n  admin: # all\n", 1))
+	require.NoError(t, os.WriteFile(main, body, 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserChangeGroups("axolotl", []string{"admin", "dev", "ops"}))
+	require.NoError(t, cr.Save())
+
+	_, groups := loadUsersGroups(t, main)
+	require.Equal(t, []string{"bravo", "axolotl"}, groups["ops"])
+	require.Equal(t, []string{"axolotl", "root"}, groups["admin"])
+}
+
+// A new name YAML would read as a number must stay a string.
+func TestUserRename_NumericName(t *testing.T) {
+	dir := t.TempDir()
+	main := writeGroupsMain(t, dir)
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserRename("bravo", "123"))
+	require.NoError(t, cr.Save())
+
+	names, groups := loadUsersGroups(t, main)
+	require.Contains(t, names, "123")
+	require.Equal(t, []string{"axolotl", "123"}, groups["dev"])
+}
+
+// writeAnchoredMain writes a config where dev reuses admin's member list.
+func writeAnchoredMain(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "sesam.yml")
+	const body = `users:
+  - name: alice
+    key:
+      - keyA
+  - name: bob
+    key:
+      - keyB
+groups:
+  admin: &team
+    - alice
+    - bob
+  dev: *team
+secrets: []
+`
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+	return path
+}
+
+func TestUserRename_AnchoredGroups(t *testing.T) {
+	main := writeAnchoredMain(t, t.TempDir())
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserRename("bob", "robert"))
+	require.NoError(t, cr.Save())
+
+	_, groups := loadUsersGroups(t, main)
+	require.Equal(t, []string{"alice", "robert"}, groups["admin"])
+	require.Equal(t, []string{"alice", "robert"}, groups["dev"])
+}
+
+func TestUserRename_NoGroupsKey(t *testing.T) {
+	main := filepath.Join(t.TempDir(), "sesam.yml")
+	require.NoError(t, os.WriteFile(main, []byte("users:\n  - name: bob\n    key:\n      - keyB\nsecrets: []\n"), 0o644))
+
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserRename("bob", "robert"))
+}
+
+func TestUserChangeGroups_AnchoredGroups(t *testing.T) {
+	main := writeAnchoredMain(t, t.TempDir())
+
+	// Same membership in every group sharing the list: nothing to edit.
+	cr, err := loadConfig(t, main)
+	require.NoError(t, err)
+	require.NoError(t, cr.UserChangeGroups("bob", []string{"admin", "dev"}))
+
+	// Leaving dev alone would edit the list admin shares too.
+	cr, err = loadConfig(t, main)
+	require.NoError(t, err)
+	require.ErrorContains(t, cr.UserChangeGroups("bob", []string{"admin"}), "through an anchor")
 }

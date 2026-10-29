@@ -642,7 +642,7 @@ func secretsNode(root ast.Node) (*ast.SequenceNode, error) {
 // nil when absent.
 func findMappingValue(m *ast.MappingNode, key string) *ast.MappingValueNode {
 	for _, mv := range m.Values {
-		if mv.Key.String() == key {
+		if mv.Key.GetToken().Value == key {
 			return mv
 		}
 	}
@@ -654,7 +654,7 @@ func findMappingValue(m *ast.MappingNode, key string) *ast.MappingValueNode {
 // true if it was present.
 func removeMappingValue(m *ast.MappingNode, key string) bool {
 	for i, mv := range m.Values {
-		if mv.Key.String() == key {
+		if mv.Key.GetToken().Value == key {
 			m.Values = append(m.Values[:i], m.Values[i+1:]...)
 			return true
 		}
@@ -669,7 +669,7 @@ func removeMappingValue(m *ast.MappingNode, key string) bool {
 // *ast.MappingNode, so both shapes are handled.
 func findRootValue(root ast.Node, key string) (*ast.MappingValueNode, error) {
 	for _, mv := range rootMappingValues(root) {
-		if mv.Key.String() == key {
+		if mv.Key.GetToken().Value == key {
 			return mv, nil
 		}
 	}
@@ -694,7 +694,7 @@ func rootMappingValues(root ast.Node) []*ast.MappingValueNode {
 
 func includePath(m *ast.MappingNode) (string, bool) {
 	for _, mv := range m.Values {
-		if mv.Key.String() == "include" {
+		if mv.Key.GetToken().Value == "include" {
 			p := mv.Value.GetToken().Value
 
 			// allow just specifying the directory itself.
@@ -750,6 +750,13 @@ func appendSecretsItems(src *FileSource, items []Secret) error {
 		return replaceValue(mv, map[string][]Secret{"secrets": items})
 	}
 
+	if err := blockRootList[Secret](src, "secrets"); err != nil {
+		return err
+	}
+	if seq, err = secretsNode(src.RootNode); err != nil {
+		return err
+	}
+
 	newSeq, err := marshalSeq(items)
 	if err != nil {
 		return err
@@ -759,6 +766,63 @@ func appendSecretsItems(src *FileSource, items []Secret) error {
 	// sequence's indentation and appends its values.
 	seq.Merge(newSeq)
 	return nil
+}
+
+// blockRootList rewrites the list under root key `key` in block style when it,
+// or one of its items, is written in flow style (`[...]`, `{...}`): block
+// items merged into those render invalid YAML. Comments inside it are lost.
+func blockRootList[T any](src *FileSource, key string) error {
+	mv, err := findRootValue(src.RootNode, key)
+	if err != nil {
+		return err
+	}
+
+	seq, ok := mv.Value.(*ast.SequenceNode)
+	if !ok || len(seq.Values) == 0 || !hasFlowStyle(seq) {
+		return nil
+	}
+
+	var items []T
+	if err := yaml.NodeToValue(seq, &items); err != nil {
+		return fmt.Errorf("%s: decoding %s: %w", src.Path, key, err)
+	}
+
+	return replaceValue(mv, map[string][]T{key: items})
+}
+
+// blockGroups is blockRootList for the groups: mapping. It returns the
+// (possibly new) mapping node.
+func blockGroups(src *FileSource) (*ast.MappingNode, error) {
+	groups, err := groupsNode(src.RootNode)
+	if err != nil || !groups.IsFlowStyle {
+		return groups, err
+	}
+
+	var decoded map[string][]string
+	if err := yaml.NodeToValue(groups, &decoded); err != nil {
+		return nil, fmt.Errorf("%s: decoding groups: %w", src.Path, err)
+	}
+
+	mv, err := findRootValue(src.RootNode, "groups")
+	if err != nil {
+		return nil, err
+	}
+	if err := replaceValue(mv, map[string]map[string][]string{"groups": decoded}); err != nil {
+		return nil, err
+	}
+
+	return groupsNode(src.RootNode)
+}
+
+func hasFlowStyle(seq *ast.SequenceNode) bool {
+	if seq.IsFlowStyle {
+		return true
+	}
+
+	return slices.ContainsFunc(seq.Values, func(n ast.Node) bool {
+		m, ok := n.(*ast.MappingNode)
+		return ok && m.IsFlowStyle
+	})
 }
 
 // replaceValue swaps the value of a mapping key for a freshly marshaled one,

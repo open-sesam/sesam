@@ -10,13 +10,14 @@ import (
 )
 
 // EditSecret reveals one secret to .sesam/tmp, runs edit on that file, copies
-// the result back into the worktree, and seals the repository.
-func (r *Repo) EditSecret(revealedPath string, edit func(path string) error, sealAll bool) error {
+// the result back into the worktree, and seals the repository. seal.Sync also
+// decides whether the plaintext or the object is the current content.
+func (r *Repo) EditSecret(revealedPath string, edit func(path string) error, seal SealOpts) error {
 	if edit == nil {
 		return fmt.Errorf("missing editor")
 	}
 
-	tmpPath, err := r.stageForEdit(revealedPath)
+	tmpPath, err := r.stageForEdit(revealedPath, seal.Sync)
 	if err != nil {
 		return err
 	}
@@ -30,7 +31,7 @@ func (r *Repo) EditSecret(revealedPath string, edit func(path string) error, sea
 	}
 
 	return r.Update(func(s *Stage) error {
-		_, err := s.Seal(SealOpts{All: sealAll})
+		_, err := s.Seal(seal)
 		return err
 	})
 }
@@ -38,7 +39,7 @@ func (r *Repo) EditSecret(revealedPath string, edit func(path string) error, sea
 // stageForEdit puts the secret's current content into .sesam/tmp: the plaintext
 // when the user has one (unsealed edits included), the object when the
 // plaintext is missing or older than the object.
-func (r *Repo) stageForEdit(revealedPath string) (string, error) {
+func (r *Repo) stageForEdit(revealedPath string, sync SyncOpts) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -46,7 +47,14 @@ func (r *Repo) stageForEdit(revealedPath string) (string, error) {
 		return "", ErrClosed
 	}
 
-	states, err := r.syncStates(SyncOpts{Paths: []string{revealedPath}})
+	// The copy in and out would follow a symlink and then replace it, so the
+	// seal's own check would never see it.
+	if err := core.NoSymlinks(r.root, revealedPath); err != nil {
+		return "", fmt.Errorf("refusing to edit: %w", err)
+	}
+
+	sync.Paths = []string{revealedPath}
+	states, err := r.syncStates(sync)
 	if err != nil {
 		return "", err
 	}
