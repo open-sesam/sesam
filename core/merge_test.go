@@ -1138,6 +1138,12 @@ func TestAuthorRevoked(t *testing.T) {
 			want:   "has no access to s/db",
 		},
 		{
+			name:   "access change into a group the author left on our side",
+			their:  signed("bob", &DetailSecretChangeAccess{RevealedPath: "s/db", AccessGroups: []string{"ops"}}),
+			merged: mergeState([]VerifiedUser{admin, demoted}, []SecretAccess{db}),
+			want:   "no access to the new groups of s/db",
+		},
+		{
 			name:   "move of a secret the author can no longer reach",
 			their:  signed("bob", &DetailSecretMove{OldRevealedPath: "s/db", NewRevealedPath: "s/api"}),
 			merged: mergeState([]VerifiedUser{admin, demoted}, []SecretAccess{locked}),

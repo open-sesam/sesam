@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/hdevalence/ed25519consensus"
 )
@@ -224,6 +225,18 @@ func (s *VerifiedState) SecretExists(revealedPath string) (*SecretAccess, bool) 
 	return s.Secret(revealedPath)
 }
 
+// secretCaseClash returns a secret other than except whose path equals p when
+// case is ignored. Case-insensitive filesystems store both as one file.
+func (s *VerifiedState) secretCaseClash(p, except string) (string, bool) {
+	for _, sec := range s.Secrets {
+		if sec.RevealedPath != except && strings.EqualFold(sec.RevealedPath, p) {
+			return sec.RevealedPath, true
+		}
+	}
+
+	return "", false
+}
+
 // UserHasAccess checks if `user` is in one of `grous` and has therefore access.
 func (s *VerifiedState) UserHasAccess(user string, groups []string) bool {
 	idx, ok := s.userIdx[user]
@@ -247,20 +260,7 @@ func (s *VerifiedState) UsersForSecret(revealedPath string) []string {
 		return nil
 	}
 
-	secret := &s.Secrets[idx]
-	groups := groupsToMap(secret.AccessGroups)
-
-	var users []string
-	for _, user := range s.Users {
-		for _, g := range user.Groups {
-			if groups[g] {
-				users = append(users, user.Name)
-				break
-			}
-		}
-	}
-
-	return users
+	return s.UserForGroups(s.Secrets[idx].AccessGroups)
 }
 
 func (s *VerifiedState) AdminUserCount() (adminUsersFound int, adminName string) {
@@ -636,7 +636,7 @@ func verifyUserChangeGroups(log *AuditLog, state *VerifiedState, entry *AuditEnt
 	if adminUsersFound == 1 && adminName == user.Name {
 		if !slices.Contains(ucg.NewGroups, "admin") {
 			return fmt.Errorf(
-				"trying to change access of last admin user to %v: %s (seq_id=%d)",
+				"cannot remove the last admin %s from admin (new groups: %v, seq_id=%d)",
 				user.Name,
 				ucg.NewGroups,
 				entry.SeqID,
@@ -760,6 +760,8 @@ func verifyUserRmRecipients(log *AuditLog, state *VerifiedState, entry *AuditEnt
 		})
 	}
 
+	// The removed key still decrypts every object until the next seal.
+	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
 
@@ -790,6 +792,10 @@ func verifySecretAdd(log *AuditLog, state *VerifiedState, entry *AuditEntrySigne
 	_, exists := state.SecretExists(scd.RevealedPath)
 	if exists {
 		return fmt.Errorf("cannot add already existing secret: %s", scd.RevealedPath)
+	}
+
+	if other, clash := state.secretCaseClash(scd.RevealedPath, ""); clash {
+		return fmt.Errorf("cannot add %s: differs from secret %s only in case", scd.RevealedPath, other)
 	}
 
 	hasAccess := state.UserHasAccess(entry.ChangedBy, scd.AccessGroups)
@@ -862,6 +868,10 @@ func verifySecretMove(log *AuditLog, state *VerifiedState, entry *AuditEntrySign
 		return fmt.Errorf("cannot move secret over existing secret: %q", scr.NewRevealedPath)
 	}
 
+	if other, clash := state.secretCaseClash(scr.NewRevealedPath, scr.OldRevealedPath); clash {
+		return fmt.Errorf("cannot move to %s: differs from secret %s only in case", scr.NewRevealedPath, other)
+	}
+
 	if _, err := state.requireSecretAccess(scr.OldRevealedPath, "move", entry); err != nil {
 		return err
 	}
@@ -892,6 +902,7 @@ func verifySecretRemove(log *AuditLog, state *VerifiedState, entry *AuditEntrySi
 	})
 	state.rebuildSecretIndex() // positions shifted
 
+	state.SealRequiredSeqID = entry.SeqID
 	return nil
 }
 
@@ -1143,6 +1154,13 @@ func replay(state *VerifiedState, batched bool, upTo uint64) error {
 	var previousEntry *AuditEntrySigned
 	var checks []SigCheck
 	err := log.Iterate(func(idx int, entry *AuditEntrySigned) error {
+		// Without this, a forged entry with a stale seq_id takes the skip below
+		// and is never checked. Relies on Iterate starting at the first entry.
+		position := uint64(idx) + 1 //nolint:gosec // slice index, never negative.
+		if entry.SeqID != position {
+			return fmt.Errorf("entry at position %d has seq_id %d", position, entry.SeqID)
+		}
+
 		if entry.SeqID <= newState.VerifiedUntil {
 			previousEntry = entry
 			return nil
@@ -1225,12 +1243,12 @@ func replay(state *VerifiedState, batched bool, upTo uint64) error {
 		if previousEntry != nil {
 			ok, err := previousEntry.HashMatches(entry.PreviousHash)
 			if err != nil {
-				return fmt.Errorf("checking chain at idx %d: %w", idx, err)
+				return fmt.Errorf("checking chain at position %d: %w", position, err)
 			}
 			if !ok {
 				return fmt.Errorf(
-					"broken chain at idx %d: %s does not match previous entry",
-					idx,
+					"broken chain at position %d: %s does not match previous entry",
+					position,
 					entry.PreviousHash,
 				)
 			}
@@ -1263,22 +1281,9 @@ func replay(state *VerifiedState, batched bool, upTo uint64) error {
 // (a stage's forked audit log and cloned keyring). The user/secret slices are
 // deep-copied so staged FeedEntry calls cannot mutate the live view.
 func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
-	users := make([]VerifiedUser, len(s.Users))
-	for i, u := range s.Users {
-		u.Groups = slices.Clone(u.Groups)
-		u.Recps = slices.Clone(u.Recps)
-		users[i] = u
-	}
-
-	secrets := make([]SecretAccess, len(s.Secrets))
-	for i, sec := range s.Secrets {
-		sec.AccessGroups = slices.Clone(sec.AccessGroups)
-		secrets[i] = sec
-	}
-
 	cloned := &VerifiedState{
-		Users:             users,
-		Secrets:           secrets,
+		Users:             cloneVerifiedUsers(s.Users),
+		Secrets:           cloneVerifiedSecrets(s.Secrets),
 		SealRequiredSeqID: s.SealRequiredSeqID,
 		VerifiedUntil:     s.VerifiedUntil,
 		LastSealRootHash:  s.LastSealRootHash,

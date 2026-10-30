@@ -1,0 +1,26 @@
+# In a linked worktree (`git worktree add`) .git is a file pointing at the
+# shared git dir. sesam must still see HEAD there, or checks that compare
+# against committed history silently switch off.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin --install-hooks=false
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec git worktree add ../wt -b wt
+cd ../wt
+
+# A committed but unapplied declaration is refused without --force, the same
+# as in the main worktree.
+cp $WORK/x.txt x.txt
+exec sh -c 'printf "  - path: x.txt\n" >> sesam.yml'
+exec git add sesam.yml
+exec git commit -m 'declare x.txt'
+! exec sesam config apply
+stderr 'committed'
+
+-- x.txt --
+secret

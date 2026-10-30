@@ -21,7 +21,7 @@ This command will do the following:
 - Create a `.gitignore` that ignores everything but `.sesam/` and `.sesam.yml`. This is to protect revealed secret so they **never get accidentally added to git**.
 - Create `.gitattributes` that tells `git` what to do with the encrypted files.
 - It will also do a couple other `git` operations that are described [here](./git_integration.md).
-- It will also create a first secret: `README.sesam`. Read it for a very condensed version of this tutorial.
+- It will also create a first secret: `README.md`. Read it for a very condensed version of this tutorial.
 - We will guess the initial user's name from your `git config`. If you want a different name then use the `--user` parameter or rename later.
 - The initial user will automatically be an `admin` user. `sesam` has the concept of users with different access levels.
 - Every user needs an **identity** - a cryptographic way to prove he is this specific user.

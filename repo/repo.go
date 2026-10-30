@@ -360,9 +360,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 
 	opts.PrintStep("Staging initial files…")
-	if err := stageInitFiles(gitRepo, resolvedDir, configPath); err != nil {
-		return nil, err
-	}
+	stageInitFiles(resolvedDir)
 
 	opts.PrintStep("Welcome to…")
 	success = true
@@ -499,7 +497,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	}
 	r.whoami = whoami
 
-	signer, err := core.LoadSignKey(root, whoami, signIdentity)
+	signer, err := core.LoadUserSignKey(root, whoami, signIdentity, r.keyring)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
 	}
@@ -538,6 +536,11 @@ func newRepo(sesamDir string, root *os.Root, gitRepo *git.Repository, ids []stri
 // SesamDir returns the resolved absolute path of the sesam repository.
 func (r *Repo) SesamDir() string {
 	return r.sesamDir
+}
+
+// PluginUI returns the plugin UI matching the repo's interactivity.
+func (r *Repo) PluginUI() *core.PluginUI {
+	return r.pluginUI
 }
 
 // Close releases the on-disk lock and closes the audit log.

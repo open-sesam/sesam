@@ -65,7 +65,8 @@ func (r *Recipient) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	parsed, err := ParseRecipient(pub.Key, nil)
+	// Decoding never talks to the user; plugins only run on Wrap.
+	parsed, err := ParseRecipient(pub.Key, NewNonInteractivePluginUI())
 	if err != nil {
 		return err
 	}

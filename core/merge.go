@@ -448,6 +448,14 @@ func authorRevoked(their *AuditEntrySigned, merged, theirs *VerifiedState) strin
 		return "author " + their.ChangedBy + " has no access to " + path + " on our side; dropped"
 	}
 
+	// Like verify: the new groups have to be reachable for the author too.
+	if their.Operation == OpSecretChangeAccess {
+		d, err := parseDetail[DetailSecretChangeAccess](their)
+		if err == nil && !merged.UserHasAccess(author.Name, normalizeAccessGroups(d.AccessGroups)) {
+			return "author " + their.ChangedBy + " has no access to the new groups of " + path + " on our side; dropped"
+		}
+	}
+
 	return ""
 }
 

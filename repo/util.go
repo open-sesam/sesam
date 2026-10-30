@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -110,11 +111,25 @@ func loadIdentitiesWith(identityPaths []string, newProvider func(keyFingerprint 
 // walks up parent directories, so this works whether .sesam lives at the
 // worktree root or in a subdir.
 func openGitRepo(sesamDir string) (*git.Repository, error) {
-	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{DetectDotGit: true})
+	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
 	if err != nil {
 		return nil, fmt.Errorf("open git repo at %s: %w", sesamDir, err)
 	}
 	return repo, nil
+}
+
+// gitAdd runs `git add -A` on sesam-relative paths. go-git's Add runs a full
+// worktree Status first, which takes minutes in large repos, and ignores
+// GIT_INDEX_FILE, which git sets for hooks.
+func gitAdd(sesamDir string, paths ...string) error {
+	args := append([]string{"--literal-pathspecs", "-C", sesamDir, "add", "-A", "--"}, paths...)
+	//nolint:gosec // fixed git subcommand; paths are sesam's own and passed after "--".
+	out, err := exec.CommandContext(context.Background(), "git", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git add %s: %w: %s", strings.Join(paths, " "), err, bytes.TrimSpace(out))
+	}
+
+	return nil
 }
 
 // MinGitVersion is the oldest git that supports config-based hooks, which is

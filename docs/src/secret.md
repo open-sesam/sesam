@@ -116,8 +116,8 @@ Once done you can also add descriptions to the files in the config or do more fi
 
 ```admonish note
 If you ever create new files in the sub directories they do not automatically get added.
-Instead you need to run `sesam add` again. This will also remove secrets that are not there anymore, if any.
-In that sense, it works a bit like `git add`.
+Instead you need to run `sesam add` again. In that sense, it works a bit like `git add`.
+Secrets whose files you deleted stay tracked; remove them with `sesam rm`.
 ```
 
 ## Modifying secrets
@@ -160,11 +160,16 @@ versions `git` holds, so nothing has to be remembered on your machine:
 
 ## Removing secrets
 
-If you have deleted files you can run this:
+To stop managing secrets and delete their plaintext:
 
 ```bash
 sesam rm files/ dir/
 ```
+
+`rm` refuses plaintext with changes that were never sealed, since it is the
+only copy of them. Seal first to keep them in history, or pass `--force` to
+delete them anyway. To keep the content outside sesam, copy it with
+`sesam show path > elsewhere` before removing.
 
 ```admonish warning
 Please do not delete secrets just with `rm`. This will just remove the revealed file, but the
@@ -190,13 +195,19 @@ be back with the old path.
 
 ```bash
 sesam ls
-├── README.sesam
-└── dir
-    └── of
-        └── secrets
-            ├── some_file
-            └── sub
-                └── another_file
+╭───────────────────────────────────────────────────────────────╮
+│                            Secrets                            │
+├─────────────────────────────────┬───────────────┬─────────────┤
+│ Path                            │ Access Groups │ Description │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ README.md                       │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ dir/of/secrets/some_file        │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ dir/of/secrets/sub/another_file │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│                                 │               │ 3 secrets   │
+╰─────────────────────────────────┴───────────────┴─────────────╯
 ```
 
 You can also use the ``--json`` switch to print it in a more scriptable way.

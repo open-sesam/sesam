@@ -449,3 +449,99 @@ func TestSecretAddIntoEmptySecretsList(t *testing.T) {
 		})
 	}
 }
+
+// Block items cannot be merged into flow-style lists or items, so those are
+// rewritten in block style first.
+func TestFlowStyleListsTakeNewItems(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		mutate func(*Config) error
+		check  func(t *testing.T, cr *Config)
+	}{
+		{
+			name:   "secret into flow list",
+			body:   "secrets: [{path: README.md, access: [admin]}]\n",
+			mutate: func(c *Config) error { return c.SecretAdd("d.txt", false, []string{"dev"}) },
+			check: func(t *testing.T, cr *Config) {
+				secrets, err := cr.Secrets()
+				require.NoError(t, err)
+				require.Len(t, secrets, 2)
+				require.Equal(t, []string{"dev"}, secrets[1].Access)
+			},
+		},
+		{
+			name:   "access on a flow item",
+			body:   "secrets:\n  - {path: a.txt}\n  - path: b.txt\n",
+			mutate: func(c *Config) error { return c.SecretChangeGroups("a.txt", []string{"y"}) },
+			check: func(t *testing.T, cr *Config) {
+				secrets, err := cr.Secrets()
+				require.NoError(t, err)
+				require.Equal(t, []string{"y"}, secrets[0].Access)
+			},
+		},
+		{
+			name:   "user into flow list",
+			body:   "users: [{name: alice, key: [keyA]}]\ngroups:\n  admin:\n    - alice\nsecrets: []\n",
+			mutate: func(c *Config) error { return c.UserTell("bob", []string{"keyB"}, []string{"dev"}) },
+			check: func(t *testing.T, cr *Config) {
+				users, err := cr.Users()
+				require.NoError(t, err)
+				require.Len(t, users, 2)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			main := filepath.Join(t.TempDir(), "sesam.yml")
+			require.NoError(t, os.WriteFile(main, []byte(tt.body), 0o644))
+
+			cr, err := loadConfig(t, main)
+			require.NoError(t, err)
+			require.NoError(t, tt.mutate(cr))
+			require.NoError(t, cr.Save())
+
+			// goccy reads mixed flow/block output back fine; strict parsers don't.
+			body, err := os.ReadFile(main)
+			require.NoError(t, err)
+			require.NotContains(t, string(body), "{")
+
+			cr, err = loadConfig(t, main)
+			require.NoError(t, err)
+			tt.check(t, cr)
+		})
+	}
+}
+
+// A flow-style groups mapping takes a new group in block style too.
+func TestFlowStyleGroupsTakeNewGroup(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config) error
+	}{
+		{"tell", func(c *Config) error { return c.UserTell("bob", []string{"keyB"}, []string{"dev"}) }},
+		{"change groups", func(c *Config) error { return c.UserChangeGroups("alice", []string{"admin", "dev"}) }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			main := filepath.Join(t.TempDir(), "sesam.yml")
+			body := "users:\n  - name: alice\n    key:\n      - keyA\ngroups: {admin: [alice]}\nsecrets: []\n"
+			require.NoError(t, os.WriteFile(main, []byte(body), 0o644))
+
+			cr, err := loadConfig(t, main)
+			require.NoError(t, err)
+			require.NoError(t, tt.mutate(cr))
+			require.NoError(t, cr.Save())
+
+			got, err := os.ReadFile(main)
+			require.NoError(t, err)
+			require.NotContains(t, string(got), "{")
+
+			_, groups := loadUsersGroups(t, main)
+			require.Contains(t, groups, "dev")
+			require.Equal(t, []string{"alice"}, groups["admin"])
+		})
+	}
+}

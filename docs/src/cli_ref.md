@@ -55,7 +55,7 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 
 **--memprofile**="": Write a heap profile at exit to `FILE` (pprof format) \[$SESAM_MEMPROFILE\]
 
-**--no-color**: Disable color always \[$NO_COLOR, $SESAM_NO_COLOR\]
+**--no-color**: Disable color always (a non-empty $NO_COLOR does the same) \[$SESAM_NO_COLOR\]
 
 **--quiet, -q**: Print less log output
 
@@ -194,11 +194,15 @@ Add a secret file or directory at `PATH`
 
 ## rm
 
-Remove a secret file or directory
+Remove a secret file or directory, plaintext included
 
-**--force, -f**: Also remove the revealed secrets
+**--force, -f**: Delete the plaintext even when it has unsealed changes
 
 **--help, -h**: show help
+
+**--no-seal**: Do not run 'sesam seal' afterwards - useful when batching
+
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 ## mv
 
@@ -207,6 +211,8 @@ Move a secret file or directory to a new name
 **--help, -h**: show help
 
 **--nested**: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the nearest existing one
+
+**--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 ## edit
 
@@ -366,7 +372,7 @@ Remove a recipient from an existing user (may not be the last one)
 
 **--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
-**--user, -u**="": Which user looses the specified recipient
+**--user, -u**="": Which user loses the specified recipient
 
 ### regen-sign-key, rsk
 
@@ -378,7 +384,7 @@ Regenerate the signing key of a specific user
 
 **--seal-all, --all**: Seal every secret from its plaintext as it is, stale and diverged ones included
 
-**--user, -u**="": Regenerate the signing key for a user
+**--user, -u**="": Which user gets a new signing key
 
 ### rename
 
@@ -414,7 +420,7 @@ Show the diff between config and actual state (extra args are passed to git)
 
 **--json**: Print output as JSON
 
-**--validate**: Fail if 'sesam config apply --force' would refuse the config (dry run, needs admin rights)
+**--validate**: Fail if 'sesam config apply --force' would refuse the config (dry run as the current user)
 
 ### print
 

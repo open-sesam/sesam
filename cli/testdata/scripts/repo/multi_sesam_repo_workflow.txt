@@ -30,3 +30,12 @@ grep 'diff=sesam-diff-sub-b' sub-b/.gitattributes
 # The alias is a plain shim, shared and harmless across repos.
 exec git config --local alias.sesam
 stdout '^!cd -- "\$\{GIT_PREFIX:-\.\}" && exec sesam$'
+
+# The take-ours driver is suffixed too, so uninstalling one repo cannot strip
+# the driver the other repo's sesam.yml and signkeys still reference.
+grep 'merge=sesam-ours-sub-a' sub-a/.gitattributes
+grep 'merge=sesam-ours-sub-b' sub-b/.gitattributes
+exec sesam uninstall --sesam-dir sub-a
+! exec git config --local merge.sesam-ours-sub-a.driver
+exec git config --local merge.sesam-ours-sub-b.driver
+stdout '^true$'

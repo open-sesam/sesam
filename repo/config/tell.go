@@ -58,6 +58,13 @@ func (c *Config) appendUser(u User) error {
 		return replaceValue(mv, map[string][]User{"users": {u}})
 	}
 
+	if err := blockRootList[User](src, "users"); err != nil {
+		return err
+	}
+	if seq, err = usersNode(src.RootNode); err != nil {
+		return err
+	}
+
 	newSeq, err := marshalSeq([]User{u})
 	if err != nil {
 		return fmt.Errorf("%s: building user %q: %w", src.Path, u.Name, err)
@@ -92,6 +99,10 @@ func (c *Config) addGroupMember(group, member string) error {
 
 	mv := findMappingValue(groups, group)
 	if mv == nil {
+		if groups, err = blockGroups(src); err != nil {
+			return err
+		}
+
 		newGroup, err := marshalMapping(map[string][]string{group: {member}})
 		if err != nil {
 			return fmt.Errorf("%s: building group %q: %w", src.Path, group, err)

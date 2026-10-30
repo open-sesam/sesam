@@ -58,6 +58,8 @@ type doctorEnv struct {
 	sesamDir      string
 	identityPaths []string
 	lockTimeout   time.Duration
+	askpass       string
+	askpassReq    string
 	version       string // full version banner, as shown to the user
 	versionShort  string // bare semver, e.g. "0.1.2" - for the update check
 
@@ -107,7 +109,7 @@ func buildCategories(ctx context.Context, env doctorEnv) []doctorCategory {
 		{"Installation", []DoctorCheck{sesamInPathCheck(), versionCheck(ctx, env)}},
 		{"Identity", []DoctorCheck{identityCheck(env)}},
 		{"Environment", []DoctorCheck{askpassCheck(), editorCheck(), clipboardCheck(ctx, env), completionCheck()}},
-		{"Git", []DoctorCheck{gitRepoCheck(), gitCheck(ctx, env)}},
+		{"Git", []DoctorCheck{gitRepoCheck(env), gitCheck(ctx, env)}},
 		{"Repository", []DoctorCheck{sesamDirCheck(env)}},
 	}
 }
@@ -392,10 +394,12 @@ func identityUserCheck(env doctorEnv) DoctorCheck {
 		}
 
 		r, err := repo.Load(env.sesamDir, env.identityPaths, repo.RepoOpts{
-			Interactive: true,
-			LockTimeout: env.lockTimeout,
-			VerifyMode:  repo.VerifyModeDefault,
-			InMerge:     mergeState(env.sesamDir).InProgress(),
+			Interactive:     true,
+			LockTimeout:     env.lockTimeout,
+			VerifyMode:      repo.VerifyModeDefault,
+			InMerge:         mergeState(env.sesamDir).InProgress(),
+			AskpassProgram:  env.askpass,
+			AskpassRequired: env.askpassReq,
 		})
 		if err != nil {
 			return docIssue(
@@ -486,13 +490,19 @@ func completionCheck() DoctorCheck {
 	}}
 }
 
-func gitRepoCheck() DoctorCheck {
+func gitRepoCheck(env doctorEnv) DoctorCheck {
 	return &genericCheck{name: "git-repository", run: func() DoctorDiagnosis {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return docFailed(fmt.Sprintf("could not determine the working directory: %v", err))
 		}
-		root, err := repo.GitWorktreeRoot(cwd)
+
+		// The repo --sesam-dir names, not necessarily the one around the cwd.
+		dir := cwd
+		if resolved, err := repo.ResolveSesamDir(env.sesamDir); err == nil {
+			dir = resolved
+		}
+		root, err := repo.GitWorktreeRoot(dir)
 		if err != nil {
 			return docIssue("not inside a git repository", "run `git init` or cd into your repository")
 		}
@@ -555,7 +565,8 @@ func gitConfigCheck(env doctorEnv) DoctorCheck {
 		once.Do(func() { checks, loadErr = repo.CheckGitConfig(env.sesamDir) })
 	}
 
-	entry := func(path string, optional bool) DoctorCheck {
+	// Every entry is optional: each has an init flag to opt out of it.
+	entry := func(path, initFlag string) DoctorCheck {
 		return &genericCheck{name: path, run: func() DoctorDiagnosis {
 			load()
 			if loadErr != nil {
@@ -568,22 +579,15 @@ func gitConfigCheck(env doctorEnv) DoctorCheck {
 				switch {
 				case c.OK:
 					return docHealthy("set as expected")
-				case optional && c.Actual == "":
-					return docWarn(
-						"not set - optional branch-merge support is not installed",
-						"run `sesam init --install-merge` to enable it",
-					)
-				case optional:
-					return docWarn(
-						fmt.Sprintf("unexpected value %q (want %q)", c.Actual, c.Expected),
-						"run `sesam init --install-merge` to reinstall it",
-					)
 				case c.Actual == "":
-					return docIssue("not set", "run `sesam init` to (re)install sesam's git integration")
+					return docWarn(
+						"not set - this optional part is not installed",
+						fmt.Sprintf("run `sesam init --%s` to enable it", initFlag),
+					)
 				default:
-					return docIssue(
+					return docWarn(
 						fmt.Sprintf("unexpected value %q (want %q)", c.Actual, c.Expected),
-						"run `sesam init` to (re)install sesam's git integration",
+						fmt.Sprintf("run `sesam init --%s` to reinstall it", initFlag),
 					)
 				}
 			}
@@ -604,10 +608,10 @@ func gitConfigCheck(env doctorEnv) DoctorCheck {
 			return docHealthy("sesam git drivers (each checked below)")
 		},
 		subChecks: []DoctorCheck{
-			entry("merge.sesam-merge.name", true),
-			entry("merge.sesam-merge.driver", true),
-			entry("diff.sesam-diff.textconv", false),
-			entry("alias.sesam", false),
+			entry("merge.sesam-merge.name", "install-merge"),
+			entry("merge.sesam-merge.driver", "install-merge"),
+			entry("diff.sesam-diff.textconv", "install-diff"),
+			entry("alias.sesam", "install-alias"),
 		},
 	}
 }
@@ -933,6 +937,8 @@ func HandleDoctor(ctx context.Context, cmd *cli.Command) error {
 		sesamDir:      cmd.String("sesam-dir"),
 		identityPaths: cmd.StringSlice("identity"),
 		lockTimeout:   cmd.Duration("lock-timeout"),
+		askpass:       cmd.String("askpass"),
+		askpassReq:    askpassRequired(),
 		version:       version,
 		versionShort:  firstField(version),
 

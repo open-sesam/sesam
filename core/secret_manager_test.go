@@ -186,6 +186,30 @@ func TestSealAndRevealAll(t *testing.T) {
 	require.Equal(t, "secret-content", string(got))
 }
 
+// A committed symlink in place of the plaintext must not make the seal encrypt
+// whatever it points at (possibly a secret the target group cannot read).
+func TestSealRefusesSymlinkedPlaintext(t *testing.T) {
+	mgr := testSecretManagerFull(t)
+	writeSecret(t, mgr.SesamDir, "other", "admin-only")
+	require.NoError(t, os.MkdirAll(filepath.Join(mgr.SesamDir, "secrets"), 0o700))
+	require.NoError(t, os.Symlink("../other", filepath.Join(mgr.SesamDir, "secrets/test")))
+
+	require.ErrorContains(t, mgr.Seal(true, nil), "is a symlink")
+	require.NoFileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
+}
+
+// A committed symlinked directory (here secrets -> .git) must not let reveal
+// write into the place it points at.
+func TestRevealRefusesSymlinkedParent(t *testing.T) {
+	mgr := sealedSecretManager(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(mgr.SesamDir, "secrets")))
+	require.NoError(t, os.Mkdir(filepath.Join(mgr.SesamDir, "target"), 0o700))
+	require.NoError(t, os.Symlink("target", filepath.Join(mgr.SesamDir, "secrets")))
+
+	require.ErrorContains(t, mgr.RevealAll(), "is a symlink")
+	require.NoFileExists(t, filepath.Join(mgr.SesamDir, "target/test"))
+}
+
 func TestSealFailsMissingPlaintext(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	// Don't write the secret file - seal should fail.
@@ -553,6 +577,33 @@ func TestSecretMove(t *testing.T) {
 	revealed, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/moved"))
 	require.NoError(t, err)
 	require.Equal(t, "secret-content", string(revealed))
+}
+
+func TestSecretMoveRefuses(t *testing.T) {
+	t.Run("existing target", func(t *testing.T) {
+		mgr := sealedSecretManager(t)
+		writeSecret(t, mgr.SesamDir, "notes.txt", "mine")
+		require.ErrorContains(t, mgr.SecretMove("secrets/test", "notes.txt"), "already exists")
+		got, err := os.ReadFile(filepath.Join(mgr.SesamDir, "notes.txt"))
+		require.NoError(t, err)
+		require.Equal(t, "mine", string(got))
+	})
+
+	t.Run("symlinked target parent", func(t *testing.T) {
+		mgr := sealedSecretManager(t)
+		require.NoError(t, os.Mkdir(filepath.Join(mgr.SesamDir, "trap"), 0o700))
+		require.NoError(t, os.Symlink("trap", filepath.Join(mgr.SesamDir, "link")))
+		require.ErrorContains(t, mgr.SecretMove("secrets/test", "link/test"), "is a symlink")
+		require.NoFileExists(t, filepath.Join(mgr.SesamDir, "trap/test"))
+	})
+
+	t.Run("symlinked source parent", func(t *testing.T) {
+		mgr := sealedSecretManager(t)
+		require.NoError(t, os.Rename(filepath.Join(mgr.SesamDir, "secrets"), filepath.Join(mgr.SesamDir, "trap")))
+		require.NoError(t, os.Symlink("trap", filepath.Join(mgr.SesamDir, "secrets")))
+		require.ErrorContains(t, mgr.SecretMove("secrets/test", "moved"), "is a symlink")
+		require.FileExists(t, filepath.Join(mgr.SesamDir, "trap/test"))
+	})
 }
 
 func TestSecretMoveNotFound(t *testing.T) {
@@ -972,6 +1023,20 @@ func TestNeedsSeal(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, needs)
 		require.NotNil(t, footer)
+	})
+
+	t.Run("ciphertext not matching the footer needs a seal", func(t *testing.T) {
+		mgr, path := seal(t, "x")
+		obj := filepath.Join(mgr.SesamDir, mgr.cryptPath(path))
+		data, err := os.ReadFile(obj)
+		require.NoError(t, err)
+		// Last ciphertext byte, right before the footer line.
+		data[bytes.LastIndexByte(data, '\n')-1] ^= 0xff
+		require.NoError(t, os.WriteFile(obj, data, 0o600))
+
+		needs, _, err := mgr.needsSeal(path)
+		require.NoError(t, err)
+		require.True(t, needs)
 	})
 }
 

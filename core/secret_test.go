@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
+	"filippo.io/age"
 	"github.com/stretchr/testify/require"
 )
 
@@ -570,4 +572,28 @@ func TestPruneOrphanObjects(t *testing.T) {
 	require.NoError(t, err)
 	_, err = root.Stat(".sesam/objects/sub/x.sesam")
 	require.NoError(t, err, "kept nested object must remain")
+}
+
+// Every footer seal accepts must also be found again by reveal: the reader
+// needs the newline in front of it inside its maxFooterSize window.
+func TestSealRevealFooterSizeLimit(t *testing.T) {
+	u := newTestUser(t, "u")
+	dir := t.TempDir()
+
+	for n := 3500; ; n++ {
+		path := strings.Repeat("a", n)
+		fd, err := os.Create(filepath.Join(dir, "obj"))
+		require.NoError(t, err)
+
+		_, err = SealStream(strings.NewReader("x"), fd, path, Recipients{u.Recipient}, nil, u.Signer, "u")
+		if err != nil {
+			require.ErrorContains(t, err, "footer bigger than page")
+			require.NoError(t, fd.Close())
+			return
+		}
+
+		_, _, _, err = RevealStream(fd, io.Discard, []age.Identity{u.Identity.Identity})
+		require.NoError(t, err, "path length %d", n)
+		require.NoError(t, fd.Close())
+	}
 }

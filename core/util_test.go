@@ -172,6 +172,10 @@ func TestValidSecretPathFormat(t *testing.T) {
 		// ones a split on "/" alone would miss.
 		{name: "traversal os separator", path: filepath.Join("..", "secret"), wantErr: "'..' segment"},
 		{name: "absolute os separator", path: string(filepath.Separator) + "etc", wantErr: "absolute paths"},
+		{name: "dot prefix", path: "./x", wantErr: "canonical form"},
+		{name: "double slash", path: "a//x", wantErr: "canonical form"},
+		{name: "trailing slash", path: "a/x/", wantErr: "canonical form"},
+		{name: "dot segment", path: "a/./x", wantErr: "canonical form"},
 	}
 
 	for _, tc := range tests {
@@ -223,6 +227,9 @@ func TestIsForbiddenPathRejectsDotSesam(t *testing.T) {
 		{"git dir", "a/.git/config", ".git"},
 		{"tmp dir", "a/.sesam-tmp/x", ".sesam-tmp"},
 		{"os separator", filepath.Join("a", ".sesam", "b"), ".sesam"},
+		{"git dir other case", ".Git/hooks/post-checkout", ".git"},
+		{"sesam dir other case", "a/.SESAM/b", ".sesam"},
+		{"sesam.yml other case", "SESAM.YML", "SESAM.YML"},
 	}
 
 	for _, tc := range cases {
@@ -395,6 +402,36 @@ func TestPruneEmptyDirs(t *testing.T) {
 			deleted, err := PruneEmptyDirs(root, ".", tc.Except, nil)
 			require.NoError(t, err)
 			require.Equal(t, tc.ExpectedToDelete, deleted)
+		})
+	}
+}
+
+func TestNoSymlinks(t *testing.T) {
+	sesamDir, root := testRepoRoot(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(sesamDir, "dir"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(sesamDir, "dir/file"), nil, 0o600))
+	require.NoError(t, os.Symlink("dir", filepath.Join(sesamDir, "linkdir")))
+	require.NoError(t, os.Symlink("dir/file", filepath.Join(sesamDir, "linkfile")))
+
+	cases := []struct {
+		path string
+		ok   bool
+	}{
+		{"dir/file", true},
+		{"dir/missing", true},
+		{"missing/deeper", true},
+		{"linkfile", false},
+		{"linkdir/file", false},
+		{"linkdir/missing", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			err := NoSymlinks(root, tc.path)
+			if tc.ok {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "is a symlink")
+			}
 		})
 	}
 }

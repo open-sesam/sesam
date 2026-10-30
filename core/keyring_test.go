@@ -345,7 +345,7 @@ func TestMemoryKeyringAddRecipientDuplicateAcrossUsers(t *testing.T) {
 
 	var dupErr *DuplicatePubkeyError
 	require.ErrorAs(t, err, &dupErr)
-	require.Equal(t, "bob", dupErr.user)
+	require.Equal(t, "alice", dupErr.user, "names the user who already holds the key")
 
 	// The duplicate must not have been recorded for bob.
 	require.Empty(t, kr.Recipients([]string{"bob"}))
@@ -364,7 +364,7 @@ func TestMemoryKeyringSetSignPubKeyDuplicateAcrossUsers(t *testing.T) {
 
 	var dupErr *DuplicatePubkeyError
 	require.ErrorAs(t, err, &dupErr)
-	require.Equal(t, "bob", dupErr.user)
+	require.Equal(t, "alice", dupErr.user, "names the user who already holds the key")
 
 	// The key must still resolve to alice only; bob must not have stolen it.
 	sig, err := user.Signer.Sign(SesamDomainSignSecretTag, []byte("test"))

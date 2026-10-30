@@ -1,0 +1,28 @@
+# Installing and removing sesam's git integration only touches sesam's own
+# keys; the rest of .git/config (pushurl, repeated keys, comments) survives.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec git remote add origin https://example.com/repo.git
+exec git config remote.origin.pushurl ssh://example.com/repo.git
+exec git config --add url.https://mirror.example/.insteadOf https://a.example/
+exec git config --add url.https://mirror.example/.insteadOf https://b.example/
+exec sh -c 'echo "# keep me" >> .git/config'
+
+exec sesam init --user admin --install-merge
+exec git config --get-all remote.origin.url
+stdout -count=1 '^https:'
+exec git config --get-all url.https://mirror.example/.insteadOf
+stdout -count=2 '^https:'
+grep '# keep me' .git/config
+exec git config merge.sesam-merge-secret.driver
+stdout 'sesam'
+
+exec sesam uninstall --no-ask
+! exec git config merge.sesam-merge-secret.driver
+exec git config remote.origin.pushurl
+stdout 'ssh://example.com/repo.git'
+exec git config --get-all url.https://mirror.example/.insteadOf
+stdout -count=2 '^https:'
+grep '# keep me' .git/config

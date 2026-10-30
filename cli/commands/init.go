@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/chzyer/readline"
@@ -93,14 +94,25 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 		return nil
 	}
 
-	out := termenv.NewOutput(os.Stdout)
-	export := out.String("export SESAM_ID=\""+ids[0]).Foreground(termenv.ANSIBrightBlue).String() + "\""
-
 	if os.Getenv("SESAM_ID") == "" {
-		homeDir := os.Getenv("HOME")
-		homeExport := strings.Replace(export, homeDir, "$HOME", 1)
+		// The shell config is read from any directory, so the path must not be relative.
+		id := ids[0]
+		if expanded, err := repo.ExpandHomeDir(id); err == nil {
+			id = expanded
+		}
+		if abs, err := filepath.Abs(id); err == nil {
+			id = abs
+		}
+		if homeDir := os.Getenv("HOME"); homeDir != "" {
+			if rest, ok := strings.CutPrefix(id, homeDir+string(filepath.Separator)); ok {
+				id = filepath.Join("$HOME", rest)
+			}
+		}
+
+		out := termenv.NewOutput(os.Stdout)
+		export := out.String(`export SESAM_ID="`+id).Foreground(termenv.ANSIBrightBlue).String() + `"`
 		fmt.Println()
-		printInfo("Tip: Put %s in your shell config", homeExport)
+		printInfo("Tip: Put %s in your shell config", export)
 	}
 	return nil
 }

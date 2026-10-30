@@ -3,11 +3,14 @@ package commands
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"filippo.io/age"
 	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/core"
 	"opensesam.org/sesam/repo"
@@ -75,14 +78,14 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	showPath := object
-	if !filepath.IsAbs(object) {
-		cwd, _ := os.Getwd()
-		rel, relErr := toShowPath(sesamDir, cwd, object)
-		if relErr != nil {
-			return relErr
+	cwd, _ := os.Getwd()
+	showPath, err := toShowPath(sesamDir, cwd, object)
+	if err != nil {
+		if !filepath.IsAbs(object) {
+			return err
 		}
-		showPath = rel
+		// An absolute path outside the repo is git's textconv temp file.
+		showPath = object
 	}
 
 	root, rootErr := os.OpenRoot(sesamDir)
@@ -106,6 +109,15 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 
 	ok, showErr := core.ShowSecret(root, ids, showPath, out)
 	if ok {
+		var noMatch *age.NoIdentityMatchError
+		// Objects are what git's textconv hands over: a temp copy for one side,
+		// the in-repo object for the worktree side of `git diff`.
+		textconv := filepath.IsAbs(showPath) || strings.HasSuffix(showPath, ".sesam")
+		if textconv && errors.As(showErr, &noMatch) {
+			// textconv: an error would abort the whole git diff/log -p.
+			_, err := fmt.Fprintln(out, "<sesam: not a recipient of this secret>")
+			return err
+		}
 		if showErr != nil {
 			return showErr
 		}

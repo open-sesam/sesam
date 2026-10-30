@@ -1,0 +1,13 @@
+# The SESAM_ID tip after init goes into a shell config, which is read from any
+# directory, so it must name the identity by an absolute path.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+mkdir keys
+cp $SESAM_ID keys/id.age
+env SESAM_ID=
+env HOME=$WORK/home
+exec sesam -i keys/id.age init --user admin
+stderr 'export SESAM_ID="/[^"]*/keys/id.age"'

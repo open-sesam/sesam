@@ -19,7 +19,7 @@
 </p>
 
 > [!WARNING]  
-> This is still beta software. It somewhat works, but it may change.
+> This is still beta software. It pretty much works (we use it at our company), but it may change.
 > There is no guarantee before v1.0 that APIs and storage will not change.
 > Use at your own risk for now.
 
@@ -48,14 +48,13 @@ managers](https://opensesam.org/docs/alternatives.html).
 - Simple modern deployment with a static binary.
 - Highly scriptable and even usable as Go library.
 - Allow merging of git branches due to smart git driver.
+- Declarative `sesam apply` workflow.
+- Password manager like features.
 
 ## Planned features
 
-- Declarative `sesam apply` workflow.
 - Rotation and exchange of secrets.
 - Better support for env-file based workflows.
-- Password manager like features.
-- Possibly also a TUI.
 
 # Quickstart Links
 
@@ -77,9 +76,9 @@ We use AI-based assistants so far for:
 - Ideation / Design feedback.
 - Building test suites.
 - Writing HTML/CSS.
-- Occasional clearly scoped code change.
+- Occasional clearly scoped code change (ex: merge and apply features).
 
-The majority of the code is still hand-written to make sure we don't lose touch
+The majority of core code is still hand-written to make sure we don't lose touch
 to what we build. To be clear: **This is not a vibe-coded project.** The design
 was done by an experienced software engineer the old-fashioned way. If you want
 to read more about our stance regarding AI-usage in software development you can read

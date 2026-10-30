@@ -57,6 +57,35 @@ func (es *ed25519Signer) UserName() string {
 	return es.user
 }
 
+// renamedSigner signs with the same key under a user's new name.
+type renamedSigner struct {
+	Signer
+	name string
+}
+
+func (rs renamedSigner) UserName() string {
+	return rs.name
+}
+
+// LoadUserSignKey is LoadSignKey plus a check against the key kr registered for
+// user. The key file itself is not signed, so anyone who can push could replace
+// it with their own key encrypted to user.
+func LoadUserSignKey(root *os.Root, user string, userIdentity age.Identity, kr Keyring) (Signer, error) {
+	signer, err := LoadSignKey(root, user, userIdentity)
+	if err != nil {
+		return nil, err
+	}
+
+	if want, ok := kr.SignPubKey(user); !ok || !bytes.Equal(want, signer.PublicKey()) {
+		return nil, fmt.Errorf(
+			"%s does not hold the sign key the audit log registered for %s (restore it from git history)",
+			signKeyPath("", user), user,
+		)
+	}
+
+	return signer, nil
+}
+
 // LoadSignKey will load a signer specific to a user and decrypt it via `userIdentity`
 func LoadSignKey(root *os.Root, user string, userIdentity age.Identity) (Signer, error) {
 	if err := ValidUserName(user); err != nil {
@@ -70,12 +99,12 @@ func LoadSignKey(root *os.Root, user string, userIdentity age.Identity) (Signer,
 		return nil, fmt.Errorf("failed to load sign key %s: %w", signKeyPath, err)
 	}
 
+	defer closeLogged(cryptedSignPrivKeyFd)
+
 	dr, err := age.Decrypt(io.LimitReader(cryptedSignPrivKeyFd, 16*1024), userIdentity)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt header of signing key: %w", err)
 	}
-
-	defer closeLogged(cryptedSignPrivKeyFd)
 
 	signingKeyEncoded, err := io.ReadAll(dr)
 	if err != nil {

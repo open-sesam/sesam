@@ -78,8 +78,7 @@ func HandleConfigApply(ctx context.Context, cmd *cli.Command, r *repo.Repo) erro
 			return nil
 		}
 
-		_, err = s.Seal(repo.SealOpts{All: cmd.Bool("seal-all")})
-		return err
+		return sealStage(cmd, r, s)
 	}); err != nil {
 		var committedErr *repo.CommittedChangesError
 		if errors.As(err, &committedErr) {
@@ -231,7 +230,7 @@ func HandleConfigReset(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 // disk.
 func printDeleted(r *repo.Repo, reset *repo.ConfigReset) {
 	for _, path := range reset.Deleted {
-		slog.Info(fmt.Sprintf("note: %s is now empty and was deleted", displayPath(r.SesamDir(), path)))
+		slog.Info(fmt.Sprintf("note: %s is now empty and was deleted", DisplayPath(r.SesamDir(), path)))
 	}
 }
 
