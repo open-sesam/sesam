@@ -564,24 +564,31 @@ func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourP
 
 	ourAuditLog, err := core.LoadAuditLogFromPath(ourPath, ids)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load our audit log: %w", err)
 	}
 
 	defer func() { _ = ourAuditLog.Close() }()
 
 	theirAuditLog, err := core.LoadAuditLogFromPath(theirPath, ids)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load their audit log: %w", err)
 	}
 
 	defer func() { _ = theirAuditLog.Close() }()
 
-	originAuditLog, err := core.LoadAuditLogFromPath(originPath, ids)
-	if err != nil {
+	// git hands an empty %O when the log has no merge base (add/add);
+	// nil lets AuditMerge derive one from the shared history.
+	var originAuditLog *core.AuditLog
+	if info, err := os.Stat(originPath); err != nil {
 		return nil, err
-	}
+	} else if info.Size() > 0 {
+		originAuditLog, err = core.LoadAuditLogFromPath(originPath, ids)
+		if err != nil {
+			return nil, fmt.Errorf("load origin audit log: %w", err)
+		}
 
-	defer func() { _ = originAuditLog.Close() }()
+		defer func() { _ = originAuditLog.Close() }()
+	}
 
 	// The merging admin re-signs the rebased entries, so we need their signing
 	// key: resolve which identity is us against ours' state, then load its key.
