@@ -1,0 +1,50 @@
+# The branch introducing sesam got squash-merged, and a branch stacked on it is
+# merged afterwards. The audit log has no git merge base (git hands an empty
+# %O), yet both sides share its history, so the merge must still go through.
+
+mv a.txt $TMPDIR/a.txt
+mv b.txt $TMPDIR/b.txt
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec git commit --allow-empty -m root
+
+exec git checkout -b intro
+exec sesam init --user admin --install-merge
+cp $TMPDIR/a.txt a
+exec sesam add a --group admin
+exec git add -A
+exec git commit -m 'intro sesam'
+
+exec git checkout -b stacked
+cp $TMPDIR/b.txt b
+exec sesam add b --group admin
+exec git add -A
+exec git commit -m 'stacked: add b'
+
+exec git checkout master
+exec git merge --squash intro
+exec git commit -m 'squashed intro'
+
+exec git checkout stacked
+! exec git merge master -m 'merge master'
+! stderr 'missing key line'
+stderr 'audit log was therefore semantically merged'
+exec git commit -m 'merge master'
+
+exec sesam verify
+stderr 'Integrity: ok'
+exec sesam show .sesam/objects/b.sesam
+stdout 'BBB'
+
+# Back onto master: its mainline anchors at the squash commit instead.
+exec git checkout master
+! exec git merge --no-ff stacked -m 'merge stacked'
+exec git commit -m 'merge stacked'
+exec sesam verify
+stderr 'Integrity: ok'
+
+-- a.txt --
+AAA
+-- b.txt --
+BBB
