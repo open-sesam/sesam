@@ -242,6 +242,20 @@ Decrypt all secrets available to the current user
 
 **--help, -h**: show help
 
+## run
+
+Run a command with secret files and dotenv variables
+
+**--all**: Select all managed secrets accessible to the current identity
+
+**--env-file**="": Inject variables from an exact dotenv secret file (repeatable)
+
+**--env-pattern**="": Additional regex matching sesam-relative dotenv paths; .env suffixes are always recognized (repeatable) \[$SESAM_RUN_ENV_PATTERN\]
+
+**--help, -h**: show help
+
+**--secret**="": Select path or VARIABLE=path; unnamed dotenv files are parsed, other files use SESAM_PATH names holding /dev/fd paths (repeatable)
+
 ## status, s
 
 Show overview over repo state (revealed, sealed, unmanaged, ...)

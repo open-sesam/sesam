@@ -206,14 +206,14 @@ func TestTellThenSealGivesNewRecipientAccess(t *testing.T) {
 	))
 
 	// Before an explicit seal, the ciphertext is still admin-only: bob cannot read it.
-	require.False(t, revealableBy(t, sesamDir, bob, kr, al, state, "secrets/api"),
+	require.False(t, revealableBy(t, sesamDir, bob, kr, state, "secrets/api"),
 		"bob must not be a recipient before an explicit seal")
 
 	// An explicit seal re-encrypts to include the new "dev" member.
 	require.NoError(t, secMgr.Seal(true, nil))
 
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
-	require.True(t, revealableBy(t, sesamDir, bob, kr, al, state, "secrets/api"),
+	require.True(t, revealableBy(t, sesamDir, bob, kr, state, "secrets/api"),
 		"bob must be a recipient after the explicit seal")
 
 	got, err := os.ReadFile(filepath.Join(sesamDir, "secrets/api"))
@@ -259,7 +259,7 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 
 	// Sanity: bob can decrypt before kill.
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
-	require.True(t, revealableBy(t, sesamDir, bob, kr, al, state, "secrets/api"),
+	require.True(t, revealableBy(t, sesamDir, bob, kr, state, "secrets/api"),
 		"bob should be a recipient before kill")
 
 	// Kill does not auto-seal; an explicit seal must drop bob from the recipients.
@@ -267,7 +267,7 @@ func TestKillThenSealEvictsRecipient(t *testing.T) {
 	require.NoError(t, secMgr.Seal(true, nil))
 
 	require.NoError(t, os.Remove(filepath.Join(sesamDir, "secrets/api")))
-	require.False(t, revealableBy(t, sesamDir, bob, kr, al, state, "secrets/api"),
+	require.False(t, revealableBy(t, sesamDir, bob, kr, state, "secrets/api"),
 		"killed user must not be a recipient of the resealed file")
 }
 

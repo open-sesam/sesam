@@ -307,16 +307,6 @@ func revealSecret(sm *SecretManager, revealedPath string) error {
 }
 
 func revealSecretToPath(sm *SecretManager, revealedPath, dstPath string) error {
-	cryptPath := sm.cryptPath(revealedPath)
-
-	srcFd, err := sm.root.Open(cryptPath)
-	if err != nil {
-		// if it does not exist, it probably means that the secret was not encrypted yet.
-		return fmt.Errorf("opening secret file failed: %w", err)
-	}
-
-	defer closeLogged(srcFd)
-
 	if err := NoSymlinks(sm.root, dstPath); err != nil {
 		return fmt.Errorf("refusing to reveal: %w", err)
 	}
@@ -336,15 +326,7 @@ func revealSecretToPath(sm *SecretManager, revealedPath, dstPath string) error {
 		_ = dstFd.Cleanup()
 	}()
 
-	ids := sm.Identities.AgeIdentities()
-	if _, err := RevealStreamAndVerify(
-		srcFd,
-		dstFd,
-		ids,
-		sm.Keyring,
-		sm.State.SealerAuthorized,
-		revealedPath,
-	); err != nil {
+	if err := sm.Reveal(revealedPath, dstFd); err != nil {
 		return err
 	}
 
@@ -397,7 +379,7 @@ func RevealStreamAndVerify(
 	}
 
 	if expectedPath != "" && footer.RevealedPath != expectedPath {
-		return nil, fmt.Errorf("object at %s is sealed for %s", expectedPath, footer.RevealedPath)
+		return nil, fmt.Errorf("secret footer path %q does not match expected path %q", footer.RevealedPath, expectedPath)
 	}
 
 	// Verify the signature, but check before if hashes are the same at all as quick check:
@@ -407,6 +389,13 @@ func RevealStreamAndVerify(
 	}
 	if !ok {
 		return nil, fmt.Errorf("encrypted file changed for %s", footer.RevealedPath)
+	}
+	ok, err = hashEqual(footer.HMACContentHash, contentHashBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check content hash for %s: %w", footer.RevealedPath, err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("decrypted content hash changed for %s", footer.RevealedPath)
 	}
 
 	recipientsHashBytes, _, err := multicodeDecode(footer.RecipientsHash)
