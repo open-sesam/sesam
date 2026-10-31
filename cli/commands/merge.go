@@ -177,9 +177,11 @@ func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
 		drv.conflictMarkerSize,
 	)
 	if err != nil {
+		// git reads <= 128 as a plain conflict the user could `git add` away;
+		// only > 128 aborts the merge.
 		return &ExitCodeError{
 			err:   err,
-			code:  128,
+			code:  129,
 			print: true,
 		}
 	}

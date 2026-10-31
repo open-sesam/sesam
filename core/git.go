@@ -45,7 +45,8 @@ func SesamGitPrefix(repo *git.Repository, sesamDir string) (string, error) {
 // whether to treat it as fatal).
 func verifyInitFileUnchanged(sesamDir string) (string, error) {
 	repo, err := git.PlainOpenWithOptions(sesamDir, &git.PlainOpenOptions{
-		DetectDotGit: true,
+		DetectDotGit:          true,
+		EnableDotGitCommonDir: true,
 	})
 	if err != nil {
 		return "", fmt.Errorf("not a git repository (skipping init-file history check): %w", err)
@@ -98,12 +99,16 @@ func verifyInitFileUnchangedWithRepo(sesamDir string, repo *git.Repository) (str
 	// The anchor is the commit that introduced the file: none of its parents
 	// carry it. Log order alone does not say which one that is - past a merge,
 	// the last commit visited may well sit on a branch that forked after init.
-	var anchorHash string
+	var introducers []plumbing.Hash
 	for _, h := range order {
 		if !slices.ContainsFunc(carriers[h], func(p plumbing.Hash) bool { _, ok := carriers[p]; return ok }) {
-			anchorHash = h.String()
-			break
+			introducers = append(introducers, h)
 		}
+	}
+
+	anchorHash, err := pickInitAnchor(repo, introducers)
+	if err != nil {
+		return "", err
 	}
 
 	switch len(blobs) {
@@ -134,4 +139,69 @@ func verifyInitFileUnchangedWithRepo(sesamDir string, repo *git.Repository) (str
 	}
 
 	return anchorHash, nil
+}
+
+// pickInitAnchor picks the trust anchor among the commits that introduced init.
+// Several are fine only side by side: a squash- or rebase-merge of the branch
+// that introduced sesam commits the same init on a parallel line. One
+// descending from another means init was deleted and put back, which would move
+// the anchor and let an older log start a fresh, shorter history.
+func pickInitAnchor(repo *git.Repository, introducers []plumbing.Hash) (string, error) {
+	switch len(introducers) {
+	case 0:
+		return "", nil
+	case 1:
+		return introducers[0].String(), nil
+	}
+
+	commits := make([]*object.Commit, len(introducers))
+	for i, h := range introducers {
+		c, err := repo.CommitObject(h)
+		if err != nil {
+			return "", fmt.Errorf("read init introducer %s: %w", h, err)
+		}
+		commits[i] = c
+	}
+
+	for _, a := range commits {
+		for _, b := range commits {
+			if a == b {
+				continue
+			}
+
+			if ok, err := a.IsAncestor(b); err != nil {
+				return "", fmt.Errorf("check ancestry of %s: %w", a.Hash, err)
+			} else if ok {
+				return "", fmt.Errorf(
+					".sesam/audit/init was removed and re-added in history (introduced by %s, again by %s)",
+					a.Hash, b.Hash,
+				)
+			}
+		}
+	}
+
+	// Prefer the one on HEAD's first-parent chain: that is the line the history
+	// walk follows, and where it stops.
+	head, err := repo.Head()
+	if err != nil {
+		return "", fmt.Errorf("resolve HEAD: %w", err)
+	}
+
+	for h := head.Hash(); ; {
+		if slices.Contains(introducers, h) {
+			return h.String(), nil
+		}
+
+		c, err := repo.CommitObject(h)
+		if err != nil {
+			return "", fmt.Errorf("read commit %s: %w", h, err)
+		}
+		if len(c.ParentHashes) == 0 {
+			break
+		}
+		h = c.ParentHashes[0]
+	}
+
+	// HEAD's mainline got its vault from a merge; the walk crosses over there.
+	return introducers[0].String(), nil
 }

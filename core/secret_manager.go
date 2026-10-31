@@ -290,6 +290,10 @@ func (sm *SecretManager) sealOrPreserve(revealedPath string, all bool, advice Se
 		return nil, fmt.Errorf("create objects subdir: %w", err)
 	}
 
+	if err := NoSymlinks(sm.root, revealedPath); err != nil {
+		return nil, fmt.Errorf("refusing to seal: %w", err)
+	}
+
 	switch _, err := sm.root.Stat(revealedPath); {
 	case err == nil:
 		sealer := sm.Signer.UserName()
@@ -513,6 +517,16 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 		return fmt.Errorf("failed to move non-existing secret: %s", oldRevealedPath)
 	}
 
+	for _, p := range []string{oldRevealedPath, newRevealedPath} {
+		if err := NoSymlinks(sm.root, p); err != nil {
+			return fmt.Errorf("refusing to move: %w", err)
+		}
+	}
+
+	if _, err := sm.root.Lstat(newRevealedPath); !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("refusing to move: %s already exists", newRevealedPath)
+	}
+
 	_, statErr := sm.root.Stat(oldRevealedPath)
 	needsReveal := statErr != nil
 	if needsReveal {
@@ -711,13 +725,22 @@ func (sm *SecretManager) plaintextMatches(revealedPath string, object io.Reader,
 }
 
 // footerOutdated reports whether the object has to be resealed even though its
-// plaintext did not change: the recipients drifted, or the footer signature no
+// plaintext did not change: the recipients drifted, the footer signature no
 // longer verifies against the keyring (e.g. the sealer's signing key was
-// regenerated). Footer only, no decryption.
+// regenerated), its sealer may not seal this path, or the object's bytes do
+// not match the footer. No decryption.
 func (sm *SecretManager) footerOutdated(footer *secretFooter, revealedPath string) (bool, error) {
 	drifted, err := sm.recipientsDrifted(footer, revealedPath)
 	if err != nil || drifted {
 		return drifted, err
+	}
+
+	if !sm.State.SealerAuthorized(footer.SealedBy, revealedPath) {
+		return true, nil
+	}
+
+	if ok, err := sm.objectMatchesFooter(footer, revealedPath); err != nil || !ok {
+		return !ok, err
 	}
 
 	if sm.footerVerifies(footer) {
@@ -732,6 +755,21 @@ func (sm *SecretManager) footerOutdated(footer *secretFooter, revealedPath strin
 		slog.String("sealed_by", footer.SealedBy),
 	)
 	return true, nil
+}
+
+func (sm *SecretManager) objectMatchesFooter(footer *secretFooter, revealedPath string) (bool, error) {
+	fd, err := sm.root.Open(sm.cryptPath(revealedPath))
+	if err != nil {
+		return false, err
+	}
+	defer closeLogged(fd)
+
+	ageRd, _, err := readFooter(fd)
+	if err != nil {
+		return false, err
+	}
+
+	return cipherTextMatches(ageRd, footer, revealedPath)
 }
 
 // footerVerifies checks the footer signature against the current keyring. The

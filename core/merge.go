@@ -153,11 +153,28 @@ func requireSameInit(logs ...*AuditLog) error {
 	return nil
 }
 
+// commonPrefix returns the leading entries a and b share verbatim. Happens when
+// the branch that introduced sesam got squash- or rebase-merged: the log then
+// has no common git ancestor, but its history is still shared.
+func commonPrefix(a, b *AuditLog) *AuditLog {
+	n := 0
+	for n < len(a.Entries) && n < len(b.Entries) && a.Entries[n].Hash() == b.Entries[n].Hash() {
+		n++
+	}
+
+	return &AuditLog{Entries: append([]AuditEntrySigned(nil), a.Entries[:n]...)}
+}
+
 // AuditMerge rebases 'theirs' entries onto 'ours', using 'origin' as the merge
 // base. `signer` is the merging admin. Every rebased entry is re-attributed to
 // and re-signed by them (their original author is preserved in
-// ChangedByBeforeMerge).
+// ChangedByBeforeMerge). A nil `origin` means git found no merge base for the
+// log; the entries both sides share stand in for it.
 func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginUI) (*AuditLog, *ConflictResolution, error) {
+	if origin == nil {
+		origin = commonPrefix(ours, theirs)
+	}
+
 	if err := requireSameInit(ours, theirs, origin); err != nil {
 		return nil, nil, err
 	}
@@ -446,6 +463,14 @@ func authorRevoked(their *AuditEntrySigned, merged, theirs *VerifiedState) strin
 
 	if !merged.SealerAuthorized(author.Name, path) {
 		return "author " + their.ChangedBy + " has no access to " + path + " on our side; dropped"
+	}
+
+	// Like verify: the new groups have to be reachable for the author too.
+	if their.Operation == OpSecretChangeAccess {
+		d, err := parseDetail[DetailSecretChangeAccess](their)
+		if err == nil && !merged.UserHasAccess(author.Name, normalizeAccessGroups(d.AccessGroups)) {
+			return "author " + their.ChangedBy + " has no access to the new groups of " + path + " on our side; dropped"
+		}
 	}
 
 	return ""

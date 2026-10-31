@@ -488,6 +488,10 @@ func sealMergedSecret(root *os.Root, ids core.Identities, ours *localState, reve
 
 // writeRevealedFile atomically writes data to a revealed (root-relative) path.
 func writeRevealedFile(root *os.Root, relPath string, data []byte) error {
+	if err := core.NoSymlinks(root, relPath); err != nil {
+		return fmt.Errorf("refusing to write merged secret: %w", err)
+	}
+
 	if dir := filepath.Dir(relPath); dir != "." {
 		if err := root.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("create dir for %s: %w", relPath, err)
@@ -545,7 +549,7 @@ func signerFor(root *os.Root, ids core.Identities, kr core.Keyring) (core.Signer
 			continue
 		}
 
-		return core.LoadSignKey(root, user, id.Identity)
+		return core.LoadUserSignKey(root, user, id.Identity, kr)
 	}
 
 	return nil, fmt.Errorf("none of the supplied identities maps to a known user; cannot merge")
@@ -560,24 +564,31 @@ func MergeAuditLog(ctx context.Context, root *os.Root, ids core.Identities, ourP
 
 	ourAuditLog, err := core.LoadAuditLogFromPath(ourPath, ids)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load our audit log: %w", err)
 	}
 
 	defer func() { _ = ourAuditLog.Close() }()
 
 	theirAuditLog, err := core.LoadAuditLogFromPath(theirPath, ids)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load their audit log: %w", err)
 	}
 
 	defer func() { _ = theirAuditLog.Close() }()
 
-	originAuditLog, err := core.LoadAuditLogFromPath(originPath, ids)
-	if err != nil {
+	// git hands an empty %O when the log has no merge base (add/add);
+	// nil lets AuditMerge derive one from the shared history.
+	var originAuditLog *core.AuditLog
+	if info, err := os.Stat(originPath); err != nil {
 		return nil, err
-	}
+	} else if info.Size() > 0 {
+		originAuditLog, err = core.LoadAuditLogFromPath(originPath, ids)
+		if err != nil {
+			return nil, fmt.Errorf("load origin audit log: %w", err)
+		}
 
-	defer func() { _ = originAuditLog.Close() }()
+		defer func() { _ = originAuditLog.Close() }()
+	}
 
 	// The merging admin re-signs the rebased entries, so we need their signing
 	// key: resolve which identity is us against ours' state, then load its key.

@@ -31,5 +31,9 @@ exec git commit -m 'c3'
 ! exec sesam --verify-mode no-disk verify --truncate
 stderr 'not a prefix'
 
+# --json carries the reason, not an empty object.
+! exec sesam --verify-mode no-disk verify --truncate --json
+stdout '"truncate_error": ".*not a prefix'
+
 -- s.txt --
 top secret

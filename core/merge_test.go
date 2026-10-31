@@ -1138,6 +1138,12 @@ func TestAuthorRevoked(t *testing.T) {
 			want:   "has no access to s/db",
 		},
 		{
+			name:   "access change into a group the author left on our side",
+			their:  signed("bob", &DetailSecretChangeAccess{RevealedPath: "s/db", AccessGroups: []string{"ops"}}),
+			merged: mergeState([]VerifiedUser{admin, demoted}, []SecretAccess{db}),
+			want:   "no access to the new groups of s/db",
+		},
+		{
 			name:   "move of a secret the author can no longer reach",
 			their:  signed("bob", &DetailSecretMove{OldRevealedPath: "s/db", NewRevealedPath: "s/api"}),
 			merged: mergeState([]VerifiedUser{admin, demoted}, []SecretAccess{locked}),
@@ -1257,6 +1263,32 @@ func TestRequireSameInit(t *testing.T) {
 		foreign, _, _ := mergeBase(t)
 		require.ErrorContains(t, requireSameInit(base, foreign), "not the same repository")
 	})
+}
+
+// TestAuditMergeNilOrigin covers a log without git merge base: the branch that
+// introduced sesam was squash-merged, so ours is a strict prefix of theirs.
+func TestAuditMergeNilOrigin(t *testing.T) {
+	base, admin, _ := mergeBase(t)
+
+	ours := cloneLog(base)
+	theirs := cloneLog(base)
+	feed(t, theirs, admin.Signer, "admin", &DetailUserKill{User: "bob"})
+
+	merged, _, err := AuditMerge(ours, theirs, nil, admin.Signer, nil)
+	require.NoError(t, err)
+
+	// The shared prefix is the base: only the kill is rebased.
+	last := merged.Entries[len(merged.Entries)-1]
+	require.Equal(t, OpMerge, last.Operation)
+	d, err := parseDetail[DetailMerge](&last)
+	require.NoError(t, err)
+	require.Equal(t, base.Entries[len(base.Entries)-1].SeqID, d.BaseSeqID)
+	require.Equal(t, 1, d.Applied)
+	require.Equal(t, OpUserKill, merged.Entries[len(merged.Entries)-2].Operation)
+
+	foreign, _, _ := mergeBase(t)
+	_, _, err = AuditMerge(ours, foreign, nil, admin.Signer, nil)
+	require.ErrorContains(t, err, "not the same repository")
 }
 
 // TestAuditMergeTheirsMultiEntry pins the rebase base: every entry of theirs is

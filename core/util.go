@@ -2,15 +2,25 @@ package core
 
 import (
 	"cmp"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 )
+
+// JSONError marshals to its message; encoding/json turns a plain error into {}.
+type JSONError struct{ Err error }
+
+func (e JSONError) Error() string                { return e.Err.Error() }
+func (e JSONError) Unwrap() error                { return e.Err }
+func (e JSONError) MarshalJSON() ([]byte, error) { return json.Marshal(e.Err.Error()) }
 
 // PruneEmptyDirs removes directories beneath dir (a root-relative path) whose
 // subtree contains no regular files, deepest first. dir itself is never
@@ -231,11 +241,13 @@ func pathSegments(revealedPath string) []string {
 }
 
 func IsForbiddenPath(revealedPath string) error {
-	if b := filepath.Base(revealedPath); forbiddenBasenames[b] {
-		return fmt.Errorf("you can't seal %s", b)
+	// Case-insensitive filesystems (macOS, Windows) treat ".Git" as ".git".
+	lower := strings.ToLower(revealedPath)
+	if b := filepath.Base(lower); forbiddenBasenames[b] {
+		return fmt.Errorf("you can't seal %s", filepath.Base(revealedPath))
 	}
 
-	for _, elem := range pathSegments(revealedPath) {
+	for _, elem := range pathSegments(lower) {
 		if elem == ".sesam" {
 			return fmt.Errorf("encrypting files in .sesam/ is not allowed")
 		}
@@ -270,6 +282,12 @@ func validSecretPathFormat(revealedPath string) error {
 		}
 	}
 
+	// "./x" or "a//x" would share the object of "x" while carrying their own
+	// access groups.
+	if slashed := filepath.ToSlash(revealedPath); path.Clean(slashed) != slashed {
+		return fmt.Errorf("path is not in canonical form (want %s): %s", path.Clean(slashed), revealedPath)
+	}
+
 	return nil
 }
 
@@ -280,6 +298,10 @@ func validSecretPath(root *os.Root, revealedPath string) error {
 		return err
 	}
 
+	if err := NoSymlinks(root, revealedPath); err != nil {
+		return err
+	}
+
 	info, err := root.Stat(revealedPath)
 	if err != nil {
 		return fmt.Errorf("failed to stat %s: %w", revealedPath, err)
@@ -287,6 +309,28 @@ func validSecretPath(root *os.Root, revealedPath string) error {
 
 	if m := info.Mode(); !m.IsRegular() {
 		return fmt.Errorf("%s is not a regular file: %v", revealedPath, m)
+	}
+
+	return nil
+}
+
+// NoSymlinks fails if path or one of its parents is a symlink. os.Root only
+// stops links that leave the root; one pointing inside (say at .git) would
+// still redirect sesam's reads and writes. Missing components are fine.
+func NoSymlinks(root *os.Root, path string) error {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
+	for i := range parts {
+		p := filepath.Join(parts[:i+1]...)
+		info, err := root.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink", p)
+		}
 	}
 
 	return nil
@@ -379,20 +423,7 @@ func readFileLimitedRoot(root *os.Root, path string, size int64) ([]byte, error)
 		return nil, err
 	}
 
-	info, err := fd.Stat()
-	if err != nil {
-		_ = fd.Close()
-		return nil, err
-	}
-
-	if is := info.Size(); is > size {
-		_ = fd.Close()
-		return nil, fmt.Errorf("file would be limited: %s: %d > %d", path, is, size)
-	}
-
-	//nolint:errcheck
-	defer fd.Close()
-	return io.ReadAll(io.LimitReader(fd, size))
+	return readLimited(fd, path, size)
 }
 
 func ReadFileLimited(path string, size int64) ([]byte, error) {
@@ -402,18 +433,22 @@ func ReadFileLimited(path string, size int64) ([]byte, error) {
 		return nil, err
 	}
 
+	return readLimited(fd, path, size)
+}
+
+// readLimited reads fd in full, refusing files larger than size. It closes fd.
+func readLimited(fd *os.File, path string, size int64) ([]byte, error) {
+	//nolint:errcheck
+	defer fd.Close()
+
 	info, err := fd.Stat()
 	if err != nil {
-		_ = fd.Close()
 		return nil, err
 	}
 
 	if is := info.Size(); is > size {
-		_ = fd.Close()
 		return nil, fmt.Errorf("file would be limited: %s: %d > %d", path, is, size)
 	}
 
-	//nolint:errcheck
-	defer fd.Close()
 	return io.ReadAll(io.LimitReader(fd, size))
 }

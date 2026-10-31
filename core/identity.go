@@ -601,9 +601,16 @@ func IdentityToUser(id *Identity, userToPub map[string]Recipients) (string, erro
 	// encrypt a dummy text with the matched recipient:
 	const dummyText = "sesam open"
 	buf := &bytes.Buffer{}
-	w, _ := age.Encrypt(buf, matchedRecipient)
-	_, _ = w.Write([]byte(dummyText))
-	_ = w.Close()
+	w, err := age.Encrypt(buf, matchedRecipient)
+	if err != nil {
+		return "", fmt.Errorf("encrypt to matched recipient: %w", err)
+	}
+	if _, err := w.Write([]byte(dummyText)); err != nil {
+		return "", fmt.Errorf("encrypt to matched recipient: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return "", fmt.Errorf("encrypt to matched recipient: %w", err)
+	}
 
 	// decrypt it with the supplied identity to check if both are really linked:
 	r, err := age.Decrypt(buf, id)

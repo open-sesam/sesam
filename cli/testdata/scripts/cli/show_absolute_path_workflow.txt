@@ -1,0 +1,12 @@
+# `sesam show` takes an absolute path inside the repo like a relative one.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+
+exec sesam show $WORK/README.md
+stdout '# Sesam Cheatsheet'
+exec sesam show $WORK/.sesam/objects/README.md.sesam
+stdout '# Sesam Cheatsheet'

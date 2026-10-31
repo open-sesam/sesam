@@ -111,8 +111,8 @@ var flagsGeneral = []cli.Flag{
 	},
 	&cli.BoolFlag{
 		Name:    "no-color",
-		Usage:   "Disable color always",
-		Sources: cli.EnvVars("NO_COLOR", "SESAM_NO_COLOR"),
+		Usage:   "Disable color always (a non-empty $NO_COLOR does the same)",
+		Sources: cli.EnvVars("SESAM_NO_COLOR"),
 	},
 	&cli.BoolFlag{
 		Name:    "verbose",
@@ -228,8 +228,10 @@ var flagsRm = []cli.Flag{
 	&cli.BoolFlag{
 		Name:    "force",
 		Aliases: []string{"f"},
-		Usage:   "Also remove the revealed secrets",
+		Usage:   "Delete the plaintext even when it has unsealed changes",
 	},
+	flagNoSeal,
+	flagSeal,
 }
 
 var flagsMove = []cli.Flag{
@@ -237,6 +239,7 @@ var flagsMove = []cli.Flag{
 		Name:  "nested",
 		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file",
 	},
+	flagSeal,
 }
 
 var flagsRun = []cli.Flag{
@@ -308,7 +311,7 @@ var flagsUserAddRecipient = []cli.Flag{
 }
 
 var flagsUserRemoveRecipient = []cli.Flag{
-	userFlag(true, "Which user looses the specified recipient"),
+	userFlag(true, "Which user loses the specified recipient"),
 	recipientsFlag(true),
 	flagNoSeal,
 	flagSeal,
@@ -320,7 +323,7 @@ var flagsUserRemoveRecipient = []cli.Flag{
 }
 
 var flagsUserRegenerateSignKey = []cli.Flag{
-	userFlag(true, "Regenerate the signing key for a user"),
+	userFlag(true, "Which user gets a new signing key"),
 	flagNoSeal,
 	flagSeal,
 }
@@ -391,7 +394,7 @@ var flagsID = []cli.Flag{flagJSON}
 var flagsConfigDiff = []cli.Flag{
 	&cli.BoolFlag{
 		Name:  "validate",
-		Usage: "Fail if 'sesam config apply --force' would refuse the config (dry run, needs admin rights)",
+		Usage: "Fail if 'sesam config apply --force' would refuse the config (dry run as the current user)",
 	},
 	flagJSON,
 }

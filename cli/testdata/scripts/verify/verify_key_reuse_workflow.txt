@@ -19,7 +19,7 @@ exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
 
 # Giving carol a key already registered to bob is rejected at add time.
 ! exec sesam tell --user carol --recipient $BOB_PUBKEY --group dev
-stderr 'already has recipient'
+stderr 'user bob already has recipient'
 
 # So the repo stays clean under the key-reuse check.
 exec sesam verify --key-reuse
