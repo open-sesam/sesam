@@ -2,10 +2,8 @@ package repo
 
 import (
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -33,11 +31,7 @@ type ConfigReset struct {
 	Rewritten bool   `json:"rewritten"`
 	Reason    string `json:"reason,omitempty"`
 
-	// Orphaned are config files still on disk that the rewritten sesam.yml no
-	// longer includes. Not deleted but reported.
-	Orphaned []string `json:"orphaned,omitempty"`
-
-	// Deleted are sub-config files the repair-in-place path removed from disk
+	// Deleted are sub-config files the reset left empty and removed from disk
 	Deleted []string `json:"deleted,omitempty"`
 }
 
@@ -63,31 +57,26 @@ func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 		return out, nil
 	}
 
-	if out.Rewritten {
-		// A rewrite flattens everything into the main file, so any sub-config
-		// that used to be included is now unreferenced - true whether or not
-		// Force lets the rewrite actually reach disk.
-		orphans, err := r.orphanedConfigs(cfg)
-		if err != nil {
-			return nil, err
-		}
-		out.Orphaned = orphans
-
-		if !opts.Force {
-			// rebuildConfig only ever builds cfg in memory, so nothing has
-			// reached disk yet - safe to stop here and just report it.
-			return out, nil
-		}
+	if out.Rewritten && !opts.Force {
+		// rebuildConfig only ever builds cfg in memory, so nothing has
+		// reached disk yet - safe to stop here and just report it.
+		return out, nil
 	}
 
 	if err := cfg.Save(); err != nil {
 		return nil, fmt.Errorf("save config: %w", err)
 	}
 
-	// A revert (the repair-in-place path) can prune a declared secret out of
-	// a sub-config and leave it empty; the config mutators delete such a file
-	// outright rather than leaving it orphaned. That must not happen without
-	// a trace either.
+	// A rebuild registers every existing sub-config up front; the ones no
+	// secret landed in still hold their old content on disk and would be
+	// loaded again. Pruned only after Save, so a failed write loses nothing.
+	if err := cfg.Prune(); err != nil {
+		return nil, fmt.Errorf("prune config: %w", err)
+	}
+
+	// A revert can prune a declared secret out of a sub-config and leave it
+	// empty; the config mutators delete such a file outright. That must not
+	// happen without a trace either.
 	out.Deleted = cfg.Deleted()
 
 	// The cached view would still hold the pre-reset file.
@@ -97,7 +86,6 @@ func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 		"config reset",
 		slog.Int("discarded", len(out.Discarded)),
 		slog.Bool("rewritten", out.Rewritten),
-		slog.Int("orphaned", len(out.Orphaned)),
 		slog.Int("deleted", len(out.Deleted)),
 		slog.Bool("force", opts.Force),
 	)
@@ -108,18 +96,23 @@ func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 // resetConfig returns the config to write, filling in what had to be done to
 // get there. A nil config means the declaration already matched the audit log.
 func (r *Repo) resetConfig(root *os.Root, out *ConfigReset) (*sesamConf.Config, error) {
-	cfg, err := sesamConf.LoadForRepair(root, configFileName)
+	paths, err := r.configPaths()
+	if err != nil {
+		return nil, err
+	}
+
+	cfg, err := sesamConf.LoadForRepair(root, configFileName, paths)
 	if err != nil {
 		// Unreadable, invalid structure, or simply gone - there is nothing to
 		// edit, so the file can only be built fresh from the audit log.
-		return r.rewriteConfig(root, out, err)
+		return r.rewriteConfig(root, paths, out, err)
 	}
 
 	declared, err := cfg.State()
 	if err != nil {
 		// The file parses but does not describe a state (a path escaping the
 		// repo, a name declared twice), so it cannot be edited either.
-		return r.rewriteConfig(root, out, err)
+		return r.rewriteConfig(root, paths, out, err)
 	}
 
 	changes := diff.Delta(r.vstate, declared)
@@ -130,7 +123,7 @@ func (r *Repo) resetConfig(root *os.Root, out *ConfigReset) (*sesamConf.Config, 
 			// A mutator choked on the file's own shape (e.g. a missing
 			// groups: key no fallback handles, or an alias-valued member none
 			// of them resolve) - fall back rather than fail the whole reset.
-			return r.rewriteConfig(root, out, err)
+			return r.rewriteConfig(root, paths, out, err)
 		}
 	}
 
@@ -139,7 +132,7 @@ func (r *Repo) resetConfig(root *os.Root, out *ConfigReset) (*sesamConf.Config, 
 	// about. Confirm that actually happened (or that there was nothing to fix
 	// in the first place)
 	if err := cfg.Validate(); err != nil {
-		return r.rewriteConfig(root, out, err)
+		return r.rewriteConfig(root, paths, out, err)
 	}
 
 	if changes.IsEmpty() {
@@ -153,19 +146,20 @@ func (r *Repo) resetConfig(root *os.Root, out *ConfigReset) (*sesamConf.Config, 
 // replacement. Whether that replacement reaches disk is entirely down to
 // which root the caller resolved: rewriteConfig itself never refuses, since
 // ConfigReset already routed a non-Force call to a throwaway copy.
-func (r *Repo) rewriteConfig(root *os.Root, out *ConfigReset, cause error) (*sesamConf.Config, error) {
+func (r *Repo) rewriteConfig(root *os.Root, paths []string, out *ConfigReset, cause error) (*sesamConf.Config, error) {
 	out.Rewritten = true
 	out.Reason = cause.Error()
 
-	return r.rebuildConfig(root)
+	return r.rebuildConfig(root, paths)
 }
 
 // rebuildConfig builds a complete config from the verified state alone, used
 // when the file on disk cannot serve as a starting point. Users come first so
 // the groups they belong to exist before any secret refers to them; both are
-// written in a stable order.
-func (r *Repo) rebuildConfig(root *os.Root) (*sesamConf.Config, error) {
-	cfg, err := sesamConf.Create(root, configFileName)
+// written in a stable order. The existing config files in paths keep their
+// role: each secret lands in the nearest one above it.
+func (r *Repo) rebuildConfig(root *os.Root, paths []string) (*sesamConf.Config, error) {
+	cfg, err := sesamConf.Create(root, configFileName, paths)
 	if err != nil {
 		return nil, fmt.Errorf("create config: %w", err)
 	}
@@ -199,55 +193,4 @@ func (r *Repo) rebuildConfig(root *os.Root) (*sesamConf.Config, error) {
 	}
 
 	return cfg, nil
-}
-
-// configPaths lists every config file in the repository, wherever it sits in
-// the include tree - and including ones no file includes at all.
-func (v *View) configPaths() ([]string, error) {
-	var paths []string
-
-	err := fs.WalkDir(v.root.FS(), ".", func(p string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		rel := filepath.FromSlash(p)
-		if entry.IsDir() {
-			switch entry.Name() {
-			case sesamSuffix, gitSuffix, forkSuffix:
-				return fs.SkipDir
-			}
-			return nil
-		}
-
-		if entry.Name() == configFileName {
-			paths = append(paths, rel)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("scan for config files: %w", err)
-	}
-
-	return paths, nil
-}
-
-// orphanedConfigs lists config files under the repository that cfg does not
-// reference. A config nobody includes is silently ignored, which is worth
-// saying out loud after a rewrite flattened the include tree away.
-func (r *Repo) orphanedConfigs(cfg *sesamConf.Config) ([]string, error) {
-	paths, err := r.configPaths()
-	if err != nil {
-		return nil, err
-	}
-
-	var orphans []string
-	for _, path := range paths {
-		if _, referenced := cfg.SourceFiles[path]; !referenced {
-			orphans = append(orphans, path)
-		}
-	}
-
-	return orphans, nil
 }

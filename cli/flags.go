@@ -220,7 +220,7 @@ var flagsAdd = []cli.Flag{
 	flagSeal,
 	&cli.BoolFlag{
 		Name:  "nested",
-		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file",
+		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the nearest existing one",
 	},
 }
 
@@ -237,7 +237,7 @@ var flagsRm = []cli.Flag{
 var flagsMove = []cli.Flag{
 	&cli.BoolFlag{
 		Name:  "nested",
-		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file",
+		Usage: "When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the nearest existing one",
 	},
 	flagSeal,
 }

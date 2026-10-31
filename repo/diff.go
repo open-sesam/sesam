@@ -74,7 +74,7 @@ func (r *Repo) ConfigDiff(ctx context.Context, opts ConfigDiffOpts) (*ConfigDiff
 	// Read sesam.yml fresh rather than through the cached view: the whole
 	// point of the diff is to answer what the file says *now*, and the user
 	// may well have edited it since this repo was opened.
-	cfg, err := sesamConf.Load(r.root, configFileName)
+	cfg, err := r.loadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
@@ -114,7 +114,7 @@ func (r *Repo) validateConfig(ctx context.Context) error {
 }
 
 // writeConfigDiffDir materializes the two sides of the diff as two copies of
-// the whole config tree (the main file plus every included one): "declared" as
+// the whole config tree (the main file plus every sub-config): "declared" as
 // the user wrote it, and "verified" with the declared changes backed out.
 func (v *View) writeConfigDiffDir(cfg *sesamConf.Config, changes *diff.Diff) (dir string, err error) {
 	// The tree is consumed by an external `git diff` process, so it is built
@@ -185,7 +185,7 @@ func (v *View) copyConfigTree(
 		return nil, nil, fmt.Errorf("open %s: %w", treeDir, err)
 	}
 
-	cfg, err = sesamConf.Load(root, configFileName)
+	cfg, err = sesamConf.Load(root, configFileName, paths)
 	if err != nil {
 		_ = root.Close()
 		return nil, nil, fmt.Errorf("load %s config copy: %w", name, err)

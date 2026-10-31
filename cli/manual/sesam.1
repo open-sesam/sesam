@@ -302,7 +302,7 @@ Add a secret file or directory at \fBPATH\fR
 \fB--help, -h\fP: show help
 
 .PP
-\fB--nested\fP: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file
+\fB--nested\fP: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the nearest existing one
 
 .PP
 \fB--no-seal\fP: Do not run 'sesam seal' afterwards - useful when batching
@@ -332,7 +332,7 @@ Move a secret file or directory to a new name
 \fB--help, -h\fP: show help
 
 .PP
-\fB--nested\fP: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the main file
+\fB--nested\fP: When the secret lives in a subdirectory, give that directory its own sesam.yml instead of adding it to the nearest existing one
 
 .PP
 \fB--seal-all, --all\fP: Seal every secret from its plaintext as it is, stale and diverged ones included
@@ -593,7 +593,7 @@ Show the diff between config and actual state (extra args are passed to git)
 \fB--validate\fP: Fail if 'sesam config apply --force' would refuse the config (dry run as the current user)
 
 .SS config print
-Print the whole config as one document, includes resolved (YAML, or JSON with --json)
+Print the whole config as one document, sub-configs merged (YAML, or JSON with --json)
 
 .PP
 \fB--help, -h\fP: show help
@@ -1039,17 +1039,8 @@ tree dir/of/secrets
 .EE
 
 .PP
-This creates one \fBsesam.yml\fR per directory, each included from the main one:
-
-.EX
-# Main sesam.yml:
-secrets:
-  - path: README.md
-    access:
-      - admin
-  - include: dir/of/secrets/sesam.yml
-  - include: dir/of/secrets/sub/sesam.yml
-.EE
+This will create a hierarchy of \fBsesam.yml\fR files, each declaring the secrets
+of its own directory:
 
 .EX
 # dir/of/secrets/sesam.yml:
@@ -1062,6 +1053,12 @@ secrets:
 secrets:
   - path: another_file
 .EE
+
+.PP
+There is no need to reference them from the main \fBsesam.yml\fR: every
+\fBsesam.yml\fR below it is picked up automatically. Only directories that hold
+their own \fB\&.sesam\fR (a separate sesam repository) are skipped. Without
+\fB--nested\fR, a secret is added to the nearest existing \fBsesam.yml\fR above it.
 
 .PP
 Once done you can also add descriptions to the files in the config or do more fine-tuning with the available config keys.
@@ -1884,8 +1881,6 @@ We can model such a case using \fBtemplate secrets\fP:
       - type: password
         name: smtp_password
         encoding: shell # json, url, ...
-      # You can also include other files in here if you want to.
-      - include: other.yml
 .EE
 
 

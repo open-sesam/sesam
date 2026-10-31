@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"path/filepath"
-	"slices"
 )
 
 // SecretAdd adds (or updates) a single secret file in the configuration.
@@ -13,12 +12,13 @@ import (
 // SecretChangeGroups); otherwise the secret is inserted.
 //
 // Where a newly inserted secret lands depends on nested:
-//   - false: the secret is added straight to the main sesam.yml, its Path kept
-//     relative to the main file's directory (subdirectory prefix preserved).
+//   - false: the secret is added to the nearest loaded sesam.yml at or above
+//     its directory (the main file if no sub-config covers it).
 //   - true: a file in a subdirectory gets its own sesam.yml in that directory
-//     (created or reused) and included from the main file; its Path is recorded
-//     relative to that sub-file. A file next to the main sesam.yml always lands
-//     in the main file regardless of nested.
+//     (created or reused). A file next to the main sesam.yml always lands in
+//     the main file regardless of nested.
+//
+// Either way its Path is recorded relative to the owning file's directory.
 //
 // Directory expansion is the caller's job (repo): SecretAdd only ever touches a
 // single file. Per-file metadata other than access is left empty for the user
@@ -50,23 +50,9 @@ func (c *Config) placeSecret(rel string, nested bool, sec Secret) error {
 	mainDir := filepath.Dir(c.MainFile.Path)
 	fileDir := filepath.Dir(rel)
 
-	src := c.MainFile
+	src := c.nearestSource(fileDir)
 	if nested && !sameDir(fileDir, mainDir) {
-		sesamPath := filepath.Join(fileDir, "sesam.yml")
-		// Already loaded means already included, maybe by another sub-config.
-		_, included := c.SourceFiles[sesamPath]
-		s, err := c.loadOrCreate(sesamPath)
-		if err != nil {
-			return fmt.Errorf("failed to load sub-config %q: %w", sesamPath, err)
-		}
-
-		if !included {
-			if err := c.includeFromMain(sesamPath); err != nil {
-				return err
-			}
-		}
-
-		src = s
+		src = c.sourceFor(filepath.Join(fileDir, "sesam.yml"))
 	}
 
 	secRel, err := filepath.Rel(filepath.Dir(src.Path), rel)
@@ -78,52 +64,43 @@ func (c *Config) placeSecret(rel string, nested bool, sec Secret) error {
 	return appendSecretsItems(src, []Secret{sec})
 }
 
-// includeFromMain adds an include of sesamPath to MainFile, unless one is
-// already present.
-func (c *Config) includeFromMain(sesamPath string) error {
-	incPath, err := filepath.Rel(filepath.Dir(c.MainFile.Path), sesamPath)
-	if err != nil {
-		return fmt.Errorf("failed to relativize include %q: %w", sesamPath, err)
-	}
+// nearestSource returns the loaded config file whose directory is the closest
+// ancestor of (or equal to) dir, falling back to MainFile.
+func (c *Config) nearestSource(dir string) *FileSource {
+	mainDir := filepath.Dir(c.MainFile.Path)
+	for {
+		if sameDir(dir, mainDir) {
+			return c.MainFile
+		}
+		if src, ok := c.SourceFiles[filepath.Join(dir, "sesam.yml")]; ok {
+			return src
+		}
 
-	if slices.Contains(fileIncludes(c.MainFile.RootNode), incPath) {
-		return nil
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return c.MainFile
+		}
+		dir = parent
 	}
-
-	if err := c.appendInclude(c.MainFile, incPath); err != nil {
-		return fmt.Errorf("failed to add include %q: %w", incPath, err)
-	}
-	return nil
 }
 
-// loadOrCreate returns the FileSource for `path`, loading it (and every file it
-// includes) from disk if it exists, or bootstrapping an empty in-memory
-// FileSource that Save() will write out once it has its first item.
-func (c *Config) loadOrCreate(path string) (*FileSource, error) {
+// sourceFor returns the FileSource for path, registering an empty in-memory
+// one that Save() will write out once it has its first item. Every sub-config
+// on disk was already loaded by Load, so a miss means the file is new.
+func (c *Config) sourceFor(path string) *FileSource {
 	if existing, ok := c.SourceFiles[path]; ok {
-		return existing, nil
+		return existing
 	}
-
-	if _, err := c.root.Stat(path); err == nil {
-		return c.loadTree(path)
-	}
-
-	return c.newFile(path), nil
+	return c.newFile(path)
 }
 
 // newFile registers an in-memory FileSource for a path that doesn't exist on
-// disk yet. Its RootNode stays nil until the first secret/include is added,
+// disk yet. Its RootNode stays nil until the first secret is added,
 // which builds the document; Save writes it like any other file.
 func (c *Config) newFile(path string) *FileSource {
 	src := &FileSource{Path: path}
 	c.SourceFiles[path] = src
 	return src
-}
-
-// appendInclude inserts an include node pointing at includePath into src's
-// secrets sequence.
-func (c *Config) appendInclude(src *FileSource, includePath string) error {
-	return appendSecretsItems(src, []Secret{{Include: includePath}})
 }
 
 // sameDir reports whether a and b refer to the same directory.
