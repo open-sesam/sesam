@@ -175,6 +175,43 @@ func TestVerifyInitFileUnchangedAnchorAcrossMerge(t *testing.T) {
 	require.Equal(t, initCommit.String(), anchor)
 }
 
+// A squash-merged intro branch commits the same init on a parallel line. That is
+// no re-add; the anchor is the introducer on HEAD's first-parent chain.
+func TestVerifyInitFileUnchangedParallelIntroducers(t *testing.T) {
+	sesamDir, repo := testGitRepo(t)
+	wt, err := repo.Worktree()
+	require.NoError(t, err)
+
+	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
+	commit := func(msg string, withInit bool, parents ...plumbing.Hash) plumbing.Hash {
+		writeSecret(t, sesamDir, "file.txt", msg)
+		if withInit {
+			require.NoError(t, os.MkdirAll(filepath.Dir(initPath), 0o700))
+			require.NoError(t, os.WriteFile(initPath, []byte("stable-hash"), 0o600))
+		} else {
+			require.NoError(t, os.RemoveAll(filepath.Dir(initPath)))
+		}
+		_, err := wt.Add(".")
+		require.NoError(t, err)
+		h, err := wt.Commit(msg, &git.CommitOptions{
+			All:     true,
+			Author:  &object.Signature{Name: "Test", Email: "t@t.com", When: time.Now()},
+			Parents: parents,
+		})
+		require.NoError(t, err)
+		return h
+	}
+
+	root := commit("root", false)
+	intro := commit("intro", true, root)
+	squashed := commit("squashed intro", true, root)
+	commit("merge", true, intro, squashed)
+
+	anchor, err := verifyInitFileUnchanged(sesamDir)
+	require.NoError(t, err)
+	require.Equal(t, intro.String(), anchor)
+}
+
 func TestVerifyInitFileUnchangedNotAGitRepo(t *testing.T) {
 	sesamDir := testRepo(t) // no git init
 

@@ -1265,6 +1265,32 @@ func TestRequireSameInit(t *testing.T) {
 	})
 }
 
+// TestAuditMergeNilOrigin covers a log without git merge base: the branch that
+// introduced sesam was squash-merged, so ours is a strict prefix of theirs.
+func TestAuditMergeNilOrigin(t *testing.T) {
+	base, admin, _ := mergeBase(t)
+
+	ours := cloneLog(base)
+	theirs := cloneLog(base)
+	feed(t, theirs, admin.Signer, "admin", &DetailUserKill{User: "bob"})
+
+	merged, _, err := AuditMerge(ours, theirs, nil, admin.Signer, nil)
+	require.NoError(t, err)
+
+	// The shared prefix is the base: only the kill is rebased.
+	last := merged.Entries[len(merged.Entries)-1]
+	require.Equal(t, OpMerge, last.Operation)
+	d, err := parseDetail[DetailMerge](&last)
+	require.NoError(t, err)
+	require.Equal(t, base.Entries[len(base.Entries)-1].SeqID, d.BaseSeqID)
+	require.Equal(t, 1, d.Applied)
+	require.Equal(t, OpUserKill, merged.Entries[len(merged.Entries)-2].Operation)
+
+	foreign, _, _ := mergeBase(t)
+	_, _, err = AuditMerge(ours, foreign, nil, admin.Signer, nil)
+	require.ErrorContains(t, err, "not the same repository")
+}
+
 // TestAuditMergeTheirsMultiEntry pins the rebase base: every entry of theirs is
 // resolved against theirs' own previous state, not against the frozen merge
 // base. Otherwise theirs' earlier entries read as changes of ours and the union
