@@ -16,9 +16,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/sahib/renameio/v2"
 	"opensesam.org/sesam/core"
 	sesamConf "opensesam.org/sesam/repo/config"
@@ -47,7 +44,7 @@ type View struct {
 
 	opts     RepoOpts
 	pluginUI *core.PluginUI
-	gitRepo  *git.Repository
+	gitRepo  *core.Git
 
 	whoami string
 
@@ -464,21 +461,11 @@ func (v *View) committedConflicts(changes []diff.Change) ([]diff.Change, error) 
 func (v *View) committedConfigChanges() ([]diff.Change, error) {
 	head, err := v.gitRepo.Head()
 	if err != nil {
-		if errors.Is(err, plumbing.ErrReferenceNotFound) {
-			// No commits yet: everything on disk is uncommitted by definition.
-			return nil, nil
-		}
 		return nil, fmt.Errorf("resolve HEAD: %w", err)
 	}
-
-	commit, err := v.gitRepo.CommitObject(head.Hash())
-	if err != nil {
-		return nil, fmt.Errorf("read HEAD commit %s: %w", head.Hash(), err)
-	}
-
-	tree, err := commit.Tree()
-	if err != nil {
-		return nil, fmt.Errorf("read tree of %s: %w", head.Hash(), err)
+	if head == "" {
+		// No commits yet: everything on disk is uncommitted by definition.
+		return nil, nil
 	}
 
 	prefix, err := core.SesamGitPrefix(v.gitRepo, v.sesamDir)
@@ -486,7 +473,13 @@ func (v *View) committedConfigChanges() ([]diff.Change, error) {
 		return nil, err
 	}
 
-	if _, err := tree.File(path.Join(prefix, filepath.ToSlash(configFileName))); err != nil {
+	objs, err := v.gitRepo.Objects()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = objs.Close() }()
+
+	if _, ok, err := objs.Blob(head + ":" + path.Join(prefix, filepath.ToSlash(configFileName))); err != nil || !ok {
 		// sesam.yml itself was never committed (e.g. the very first apply):
 		// there is nothing to compare the declaration against.
 		return nil, nil
@@ -497,7 +490,7 @@ func (v *View) committedConfigChanges() ([]diff.Change, error) {
 		return nil, err
 	}
 
-	dir, cleanup, err := writeCommittedConfigs(v.sesamDir, tree, prefix, paths)
+	dir, cleanup, err := writeCommittedConfigs(v.sesamDir, objs, head, prefix, paths)
 	if err != nil {
 		return nil, err
 	}
@@ -523,11 +516,12 @@ func (v *View) committedConfigChanges() ([]diff.Change, error) {
 }
 
 // writeCommittedConfigs materializes the given config paths as they are in
-// tree into a scratch directory, so the committed configuration can be read
+// commit into a scratch directory, so the committed configuration can be read
 // with the ordinary config loader. Paths missing from the commit are skipped.
 func writeCommittedConfigs(
 	sesamDir string,
-	tree *object.Tree,
+	objs *core.GitObjects,
+	commit string,
 	prefix string,
 	paths []string,
 ) (dir string, cleanup func(), err error) {
@@ -543,18 +537,16 @@ func writeCommittedConfigs(
 	}()
 
 	err = writeFileCopies(tmpDir, paths, func(rel string) ([]byte, bool, error) {
-		file, err := tree.File(path.Join(prefix, filepath.ToSlash(rel)))
-		if err != nil {
-			// Not committed (yet): nothing to compare against.
-			return nil, true, nil //nolint:nilerr
-		}
-
-		contents, err := file.Contents()
+		contents, ok, err := objs.ReadBlob(commit + ":" + path.Join(prefix, filepath.ToSlash(rel)))
 		if err != nil {
 			return nil, false, fmt.Errorf("read committed %s: %w", rel, err)
 		}
+		if !ok {
+			// Not committed (yet): nothing to compare against.
+			return nil, true, nil
+		}
 
-		return []byte(contents), false, nil
+		return contents, false, nil
 	})
 	if err != nil {
 		return "", nil, err

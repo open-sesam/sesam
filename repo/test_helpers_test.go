@@ -1,16 +1,17 @@
 package repo
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"filippo.io/age"
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,16 +50,26 @@ func freshGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	gr, err := git.PlainInit(dir, false)
-	require.NoError(t, err)
-
-	cfg, err := gr.Config()
-	require.NoError(t, err)
-	cfg.User.Name = "Sesam Test"
-	cfg.User.Email = "test@sesam.dev"
-	require.NoError(t, gr.SetConfig(cfg))
+	testGit(t, dir, "init", "-q")
+	testGit(t, dir, "config", "user.name", "Sesam Test")
+	testGit(t, dir, "config", "user.email", "test@sesam.dev")
 
 	return dir
+}
+
+// testGit runs git in dir and returns its trimmed stdout.
+func testGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	cmd := exec.CommandContext(context.Background(), "git", append([]string{"-c", "commit.gpgsign=false"}, args...)...)
+	cmd.Dir = dir
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	require.NoError(t, err, "git %v: %s", args, stderr.String())
+
+	return strings.TrimSpace(string(out))
 }
 
 // bootstrapRepo bootstraps a fresh sesam repository under a brand-new git
@@ -111,23 +122,8 @@ func reloadSesamRepo(t *testing.T, dir string, who *testIdentity) *Repo {
 func gitCommitAll(t *testing.T, dir, msg string) {
 	t.Helper()
 
-	gr, err := git.PlainOpen(dir)
-	require.NoError(t, err)
-
-	wt, err := gr.Worktree()
-	require.NoError(t, err)
-
-	_, err = wt.Add(".")
-	require.NoError(t, err)
-
-	_, err = wt.Commit(msg, &git.CommitOptions{
-		Author: &object.Signature{
-			Name:  "Sesam Test",
-			Email: "test@sesam.dev",
-			When:  time.Now(),
-		},
-	})
-	require.NoError(t, err)
+	testGit(t, dir, "add", "-A")
+	testGit(t, dir, "commit", "-q", "-m", msg)
 }
 
 // fileExists is a small helper that asserts whether `path` is a regular

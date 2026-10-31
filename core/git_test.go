@@ -4,11 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,17 +58,14 @@ func TestVerifyInitFileUnchangedRemovedAndReadded(t *testing.T) {
 	require.NoError(t, os.WriteFile(initPath, []byte("stable-hash"), 0o600))
 	gitCommitAll(t, repo, "init")
 
-	wt, err := repo.Worktree()
-	require.NoError(t, err)
-	_, err = wt.Remove(".sesam/audit/init")
-	require.NoError(t, err)
+	gitRemove(t, sesamDir, ".sesam/audit/init")
 	writeSecret(t, sesamDir, "other.txt", "data")
 	gitCommitAll(t, repo, "drop init")
 
 	require.NoError(t, os.WriteFile(initPath, []byte("stable-hash"), 0o600))
 	gitCommitAll(t, repo, "restore init")
 
-	_, err = verifyInitFileUnchanged(sesamDir)
+	_, err := verifyInitFileUnchanged(sesamDir)
 	require.ErrorContains(t, err, "removed and re-added")
 }
 
@@ -92,55 +85,30 @@ func TestVerifyInitFileUnchangedMultipleCommitsUnchanged(t *testing.T) {
 }
 
 // A merge that re-touches init with content identical to its main-line parent
-// shows up under `git log --full-history` (which go-git's path filter mirrors),
-// but is not a modification. This is the rebase artifact seen in the wild.
+// shows up under `git log --full-history`, but is not a modification. This is
+// the rebase artifact seen in the wild.
 func TestVerifyInitFileUnchangedMergeSameContent(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
-	wt, err := repo.Worktree()
-	require.NoError(t, err)
-
-	sig := func() *object.Signature {
-		return &object.Signature{Name: "Test", Email: "t@t.com", When: time.Now()}
-	}
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 
 	// Base commit without init.
 	writeSecret(t, sesamDir, "base.txt", "base")
-	_, err = wt.Add(".")
-	require.NoError(t, err)
-	base, err := wt.Commit("base", &git.CommitOptions{Author: sig()})
-	require.NoError(t, err)
+	base := gitCommit(t, repo, "base")
 
 	// Main line adds init.
 	require.NoError(t, os.WriteFile(initPath, []byte("stable-hash"), 0o600))
-	_, err = wt.Add(".")
-	require.NoError(t, err)
-	mainLine, err := wt.Commit("add init", &git.CommitOptions{Author: sig()})
-	require.NoError(t, err)
+	mainLine := gitCommit(t, repo, "add init")
 
 	// Side line off base, without init.
-	_, err = wt.Remove(filepath.Join(".sesam", "audit", "init"))
-	require.NoError(t, err)
+	gitRemove(t, sesamDir, filepath.Join(".sesam", "audit", "init"))
 	writeSecret(t, sesamDir, "side.txt", "side")
-	_, err = wt.Add(".")
-	require.NoError(t, err)
-	side, err := wt.Commit("side change", &git.CommitOptions{
-		Author:  sig(),
-		Parents: []plumbing.Hash{base},
-	})
-	require.NoError(t, err)
+	side := gitCommit(t, repo, "side change", base)
 
 	// Merge that restores init with content identical to the main line.
 	require.NoError(t, os.WriteFile(initPath, []byte("stable-hash"), 0o600))
-	_, err = wt.Add(".")
-	require.NoError(t, err)
-	_, err = wt.Commit("chores: merge with main", &git.CommitOptions{
-		Author:  sig(),
-		Parents: []plumbing.Hash{mainLine, side},
-	})
-	require.NoError(t, err)
+	gitCommit(t, repo, "chores: merge with main", mainLine, side)
 
-	_, err = verifyInitFileUnchanged(sesamDir)
+	_, err := verifyInitFileUnchanged(sesamDir)
 	require.NoError(t, err, "merge re-touching init with identical content is not a modification")
 }
 
@@ -148,19 +116,10 @@ func TestVerifyInitFileUnchangedMergeSameContent(t *testing.T) {
 // walk visits last: past a merge, that is a commit on the merged-in branch.
 func TestVerifyInitFileUnchangedAnchorAcrossMerge(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
-	wt, err := repo.Worktree()
-	require.NoError(t, err)
 
-	commit := func(msg string, parents ...plumbing.Hash) plumbing.Hash {
+	commit := func(msg string, parents ...string) string {
 		writeSecret(t, sesamDir, "file.txt", msg)
-		_, err := wt.Add(".")
-		require.NoError(t, err)
-		h, err := wt.Commit(msg, &git.CommitOptions{
-			Author:  &object.Signature{Name: "Test", Email: "t@t.com", When: time.Now()},
-			Parents: parents,
-		})
-		require.NoError(t, err)
-		return h
+		return gitCommit(t, repo, msg, parents...)
 	}
 
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
@@ -172,18 +131,16 @@ func TestVerifyInitFileUnchangedAnchorAcrossMerge(t *testing.T) {
 
 	anchor, err := verifyInitFileUnchanged(sesamDir)
 	require.NoError(t, err)
-	require.Equal(t, initCommit.String(), anchor)
+	require.Equal(t, initCommit, anchor)
 }
 
 // A squash-merged intro branch commits the same init on a parallel line. That is
 // no re-add; the anchor is the introducer on HEAD's first-parent chain.
 func TestVerifyInitFileUnchangedParallelIntroducers(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
-	wt, err := repo.Worktree()
-	require.NoError(t, err)
 
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
-	commit := func(msg string, withInit bool, parents ...plumbing.Hash) plumbing.Hash {
+	commit := func(msg string, withInit bool, parents ...string) string {
 		writeSecret(t, sesamDir, "file.txt", msg)
 		if withInit {
 			require.NoError(t, os.MkdirAll(filepath.Dir(initPath), 0o700))
@@ -191,15 +148,7 @@ func TestVerifyInitFileUnchangedParallelIntroducers(t *testing.T) {
 		} else {
 			require.NoError(t, os.RemoveAll(filepath.Dir(initPath)))
 		}
-		_, err := wt.Add(".")
-		require.NoError(t, err)
-		h, err := wt.Commit(msg, &git.CommitOptions{
-			All:     true,
-			Author:  &object.Signature{Name: "Test", Email: "t@t.com", When: time.Now()},
-			Parents: parents,
-		})
-		require.NoError(t, err)
-		return h
+		return gitCommit(t, repo, msg, parents...)
 	}
 
 	root := commit("root", false)
@@ -209,7 +158,7 @@ func TestVerifyInitFileUnchangedParallelIntroducers(t *testing.T) {
 
 	anchor, err := verifyInitFileUnchanged(sesamDir)
 	require.NoError(t, err)
-	require.Equal(t, intro.String(), anchor)
+	require.Equal(t, intro, anchor)
 }
 
 func TestVerifyInitFileUnchangedNotAGitRepo(t *testing.T) {
@@ -221,7 +170,50 @@ func TestVerifyInitFileUnchangedNotAGitRepo(t *testing.T) {
 
 func TestVerifyInitFileUnchangedNoCommitsAtAll(t *testing.T) {
 	sesamDir, _ := testGitRepo(t)
-	// Zero commits - repo.Log() returns ErrReferenceNotFound, treated as "fine during init".
+	// Zero commits - an unborn HEAD is treated as "fine during init".
 	_, err := verifyInitFileUnchanged(sesamDir)
 	require.NoError(t, err)
+}
+
+func TestGitObjects(t *testing.T) {
+	sesamDir, repo := testGitRepo(t)
+	content := "has spaces\nand lines\n"
+	writeSecret(t, sesamDir, "a dir/missing", content)
+	first := gitCommit(t, repo, "first")
+	writeSecret(t, sesamDir, "other", "x")
+	second := gitCommit(t, repo, "second")
+
+	objs, err := repo.Objects()
+	require.NoError(t, err)
+	defer func() { require.NoError(t, objs.Close()) }()
+
+	// A path ending in " missing" must not be mistaken for git's "missing" reply.
+	oid, ok, err := objs.Blob(second + ":a dir/missing")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, testGit(t, sesamDir, "hash-object", "a dir/missing"), oid)
+	require.Equal(t, oid, repo.BlobHash([]byte(content)))
+
+	data, ok, err := objs.ReadBlob(oid)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, content, string(data))
+
+	for _, rev := range []string{second + ":nope", second + ":a dir", "0000000000000000000000000000000000000000"} {
+		_, ok, err := objs.Blob(rev)
+		require.NoError(t, err)
+		require.False(t, ok, rev)
+	}
+
+	commit, ok, err := objs.Commit(second)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, []string{first}, commit.Parents)
+
+	_, ok, err = objs.Commit(oid)
+	require.NoError(t, err)
+	require.False(t, ok, "a blob is no commit")
+
+	_, _, err = objs.Blob("a\nb")
+	require.Error(t, err)
 }

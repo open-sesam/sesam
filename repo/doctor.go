@@ -6,8 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/go-git/go-git/v5"
-	gogitconfig "github.com/go-git/go-git/v5/config"
+	"opensesam.org/sesam/core"
 )
 
 // GitConfigCheck reports whether one git-config entry sesam manages matches the
@@ -31,22 +30,12 @@ type ManagedFileCheck struct {
 // a .git) and returns the absolute path of its worktree root. It errors when
 // dir is not inside a git repository.
 func GitWorktreeRoot(dir string) (string, error) {
-	abs, err := filepath.Abs(dir)
+	g, err := core.OpenGit(dir)
 	if err != nil {
 		return "", err
 	}
 
-	gitRepo, err := git.PlainOpenWithOptions(abs, &git.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
-	if err != nil {
-		return "", err
-	}
-
-	wt, err := gitRepo.Worktree()
-	if err != nil {
-		return "", err
-	}
-
-	return wt.Filesystem.Root(), nil
+	return g.Root(), nil
 }
 
 // CheckGitConfig compares the git-config entries sesam surfaces in `sesam
@@ -64,21 +53,15 @@ func CheckGitConfig(sesamDir string) ([]GitConfigCheck, error) {
 		return nil, err
 	}
 
-	cfg, err := gitRepo.ConfigScoped(gogitconfig.LocalScope)
-	if err != nil {
-		return nil, fmt.Errorf("read local git config: %w", err)
-	}
-
 	var checks []GitConfigCheck
 	for _, e := range entries {
 		if !e.report {
 			continue
 		}
 
-		section := cfg.Raw.Section(e.section)
-		actual := section.Option(e.option)
-		if e.subsection != "" {
-			actual = section.Subsection(e.subsection).Option(e.option)
+		actual, err := gitConfigGet(resolvedDir, "--local", e.key())
+		if err != nil {
+			return nil, fmt.Errorf("read local git config: %w", err)
 		}
 
 		checks = append(checks, GitConfigCheck{

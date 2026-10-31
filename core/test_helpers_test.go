@@ -1,17 +1,18 @@
 package core
 
 import (
+	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
-	"time"
 
 	"filippo.io/age"
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/require"
 )
 
@@ -212,41 +213,67 @@ func writeSecret(t *testing.T, sesamDir, revealedPath, content string) {
 	require.NoError(t, os.WriteFile(fullPath, []byte(content), 0o600))
 }
 
+// testGit runs git in dir with a test committer and returns its trimmed stdout.
+func testGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	base := []string{"-c", "user.name=Test", "-c", "user.email=test@test.com", "-c", "commit.gpgsign=false"}
+	cmd := exec.CommandContext(context.Background(), "git", append(base, args...)...)
+	cmd.Dir = dir
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	require.NoError(t, err, "git %v: %s", args, stderr.String())
+
+	return strings.TrimSpace(string(out))
+}
+
+// gitRemove deletes rel from the worktree and the index. Unlike `git rm` it
+// leaves the emptied directory in place.
+func gitRemove(t *testing.T, dir, rel string) {
+	t.Helper()
+	testGit(t, dir, "rm", "-q", "--cached", "--", rel)
+	require.NoError(t, os.Remove(filepath.Join(dir, rel)))
+}
+
 // testGitRepo creates a temp dir initialized as a git repo with .sesam subdirs.
-func testGitRepo(t *testing.T) (string, *git.Repository) {
+func testGitRepo(t *testing.T) (string, *Git) {
 	t.Helper()
 	sesamDir := testRepo(t)
+	testGit(t, sesamDir, "init", "-q")
 
-	repo, err := git.PlainInit(sesamDir, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	repo, err := OpenGit(sesamDir)
+	require.NoError(t, err)
 
 	return sesamDir, repo
 }
 
 // gitCommitAll stages all files and commits them.
-func gitCommitAll(t *testing.T, repo *git.Repository, msg string) {
+func gitCommitAll(t *testing.T, repo *Git, msg string) {
 	t.Helper()
-	wt, err := repo.Worktree()
-	if err != nil {
-		t.Fatal(err)
+	gitCommit(t, repo, msg)
+}
+
+// gitCommit stages all files and commits them on top of parents (HEAD when
+// none are given), moving HEAD along. Returns the new commit.
+func gitCommit(t *testing.T, repo *Git, msg string, parents ...string) string {
+	t.Helper()
+	testGit(t, repo.Root(), "add", "-A")
+
+	if len(parents) == 0 {
+		testGit(t, repo.Root(), "commit", "-q", "-m", msg)
+		return testGit(t, repo.Root(), "rev-parse", "HEAD")
 	}
 
-	if _, err := wt.Add("."); err != nil {
-		t.Fatal(err)
+	args := []string{"commit-tree", testGit(t, repo.Root(), "write-tree"), "-m", msg}
+	for _, p := range parents {
+		args = append(args, "-p", p)
 	}
 
-	_, err = wt.Commit(msg, &git.CommitOptions{
-		Author: &object.Signature{
-			Name:  "Test",
-			Email: "test@test.com",
-			When:  time.Now(),
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hash := testGit(t, repo.Root(), args...)
+	testGit(t, repo.Root(), "update-ref", "HEAD", hash)
+	return hash
 }
 
 // testSecretManagerFull creates a SecretManager backed by a full audit log and verified state.
