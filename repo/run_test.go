@@ -158,7 +158,7 @@ func TestPrepareRunAutomaticSelection(t *testing.T) {
 				require.Empty(t, prepared.entries)
 			} else {
 				require.Empty(t, prepared.Files)
-				require.Equal(t, []runEntry{{name: "TOKEN", value: []byte("value")}}, prepared.entries)
+				require.Equal(t, []runEntry{{name: "TOKEN", value: []byte("value"), source: tc.secret.Path}}, prepared.entries)
 			}
 		})
 	}
@@ -203,10 +203,69 @@ func TestPrepareRunPreservesSelectionOrderAndOptions(t *testing.T) {
 		{Name: "FORCED", Content: []byte("not dotenv")},
 	}, prepared.Files)
 	require.Equal(t, []runEntry{
-		{name: "FIRST", value: []byte("one")},
-		{name: "LAST", value: []byte("two")},
-		{name: "EXTRA", value: []byte("three")},
+		{name: "FIRST", value: []byte("one"), source: "first.env"},
+		{name: "LAST", value: []byte("two"), source: "last.env"},
+		{name: "EXTRA", value: []byte("three"), source: "extra.vars"},
 	}, prepared.entries)
+}
+
+func TestPrepareRunOverlappingEnvFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		opts     RunOptions
+		previous string
+		last     string
+		want     string
+	}{
+		{name: "explicit files", opts: RunOptions{EnvFiles: []string{"one.env", "two.env"}}, previous: "one.env", last: "two.env", want: "second-secret"},
+		{name: "automatic detection", opts: RunOptions{Secrets: []RunSecret{{Path: "one.env"}, {Path: "two.env"}}}, previous: "one.env", last: "two.env", want: "second-secret"},
+		{name: "explicit after automatic", opts: RunOptions{Secrets: []RunSecret{{Path: "one.env"}}, EnvFiles: []string{"two.env"}}, previous: "one.env", last: "two.env", want: "second-secret"},
+		{name: "reversed order", opts: RunOptions{EnvFiles: []string{"two.env", "one.env"}}, previous: "two.env", last: "one.env", want: "first-secret"},
+		{name: "empty override", opts: RunOptions{EnvFiles: []string{"one.env", "empty.env"}}, previous: "one.env", last: "empty.env", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			warnings := captureWarnings(t)
+			prepared, err := prepareRun(tc.opts, func(path string) ([]byte, error) {
+				values := map[string]string{
+					"one.env":   "DUP=first-secret\nFIRST=kept",
+					"two.env":   "DUP=second-secret\nSECOND=kept",
+					"empty.env": "DUP=\nSECOND=kept",
+				}
+				return []byte(values[path]), nil
+			})
+			require.NoError(t, err)
+			inherited := []string{"BASE=kept"}
+			env, err := prepared.Environment(inherited, nil)
+			require.NoError(t, err)
+			require.ElementsMatch(t, []string{"BASE=kept", "DUP=" + tc.want, "FIRST=kept", "SECOND=kept"}, env)
+			require.Equal(t, []string{"BASE=kept"}, inherited)
+			again, err := prepared.Environment(inherited, nil)
+			require.NoError(t, err)
+			require.Equal(t, env, again)
+			logged := warnings.String()
+			require.Contains(t, logged, "level=WARN")
+			require.Contains(t, logged, "name=DUP")
+			require.Contains(t, logged, "previous_file="+tc.previous)
+			require.Contains(t, logged, "file="+tc.last)
+			require.NotContains(t, logged, "first-secret")
+			require.NotContains(t, logged, "second-secret")
+		})
+	}
+}
+
+func TestPrepareRunOverlapsCountUniqueVariables(t *testing.T) {
+	captureWarnings(t)
+	var document strings.Builder
+	for i := 0; i < runMaxInjectedVars; i++ {
+		fmt.Fprintf(&document, "K%03d=value\n", i)
+	}
+	prepared, err := prepareRun(RunOptions{EnvFiles: []string{"one.env", "two.env"}}, func(string) ([]byte, error) {
+		return []byte(document.String()), nil
+	})
+	require.NoError(t, err)
+	env, err := prepared.Environment(nil, nil)
+	require.NoError(t, err)
+	require.Len(t, env, runMaxInjectedVars)
 }
 
 func TestRunPreparationEnvironmentRejectsCollisions(t *testing.T) {
@@ -237,16 +296,10 @@ func TestRunPreparationEnvironmentRejectsCollisions(t *testing.T) {
 			wantErr:    "inherited environment",
 		},
 		{
-			name:       "dotenv across documents",
-			opts:       RunOptions{EnvFiles: []string{"one.env", "two.env"}},
-			plaintexts: map[string]string{"one.env": "DUP=one", "two.env": "DUP=two"},
-			wantErr:    "collides",
-		},
-		{
 			name:       "file and dotenv",
 			opts:       RunOptions{Secrets: []RunSecret{{Name: "FILE", Path: "a-b"}}, EnvFiles: []string{"one.env"}},
 			plaintexts: map[string]string{"a-b": "one", "one.env": "FILE=two"},
-			wantErr:    "collides",
+			wantErr:    `from env file "one.env" collides with file secret "FILE"`,
 		},
 		{
 			name:       "file and inherited",
@@ -260,7 +313,7 @@ func TestRunPreparationEnvironmentRejectsCollisions(t *testing.T) {
 			opts:       RunOptions{EnvFiles: []string{"one.env"}},
 			inherited:  []string{"DUP=parent"},
 			plaintexts: map[string]string{"one.env": "DUP=child"},
-			wantErr:    "inherited environment",
+			wantErr:    `from env file "one.env" collides with inherited environment`,
 		},
 	}
 

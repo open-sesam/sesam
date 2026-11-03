@@ -56,8 +56,9 @@ type ExitError struct {
 }
 
 type runEntry struct {
-	name  string
-	value []byte
+	name   string
+	value  []byte
+	source string
 }
 
 type runRevealFunc func(path string) ([]byte, error)
@@ -172,7 +173,7 @@ func (p *RunPreparation) Environment(inherited, filePaths []string) ([]string, e
 		}
 	}
 	for _, entry := range p.entries {
-		if err := add(entry, "env file"); err != nil {
+		if err := add(entry, fmt.Sprintf("env file %q", entry.source)); err != nil {
 			return nil, err
 		}
 	}
@@ -350,7 +351,23 @@ func (p *RunPreparation) addEnvFile(path string, document []byte) error {
 	if err != nil {
 		return fmt.Errorf("parse env file %s: %w", path, err)
 	}
-	p.entries = append(p.entries, entries...)
+	positions := make(map[string]int, len(p.entries)+len(entries))
+	for i, entry := range p.entries {
+		positions[entry.name] = i
+	}
+	for _, entry := range entries {
+		entry.source = path
+		if previous, exists := positions[entry.name]; exists {
+			slog.Warn("dotenv variable overridden by later file",
+				slog.String("name", entry.name),
+				slog.String("previous_file", p.entries[previous].source),
+				slog.String("file", path))
+			p.entries[previous] = entry
+			continue
+		}
+		positions[entry.name] = len(p.entries)
+		p.entries = append(p.entries, entry)
+	}
 	return nil
 }
 
