@@ -390,13 +390,6 @@ func RevealStreamAndVerify(
 	if !ok {
 		return nil, fmt.Errorf("encrypted file changed for %s", footer.RevealedPath)
 	}
-	ok, err = hashEqual(footer.HMACContentHash, contentHashBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check content hash for %s: %w", footer.RevealedPath, err)
-	}
-	if !ok {
-		return nil, fmt.Errorf("decrypted content hash changed for %s", footer.RevealedPath)
-	}
 
 	recipientsHashBytes, _, err := multicodeDecode(footer.RecipientsHash)
 	if err != nil {

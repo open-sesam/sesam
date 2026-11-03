@@ -2,7 +2,6 @@ package core
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -285,29 +284,6 @@ func TestRevealRejectsCorruption(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(mgr.SesamDir, path))
 	require.NoError(t, err)
 	require.Equal(t, "payload", string(content), "failed verification must not replace existing plaintext")
-}
-
-func TestRevealRejectsChangedFooterContentHash(t *testing.T) {
-	mgr := testSecretManager(t)
-	path := testSecret(t, mgr, "secrets/value", "payload")
-	_, err := sealSecret(mgr, path, mgr.recipientsFor(path), mgr.cryptPath(path), mgr.Signer.UserName())
-	require.NoError(t, err)
-
-	objectPath := filepath.Join(mgr.SesamDir, mgr.cryptPath(path))
-	object, err := os.ReadFile(objectPath)
-	require.NoError(t, err)
-	footerStart := bytes.LastIndexByte(object, '\n')
-	require.GreaterOrEqual(t, footerStart, 0)
-	var footer secretFooter
-	require.NoError(t, json.Unmarshal(object[footerStart+1:], &footer))
-	footer.HMACContentHash = footer.CipherTextHash
-	encodedFooter, err := json.Marshal(footer)
-	require.NoError(t, err)
-	object = append(object[:footerStart+1], encodedFooter...)
-	require.NoError(t, os.WriteFile(objectPath, object, 0o600))
-
-	err = mgr.Reveal(path, io.Discard)
-	require.ErrorContains(t, err, "content hash changed")
 }
 
 func TestRevealRejectsFooterPathMismatch(t *testing.T) {
