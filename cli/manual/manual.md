@@ -304,7 +304,7 @@ Run a command with secret files and dotenv variables
 
 **--all**: Select all managed secrets accessible to the current identity
 
-**--env-file**="": Inject variables from an exact dotenv secret file (repeatable)
+**--env-file**="": Load environment variables from a managed dotenv file (repeatable)
 
 **--env-pattern**="": Additional regex matching sesam-relative dotenv paths; .env suffixes are always recognized (repeatable) \[$SESAM_RUN_ENV_PATTERN\]
 
@@ -935,7 +935,8 @@ sesam run \
   secret from that path.
 - `--env-file deploy/production.env` adds the variables declared in that dotenv
   file to the command's environment. Sesam parses the file without shell expansion.
-  Duplicate assignments within one file produce a warning; the last value wins.
+  Duplicate assignments within or across dotenv files produce a warning; the
+  last value wins. Cross-file warnings name both files without printing values.
 
 Dotenv files support `NAME=value` and `export NAME=value` assignments, blank
 lines, and comments starting with `#`. They are parsed as data, not executed as
@@ -944,7 +945,7 @@ assignments cause an error rather than being silently skipped.
 
 Both options select managed files and can be repeated. Sesam verifies the secrets
 and your access before starting the command. It rejects variable collisions
-between selected files or with the inherited environment, and releases the
+with file-secret variables or the inherited environment, and releases the
 repository lock before the command starts.
 
 
@@ -983,6 +984,10 @@ Automatically selected paths are processed in sorted order. Additional dotenv
 filename regexes can be supplied with repeatable `--env-pattern` flags or the
 `SESAM_RUN_ENV_PATTERN` environment variable. Regexes match sesam-relative paths
 with `/` separators; the `.env` suffix is always recognized.
+
+Dotenv files selected with `--secret` (including automatic `--all` selections)
+are processed first. Explicit `--env-file` files follow in flag order, so their
+values override earlier dotenv assignments with the same name.
 
 ```bash
 sesam run --all --env-pattern '(^|/)\.env\.' -- ./my-service

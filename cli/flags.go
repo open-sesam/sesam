@@ -253,7 +253,7 @@ var flagsRun = []cli.Flag{
 	},
 	&cli.StringSliceFlag{
 		Name:  "env-file",
-		Usage: "Inject variables from an exact dotenv secret file (repeatable)",
+		Usage: "Load environment variables from a managed dotenv file (repeatable)",
 	},
 	&cli.StringSliceFlag{
 		Name:    "env-pattern",

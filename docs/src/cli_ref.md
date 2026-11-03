@@ -248,7 +248,7 @@ Run a command with secret files and dotenv variables
 
 **--all**: Select all managed secrets accessible to the current identity
 
-**--env-file**="": Inject variables from an exact dotenv secret file (repeatable)
+**--env-file**="": Load environment variables from a managed dotenv file (repeatable)
 
 **--env-pattern**="": Additional regex matching sesam-relative dotenv paths; .env suffixes are always recognized (repeatable) \[$SESAM_RUN_ENV_PATTERN\]
 
