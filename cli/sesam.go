@@ -514,12 +514,6 @@ we assume 'sesam show path/to/secret' as convenience.`,
 		if !runInvocation {
 			ctx, stopSignals = signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 		}
-		if runInvocation {
-			if mode := cmd.String("verify-mode"); mode != "all" {
-				return ctx, fmt.Errorf("sesam run does not support --verify-mode=%s", mode)
-			}
-		}
-
 		if cmd.Bool("no-color") && !runInvocation {
 			// hack to make sure color is always ignored without passing it to everywhere we use termenv.
 			_ = os.Setenv("NO_COLOR", "1")

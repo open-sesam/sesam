@@ -15,6 +15,11 @@ import (
 // HandleRun verifies selected secrets, closes the repository, and runs the
 // requested command with them.
 func HandleRun(ctx context.Context, cmd *cli.Command) (err error) {
+	verifyMode, err := repo.ToVerifyMode(cmd.String("verify-mode"))
+	if err != nil {
+		return err
+	}
+
 	secretArgs := cmd.StringSlice("secret")
 	envFileArgs := cmd.StringSlice("env-file")
 	if !cmd.Bool("all") && len(secretArgs)+len(envFileArgs) == 0 {
@@ -52,7 +57,7 @@ func HandleRun(ctx context.Context, cmd *cli.Command) (err error) {
 			AskpassProgram:  cmd.String("askpass"),
 			AskpassRequired: askpassRequired(),
 			LockTimeout:     cmd.Duration("lock-timeout"),
-			VerifyMode:      repo.VerifyModeAll,
+			VerifyMode:      verifyMode,
 		},
 	)
 	if err != nil {
