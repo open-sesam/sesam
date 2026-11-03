@@ -997,8 +997,9 @@ Explicit selectors take precedence over `--all`. For example,
 `--secret CONFIG=production.env` forces file-descriptor delivery even for a
 dotenv filename. `--env-file` forces literal dotenv parsing regardless of the
 filename. Generated names that collide with each other, dotenv variables, or
-the inherited environment are rejected rather than overwritten. Existing size
-limits also apply to `--all`; it does not bypass them.
+the inherited environment are rejected rather than overwritten. File secrets
+are streamed into their descriptors; dotenv values remain subject to the
+operating system's process-environment limits.
 
 ### Removing secrets
 

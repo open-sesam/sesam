@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -30,8 +31,8 @@ type RunSecret struct {
 }
 
 type RunFile struct {
-	Name    string
-	Content []byte
+	Name string
+	file *os.File
 }
 
 // RunPreparation holds verified file contents and parsed dotenv entries.
@@ -61,21 +62,7 @@ type runEntry struct {
 	source string
 }
 
-type runRevealFunc func(path string) ([]byte, error)
-
-type boundedBuffer struct {
-	buf      bytes.Buffer
-	limit    int
-	overflow bool
-}
-
-const (
-	runMaxSelectorPlaintext = 64 * 1024
-	runMaxTotalPlaintext    = 64 * 1024
-	runMaxValueSize         = 64 * 1024
-	runMaxInjectedSize      = 64 * 1024
-	runMaxInjectedVars      = 256
-)
+type runRevealFunc func(path string, dst io.Writer) error
 
 // PrepareRun reads selected encrypted objects without revealing worktree files.
 func (v *View) PrepareRun(opts RunOptions) (*RunPreparation, error) {
@@ -105,27 +92,7 @@ func (v *View) PrepareRun(opts RunOptions) (*RunPreparation, error) {
 			opts.Secrets = append(opts.Secrets, RunSecret{Path: path})
 		}
 	}
-	return prepareRun(opts, func(path string) ([]byte, error) {
-		dst := &boundedBuffer{limit: runMaxSelectorPlaintext}
-		if err := v.secret.Reveal(path, dst); err != nil {
-			return nil, err
-		}
-		if dst.overflow {
-			return nil, fmt.Errorf("secret %s exceeds %d bytes", path, runMaxSelectorPlaintext)
-		}
-		return dst.buf.Bytes(), nil
-	})
-}
-
-func (b *boundedBuffer) Write(p []byte) (int, error) {
-	remaining := b.limit - b.buf.Len()
-	if remaining > 0 {
-		_, _ = b.buf.Write(p[:min(len(p), remaining)])
-	}
-	if len(p) > remaining {
-		b.overflow = true
-	}
-	return len(p), nil
+	return prepareRun(opts, v.secret.Reveal)
 }
 
 // Environment binds file paths to explicit names and validates the complete
@@ -142,28 +109,14 @@ func (p *RunPreparation) Environment(inherited, filePaths []string) ([]string, e
 		owners[name] = "inherited environment"
 	}
 
-	injectedSize := 0
-	injectedVars := 0
 	add := func(entry runEntry, source string) error {
-		if len(entry.value) > runMaxValueSize {
-			return fmt.Errorf("value for %s exceeds %d bytes", source, runMaxValueSize)
-		}
 		if previous, exists := owners[entry.name]; exists {
 			return fmt.Errorf("environment variable %q from %s collides with %s", entry.name, source, previous)
 		}
-		if injectedVars == runMaxInjectedVars {
-			return fmt.Errorf("injected environment exceeds %d variables", runMaxInjectedVars)
-		}
 
 		encoded := entry.name + "=" + string(entry.value)
-		if injectedSize+len(encoded) > runMaxInjectedSize {
-			return fmt.Errorf("encoded injected environment exceeds %d bytes", runMaxInjectedSize)
-		}
-
 		owners[entry.name] = source
 		env = append(env, encoded)
-		injectedSize += len(encoded)
-		injectedVars++
 		return nil
 	}
 
@@ -183,7 +136,13 @@ func (p *RunPreparation) Environment(inherited, filePaths []string) ([]string, e
 // Run starts the command with file secrets as inherited descriptors and dotenv
 // entries in its environment, forwards signals, and waits for it. Close the
 // repository first: the command may run for hours and may call sesam itself.
-func (p *RunPreparation) Run(ctx context.Context, command RunCommand) error {
+func (p *RunPreparation) Run(ctx context.Context, command RunCommand) (err error) {
+	defer func() {
+		if closeErr := p.Close(); err == nil {
+			err = closeErr
+		}
+	}()
+
 	filePaths := make([]string, len(p.Files))
 	for i := range filePaths {
 		filePaths[i] = fmt.Sprintf("/dev/fd/%d", 3+i)
@@ -193,18 +152,9 @@ func (p *RunPreparation) Run(ctx context.Context, command RunCommand) error {
 		return err
 	}
 
-	files := make([]*os.File, 0, len(p.Files))
-	defer func() {
-		for _, file := range files {
-			_ = file.Close()
-		}
-	}()
-	for _, secret := range p.Files {
-		file, err := runSecretFile(secret.Content)
-		if err != nil {
-			return fmt.Errorf("prepare file secret %q: %w", secret.Name, err)
-		}
-		files = append(files, file)
+	files := make([]*os.File, len(p.Files))
+	for i, secret := range p.Files {
+		files[i] = secret.file
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -246,6 +196,18 @@ func (p *RunPreparation) Run(ctx context.Context, command RunCommand) error {
 	}
 }
 
+// Close releases prepared secret descriptors without running a command.
+func (p *RunPreparation) Close() error {
+	var errs []error
+	for i := range p.Files {
+		if p.Files[i].file != nil {
+			errs = append(errs, p.Files[i].file.Close())
+			p.Files[i].file = nil
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (e *ExitError) Error() string {
 	if e.Signal != 0 {
 		return fmt.Sprintf("command terminated by signal %d (%s)", e.Signal, e.Signal)
@@ -268,27 +230,39 @@ func prepareRun(opts RunOptions, reveal runRevealFunc) (*RunPreparation, error) 
 	}
 
 	prepared := &RunPreparation{}
-	totalPlaintext := 0
+	success := false
+	defer func() {
+		if !success {
+			_ = prepared.Close()
+		}
+	}()
 	for _, secret := range secrets {
-		value, err := readRunSecret(secret.Path, reveal, &totalPlaintext)
-		if err != nil {
+		if secret.Name != "" {
+			file, err := runSecretFile(func(dst io.Writer) error { return reveal(secret.Path, dst) })
+			if err != nil {
+				return nil, fmt.Errorf("read secret %s: %w", secret.Path, err)
+			}
+			prepared.Files = append(prepared.Files, RunFile{Name: secret.Name, file: file})
+			continue
+		}
+		var document bytes.Buffer
+		if err := reveal(secret.Path, &document); err != nil {
 			return nil, fmt.Errorf("read secret %s: %w", secret.Path, err)
 		}
-		if secret.Name != "" {
-			prepared.Files = append(prepared.Files, RunFile{Name: secret.Name, Content: value})
-		} else if err := prepared.addEnvFile(secret.Path, value); err != nil {
+		if err := prepared.addEnvFile(secret.Path, document.Bytes()); err != nil {
 			return nil, err
 		}
 	}
 	for _, path := range opts.EnvFiles {
-		document, err := readRunSecret(path, reveal, &totalPlaintext)
-		if err != nil {
+		var document bytes.Buffer
+		if err := reveal(path, &document); err != nil {
 			return nil, fmt.Errorf("read env file %s: %w", path, err)
 		}
-		if err := prepared.addEnvFile(path, document); err != nil {
+		if err := prepared.addEnvFile(path, document.Bytes()); err != nil {
 			return nil, err
 		}
 	}
+	success = true
 	return prepared, nil
 }
 
@@ -329,21 +303,6 @@ func resolveRunSelectors(opts RunOptions) ([]RunSecret, error) {
 		}
 	}
 	return secrets, nil
-}
-
-func readRunSecret(path string, reveal runRevealFunc, totalPlaintext *int) ([]byte, error) {
-	plaintext, err := reveal(path)
-	if err != nil {
-		return nil, err
-	}
-	if len(plaintext) > runMaxSelectorPlaintext {
-		return nil, fmt.Errorf("selector %s exceeds %d bytes", path, runMaxSelectorPlaintext)
-	}
-	*totalPlaintext += len(plaintext)
-	if *totalPlaintext > runMaxTotalPlaintext {
-		return nil, fmt.Errorf("total decrypted selector plaintext exceeds %d bytes", runMaxTotalPlaintext)
-	}
-	return plaintext, nil
 }
 
 func (p *RunPreparation) addEnvFile(path string, document []byte) error {

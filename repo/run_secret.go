@@ -2,11 +2,14 @@
 
 package repo
 
-import "os"
+import (
+	"io"
+	"os"
+)
 
 // runSecretFile unlinks an empty file before writing any plaintext. Only the
 // read-only descriptor is inherited; the kernel owns the file's lifetime.
-func runSecretFile(content []byte) (_ *os.File, err error) {
+func runSecretFile(write func(io.Writer) error) (_ *os.File, err error) {
 	writer, err := os.CreateTemp("", "sesam-run-*")
 	if err != nil {
 		return nil, err
@@ -28,7 +31,7 @@ func runSecretFile(content []byte) (_ *os.File, err error) {
 	if err := writer.Chmod(0o400); err != nil {
 		return nil, err
 	}
-	if _, err := writer.Write(content); err != nil {
+	if err := write(writer); err != nil {
 		return nil, err
 	}
 	if err := writer.Close(); err != nil {

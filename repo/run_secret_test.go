@@ -14,7 +14,10 @@ func TestRunSecretFile(t *testing.T) {
 		t.Run(content, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("TMPDIR", dir)
-			file, err := runSecretFile([]byte(content))
+			file, err := runSecretFile(func(dst io.Writer) error {
+				_, err := io.WriteString(dst, content)
+				return err
+			})
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = file.Close() })
 			entries, err := os.ReadDir(dir)

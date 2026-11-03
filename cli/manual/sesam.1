@@ -1225,8 +1225,9 @@ Explicit selectors take precedence over \fB--all\fR\&. For example,
 \fB--secret CONFIG=production.env\fR forces file-descriptor delivery even for a
 dotenv filename. \fB--env-file\fR forces literal dotenv parsing regardless of the
 filename. Generated names that collide with each other, dotenv variables, or
-the inherited environment are rejected rather than overwritten. Existing size
-limits also apply to \fB--all\fR; it does not bypass them.
+the inherited environment are rejected rather than overwritten. File secrets
+are streamed into their descriptors; dotenv values remain subject to the
+operating system's process-environment limits.
 
 .SS Removing secrets
 To stop managing secrets and delete their plaintext:

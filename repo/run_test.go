@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,40 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func revealBytes(fn func(string) ([]byte, error)) runRevealFunc {
+	return func(path string, dst io.Writer) error {
+		value, err := fn(path)
+		if err != nil {
+			return err
+		}
+		_, err = dst.Write(value)
+		return err
+	}
+}
+
+type testRunFile struct {
+	Name    string
+	Content []byte
+}
+
+func runFiles(t *testing.T, prepared *RunPreparation) []testRunFile {
+	t.Helper()
+	t.Cleanup(func() { require.NoError(t, prepared.Close()) })
+	files := make([]testRunFile, len(prepared.Files))
+	for i, file := range prepared.Files {
+		position, err := file.file.Seek(0, io.SeekCurrent)
+		require.NoError(t, err)
+		_, err = file.file.Seek(0, io.SeekStart)
+		require.NoError(t, err)
+		files[i].Name = file.Name
+		files[i].Content, err = io.ReadAll(file.file)
+		require.NoError(t, err)
+		_, err = file.file.Seek(position, io.SeekStart)
+		require.NoError(t, err)
+	}
+	return files
+}
 
 func TestParseDotenvValid(t *testing.T) {
 	document := []byte(" \t# comment\r\nexport FOO = unquoted\r\nEMPTY=   \nSINGLE=' literal \\ # $HOME '\r\nDOUBLE=\"literal ' value\"\nSHELL=$(touch);`id`$HOME=a\n_NO9=ok")
@@ -110,10 +145,10 @@ func TestPrepareRunRejectsInvalidSelectors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := prepareRun(RunOptions{
 				Secrets: tc.secrets, EnvFiles: tc.envFiles,
-			}, func(string) ([]byte, error) {
+			}, revealBytes(func(string) ([]byte, error) {
 				t.Fatal("invalid selectors must fail before reading secrets")
 				return nil, nil
-			})
+			}))
 			require.ErrorContains(t, err, tc.wantErr)
 		})
 	}
@@ -148,13 +183,13 @@ func TestPrepareRunAutomaticSelection(t *testing.T) {
 		{name: "unmatched regex", secret: RunSecret{Path: "vars.txt"}, patterns: []string{`\.vars$`}, content: "not dotenv", wantFile: "SESAM_VARS_TXT"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			prepared, err := prepareRun(RunOptions{Secrets: []RunSecret{tc.secret}, EnvPatterns: tc.patterns}, func(path string) ([]byte, error) {
+			prepared, err := prepareRun(RunOptions{Secrets: []RunSecret{tc.secret}, EnvPatterns: tc.patterns}, revealBytes(func(path string) ([]byte, error) {
 				require.Equal(t, tc.secret.Path, path)
 				return []byte(tc.content), nil
-			})
+			}))
 			require.NoError(t, err)
 			if tc.wantFile != "" {
-				require.Equal(t, []RunFile{{Name: tc.wantFile, Content: []byte(tc.content)}}, prepared.Files)
+				require.Equal(t, []testRunFile{{Name: tc.wantFile, Content: []byte(tc.content)}}, runFiles(t, prepared))
 				require.Empty(t, prepared.entries)
 			} else {
 				require.Empty(t, prepared.Files)
@@ -165,10 +200,10 @@ func TestPrepareRunAutomaticSelection(t *testing.T) {
 }
 
 func TestPrepareRunRejectsInvalidPatternBeforeReading(t *testing.T) {
-	_, err := prepareRun(RunOptions{Secrets: []RunSecret{{Path: "a"}}, EnvPatterns: []string{"["}}, func(string) ([]byte, error) {
+	_, err := prepareRun(RunOptions{Secrets: []RunSecret{{Path: "a"}}, EnvPatterns: []string{"["}}, revealBytes(func(string) ([]byte, error) {
 		t.Fatal("invalid pattern must fail before reading secrets")
 		return nil, nil
-	})
+	}))
 	require.ErrorContains(t, err, "invalid env pattern")
 }
 
@@ -184,7 +219,7 @@ func TestPrepareRunPreservesSelectionOrderAndOptions(t *testing.T) {
 	}
 	original := append([]RunSecret(nil), opts.Secrets...)
 	var readPaths []string
-	prepared, err := prepareRun(opts, func(path string) ([]byte, error) {
+	prepared, err := prepareRun(opts, revealBytes(func(path string) ([]byte, error) {
 		readPaths = append(readPaths, path)
 		values := map[string]string{
 			"first.env":    "FIRST=one",
@@ -194,14 +229,14 @@ func TestPrepareRunPreservesSelectionOrderAndOptions(t *testing.T) {
 			"extra.vars":   "EXTRA=three",
 		}
 		return []byte(values[path]), nil
-	})
+	}))
 	require.NoError(t, err)
 	require.Equal(t, original, opts.Secrets)
 	require.Equal(t, []string{"first.env", "raw-file.txt", "also.env", "last.env", "extra.vars"}, readPaths)
-	require.Equal(t, []RunFile{
+	require.Equal(t, []testRunFile{
 		{Name: "SESAM_RAW_FILE_TXT", Content: []byte("raw")},
 		{Name: "FORCED", Content: []byte("not dotenv")},
-	}, prepared.Files)
+	}, runFiles(t, prepared))
 	require.Equal(t, []runEntry{
 		{name: "FIRST", value: []byte("one"), source: "first.env"},
 		{name: "LAST", value: []byte("two"), source: "last.env"},
@@ -225,14 +260,14 @@ func TestPrepareRunOverlappingEnvFiles(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			warnings := captureWarnings(t)
-			prepared, err := prepareRun(tc.opts, func(path string) ([]byte, error) {
+			prepared, err := prepareRun(tc.opts, revealBytes(func(path string) ([]byte, error) {
 				values := map[string]string{
 					"one.env":   "DUP=first-secret\nFIRST=kept",
 					"two.env":   "DUP=second-secret\nSECOND=kept",
 					"empty.env": "DUP=\nSECOND=kept",
 				}
 				return []byte(values[path]), nil
-			})
+			}))
 			require.NoError(t, err)
 			inherited := []string{"BASE=kept"}
 			env, err := prepared.Environment(inherited, nil)
@@ -255,17 +290,18 @@ func TestPrepareRunOverlappingEnvFiles(t *testing.T) {
 
 func TestPrepareRunOverlapsCountUniqueVariables(t *testing.T) {
 	captureWarnings(t)
+	const variables = 300
 	var document strings.Builder
-	for i := 0; i < runMaxInjectedVars; i++ {
+	for i := 0; i < variables; i++ {
 		fmt.Fprintf(&document, "K%03d=value\n", i)
 	}
-	prepared, err := prepareRun(RunOptions{EnvFiles: []string{"one.env", "two.env"}}, func(string) ([]byte, error) {
+	prepared, err := prepareRun(RunOptions{EnvFiles: []string{"one.env", "two.env"}}, revealBytes(func(string) ([]byte, error) {
 		return []byte(document.String()), nil
-	})
+	}))
 	require.NoError(t, err)
 	env, err := prepared.Environment(nil, nil)
 	require.NoError(t, err)
-	require.Len(t, env, runMaxInjectedVars)
+	require.Len(t, env, variables)
 }
 
 func TestRunPreparationEnvironmentRejectsCollisions(t *testing.T) {
@@ -319,9 +355,9 @@ func TestRunPreparationEnvironmentRejectsCollisions(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			prepared, err := prepareRun(tc.opts, func(path string) ([]byte, error) {
+			prepared, err := prepareRun(tc.opts, revealBytes(func(path string) ([]byte, error) {
 				return []byte(tc.plaintexts[path]), nil
-			})
+			}))
 			if err == nil {
 				paths := make([]string, len(prepared.Files))
 				for i := range paths {
@@ -334,72 +370,18 @@ func TestRunPreparationEnvironmentRejectsCollisions(t *testing.T) {
 	}
 }
 
-func TestPrepareRunRejectsLimits(t *testing.T) {
-	manyVariables := strings.Builder{}
-	for i := 0; i <= runMaxInjectedVars; i++ {
-		fmt.Fprintf(&manyVariables, "K%03d=x\n", i)
+func TestRunPreparationEnvironmentHasNoPolicyLimits(t *testing.T) {
+	const variables = 300
+	entries := make([]runEntry, variables+1)
+	for i := 0; i < variables; i++ {
+		entries[i] = runEntry{name: fmt.Sprintf("K%03d", i), value: []byte("x"), source: "many.env"}
 	}
-
-	tests := []struct {
-		name      string
-		opts      RunOptions
-		inherited []string
-		reveal    runRevealFunc
-		wantErr   string
-	}{
-		{
-			name: "one selector",
-			opts: RunOptions{Secrets: []RunSecret{{Name: "A", Path: "a"}}},
-			reveal: func(string) ([]byte, error) {
-				return bytes.Repeat([]byte{'x'}, runMaxSelectorPlaintext+1), nil
-			},
-			wantErr: "selector a exceeds",
-		},
-		{
-			name: "total selector plaintext",
-			opts: RunOptions{Secrets: []RunSecret{{Name: "A", Path: "a"}, {Name: "B", Path: "b"}}},
-			reveal: func(string) ([]byte, error) {
-				return bytes.Repeat([]byte{'x'}, runMaxTotalPlaintext/2+1), nil
-			},
-			wantErr: "total decrypted selector plaintext",
-		},
-		{
-			name: "total across file and dotenv selectors",
-			opts: RunOptions{Secrets: []RunSecret{{Name: "A", Path: "a"}}, EnvFiles: []string{"b.env"}},
-			reveal: func(string) ([]byte, error) {
-				return bytes.Repeat([]byte{'x'}, runMaxTotalPlaintext/2+1), nil
-			},
-			wantErr: "total decrypted selector plaintext",
-		},
-		{
-			name: "encoded injected entries",
-			opts: RunOptions{Secrets: []RunSecret{{Name: strings.Repeat("A", runMaxInjectedSize), Path: "a"}}},
-			reveal: func(string) ([]byte, error) {
-				return []byte("x"), nil
-			},
-			wantErr: "encoded injected environment",
-		},
-		{
-			name:    "variable count",
-			opts:    RunOptions{EnvFiles: []string{"a"}},
-			reveal:  func(string) ([]byte, error) { return []byte(manyVariables.String()), nil },
-			wantErr: "exceeds 256 variables",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			prepared, err := prepareRun(tc.opts, tc.reveal)
-			if err == nil {
-				paths := make([]string, len(prepared.Files))
-				for i := range paths {
-					paths[i] = fmt.Sprintf("/dev/fd/%d", 3+i)
-				}
-				_, err = prepared.Environment(tc.inherited, paths)
-			}
-			require.ErrorContains(t, err, tc.wantErr)
-		})
-	}
+	entries[variables] = runEntry{name: "LARGE", value: bytes.Repeat([]byte{'x'}, 128*1024), source: "large.env"}
+	prepared := RunPreparation{entries: entries}
+	env, err := prepared.Environment(nil, nil)
+	require.NoError(t, err)
+	require.Len(t, env, variables+1)
+	require.Len(t, env[len(env)-1], len("LARGE=")+128*1024)
 }
 
 func TestRunPreparationEnvironment(t *testing.T) {
@@ -407,21 +389,21 @@ func TestRunPreparationEnvironment(t *testing.T) {
 		Secrets:  []RunSecret{{Name: "CERT", Path: "raw/a"}, {Name: "KEY", Path: "raw/b"}},
 		EnvFiles: []string{"vars.env"},
 	}
-	reveal := func(path string) ([]byte, error) {
+	reveal := revealBytes(func(path string) ([]byte, error) {
 		values := map[string]string{
 			"raw/a":    "one\x00\n",
 			"raw/b":    "two",
 			"vars.env": "ZED=last\nALPHA=first",
 		}
 		return []byte(values[path]), nil
-	}
+	})
 
 	prepared, err := prepareRun(opts, reveal)
 	require.NoError(t, err)
-	require.Equal(t, []RunFile{
+	require.Equal(t, []testRunFile{
 		{Name: "CERT", Content: []byte("one\x00\n")},
 		{Name: "KEY", Content: []byte("two")},
-	}, prepared.Files)
+	}, runFiles(t, prepared))
 	inherited := []string{"BASE=kept"}
 	first, err := prepared.Environment(inherited, []string{"/dev/fd/3", "/dev/fd/4"})
 	require.NoError(t, err)
@@ -467,7 +449,7 @@ func TestRepoPrepareRunReadsEncryptedObjects(t *testing.T) {
 		EnvFiles: []string{"vars.env"},
 	})
 	require.NoError(t, err)
-	require.Equal(t, []RunFile{{Name: "RAW", Content: []byte("raw-value\n")}}, prepared.Files)
+	require.Equal(t, []testRunFile{{Name: "RAW", Content: []byte("raw-value\n")}}, runFiles(t, prepared))
 	env, err := prepared.Environment([]string{"BASE=kept"}, []string{"/dev/fd/3"})
 	require.NoError(t, err)
 	require.Equal(t, []string{
@@ -480,8 +462,8 @@ func TestRepoPrepareRunReadsEncryptedObjects(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(dir, "vars.env"))
 }
 
-func TestRepoPrepareRunPlaintextLimit(t *testing.T) {
-	for _, size := range []int{0, runMaxSelectorPlaintext, runMaxSelectorPlaintext + 1} {
+func TestRepoPrepareRunStreamsLargeFiles(t *testing.T) {
+	for _, size := range []int{0, 2 * 1024 * 1024} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			admin := writeTestIdentity(t, "admin")
 			dir, r := bootstrapRepo(t, admin)
@@ -496,31 +478,9 @@ func TestRepoPrepareRunPlaintextLimit(t *testing.T) {
 			}))
 			require.NoError(t, os.Remove(filepath.Join(dir, "raw.txt")))
 			prepared, err := r.PrepareRun(RunOptions{Secrets: []RunSecret{{Name: "RAW", Path: "raw.txt"}}})
-			if size > runMaxSelectorPlaintext {
-				require.ErrorContains(t, err, "exceeds 65536 bytes")
-				require.Nil(t, prepared)
-			} else {
-				require.NoError(t, err)
-				require.Len(t, prepared.Files, 1)
-				require.Equal(t, content, string(prepared.Files[0].Content))
-			}
+			require.NoError(t, err)
+			require.Equal(t, []testRunFile{{Name: "RAW", Content: []byte(content)}}, runFiles(t, prepared))
 			require.NoFileExists(t, filepath.Join(dir, "raw.txt"))
-		})
-	}
-}
-
-func TestBoundedBuffer(t *testing.T) {
-	for _, chunks := range [][]string{{"abc"}, {"abcd"}, {"ab", "c", "d"}, {"abc", ""}} {
-		t.Run(fmt.Sprint(chunks), func(t *testing.T) {
-			dst := boundedBuffer{limit: 3}
-			for _, chunk := range chunks {
-				n, err := dst.Write([]byte(chunk))
-				require.NoError(t, err)
-				require.Equal(t, len(chunk), n)
-				require.LessOrEqual(t, dst.buf.Len(), 3)
-			}
-			require.Equal(t, "abc", dst.buf.String())
-			require.Equal(t, len(strings.Join(chunks, "")) > 3, dst.overflow)
 		})
 	}
 }
@@ -556,6 +516,8 @@ func TestRepoPrepareRunChecksCurrentUserAccess(t *testing.T) {
 		EnvFiles: []string{"secrets/vars.env"},
 	})
 	require.NoError(t, err)
+	firstPrepared := prepared
+	t.Cleanup(func() { require.NoError(t, firstPrepared.Close()) })
 	env, err := prepared.Environment([]string{"BASE=kept"}, []string{"/dev/fd/3"})
 	require.NoError(t, err)
 	require.Equal(t, []string{
@@ -568,7 +530,7 @@ func TestRepoPrepareRunChecksCurrentUserAccess(t *testing.T) {
 
 	prepared, err = r.PrepareRun(RunOptions{All: true})
 	require.NoError(t, err)
-	require.Equal(t, []RunFile{{Name: "SESAM_SECRETS_RAW_TXT", Content: []byte("raw-value\n")}}, prepared.Files)
+	require.Equal(t, []testRunFile{{Name: "SESAM_SECRETS_RAW_TXT", Content: []byte("raw-value\n")}}, runFiles(t, prepared))
 	env, err = prepared.Environment(nil, []string{"/dev/fd/3"})
 	require.NoError(t, err)
 	require.Equal(t, []string{"SESAM_SECRETS_RAW_TXT=/dev/fd/3", "TOKEN=dotenv value"}, env)
@@ -591,6 +553,7 @@ func TestRepoPrepareRunAllExplicitOverrides(t *testing.T) {
 		All: true, Secrets: []RunSecret{{Name: "CONFIG", Path: "vars.env"}},
 	})
 	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, prepared.Close()) })
 	var names []string
 	for _, file := range prepared.Files {
 		names = append(names, file.Name)

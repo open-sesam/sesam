@@ -17,9 +17,9 @@ stderr 'invalid byte in unquoted value'
 ! exists started-malformed
 ! exists malformed.env
 
-! exec sesam run --secret LARGE=oversize.txt -- touch started-oversize
-stderr 'exceeds 65536 bytes'
-! exists started-oversize
+# File secrets are streamed and are not restricted to the old 64 KiB limit.
+exec sesam run --secret LARGE=oversize.txt -- sh -c 'wc -c < "$LARGE"'
+stdout '^65537$'
 ! exists oversize.txt
 
 # os/exec rejects NUL-containing environment values before starting the target.

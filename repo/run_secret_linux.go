@@ -7,10 +7,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// runSecretFile keeps the plaintext in an anonymous memory file that never
-// touches a filesystem. Sealing makes it immutable even when reopened via
-// /dev/fd.
-func runSecretFile(content []byte) (_ *os.File, err error) {
+// runSecretFile streams plaintext into an anonymous memory file. Sealing makes
+// it immutable even when reopened via /dev/fd.
+func runSecretFile(write func(io.Writer) error) (_ *os.File, err error) {
 	fd, err := unix.MemfdCreate("sesam-run", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
 	if err != nil {
 		return nil, err
@@ -21,7 +20,7 @@ func runSecretFile(content []byte) (_ *os.File, err error) {
 			_ = file.Close()
 		}
 	}()
-	if _, err := file.Write(content); err != nil {
+	if err := write(file); err != nil {
 		return nil, err
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {

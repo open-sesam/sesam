@@ -96,6 +96,11 @@ func HandleRun(ctx context.Context, cmd *cli.Command) (err error) {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if closeErr := prepared.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close prepared secrets: %w", closeErr)
+		}
+	}()
 	// The lock must be gone before the command starts: it may run for hours and
 	// may itself call sesam against the same repository.
 	if err := r.Close(); err != nil {
