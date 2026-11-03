@@ -49,7 +49,14 @@ git merge-base --is-ancestor "$target" main || {
 # up front so they can be reviewed before anything is tagged or pushed. git-cliff
 # ignores .mailmap, so the tally comes from git shortlog, which honors it. Kept
 # on disk to reuse verbatim as both the tag message and the GitHub release body.
+# Tags missing locally (e.g. pruned by a fetch from a tag-less mirror) would
+# make git-cliff treat the whole history as unreleased.
+git fetch --tags origin
 prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)"
+[ -n "$prev" ] || {
+  echo "no previous v* tag found; refusing to build full-history notes" >&2
+  exit 1
+}
 notes="$(mktemp)"
 trap 'rm -f "$notes"' EXIT
 {
@@ -57,7 +64,7 @@ trap 'rm -f "$notes"' EXIT
   echo
   echo "#### Contributors"
   echo
-  git shortlog -sn --no-merges "${prev:+$prev..}HEAD" |
+  git shortlog -sn --no-merges "$prev..HEAD" |
     sed -E 's/^[[:space:]]*([0-9]+)[[:space:]]+(.*)$/- \2 (\1)/'
 } >"$notes"
 
