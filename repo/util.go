@@ -130,6 +130,10 @@ func gitAdd(sesamDir string, paths ...string) error {
 	return nil
 }
 
+// MinCoreGitVersion is the oldest git sesam works with at all: it reads
+// objects via `git cat-file --batch-command`.
+var MinCoreGitVersion = semver.MustParse("2.36.0")
+
 // MinGitVersion is the oldest git that supports config-based hooks, which is
 // what sesam installs its hooks as.
 // See: https://github.blog/open-source/git/highlights-from-git-2-54/#h-config-based-hooks

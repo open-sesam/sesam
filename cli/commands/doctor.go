@@ -542,6 +542,12 @@ func gitVersionCheck(ctx context.Context) DoctorCheck {
 		if err != nil {
 			return docFailed(fmt.Sprintf("could not read git version: %v", err))
 		}
+		if v.LessThan(repo.MinCoreGitVersion) {
+			return docIssue(
+				fmt.Sprintf("git %s (< %s)", v, repo.MinCoreGitVersion),
+				fmt.Sprintf("upgrade git to %s+, sesam does not work with older versions", repo.MinCoreGitVersion),
+			)
+		}
 		if v.LessThan(repo.MinGitVersion) {
 			return docWarn(
 				fmt.Sprintf("git %s (< %s)", v, repo.MinGitVersion),
