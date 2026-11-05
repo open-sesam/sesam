@@ -21,7 +21,8 @@ import (
 // so callers can attribute errors to a specific revision.
 type auditLogSnapshot struct {
 	Commit plumbing.Hash
-	Log    *AuditLog
+	// Log is nil when we have no access to it; the walk ends there.
+	Log *AuditLog
 }
 
 func auditLogHistory(
@@ -157,6 +158,7 @@ func auditLogHistory(
 					if errors.As(err, &nie) {
 						// Current user had no access at this commit — we have no way
 						// to verify further back, but this is not a verification failure.
+						yield(&auditLogSnapshot{Commit: commit.Hash}, nil)
 						return
 					}
 
@@ -374,6 +376,9 @@ func entryOriginKey(e *AuditEntrySigned) string {
 // finding it walks the whole history, and Verify already did that. Pass "" to
 // have it determined here, which also re-runs the init-file check.
 //
+// stoppedAt is the commit whose log ids cannot read, where the walk ended
+// early; empty when it reached the trust anchor.
+//
 // CAVEAT: Right now we do not recognize renames: If the sesam repo was moved from secret/ to secrets/
 // then this function does not find the old audit log before that rename. We could use git's renames,
 // but there will edge cases too if the file was renamed and a user was rotated (git looks for 50% matching content).
@@ -383,7 +388,7 @@ func VerifyHistory(
 	ids Identities,
 	pluginUI *PluginUI,
 	initCommitRev string,
-) error {
+) (stoppedAt string, err error) {
 	auditLogIter, err := auditLogHistory(
 		sesamDir,
 		repo,
@@ -392,26 +397,30 @@ func VerifyHistory(
 		initCommitRev,
 	)
 	if err != nil {
-		return fmt.Errorf("build audit log history: %w", err)
+		return "", fmt.Errorf("build audit log history: %w", err)
 	}
 
 	var prev *auditLogSnapshot
 	for curr, err := range auditLogIter {
 		if err != nil {
-			return err
+			return "", err
+		}
+
+		if curr.Log == nil {
+			return curr.Commit.String(), nil
 		}
 
 		if prev == nil {
 			// First iteration yields the newest log. We chain-verify it once;
 			// older logs inherit validity by being prefixes of it (transitively).
 			if _, err := VerifyChain(curr.Log, EmptyKeyring(), pluginUI); err != nil {
-				return fmt.Errorf("verify audit log chain at commit %s: %w", curr.Commit, err)
+				return "", fmt.Errorf("verify audit log chain at commit %s: %w", curr.Commit, err)
 			}
 		} else {
 			// Walking backward: prev is the newer log, curr is the older one
 			// whose entries it has to account for.
 			if err := auditLogCovers(prev.Log, curr.Log); err != nil {
-				return fmt.Errorf(
+				return "", fmt.Errorf(
 					"audit log at commit %s is not a prefix of commit %s: %w",
 					curr.Commit, prev.Commit, err,
 				)
@@ -421,5 +430,5 @@ func VerifyHistory(
 		prev = curr
 	}
 
-	return nil
+	return "", nil
 }
