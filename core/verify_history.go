@@ -248,8 +248,8 @@ func auditLogIsPrefix(new, old *AuditLog) error {
 
 // auditLogCovers tests that every entry of `old` is accounted for in `new`:
 // either `old` is a prefix of `new`, or `new` holds a merge that took in
-// exactly `old`'s tip and whose base is covered in turn. The latter is what a
-// branch looks like that merged its upstream and was then squashed into it.
+// exactly `old`. The latter is what a branch looks like that merged its
+// upstream and was then squashed into it.
 func auditLogCovers(new, old *AuditLog) error {
 	prefixErr := auditLogIsPrefix(new, old)
 	for n := len(old.Entries); n > 0; {
@@ -266,11 +266,12 @@ func auditLogCovers(new, old *AuditLog) error {
 		n = base
 	}
 
-	return prefixErr
+	return nil
 }
 
 // mergeTakingIn finds a merge entry in `entries` whose theirs side was exactly
-// `taken` and returns how many of taken's entries were its base.
+// `taken` and returns how many of taken's entries are still to be accounted
+// for: none for a merge bound by hash, its base for an older one.
 func mergeTakingIn(entries, taken []AuditEntrySigned) (int, bool) {
 	tip := &taken[len(taken)-1]
 	for i := range entries {
@@ -283,17 +284,20 @@ func mergeTakingIn(entries, taken []AuditEntrySigned) (int, bool) {
 			continue
 		}
 
-		// By seq id, not position: older logs in the walk are not chain-verified.
-		base := slices.IndexFunc(taken, func(e AuditEntrySigned) bool { return e.SeqID == d.BaseSeqID }) + 1
-		if base == 0 || base >= len(taken) {
+		// A merge takes in all of theirs: each entry was in its base, which ours
+		// carries too, or the merge decided on it. Its base's seq ids need not
+		// match taken's - taken may have been reordered by a squash since.
+		if d.TheirTipHash != "" {
+			if ok, _ := tip.HashMatches(d.TheirTipHash); ok {
+				return 0, true
+			}
+
 			continue
 		}
 
-		if d.TheirTipHash != "" {
-			if ok, _ := tip.HashMatches(d.TheirTipHash); ok {
-				return base, true
-			}
-
+		// By seq id, not position: older logs in the walk are not chain-verified.
+		base := slices.IndexFunc(taken, func(e AuditEntrySigned) bool { return e.SeqID == d.BaseSeqID }) + 1
+		if base == 0 || base >= len(taken) {
 			continue
 		}
 
