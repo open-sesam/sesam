@@ -1,12 +1,15 @@
 package core
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"iter"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"filippo.io/age"
 	"github.com/go-git/go-git/v5"
@@ -224,7 +227,6 @@ func logCarryingParent(
 }
 
 // auditLogIsPrefix tests if `old` is a prefix of `new`
-// If this is not the case, an error with the specifics are returned.
 func auditLogIsPrefix(new, old *AuditLog) error {
 	oel, nel := len(old.Entries), len(new.Entries)
 	if oel > nel {
@@ -235,19 +237,127 @@ func auditLogIsPrefix(new, old *AuditLog) error {
 		return fmt.Errorf("neither audit log may be completely empty")
 	}
 
-	for oldIdx := oel - 1; oldIdx >= 0; oldIdx-- {
-		oldEntry := old.Entries[oldIdx]
-		newEntry := new.Entries[oldIdx]
-		if newEntry.Signature != oldEntry.Signature {
-			return fmt.Errorf("audit log entries differ at index %d (seq_id %d)", oldIdx, oldEntry.SeqID)
+	for idx := range old.Entries {
+		if new.Entries[idx].Signature != old.Entries[idx].Signature {
+			return fmt.Errorf("audit log entries differ at index %d (seq_id %d)", idx, old.Entries[idx].SeqID)
 		}
 	}
 
 	return nil
 }
 
+// auditLogCovers tests that every entry of `old` is accounted for in `new`:
+// either `old` is a prefix of `new`, or `new` holds a merge that took in
+// exactly `old`'s tip and whose base is covered in turn. The latter is what a
+// branch looks like that merged its upstream and was then squashed into it.
+func auditLogCovers(new, old *AuditLog) error {
+	prefixErr := auditLogIsPrefix(new, old)
+	for n := len(old.Entries); n > 0; {
+		taken := old.Entries[:n]
+		if auditLogIsPrefix(new, &AuditLog{Entries: taken}) == nil {
+			return nil
+		}
+
+		base, ok := mergeTakingIn(new.Entries, taken)
+		if !ok {
+			return prefixErr
+		}
+
+		n = base
+	}
+
+	return prefixErr
+}
+
+// mergeTakingIn finds a merge entry in `entries` whose theirs side was exactly
+// `taken` and returns how many of taken's entries were its base.
+func mergeTakingIn(entries, taken []AuditEntrySigned) (int, bool) {
+	tip := &taken[len(taken)-1]
+	for i := range entries {
+		if entries[i].Operation != OpMerge {
+			continue
+		}
+
+		d, err := parseDetail[DetailMerge](&entries[i])
+		if err != nil || d.TheirTipSeqID != tip.SeqID {
+			continue
+		}
+
+		// By seq id, not position: older logs in the walk are not chain-verified.
+		base := slices.IndexFunc(taken, func(e AuditEntrySigned) bool { return e.SeqID == d.BaseSeqID }) + 1
+		if base == 0 || base >= len(taken) {
+			continue
+		}
+
+		if d.TheirTipHash != "" {
+			if ok, _ := tip.HashMatches(d.TheirTipHash); ok {
+				return base, true
+			}
+
+			continue
+		}
+
+		// Merges from before TheirTipHash: bind by content instead.
+		if legacyMergeTookIn(entries[:i], taken[base:], d) {
+			return base, true
+		}
+	}
+
+	return 0, false
+}
+
+// legacyMergeTookIn reports whether everything theirs added since the base is
+// in the log before the merge. Missing entries are excused only up to the
+// merge's dropped count, and only if each is a seal (the merge reseals), a
+// drop the merge recorded, or a dedupe of an equal non-removal already there.
+func legacyMergeTookIn(before, theirs []AuditEntrySigned, d *DetailMerge) bool {
+	have := make(map[string]int, len(before))
+	same := make(map[string]bool, len(before))
+	for i := range before {
+		have[entryOriginKey(&before[i])]++
+		same[entryContentKey(&before[i].AuditEntry)] = true
+	}
+
+	recorded := make(map[string]int, len(d.Resolutions))
+	for _, r := range d.Resolutions {
+		if r.Action == MergeDropped {
+			recorded[string(r.Operation)+"\x00"+r.ChangedByBeforeMerge]++
+		}
+	}
+
+	missing := 0
+	for i := range theirs {
+		e := &theirs[i]
+		if key := entryOriginKey(e); have[key] > 0 {
+			have[key]--
+			continue
+		}
+
+		missing++
+		dropKey := string(e.Operation) + "\x00" + cmp.Or(e.ChangedByBeforeMerge, e.ChangedBy)
+		switch {
+		// A removal is never excused as dedupe: an older equal kill proves nothing.
+		case e.Operation == OpSeal, !revokesAccess(e.Operation) && same[entryContentKey(&e.AuditEntry)]:
+		case recorded[dropKey] > 0:
+			recorded[dropKey]--
+		default:
+			return false
+		}
+	}
+
+	return missing <= d.Dropped
+}
+
+// entryOriginKey identifies an entry across a merge's re-signing, which keeps
+// operation, detail and time but moves the author to ChangedByBeforeMerge.
+func entryOriginKey(e *AuditEntrySigned) string {
+	return entryContentKey(&e.AuditEntry) + "\x00" +
+		e.Time.UTC().Format(time.RFC3339Nano) + "\x00" +
+		cmp.Or(e.ChangedByBeforeMerge, e.ChangedBy)
+}
+
 // VerifyHistory checks that, along the FIRST-PARENT chain from HEAD, every older
-// audit log is a prefix of the newer one (append-only, no truncation), and that
+// audit log is accounted for in the newer one (see auditLogCovers), and that
 // the tip chain-verifies. Where that chain has no vault - a merge that brought
 // one in from its second parent - the walk crosses over to the parent that does,
 // so the log's own ancestry is followed down to the trust anchor.
@@ -294,9 +404,9 @@ func VerifyHistory(
 				return fmt.Errorf("verify audit log chain at commit %s: %w", curr.Commit, err)
 			}
 		} else {
-			// Walking backward: prev is the newer (longer) log, curr is the older
-			// (shorter) one that should be its prefix.
-			if err := auditLogIsPrefix(prev.Log, curr.Log); err != nil {
+			// Walking backward: prev is the newer log, curr is the older one
+			// whose entries it has to account for.
+			if err := auditLogCovers(prev.Log, curr.Log); err != nil {
 				return fmt.Errorf(
 					"audit log at commit %s is not a prefix of commit %s: %w",
 					curr.Commit, prev.Commit, err,

@@ -1,0 +1,56 @@
+# Updating a feature branch by rebase instead of merge. During a rebase git makes
+# the upstream "ours", so develop's entries stay first and develop's log stays a
+# plain prefix - also when develop moves on again.
+
+sesam-repo admin base.txt dev.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+exec git branch develop
+
+# feature: own entry F.
+exec git checkout -b feature
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'feature: tell bob'
+
+# develop: D1 meanwhile.
+exec git checkout develop
+cp $TMPDIR/dev.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'develop: reseal s'
+
+# Update feature by rebase.
+exec git checkout feature
+exec git rebase develop
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+# develop moves on (D3) before the feature lands; feature updates again.
+exec git checkout develop
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'develop: tell carol'
+
+exec git checkout feature
+exec git rebase develop
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+# Squash into develop, GitHub-style (no drivers, no hooks).
+exec git checkout develop
+exec git merge --squash feature
+exec git commit --no-verify -m 'squash feature'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+exec sesam user ls
+stdout bob
+stdout carol
+
+-- base.txt --
+S=BASE
+-- dev.txt --
+S=DEV

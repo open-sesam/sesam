@@ -354,9 +354,10 @@ are not prevented at the storage layer, but they are *detectable*:
 - **Replacement** is caught because the init UUID and signature in
   `.sesam/audit/init` are pinned in the first commit and checked over
   git history.
-- **Truncation** is caught by verifying that the audit log at each
-  prior commit is a strict *prefix* of the log at the next - i.e. the
-  log never shrinks across history.
+- **Truncation** is caught by verifying that every entry of the audit
+  log at each prior commit is accounted for at the next: the old log is
+  a *prefix* of the new one, or the new one holds an admin-signed merge
+  that took in exactly the old log (e.g. after a squash merge).
 
 *Caveat:* This only holds true when force pushes are not allowed or at least noticed.
 
@@ -429,8 +430,10 @@ There are two mechanisms that can detect such:
   During verification we compare this stored hash to the hash of the first audit-log entry.
   This test catches complete log substitution.
 - A more thorough test is to check if the audit log is only growing. Since it's append only we would notice
-  truncations by going back in history and seeing if each commit contains an audit log that is an prefix to
-  the audit log in the commit afterwards. This test is too expensive to be run all the time but will also notice
+  truncations by going back in history and seeing if each commit contains an audit log that is a prefix to
+  the audit log in the commit afterwards. A branch that merged its upstream and was then squashed into it
+  puts its own entries first; the merge entry names the hash of the upstream log it took in, which then
+  counts as accounted for. This test is too expensive to be run all the time but will also notice
   if the log was truncated.
 
 #### Denial of Service via broken repo

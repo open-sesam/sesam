@@ -283,12 +283,17 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		case orphanName != "":
 			r = dropWith("references "+orphanName+", whose rename/move was dropped on merge; skipped", true)
 			r.Target = orphanName
-		case revoked != "":
+		case revoked != "" && !revokesAccess(their.Operation):
 			// Verified on their branch, but we revoked the author since the base.
 			r = dropWith(revoked, true)
 			r.Target = their.ChangedBy
 		default:
 			r = resolveTheirs(their, states)
+			if revoked != "" && r.entry != nil {
+				// A removal must not be undone by revoking whoever made it.
+				r.Reason = "author " + their.ChangedBy + " was revoked on our side, but the removal stands; re-signed by " + merger
+				r.conflict = true
+			}
 		}
 
 		if r.entry != nil {
@@ -343,6 +348,7 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		BaseSeqID:     origin.Entries[len(origin.Entries)-1].SeqID,
 		OurTipSeqID:   ours.Entries[len(ours.Entries)-1].SeqID,
 		TheirTipSeqID: theirs.Entries[len(theirs.Entries)-1].SeqID,
+		TheirTipHash:  theirs.Entries[len(theirs.Entries)-1].Hash(),
 		Applied:       applied,
 		Dropped:       dropped,
 		Resolutions:   resolutions,
@@ -415,6 +421,11 @@ func isMergeAdminKill(their *AuditEntrySigned, merger string) (string, bool) {
 	}
 
 	return "", false
+}
+
+// revokesAccess reports whether op takes access away from someone.
+func revokesAccess(op Operation) bool {
+	return op == OpUserKill || op == OpUserRmRecipients
 }
 
 // authorRevoked reports why theirs' author may no longer perform the entry's
@@ -707,6 +718,24 @@ func resolveUserTell(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	return dropWith("user "+d.User+" added on both sides with different identity; kept ours", true)
 }
 
+// renamedOnOurSide returns the merged name of theirs' user `name` when a dropped
+// rename left theirs addressing it by a name that no longer exists. Users are
+// matched by sign key, which a rename keeps.
+func renamedOnOurSide(s *mergeStates, name string) (string, bool) {
+	t, ok := s.theirPrev.UserExists(name)
+	if !ok || t.SignPubKey == "" {
+		return "", false
+	}
+
+	for _, u := range s.merged.Users {
+		if u.SignPubKey == t.SignPubKey {
+			return u.Name, true
+		}
+	}
+
+	return "", false
+}
+
 // resolveUserKill: a kill wins over a concurrent modify. Killing an already-absent
 // user is a no-op dedupe; if our side modified the victim since the base, the
 // kill still wins but is flagged (the modification is discarded).
@@ -718,6 +747,14 @@ func resolveUserKill(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 	defer func() { r.Target = d.User }()
 
 	if _, ok := s.merged.UserExists(d.User); !ok {
+		if name, ok := renamedOnOurSide(s, d.User); ok {
+			return rewriteAs(
+				newAuditEntry(their.ChangedBy, &DetailUserKill{User: name}),
+				"user "+d.User+" is "+name+" on our side; killed under that name",
+				true,
+			)
+		}
+
 		return dropWith("user "+d.User+" already removed", false)
 	}
 
@@ -764,6 +801,12 @@ func resolveUserRegenKey(their *AuditEntrySigned, s *mergeStates) (r resolution)
 	defer func() { r.Target = d.User }()
 
 	if _, ok := s.merged.UserExists(d.User); !ok {
+		// Not redirected: the new private key sits in theirs' signkeys file under
+		// the old name, which the merge cannot carry over.
+		if name, ok := renamedOnOurSide(s, d.User); ok {
+			return dropWith("user "+d.User+" is "+name+" on our side; dropped sign-key rotation - run `sesam user regen-sign-key --user "+name+"`", true)
+		}
+
 		return dropWith("user "+d.User+" gone; dropped sign-key rotation", true)
 	}
 
@@ -871,7 +914,13 @@ func resolveUserRmRecipients(their *AuditEntrySigned, s *mergeStates) (r resolut
 	}
 	defer func() { r.Target = d.User }()
 
-	cur, ok := s.merged.UserExists(d.User)
+	user := d.User
+	cur, ok := s.merged.UserExists(user)
+	if !ok {
+		if user, ok = renamedOnOurSide(s, d.User); ok {
+			cur, _ = s.merged.UserExists(user)
+		}
+	}
 	if !ok {
 		return dropWith("user "+d.User+" gone; removal already satisfied", false)
 	}
@@ -880,9 +929,19 @@ func resolveUserRmRecipients(their *AuditEntrySigned, s *mergeStates) (r resolut
 	// ones), the removal is a satisfied no-op - a dedupe, not a conflict.
 	present := stringSet(cur.Recps.Strings())
 	for _, pk := range d.PubKeys {
-		if present[pk.Key] {
-			return applyAs(their)
+		if !present[pk.Key] {
+			continue
 		}
+
+		if user != d.User {
+			return rewriteAs(
+				newAuditEntry(their.ChangedBy, &DetailUserRmRecipients{User: user, PubKeys: d.PubKeys}),
+				"user "+d.User+" is "+user+" on our side; removed the recipients there",
+				true,
+			)
+		}
+
+		return applyAs(their)
 	}
 
 	return dropWith("recipients of "+d.User+" already removed", false)
