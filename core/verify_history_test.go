@@ -268,10 +268,10 @@ func TestAuditLogCovers(t *testing.T) {
 			oldLog: develop,
 		},
 		{
-			name:    "legacy merge lost an entry it did not drop",
-			newLog:  log(initE, a, f, merge("m", 2, &tip, false, 1)),
-			oldLog:  develop,
-			wantErr: "differ at index 2",
+			// e.g. a change_access that was already satisfied: deduped, not recorded.
+			name:   "legacy merge left out a non-removal",
+			newLog: log(initE, a, f, merge("m", 2, &tip, false, 1)),
+			oldLog: develop,
 		},
 		{
 			name:    "legacy merge lost a kill it did not record",

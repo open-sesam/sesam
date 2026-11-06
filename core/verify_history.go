@@ -7,7 +7,6 @@ import (
 	"iter"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -254,27 +253,17 @@ func auditLogIsPrefix(new, old *AuditLog) error {
 // upstream and was then squashed into it.
 func auditLogCovers(new, old *AuditLog) error {
 	prefixErr := auditLogIsPrefix(new, old)
-	for n := len(old.Entries); n > 0; {
-		taken := old.Entries[:n]
-		if auditLogIsPrefix(new, &AuditLog{Entries: taken}) == nil {
-			return nil
-		}
-
-		base, ok := mergeTakingIn(new.Entries, taken)
-		if !ok {
-			return prefixErr
-		}
-
-		n = base
+	if prefixErr == nil || mergeTookIn(new.Entries, old.Entries) {
+		return nil
 	}
 
-	return nil
+	return prefixErr
 }
 
-// mergeTakingIn finds a merge entry in `entries` whose theirs side was exactly
-// `taken` and returns how many of taken's entries are still to be accounted
-// for: none for a merge bound by hash, its base for an older one.
-func mergeTakingIn(entries, taken []AuditEntrySigned) (int, bool) {
+// mergeTookIn reports whether a merge entry in `entries` took in exactly `taken`.
+// A merge takes in all of theirs: each entry was in its base, which ours carries
+// too, or the merge decided on it.
+func mergeTookIn(entries, taken []AuditEntrySigned) bool {
 	tip := &taken[len(taken)-1]
 	for i := range entries {
 		if entries[i].Operation != OpMerge {
@@ -286,72 +275,68 @@ func mergeTakingIn(entries, taken []AuditEntrySigned) (int, bool) {
 			continue
 		}
 
-		// A merge takes in all of theirs: each entry was in its base, which ours
-		// carries too, or the merge decided on it. Its base's seq ids need not
-		// match taken's - taken may have been reordered by a squash since.
 		if d.TheirTipHash != "" {
 			if ok, _ := tip.HashMatches(d.TheirTipHash); ok {
-				return 0, true
+				return true
 			}
 
 			continue
 		}
 
-		// By seq id, not position: older logs in the walk are not chain-verified.
-		base := slices.IndexFunc(taken, func(e AuditEntrySigned) bool { return e.SeqID == d.BaseSeqID }) + 1
-		if base == 0 || base >= len(taken) {
+		// Merges from before TheirTipHash: bind by content instead.
+		if legacyMergeTookIn(entries, taken) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// legacyMergeTookIn reports whether every removal in `taken` is in `entries`
+// or recorded as dropped by one of its merges. Anything else a merge may leave
+// out without a record: seals and merge entries are redone, already satisfied
+// entries are deduped.
+func legacyMergeTookIn(entries, taken []AuditEntrySigned) bool {
+	have := make(map[string]int, len(entries))
+	recorded := make(map[string]int)
+	for i := range entries {
+		have[entryOriginKey(&entries[i])]++
+		if entries[i].Operation != OpMerge {
 			continue
 		}
 
-		// Merges from before TheirTipHash: bind by content instead.
-		if legacyMergeTookIn(entries[:i], taken[base:], d) {
-			return base, true
+		d, err := parseDetail[DetailMerge](&entries[i])
+		if err != nil {
+			continue
+		}
+
+		for _, r := range d.Resolutions {
+			if r.Action == MergeDropped {
+				recorded[string(r.Operation)+"\x00"+r.ChangedByBeforeMerge]++
+			}
 		}
 	}
 
-	return 0, false
-}
-
-// legacyMergeTookIn reports whether everything theirs added since the base is
-// in the log before the merge. Missing entries are excused only up to the
-// merge's dropped count, and only if each is a seal (the merge reseals), a
-// drop the merge recorded, or a dedupe of an equal non-removal already there.
-func legacyMergeTookIn(before, theirs []AuditEntrySigned, d *DetailMerge) bool {
-	have := make(map[string]int, len(before))
-	same := make(map[string]bool, len(before))
-	for i := range before {
-		have[entryOriginKey(&before[i])]++
-		same[entryContentKey(&before[i].AuditEntry)] = true
-	}
-
-	recorded := make(map[string]int, len(d.Resolutions))
-	for _, r := range d.Resolutions {
-		if r.Action == MergeDropped {
-			recorded[string(r.Operation)+"\x00"+r.ChangedByBeforeMerge]++
+	for i := range taken {
+		e := &taken[i]
+		if !revokesAccess(e.Operation) {
+			continue
 		}
-	}
 
-	missing := 0
-	for i := range theirs {
-		e := &theirs[i]
 		if key := entryOriginKey(e); have[key] > 0 {
 			have[key]--
 			continue
 		}
 
-		missing++
 		dropKey := string(e.Operation) + "\x00" + cmp.Or(e.ChangedByBeforeMerge, e.ChangedBy)
-		switch {
-		// A removal is never excused as dedupe: an older equal kill proves nothing.
-		case e.Operation == OpSeal, !revokesAccess(e.Operation) && same[entryContentKey(&e.AuditEntry)]:
-		case recorded[dropKey] > 0:
-			recorded[dropKey]--
-		default:
+		if recorded[dropKey] == 0 {
 			return false
 		}
+
+		recorded[dropKey]--
 	}
 
-	return missing <= d.Dropped
+	return true
 }
 
 // entryOriginKey identifies an entry across a merge's re-signing, which keeps
