@@ -312,7 +312,7 @@ func legacyMergeTookIn(entries, taken []AuditEntrySigned) bool {
 
 		for _, r := range d.Resolutions {
 			if r.Action == MergeDropped {
-				recorded[string(r.Operation)+"\x00"+r.ChangedByBeforeMerge]++
+				recorded[string(r.Operation)+"\x00"+r.ChangedByBeforeMerge+"\x00"+r.Target]++
 			}
 		}
 	}
@@ -328,7 +328,7 @@ func legacyMergeTookIn(entries, taken []AuditEntrySigned) bool {
 			continue
 		}
 
-		dropKey := string(e.Operation) + "\x00" + cmp.Or(e.ChangedByBeforeMerge, e.ChangedBy)
+		dropKey := string(e.Operation) + "\x00" + cmp.Or(e.ChangedByBeforeMerge, e.ChangedBy) + "\x00" + entryUserTarget(e)
 		if recorded[dropKey] == 0 {
 			return false
 		}

@@ -720,16 +720,24 @@ func resolveUserTell(their *AuditEntrySigned, s *mergeStates) (r resolution) {
 
 // renamedOnOurSide returns the merged name of theirs' user `name` when a dropped
 // rename left theirs addressing it by a name that no longer exists. Users are
-// matched by sign key, which a rename keeps.
+// matched by sign key or by a shared recipient: a rename keeps both, a sign-key
+// rotation the recipients, and verify rejects recipients shared between users.
 func renamedOnOurSide(s *mergeStates, name string) (string, bool) {
 	t, ok := s.theirPrev.UserExists(name)
-	if !ok || t.SignPubKey == "" {
+	if !ok {
 		return "", false
 	}
 
+	recps := stringSet(t.Recps.Strings())
 	for _, u := range s.merged.Users {
-		if u.SignPubKey == t.SignPubKey {
+		if t.SignPubKey != "" && u.SignPubKey == t.SignPubKey {
 			return u.Name, true
+		}
+
+		for _, r := range u.Recps.Strings() {
+			if recps[r] {
+				return u.Name, true
+			}
 		}
 	}
 

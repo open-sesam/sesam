@@ -212,6 +212,7 @@ func TestAuditLogCovers(t *testing.T) {
 	initE, a := e(OpInit, "init", 0), e(OpSecretAdd, "a", 1)
 	f := e(OpUserTell, "f", 2)
 	d1, d2, d3 := e(OpUserTell, "d1", 3), e(OpSeal, "d2", 4), e(OpUserKill, "d3", 5)
+	d3.Detail = []byte(`{"user":"bob"}`)
 
 	// develop: init a d1 d2 (d3). Copies, so seq ids are set per log.
 	develop := log(initE, a, d1, d2)
@@ -221,6 +222,7 @@ func TestAuditLogCovers(t *testing.T) {
 	// olderKill does what d3 does, but is another entry.
 	olderKill := e(OpUserKill, "d3", 9)
 	olderKill.Signature = "older"
+	olderKill.Detail = d3.Detail
 
 	// forged has tip's seq id but other content.
 	forged := tip
@@ -280,9 +282,17 @@ func TestAuditLogCovers(t *testing.T) {
 			wantErr: "differ at index 4",
 		},
 		{
+			name: "legacy merge recorded dropping another user's kill",
+			newLog: log(initE, a, d1, d2, f, merge("m", 4, &tip3, false, 1, ConflictResolutionEntry{
+				Operation: OpUserKill, Action: MergeDropped, ChangedByBeforeMerge: "alice", Target: "carol",
+			})),
+			oldLog:  develop3,
+			wantErr: "differ at index 4",
+		},
+		{
 			name: "legacy merge recorded dropping the kill",
 			newLog: log(initE, a, d1, d2, f, merge("m", 4, &tip3, false, 1, ConflictResolutionEntry{
-				Operation: OpUserKill, Action: MergeDropped, ChangedByBeforeMerge: "alice",
+				Operation: OpUserKill, Action: MergeDropped, ChangedByBeforeMerge: "alice", Target: "bob",
 			})),
 			oldLog: develop3,
 		},
