@@ -1,0 +1,67 @@
+# A feature branch that merged develop - twice, develop moved in between - and
+# then landed on develop by squash or by a merge commit made without sesam
+# (GitHub) puts its own entries before develop's. Develop's old log is then no
+# prefix of the new one, but the merge entries name develop's tip, which
+# accounts for every entry it had.
+
+sesam-repo admin base.txt dev.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+exec git branch develop
+
+# feature: own entry.
+exec git checkout -b feature
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'feature: tell bob'
+
+# develop moves on.
+exec git checkout develop
+cp $TMPDIR/dev.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'develop: reseal s'
+
+# First update of feature, with sesam's drivers.
+exec git checkout feature
+! exec git merge --no-edit develop
+exec git commit --no-edit
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+# develop moves on again; second update.
+exec git checkout develop
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'develop: tell carol'
+
+exec git checkout feature
+! exec git merge --no-edit develop
+exec git commit --no-edit
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+# Squash into develop. feature already contains develop, so git takes feature's
+# tree without calling any driver - same as GitHub. --no-verify: GitHub runs no hooks.
+exec git checkout develop
+exec git merge --squash feature
+exec git commit --no-verify -m 'squash feature'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+exec sesam user ls
+stdout bob
+stdout carol
+
+# Same with a real merge commit (GitHub "Create a merge commit").
+exec git reset --hard HEAD~1
+exec git merge --no-ff --no-verify --no-edit feature
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+-- base.txt --
+S=BASE
+-- dev.txt --
+S=DEV

@@ -94,6 +94,13 @@ func printReport(opts repo.VerifyOptions, report *repo.VerifyReport) {
 		} else {
 			slog.Info(fmt.Sprintf("Audit log history: %s", green("ok")))
 		}
+
+		if report.TruncateStoppedAt != "" {
+			slog.Warn(fmt.Sprintf(
+				"Audit log history: only checked down to commit %s - your identity cannot read the logs before",
+				report.TruncateStoppedAt,
+			))
+		}
 	}
 
 	printForgeReportEntries := func(name string, entries []core.ForgeReportEntry) {

@@ -393,6 +393,7 @@ type DetailMerge struct {
 	BaseSeqID     uint64                    `json:"base_seq_id"`
 	OurTipSeqID   uint64                    `json:"our_tip_seq_id"`
 	TheirTipSeqID uint64                    `json:"their_tip_seq_id"`
+	TheirTipHash  string                    `json:"their_tip_hash,omitempty"`
 	Applied       int                       `json:"applied"`
 	Dropped       int                       `json:"dropped"`
 	Resolutions   []ConflictResolutionEntry `json:"resolutions,omitempty"`
