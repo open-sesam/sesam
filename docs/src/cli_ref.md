@@ -240,9 +240,11 @@ Encrypt and sign changed secrets, and the given ones in any case
 
 ## open, reveal
 
-Decrypt all secrets available to the current user
+Decrypt all secrets available to the current user, and the given ones over your edits
 
 **--all, -a**: Reveal every secret, overwriting plaintext you edited
+
+**--force-diverged**: Also reveal diverged secrets, overwriting your edits with the object's version
 
 **--help, -h**: show help
 

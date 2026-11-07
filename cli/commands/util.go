@@ -148,7 +148,7 @@ func printInfo(format string, args ...any) {
 }
 
 // waysOut is the one sentence every "pick a side" message ends with.
-const waysOut = "`sesam reveal --all` takes the incoming version, `sesam seal --force-diverged` keeps yours"
+const waysOut = "`sesam reveal --force-diverged` takes the incoming version, `sesam seal --force-diverged` keeps yours"
 
 // printNote is sesam's "left these alone" notice on stderr: a headline, the
 // paths, and how to get on. git shows nothing of it, the plaintext is gitignored.
