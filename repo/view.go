@@ -213,7 +213,7 @@ func (v *View) ListSecrets(paths []string) ([]SecretInfo, error) {
 
 // RevealAll writes out every secret the user can read, whatever the plaintext
 // holds. The selective variant is RevealPaths fed by SyncStates.
-func (v *View) RevealAll() error {
+func (v *View) RevealAll(ctx context.Context) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -221,7 +221,7 @@ func (v *View) RevealAll() error {
 		return ErrClosed
 	}
 
-	if err := v.secret.RevealAll(); err != nil {
+	if err := v.secret.RevealAll(ctx); err != nil {
 		return fmt.Errorf("failed to reveal secrets: %w", err)
 	}
 
@@ -230,7 +230,7 @@ func (v *View) RevealAll() error {
 
 // RevealPaths writes out the named secrets from their objects, whatever their
 // plaintext holds. Callers decide; SyncStates tells them what is safe.
-func (v *View) RevealPaths(paths []string) error {
+func (v *View) RevealPaths(ctx context.Context, paths []string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -238,7 +238,7 @@ func (v *View) RevealPaths(paths []string) error {
 		return ErrClosed
 	}
 
-	if err := v.secret.RevealPaths(paths); err != nil {
+	if err := v.secret.RevealPaths(ctx, paths); err != nil {
 		return fmt.Errorf("failed to reveal secrets: %w", err)
 	}
 	return nil
@@ -288,7 +288,7 @@ func (v *View) Clean(ctx context.Context, opts CleanOpts) (*CleanResult, error) 
 	res := &CleanResult{}
 	check := opts.CheckFunc
 	if !opts.CleanEditedOrUnsealed {
-		states, err := v.syncStates(opts.Sync)
+		states, err := v.syncStates(ctx, opts.Sync)
 		if err != nil {
 			return nil, err
 		}
@@ -367,6 +367,7 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 		// The anchor comes from the load-time Verify, which already walked the
 		// history for it - VerifyHistory would otherwise walk it a second time.
 		stoppedAt, err := core.VerifyHistory(
+			ctx,
 			v.sesamDir, v.gitRepo, v.identities, v.opts.pluginUI(), v.vstate.InitCommit(),
 		)
 		if err != nil {
@@ -381,7 +382,7 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 	}
 
 	if opts.Config {
-		conflicts, err := v.configConflicts()
+		conflicts, err := v.configConflicts(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("check config: %w", err)
 		}
@@ -397,13 +398,13 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 // config apply` uses to refuse them. Verify cannot refuse anything, being read-only,
 // but it must not stay silent about a pushed config sitting there ready to be applied by
 // someone who never thought to check.
-func (v *View) configConflicts() ([]diff.Change, error) {
+func (v *View) configConflicts(ctx context.Context) ([]diff.Change, error) {
 	declared, err := v.declaredState()
 	if err != nil {
 		return nil, err
 	}
 
-	return v.committedConflicts(diff.Delta(v.vstate, declared).Changes)
+	return v.committedConflicts(ctx, diff.Delta(v.vstate, declared).Changes)
 }
 
 // declaredState reads sesam.yml fresh rather than through the cached config:
@@ -442,8 +443,8 @@ func (v *View) MergedConfig() (*sesamConf.Document, error) {
 
 // committedConflicts returns those of changes that the config committed at
 // HEAD already declares on its own.
-func (v *View) committedConflicts(changes []diff.Change) ([]diff.Change, error) {
-	committed, err := v.committedConfigChanges()
+func (v *View) committedConflicts(ctx context.Context, changes []diff.Change) ([]diff.Change, error) {
+	committed, err := v.committedConfigChanges(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -461,8 +462,8 @@ func (v *View) committedConflicts(changes []diff.Change) ([]diff.Change, error) 
 // committedConfigChanges returns the steps the configuration committed at HEAD
 // would apply on its own, which is how a step is recognised as not coming from
 // the working tree.
-func (v *View) committedConfigChanges() ([]diff.Change, error) {
-	head, err := v.gitRepo.Head()
+func (v *View) committedConfigChanges(ctx context.Context) ([]diff.Change, error) {
+	head, err := v.gitRepo.Head(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("resolve HEAD: %w", err)
 	}
@@ -476,7 +477,7 @@ func (v *View) committedConfigChanges() ([]diff.Change, error) {
 		return nil, err
 	}
 
-	objs, err := v.gitRepo.Objects()
+	objs, err := v.gitRepo.Objects(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -637,7 +638,7 @@ func (v *View) GitIntegrationNudgeSuppressed() bool {
 }
 
 // GitAddDotSesam is equivalent to `git add .sesam`
-func (v *View) GitAddDotSesam() error {
+func (v *View) GitAddDotSesam(ctx context.Context) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -645,7 +646,7 @@ func (v *View) GitAddDotSesam() error {
 		return ErrClosed
 	}
 
-	return gitAdd(v.sesamDir, sesamSuffix)
+	return gitAdd(ctx, v.sesamDir, sesamSuffix)
 }
 
 // GitAddConfig stages sesam.yml, every config file it includes, and
@@ -653,7 +654,7 @@ func (v *View) GitAddDotSesam() error {
 // lands in git's index exactly as it sits in the worktree. Needed because the
 // sesam-ours merge driver leaves sesam.yml's own index entry untouched: only
 // an explicit add after a config reset keeps it in sync.
-func (v *View) GitAddConfig(deleted []string) error {
+func (v *View) GitAddConfig(ctx context.Context, deleted []string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -668,11 +669,11 @@ func (v *View) GitAddConfig(deleted []string) error {
 	}
 	paths := slices.Sorted(maps.Keys(cfg.SourceFiles))
 
-	return gitAdd(v.sesamDir, slices.Concat(paths, deleted)...)
+	return gitAdd(ctx, v.sesamDir, slices.Concat(paths, deleted)...)
 }
 
 // Status computes a comparison between the revealed and sealed state.
-func (v *View) Status(opts StatusOpts) (*Status, error) {
+func (v *View) Status(ctx context.Context, opts StatusOpts) (*Status, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -703,13 +704,13 @@ func (v *View) Status(opts StatusOpts) (*Status, error) {
 		}
 	}
 
-	states, err := v.syncStates(opts.Sync)
+	states, err := v.syncStates(ctx, opts.Sync)
 	if err != nil {
 		return nil, err
 	}
 
 	if !opts.IgnoreUnmanaged {
-		allPaths, err := v.cleanablePaths()
+		allPaths, err := v.cleanablePaths(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list all paths: %w", err)
 		}
@@ -834,9 +835,9 @@ func (v *View) secretsUnder(rel string) []core.SecretAccess {
 	return out
 }
 
-func (v *View) cleanablePaths() ([]string, error) {
+func (v *View) cleanablePaths(ctx context.Context) ([]string, error) {
 	paths := []string{}
-	err := cleanup(v.root, v.gitRepo, func(path string) (bool, error) {
+	err := cleanup(ctx, v.root, v.gitRepo, func(path string) (bool, error) {
 		paths = append(paths, path)
 		return false, nil
 	})

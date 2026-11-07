@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"iter"
@@ -22,6 +23,7 @@ type auditLogSnapshot struct {
 }
 
 func auditLogHistory(
+	ctx context.Context,
 	sesamDir string,
 	g *Git,
 	ids Identities,
@@ -32,7 +34,7 @@ func auditLogHistory(
 		// No anchor handed down, so the init-file check has not run for this
 		// state (VerifyChain, or a caller without one): walk history for it.
 		var err error
-		if initCommitRev, err = verifyInitFileUnchangedWithRepo(sesamDir, g); err != nil {
+		if initCommitRev, err = verifyInitFileUnchangedWithRepo(ctx, sesamDir, g); err != nil {
 			return nil, fmt.Errorf("verify init file: %w", err)
 		}
 	}
@@ -41,7 +43,7 @@ func auditLogHistory(
 		return func(yield func(*auditLogSnapshot, error) bool) {}, nil
 	}
 
-	fromCommit, err := g.ResolveCommit(fromRev)
+	fromCommit, err := g.ResolveCommit(ctx, fromRev)
 	if err != nil {
 		return nil, fmt.Errorf("resolve revision %q: %w", fromRev, err)
 	}
@@ -63,7 +65,7 @@ func auditLogHistory(
 	initHash := strings.TrimSpace(string(initData))
 
 	return func(yield func(*auditLogSnapshot, error) bool) {
-		objs, err := g.Objects()
+		objs, err := g.Objects(ctx)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -87,6 +89,11 @@ func auditLogHistory(
 		var sawGap bool
 		var child *GitCommit // the newer commit this one was reached from
 		for {
+			if err := ctx.Err(); err != nil {
+				yield(nil, err)
+				return
+			}
+
 			commit, ok, err := objs.Commit(hash)
 			if err == nil && !ok {
 				err = errors.New("no such commit")
@@ -112,7 +119,7 @@ func auditLogHistory(
 				// leave a shortened log with nothing to compare it against.
 				// Only if "ours" never had a vault: otherwise the log was deleted
 				// here, and crossing over would skip whatever it held.
-				if alt, ok := logCarryingParent(g, objs, initCommitRev, child, commit, auditPathRel); ok {
+				if alt, ok := logCarryingParent(ctx, g, objs, initCommitRev, child, commit, auditPathRel); ok {
 					hash = alt
 					continue
 				}
@@ -184,6 +191,7 @@ func auditLogHistory(
 // rather than the mainline where the two part ways. Only a parent that really
 // carries the log is returned, so the caller cannot bounce back in here.
 func logCarryingParent(
+	ctx context.Context,
 	g *Git,
 	objs *GitObjects,
 	initCommit string,
@@ -195,7 +203,7 @@ func logCarryingParent(
 		return "", false
 	}
 
-	if hadVault, err := g.IsAncestor(initCommit, tried.Hash); err != nil || hadVault {
+	if hadVault, err := g.IsAncestor(ctx, initCommit, tried.Hash); err != nil || hadVault {
 		return "", false
 	}
 
@@ -353,6 +361,7 @@ func entryOriginKey(e *AuditEntrySigned) string {
 // then this function does not find the old audit log before that rename. We could use git's renames,
 // but there will edge cases too if the file was renamed and a user was rotated (git looks for 50% matching content).
 func VerifyHistory(
+	ctx context.Context,
 	sesamDir string,
 	g *Git,
 	ids Identities,
@@ -360,6 +369,7 @@ func VerifyHistory(
 	initCommitRev string,
 ) (stoppedAt string, err error) {
 	auditLogIter, err := auditLogHistory(
+		ctx,
 		sesamDir,
 		g,
 		ids,

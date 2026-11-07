@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -176,15 +177,20 @@ func TestSealAndRevealAll(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	writeSecret(t, mgr.SesamDir, "secrets/test", "secret-content")
 
-	require.NoError(t, mgr.Seal(true, nil))
+	require.NoError(t, mgr.Seal(t.Context(), true, nil))
 	require.FileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
 
 	// Remove plaintext, then reveal.
 	os.Remove(filepath.Join(mgr.SesamDir, "secrets/test"))
-	require.NoError(t, mgr.RevealAll())
+	require.NoError(t, mgr.RevealAll(t.Context()))
 
 	got, _ := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/test"))
 	require.Equal(t, "secret-content", string(got))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, mgr.Seal(ctx, true, nil), context.Canceled)
+	require.ErrorIs(t, mgr.RevealAll(ctx), context.Canceled)
 }
 
 func TestReveal(t *testing.T) {
@@ -311,7 +317,7 @@ func TestSealRefusesSymlinkedPlaintext(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(mgr.SesamDir, "secrets"), 0o700))
 	require.NoError(t, os.Symlink("../other", filepath.Join(mgr.SesamDir, "secrets/test")))
 
-	require.ErrorContains(t, mgr.Seal(true, nil), "is a symlink")
+	require.ErrorContains(t, mgr.Seal(t.Context(), true, nil), "is a symlink")
 	require.NoFileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
 }
 
@@ -323,14 +329,14 @@ func TestRevealRefusesSymlinkedParent(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(mgr.SesamDir, "target"), 0o700))
 	require.NoError(t, os.Symlink("target", filepath.Join(mgr.SesamDir, "secrets")))
 
-	require.ErrorContains(t, mgr.RevealAll(), "is a symlink")
+	require.ErrorContains(t, mgr.RevealAll(t.Context()), "is a symlink")
 	require.NoFileExists(t, filepath.Join(mgr.SesamDir, "target/test"))
 }
 
 func TestSealFailsMissingPlaintext(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	// Don't write the secret file - seal should fail.
-	err := mgr.Seal(true, nil)
+	err := mgr.Seal(t.Context(), true, nil)
 	require.Error(t, err, "seal should fail when plaintext file is missing")
 }
 
@@ -341,11 +347,11 @@ func TestSealNoopSkipsAuditEntry(t *testing.T) {
 	mgr := sealedSecretManager(t)
 
 	before := len(mgr.AuditLog.Entries)
-	require.NoError(t, mgr.Seal(false, nil))
+	require.NoError(t, mgr.Seal(t.Context(), false, nil))
 	require.Len(t, mgr.AuditLog.Entries, before, "a no-op seal must not append an audit entry")
 
 	writeSecret(t, mgr.SesamDir, "secrets/test", "changed")
-	require.NoError(t, mgr.Seal(false, nil))
+	require.NoError(t, mgr.Seal(t.Context(), false, nil))
 	require.Len(t, mgr.AuditLog.Entries, before+1, "a reseal must append exactly one entry")
 }
 
@@ -356,11 +362,11 @@ func TestSealIncrementalNewSecret(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	writeSecret(t, mgr.SesamDir, "secrets/test", "secret-content")
 
-	require.NoError(t, mgr.Seal(false, nil))
+	require.NoError(t, mgr.Seal(t.Context(), false, nil))
 	require.FileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
 
 	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/test")))
-	require.NoError(t, mgr.RevealAll())
+	require.NoError(t, mgr.RevealAll(t.Context()))
 	got, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/test"))
 	require.NoError(t, err)
 	require.Equal(t, "secret-content", string(got))
@@ -377,7 +383,7 @@ func TestSealIncrementalSkipsUnchanged(t *testing.T) {
 	before, err := os.ReadFile(obj)
 	require.NoError(t, err)
 
-	require.NoError(t, mgr.Seal(false, nil))
+	require.NoError(t, mgr.Seal(t.Context(), false, nil))
 
 	after, err := os.ReadFile(obj)
 	require.NoError(t, err)
@@ -394,14 +400,14 @@ func TestSealIncrementalResealsChangedPlaintext(t *testing.T) {
 	require.NoError(t, err)
 
 	writeSecret(t, mgr.SesamDir, "secrets/test", "new-content")
-	require.NoError(t, mgr.Seal(false, nil))
+	require.NoError(t, mgr.Seal(t.Context(), false, nil))
 
 	after, err := os.ReadFile(obj)
 	require.NoError(t, err)
 	require.NotEqual(t, before, after, "changed plaintext must be re-sealed")
 
 	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/test")))
-	require.NoError(t, mgr.RevealAll())
+	require.NoError(t, mgr.RevealAll(t.Context()))
 	got, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/test"))
 	require.NoError(t, err)
 	require.Equal(t, "new-content", string(got))
@@ -417,7 +423,7 @@ func TestSealIncrementalResealsOnRecipientChange(t *testing.T) {
 	// A "dev" secret, sealed while only admin is a recipient.
 	writeSecret(t, mgr.SesamDir, "secrets/dev", "dev-content")
 	require.NoError(t, onlyErr(mgr.SecretAdd("secrets/dev", []string{"dev"}, false)))
-	require.NoError(t, mgr.Seal(false, nil))
+	require.NoError(t, mgr.Seal(t.Context(), false, nil))
 
 	obj := filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/dev"))
 	before, err := os.ReadFile(obj)
@@ -428,7 +434,7 @@ func TestSealIncrementalResealsOnRecipientChange(t *testing.T) {
 	tell := bob.DetailUserTell([]string{"dev"})
 	require.NoError(t, mgr.State.FeedEntry(mgr.Signer, newAuditEntry("admin", &tell)))
 
-	require.NoError(t, mgr.Seal(false, nil))
+	require.NoError(t, mgr.Seal(t.Context(), false, nil))
 
 	after, err := os.ReadFile(obj)
 	require.NoError(t, err)
@@ -443,7 +449,7 @@ func TestSealIncrementalResealsOnRecipientChange(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/dev")))
-	require.NoError(t, bobMgr.RevealAll())
+	require.NoError(t, bobMgr.RevealAll(t.Context()))
 	got, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/dev"))
 	require.NoError(t, err)
 	require.Equal(t, "dev-content", string(got), "new recipient must be able to decrypt")
@@ -467,7 +473,7 @@ func TestSealDischargesObligationWithoutRecipientChange(t *testing.T) {
 	require.NotZero(t, mgr.State.SealRequiredSeqID, "change_access must record a seal obligation")
 
 	entriesBefore := len(mgr.AuditLog.Entries)
-	require.NoError(t, mgr.Seal(false, nil))
+	require.NoError(t, mgr.Seal(t.Context(), false, nil))
 
 	require.Zero(t, mgr.State.SealRequiredSeqID, "seal must clear the pending obligation")
 	require.Len(t, mgr.AuditLog.Entries, entriesBefore+1, "seal must append exactly one entry to discharge the obligation")
@@ -505,7 +511,7 @@ func TestSealIncrementalResealsOnOrphanedSignature(t *testing.T) {
 			report := VerifyIntegrity(mgr.root, mgr.State, mgr.Keyring)
 			require.False(t, report.OK(), "old footer must not verify after regen")
 
-			require.NoError(t, mgr.Seal(false, map[string]SealAdvice{"secrets/test": tc.advice}))
+			require.NoError(t, mgr.Seal(t.Context(), false, map[string]SealAdvice{"secrets/test": tc.advice}))
 
 			after, err := os.ReadFile(obj)
 			require.NoError(t, err)
@@ -520,7 +526,7 @@ func TestSealIncrementalResealsOnOrphanedSignature(t *testing.T) {
 func TestRevealFailsMissingAge(t *testing.T) {
 	mgr := testSecretManagerFull(t)
 	// No .sesam files exist, so reveal should fail.
-	err := mgr.RevealAll()
+	err := mgr.RevealAll(t.Context())
 	require.Error(t, err, "reveal should fail when .sesam file is missing")
 }
 
@@ -547,7 +553,7 @@ func TestRevealSkipsInaccessibleSecrets(t *testing.T) {
 	// naive Reveal would hit the inaccessible secret first.
 	writeSecret(t, mgr.SesamDir, "secrets/devstuff", "dev-content")
 	require.NoError(t, onlyErr(mgr.SecretAdd("secrets/devstuff", []string{"dev"}, false)))
-	require.NoError(t, mgr.Seal(true, nil))
+	require.NoError(t, mgr.Seal(t.Context(), true, nil))
 
 	bobMgr, err := BuildSecretManager(
 		mgr.SesamDir, mgr.root, Identities{bob.Identity}, bob.Signer,
@@ -561,7 +567,7 @@ func TestRevealSkipsInaccessibleSecrets(t *testing.T) {
 	require.NoError(t, os.Remove(filepath.Join(mgr.SesamDir, "secrets/devstuff")))
 
 	// Skips the admin-only "secrets/test", reveals the accessible "devstuff".
-	require.NoError(t, bobMgr.RevealAll())
+	require.NoError(t, bobMgr.RevealAll(t.Context()))
 
 	got, err := os.ReadFile(filepath.Join(mgr.SesamDir, "secrets/devstuff"))
 	require.NoError(t, err)
@@ -578,7 +584,7 @@ func sealedSecretManager(t *testing.T) *SecretManager {
 	mgr := testSecretManagerFull(t)
 
 	writeSecret(t, mgr.SesamDir, "secrets/test", "secret-content")
-	require.NoError(t, mgr.Seal(true, nil))
+	require.NoError(t, mgr.Seal(t.Context(), true, nil))
 	return mgr
 }
 
@@ -663,7 +669,7 @@ func TestSecretMove(t *testing.T) {
 	require.NoError(t, mgr.SecretMove("secrets/test", "secrets/moved"))
 	// SecretMove no longer emits its own seal entry; the caller seals once
 	// after the whole move cascade (here, a single Seal).
-	require.NoError(t, mgr.Seal(true, nil))
+	require.NoError(t, mgr.Seal(t.Context(), true, nil))
 
 	// The encrypted object moved.
 	require.NoFileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
@@ -743,7 +749,7 @@ func TestSecretMoveNotYetRevealed(t *testing.T) {
 
 	require.NoError(t, mgr.SecretMove("secrets/test", "secrets/moved"))
 	// The caller seals once after the move (SecretMove no longer self-seals).
-	require.NoError(t, mgr.Seal(true, nil))
+	require.NoError(t, mgr.Seal(t.Context(), true, nil))
 
 	require.NoFileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
 	require.FileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/moved")))
@@ -837,13 +843,13 @@ func TestSecretRemoveThenSeal(t *testing.T) {
 	// Add a second secret so Seal still has work to do.
 	writeSecret(t, mgr.SesamDir, "secrets/other", "other-content")
 	require.NoError(t, onlyErr(mgr.SecretAdd("secrets/other", []string{"admin"}, false)))
-	require.NoError(t, mgr.Seal(true, nil))
+	require.NoError(t, mgr.Seal(t.Context(), true, nil))
 
 	require.NoError(t, mgr.SecretRemove("secrets/test"))
 
 	// Seal after removal should only seal the remaining secret.
 	writeSecret(t, mgr.SesamDir, "secrets/other", "other-content")
-	require.NoError(t, mgr.Seal(true, nil))
+	require.NoError(t, mgr.Seal(t.Context(), true, nil))
 
 	require.NoFileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
 	require.FileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/other")))
@@ -883,7 +889,7 @@ func TestSealMultiple(t *testing.T) {
 	writeSecret(t, sesamDir, "secrets/a", "aaa")
 	writeSecret(t, sesamDir, "secrets/b", "bbb")
 
-	require.NoError(t, mgr.Seal(true, nil))
+	require.NoError(t, mgr.Seal(t.Context(), true, nil))
 
 	for _, p := range []string{"secrets/a", "secrets/b"} {
 		require.FileExists(t, filepath.Join(mgr.SesamDir, mgr.cryptPath(p)))
@@ -917,7 +923,7 @@ func TestSealRejectsUnauthorizedUser(t *testing.T) {
 	// Bob has plaintext on disk (left over from sealedSecretManager) but no
 	// access to secrets/test, so Seal must preserve the existing ciphertext
 	// rather than re-seal it.
-	require.NoError(t, bobMgr.Seal(true, nil))
+	require.NoError(t, bobMgr.Seal(t.Context(), true, nil))
 
 	current, err := os.ReadFile(filepath.Join(mgr.SesamDir, mgr.cryptPath("secrets/test")))
 	require.NoError(t, err)
@@ -970,7 +976,7 @@ func TestSealNonAdminPreservesCiphertextItCannotDecrypt(t *testing.T) {
 
 	writeSecret(t, sesamDir, "secrets/admin-only", "admin payload")
 	writeSecret(t, sesamDir, "secrets/dev-shared", "dev payload")
-	require.NoError(t, adminMgr.Seal(true, nil))
+	require.NoError(t, adminMgr.Seal(t.Context(), true, nil))
 
 	adminOnlyBefore, err := os.ReadFile(filepath.Join(adminMgr.SesamDir, adminMgr.cryptPath("secrets/admin-only")))
 	require.NoError(t, err)
@@ -990,7 +996,7 @@ func TestSealNonAdminPreservesCiphertextItCannotDecrypt(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	require.NoError(t, bobMgr.Seal(true, nil), "non-admin should be able to seal")
+	require.NoError(t, bobMgr.Seal(t.Context(), true, nil), "non-admin should be able to seal")
 
 	adminOnlyAfter, err := os.ReadFile(filepath.Join(bobMgr.SesamDir, bobMgr.cryptPath("secrets/admin-only")))
 	require.NoError(t, err)

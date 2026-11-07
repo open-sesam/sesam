@@ -110,7 +110,7 @@ func bootstrappedDir(t *testing.T, admin *testIdentity) string {
 func reloadSesamRepo(t *testing.T, dir string, who *testIdentity) *Repo {
 	t.Helper()
 
-	r, err := Load(dir, []string{who.Path}, RepoOpts{LockTimeout: 5 * time.Second})
+	r, err := Load(t.Context(), dir, []string{who.Path}, RepoOpts{LockTimeout: 5 * time.Second})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = r.Close() })
 

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,7 +20,7 @@ func TestVerifyInitFileUnchangedNoCommitsTouchingInit(t *testing.T) {
 	initPath := filepath.Join(sesamDir, ".sesam", "audit", "init")
 	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0o600))
 
-	_, err := verifyInitFileUnchanged(sesamDir)
+	_, err := verifyInitFileUnchanged(t.Context(), sesamDir)
 	require.NoError(t, err)
 }
 
@@ -30,7 +31,7 @@ func TestVerifyInitFileUnchangedOneCommit(t *testing.T) {
 	require.NoError(t, os.WriteFile(initPath, []byte("somehash"), 0o600))
 	gitCommitAll(t, repo, "init commit")
 
-	_, err := verifyInitFileUnchanged(sesamDir)
+	_, err := verifyInitFileUnchanged(t.Context(), sesamDir)
 	require.NoError(t, err)
 }
 
@@ -45,7 +46,7 @@ func TestVerifyInitFileUnchangedMultipleCommits(t *testing.T) {
 	require.NoError(t, os.WriteFile(initPath, []byte("hash2"), 0o600))
 	gitCommitAll(t, repo, "tampered commit")
 
-	_, err := verifyInitFileUnchanged(sesamDir)
+	_, err := verifyInitFileUnchanged(t.Context(), sesamDir)
 	require.Error(t, err, "should detect init file modification")
 }
 
@@ -65,7 +66,7 @@ func TestVerifyInitFileUnchangedRemovedAndReadded(t *testing.T) {
 	require.NoError(t, os.WriteFile(initPath, []byte("stable-hash"), 0o600))
 	gitCommitAll(t, repo, "restore init")
 
-	_, err := verifyInitFileUnchanged(sesamDir)
+	_, err := verifyInitFileUnchanged(t.Context(), sesamDir)
 	require.ErrorContains(t, err, "removed and re-added")
 }
 
@@ -80,7 +81,7 @@ func TestVerifyInitFileUnchangedMultipleCommitsUnchanged(t *testing.T) {
 	writeSecret(t, sesamDir, "other.txt", "data")
 	gitCommitAll(t, repo, "second commit")
 
-	_, err := verifyInitFileUnchanged(sesamDir)
+	_, err := verifyInitFileUnchanged(t.Context(), sesamDir)
 	require.NoError(t, err, "init was not changed across commits")
 }
 
@@ -108,7 +109,7 @@ func TestVerifyInitFileUnchangedMergeSameContent(t *testing.T) {
 	require.NoError(t, os.WriteFile(initPath, []byte("stable-hash"), 0o600))
 	gitCommit(t, repo, "chores: merge with main", mainLine, side)
 
-	_, err := verifyInitFileUnchanged(sesamDir)
+	_, err := verifyInitFileUnchanged(t.Context(), sesamDir)
 	require.NoError(t, err, "merge re-touching init with identical content is not a modification")
 }
 
@@ -129,7 +130,7 @@ func TestVerifyInitFileUnchangedAnchorAcrossMerge(t *testing.T) {
 	side := commit("side", initCommit)
 	commit("merge", mainLine, side)
 
-	anchor, err := verifyInitFileUnchanged(sesamDir)
+	anchor, err := verifyInitFileUnchanged(t.Context(), sesamDir)
 	require.NoError(t, err)
 	require.Equal(t, initCommit, anchor)
 }
@@ -156,7 +157,7 @@ func TestVerifyInitFileUnchangedParallelIntroducers(t *testing.T) {
 	squashed := commit("squashed intro", true, root)
 	commit("merge", true, intro, squashed)
 
-	anchor, err := verifyInitFileUnchanged(sesamDir)
+	anchor, err := verifyInitFileUnchanged(t.Context(), sesamDir)
 	require.NoError(t, err)
 	require.Equal(t, intro, anchor)
 }
@@ -164,15 +165,37 @@ func TestVerifyInitFileUnchangedParallelIntroducers(t *testing.T) {
 func TestVerifyInitFileUnchangedNotAGitRepo(t *testing.T) {
 	sesamDir := testRepo(t) // no git init
 
-	_, err := verifyInitFileUnchanged(sesamDir)
+	_, err := verifyInitFileUnchanged(t.Context(), sesamDir)
 	require.Error(t, err, "should fail for non-git directory")
 }
 
 func TestVerifyInitFileUnchangedNoCommitsAtAll(t *testing.T) {
 	sesamDir, _ := testGitRepo(t)
 	// Zero commits - an unborn HEAD is treated as "fine during init".
-	_, err := verifyInitFileUnchanged(sesamDir)
+	_, err := verifyInitFileUnchanged(t.Context(), sesamDir)
 	require.NoError(t, err)
+}
+
+func TestGitCanceled(t *testing.T) {
+	_, repo := testGitRepo(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := repo.Head(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+
+	_, err = repo.Objects(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+
+	// Cancelling a running reader reports the cancel, not the dead pipe.
+	ctx, cancel = context.WithCancel(t.Context())
+	objs, err := repo.Objects(ctx)
+	require.NoError(t, err)
+	cancel()
+	_, _, err = objs.Blob("HEAD:nope")
+	require.ErrorIs(t, err, context.Canceled)
+	require.Error(t, objs.Close())
 }
 
 func TestGitObjects(t *testing.T) {
@@ -183,7 +206,7 @@ func TestGitObjects(t *testing.T) {
 	writeSecret(t, sesamDir, "other", "x")
 	second := gitCommit(t, repo, "second")
 
-	objs, err := repo.Objects()
+	objs, err := repo.Objects(t.Context())
 	require.NoError(t, err)
 	defer func() { require.NoError(t, objs.Close()) }()
 

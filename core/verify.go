@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
@@ -984,8 +985,8 @@ func (s *VerifiedState) AdvanceTo(seqID uint64) error {
 // Verify is like VerifyChain but additionally checks the trust-anchor file
 // (.sesam/audit/init) and the latest seal's root-hash against the on-disk
 // secret footers. See [VerifyChain] for pluginUI semantics.
-func Verify(log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, error) {
-	initCommit, err := verifyInitFileUnchanged(log.SesamDir)
+func Verify(ctx context.Context, log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, error) {
+	initCommit, err := verifyInitFileUnchanged(ctx, log.SesamDir)
 	if err != nil {
 		return nil, fmt.Errorf("init file check: %w", err)
 	}

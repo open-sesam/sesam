@@ -241,12 +241,12 @@ func TestExpectedGitConfigWithoutGitBinary(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	dir := bootstrappedDir(t, admin)
 
-	gitRepo, err := openGitRepo(dir)
+	gitRepo, err := openGitRepo(t.Context(), dir)
 	require.NoError(t, err)
 
 	t.Setenv("PATH", "")
 
-	entries, err := expectedGitConfig(gitRepo, dir)
+	entries, err := expectedGitConfig(t.Context(), gitRepo, dir)
 	require.NoError(t, err)
 
 	var sections []string
@@ -260,7 +260,7 @@ func TestExpectedGitConfigWithoutGitBinary(t *testing.T) {
 
 func TestGitConfigHasSection(t *testing.T) {
 	dir := freshGitRepo(t)
-	require.NoError(t, gitConfigLocal(dir, "hook.sesam-precommit-a%2Fb.event", "pre-commit"))
+	require.NoError(t, gitConfigLocal(t.Context(), dir, "hook.sesam-precommit-a%2Fb.event", "pre-commit"))
 
 	tests := []struct {
 		section string
@@ -273,7 +273,7 @@ func TestGitConfigHasSection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.section, func(t *testing.T) {
-			got, err := gitConfigHasSection(dir, tt.section)
+			got, err := gitConfigHasSection(t.Context(), dir, tt.section)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
 		})
@@ -282,9 +282,9 @@ func TestGitConfigHasSection(t *testing.T) {
 
 func TestGitConfigLocalList(t *testing.T) {
 	dir := freshGitRepo(t)
-	require.NoError(t, gitConfigLocal(dir, "merge.sesam-Sub%2Fdir.driver", "sesam merge %O\n%A"))
-	require.NoError(t, gitConfigLocal(dir, "--add", "alias.sesam", "first"))
-	require.NoError(t, gitConfigLocal(dir, "--add", "alias.sesam", "last"))
+	require.NoError(t, gitConfigLocal(t.Context(), dir, "merge.sesam-Sub%2Fdir.driver", "sesam merge %O\n%A"))
+	require.NoError(t, gitConfigLocal(t.Context(), dir, "--add", "alias.sesam", "first"))
+	require.NoError(t, gitConfigLocal(t.Context(), dir, "--add", "alias.sesam", "last"))
 
 	config, err := gitConfigList(t.Context(), dir, "--local")
 	require.NoError(t, err)

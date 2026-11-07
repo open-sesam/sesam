@@ -30,8 +30,8 @@ type ManagedFileCheck struct {
 // GitWorktreeRoot opens the git repository containing dir (searching upward for
 // a .git) and returns the absolute path of its worktree root. It errors when
 // dir is not inside a git repository.
-func GitWorktreeRoot(dir string) (string, error) {
-	g, err := core.OpenGit(dir)
+func GitWorktreeRoot(ctx context.Context, dir string) (string, error) {
+	g, err := core.OpenGit(ctx, dir)
 	if err != nil {
 		return "", err
 	}
@@ -44,12 +44,12 @@ func GitWorktreeRoot(dir string) (string, error) {
 // git >= 2.54, the hook commands) against what `sesam init` would install for
 // the repo at sesamDir.
 func CheckGitConfig(ctx context.Context, sesamDir string) ([]GitConfigCheck, error) {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
 	if err != nil {
 		return nil, err
 	}
 
-	entries, err := expectedGitConfig(gitRepo, resolvedDir)
+	entries, err := expectedGitConfig(ctx, gitRepo, resolvedDir)
 	if err != nil {
 		return nil, err
 	}
@@ -80,8 +80,8 @@ func CheckGitConfig(ctx context.Context, sesamDir string) ([]GitConfigCheck, err
 
 // CheckGitIgnore reports whether the repo's .gitignore still contains the lines
 // `sesam init` writes.
-func CheckGitIgnore(sesamDir string) (ManagedFileCheck, error) {
-	return checkManagedFile(sesamDir, ".gitignore", gitignoreTemplate)
+func CheckGitIgnore(ctx context.Context, sesamDir string) (ManagedFileCheck, error) {
+	return checkManagedFile(ctx, sesamDir, ".gitignore", gitignoreTemplate)
 }
 
 // CheckGitAttributes reports whether the repo's .gitattributes still contains
@@ -89,8 +89,8 @@ func CheckGitIgnore(sesamDir string) (ManagedFileCheck, error) {
 // its driver names, so it must be rendered with the repo's suffix first -
 // comparing the raw template would hunt for the literal placeholder and always
 // report a mismatch.
-func CheckGitAttributes(sesamDir string) (ManagedFileCheck, error) {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+func CheckGitAttributes(ctx context.Context, sesamDir string) (ManagedFileCheck, error) {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
 	if err != nil {
 		return ManagedFileCheck{}, err
 	}
@@ -105,11 +105,11 @@ func CheckGitAttributes(sesamDir string) (ManagedFileCheck, error) {
 		return ManagedFileCheck{}, err
 	}
 
-	return checkManagedFile(sesamDir, ".gitattributes", rendered)
+	return checkManagedFile(ctx, sesamDir, ".gitattributes", rendered)
 }
 
-func checkManagedFile(sesamDir, name, template string) (ManagedFileCheck, error) {
-	resolvedDir, err := resolveSesamDir(sesamDir)
+func checkManagedFile(ctx context.Context, sesamDir, name, template string) (ManagedFileCheck, error) {
+	resolvedDir, err := resolveSesamDir(ctx, sesamDir)
 	if err != nil {
 		return ManagedFileCheck{}, err
 	}

@@ -77,7 +77,7 @@ func (s *Stage) ConfigApply(ctx context.Context, opts ConfigApplyOpts) ([]diff.C
 		return plan.Changes, nil
 	}
 
-	if err := s.applyPreflight(plan.Changes, opts); err != nil {
+	if err := s.applyPreflight(ctx, plan.Changes, opts); err != nil {
 		return nil, err
 	}
 
@@ -132,7 +132,7 @@ func keyMoveHint(plan []diff.Change, failed diff.Change, err error) string {
 
 // applyPreflight rejects plans that would fail part-way through, so the user
 // gets one clear reason instead of an error from the middle of the log.
-func (s *Stage) applyPreflight(changes []diff.Change, opts ConfigApplyOpts) error {
+func (s *Stage) applyPreflight(ctx context.Context, changes []diff.Change, opts ConfigApplyOpts) error {
 	me, exists := s.vstate.UserExists(s.whoami)
 	if !exists {
 		return fmt.Errorf("user %s is not part of this repository", s.whoami)
@@ -184,18 +184,18 @@ func (s *Stage) applyPreflight(changes []diff.Change, opts ConfigApplyOpts) erro
 		}
 	}
 
-	return s.requireLocalChanges(changes, opts)
+	return s.requireLocalChanges(ctx, changes, opts)
 }
 
 // requireLocalChanges enforces the rule that an apply may only carry out what
 // the working tree asks for: a step the committed configuration already
 // declares did not originate with the user running the command.
-func (s *Stage) requireLocalChanges(changes []diff.Change, opts ConfigApplyOpts) error {
+func (s *Stage) requireLocalChanges(ctx context.Context, changes []diff.Change, opts ConfigApplyOpts) error {
 	if opts.Force {
 		return nil
 	}
 
-	alreadyCommitted, err := s.committedConflicts(changes)
+	alreadyCommitted, err := s.committedConflicts(ctx, changes)
 	if err != nil {
 		return err
 	}
