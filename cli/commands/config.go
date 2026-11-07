@@ -206,7 +206,7 @@ func HandleConfigReset(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 		if force {
 			slog.Info("wrote it fresh from the audit log - comments and descriptions are gone")
 		} else {
-			slog.Info("would write it fresh from the audit log - comments and descriptions would be lost")
+			slog.Info("would write sesam.yml and sub-configs fresh from the audit log - comments and descriptions would be lost")
 		}
 
 		if force {
