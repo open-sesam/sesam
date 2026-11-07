@@ -53,7 +53,5 @@ We can model such a case using **template secrets**:
       - type: password
         name: smtp_password
         encoding: shell # json, url, ...
-      # You can also include other files in here if you want to.
-      - include: other.yml
 ```
 

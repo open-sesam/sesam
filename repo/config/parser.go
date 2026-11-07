@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -67,10 +68,9 @@ type secretEntry struct {
 	secret Secret
 }
 
-// Load is the entry function for ConfigRepository. The main sesam.yml file
-// should be passed to Load as a repo-relative path. It parses the file and
-// every transitively-included file into the AST, validating each against the
-// JSON schema as it goes.
+// Load is the entry function for ConfigRepository. It reads the main file at
+// the root-relative path and every sub-config Discover finds. Each file is
+// parsed into the AST and validated against the JSON schema as it goes.
 func Load(root *os.Root, path string) (*Config, error) {
 	return load(root, path, true)
 }
@@ -80,6 +80,46 @@ func Load(root *os.Root, path string) (*Config, error) {
 // structural checks (secretEntries) run.
 func LoadForRepair(root *os.Root, path string) (*Config, error) {
 	return load(root, path, false)
+}
+
+// Discover lists every sesam.yml below root, sorted. It skips .git, .sesam and
+// the fork dir as well as any directory holding its own .sesam (a separate
+// sesam repo). .gitignore is deliberately not consulted: the one sesam init
+// writes ignores every subdirectory, sub-configs included.
+func Discover(root *os.Root) ([]string, error) {
+	var paths []string
+	err := fs.WalkDir(root.FS(), ".", func(p string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel := filepath.FromSlash(p)
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".sesam", ".git", ".sesam-tmp":
+				return fs.SkipDir
+			}
+
+			if p != "." {
+				if _, err := root.Stat(filepath.Join(rel, ".sesam")); err == nil {
+					return fs.SkipDir
+				}
+			}
+			return nil
+		}
+
+		if entry.Name() == "sesam.yml" {
+			paths = append(paths, rel)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan for config files: %w", err)
+	}
+
+	slices.Sort(paths)
+	return paths, nil
 }
 
 func load(root *os.Root, path string, validate bool) (*Config, error) {
@@ -98,15 +138,32 @@ func load(root *os.Root, path string, validate bool) (*Config, error) {
 	}
 	configRepo.JSONSchema = sch
 
-	src, err := configRepo.loadTree(path)
+	src, err := configRepo.loadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config tree: %w", err)
+		return nil, fmt.Errorf("failed to load config %s: %w", path, err)
 	}
 	configRepo.MainFile = src
+	configRepo.SourceFiles[path] = src
+
+	subs, err := Discover(root)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, sub := range subs {
+		if _, ok := configRepo.SourceFiles[sub]; ok {
+			continue
+		}
+
+		subSrc, err := configRepo.loadFile(sub)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load sub-config %s: %w", sub, err)
+		}
+		configRepo.SourceFiles[sub] = subSrc
+	}
 
 	// Walk the merged secrets once now so structural errors (a non-mapping
-	// secrets item, a dangling include) surface at load time rather than on the
-	// first read.
+	// secrets item) surface at load time rather than on the first read.
 	if _, err := configRepo.secretEntries(); err != nil {
 		return nil, fmt.Errorf("config structure seems off: %w", err)
 	}
@@ -127,8 +184,10 @@ func load(root *os.Root, path string, validate bool) (*Config, error) {
 // Create returns an empty config for path, held in memory only - nothing is
 // read from or written to disk until Save. It exists for the callers that
 // build a config from another source of truth rather than parse one, namely
-// `sesam config reset` when sesam.yml is gone or too broken to read.
-func Create(root *os.Root, path string) (*Config, error) {
+// `sesam config reset` when sesam.yml is gone or too broken to read. Every
+// path in subs is registered as an empty sub-config, so secrets beneath it
+// land there again; one that stays empty is pruned like any other.
+func Create(root *os.Root, path string, subs []string) (*Config, error) {
 	sch, err := compileSchema()
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile json schema: %w", err)
@@ -140,6 +199,11 @@ func Create(root *os.Root, path string) (*Config, error) {
 		root:        root,
 	}
 	c.MainFile = c.newFile(filepath.Clean(path))
+	for _, sub := range subs {
+		if _, ok := c.SourceFiles[filepath.Clean(sub)]; !ok {
+			c.newFile(filepath.Clean(sub))
+		}
+	}
 
 	return c, nil
 }
@@ -205,7 +269,7 @@ func (c *Config) validate(v any, path string) error {
 }
 
 // loadFile parses one file into the AST (comments attached to nodes) and
-// validates it against the schema. It does not follow includes.
+// validates it against the schema.
 func (c *Config) loadFile(path string) (*FileSource, error) {
 	bs, err := c.root.ReadFile(path)
 	if err != nil {
@@ -226,34 +290,12 @@ func (c *Config) loadFile(path string) (*FileSource, error) {
 	if err := yaml.Unmarshal(bs, &doc); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+
 	if err := c.validate(doc, path); err != nil {
 		return nil, err
 	}
 
 	return &FileSource{Path: path, RootNode: file.Docs[0].Body}, nil
-}
-
-// loadTree loads path (unless already loaded) and recurses into every include
-// it declares, registering each file in SourceFiles.
-func (c *Config) loadTree(path string) (*FileSource, error) {
-	if existing, ok := c.SourceFiles[path]; ok {
-		return existing, nil
-	}
-
-	src, err := c.loadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	c.SourceFiles[path] = src
-
-	for _, inc := range fileIncludes(src.RootNode) {
-		p := filepath.Join(filepath.Dir(path), inc)
-		if _, err := c.loadTree(p); err != nil {
-			return nil, fmt.Errorf("loading include %s: %w", p, err)
-		}
-	}
-
-	return src, nil
 }
 
 // primedDecoder returns a decoder whose anchor table is already populated from
@@ -273,27 +315,45 @@ func primedDecoder(src *FileSource) (*yaml.Decoder, error) {
 	return dec, nil
 }
 
-// secretEntries walks the main file and every included file, returning one
-// entry per real secret in include order. The list is derived fresh from the
-// AST every call.
+// secretEntries walks the main file and every sub-config (see sources),
+// returning one entry per secret. The list is derived fresh from the AST every
+// call.
 func (c *Config) secretEntries() ([]secretEntry, error) {
-	return c.collectSecrets(c.MainFile, map[string]bool{})
+	var out []secretEntry
+	for _, src := range c.sources() {
+		if src != c.MainFile && src.RootNode == nil {
+			// A sub-config registered in memory that has no item yet.
+			continue
+		}
+
+		entries, err := fileSecrets(src)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, entries...)
+	}
+
+	return out, nil
 }
 
-// collectSecrets returns the real secrets in src, splicing in the secrets of
-// any included file at the point the include appears. visiting holds the files
-// on the current include chain so a cycle (a file that transitively includes
-// itself) is detected and rejected instead of recursing forever.
-func (c *Config) collectSecrets(src *FileSource, visiting map[string]bool) ([]secretEntry, error) {
-	if visiting[src.Path] {
-		return nil, fmt.Errorf("include loop detected at %s", src.Path)
+// sources returns the main file followed by every sub-config, sorted by path
+// so the merged secret order does not depend on map iteration.
+func (c *Config) sources() []*FileSource {
+	out := []*FileSource{c.MainFile}
+	for _, path := range slices.Sorted(maps.Keys(c.SourceFiles)) {
+		if src := c.SourceFiles[path]; src != c.MainFile {
+			out = append(out, src)
+		}
 	}
-	visiting[src.Path] = true
-	defer delete(visiting, src.Path)
+	return out
+}
 
+// fileSecrets returns the secrets declared in src, paired with their AST
+// nodes.
+func fileSecrets(src *FileSource) ([]secretEntry, error) {
 	seq, err := secretsNode(src.RootNode)
 	if err != nil {
-		return nil, errors.New("missing secrets: key")
+		return nil, fmt.Errorf("%s: missing secrets: key", src.Path)
 	}
 
 	dec, err := primedDecoder(src)
@@ -306,21 +366,6 @@ func (c *Config) collectSecrets(src *FileSource, visiting map[string]bool) ([]se
 		mapNode, ok := item.(*ast.MappingNode)
 		if !ok {
 			return nil, fmt.Errorf("%s: secrets[%d] is not a mapping (got %T)", src.Path, i, item)
-		}
-
-		if inc, ok := includePath(mapNode); ok {
-			p := filepath.Join(filepath.Dir(src.Path), inc)
-			sub, ok := c.SourceFiles[p]
-			if !ok {
-				return nil, fmt.Errorf("%s: include %s is not loaded", src.Path, inc)
-			}
-
-			subEntries, err := c.collectSecrets(sub, visiting)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, subEntries...)
-			continue
 		}
 
 		var s Secret
@@ -338,11 +383,9 @@ func (c *Config) collectSecrets(src *FileSource, visiting map[string]bool) ([]se
 // multiple secrets at once (or large directories), it's probably easier to compute once and
 // update when addSecret is called.
 //
-// trackedRevealedPaths returns the set of absolute on-disk paths of every real
-// secret declared across all loaded files. It walks each file's own secrets
-// directly (not via includes) so it is independent of include reachability —
-// covering sub-files that are mid-creation and not yet wired up — which makes
-// it the basis for both global dedup and reporting which secrets a mutation
+// trackedRevealedPaths returns the set of on-disk paths of every secret
+// declared across all loaded files, including sub-files that are mid-creation.
+// It is the basis for both global dedup and reporting which secrets a mutation
 // added. The same physical file tracked by two files collapses to one entry,
 // which is exactly the duplicate we refuse to create.
 func (c *Config) trackedRevealedPaths() (map[string]bool, error) {
@@ -361,7 +404,7 @@ func (c *Config) trackedRevealedPaths() (map[string]bool, error) {
 }
 
 // Secrets returns the merged, flattened secrets across the main file and all
-// included files, in include order, decoded fresh from the AST.
+// sub-configs, in sources order, decoded fresh from the AST.
 func (c *Config) Secrets() ([]Secret, error) {
 	entries, err := c.secretEntries()
 	if err != nil {
@@ -426,9 +469,9 @@ func (c *Config) Groups() (map[string][]string, error) {
 	return groups, nil
 }
 
-// Merged returns the config as one document: included files are flattened
-// into secrets and their paths resolved relative to the main file, so the
-// result loads as a single sesam.yml.
+// Merged returns the config as one document: sub-configs are flattened into
+// secrets and their paths resolved relative to the main file, so the result
+// loads as a single sesam.yml.
 func (c *Config) Merged() (*Document, error) {
 	users, err := c.Users()
 	if err != nil {
@@ -538,29 +581,8 @@ func (c *Config) writeFile(src *FileSource) error {
 // AST NAVIGATION //
 ////////////////////
 
-// fileIncludes returns the include paths declared in a file's secrets sequence.
-func fileIncludes(root ast.Node) []string {
-	seq, err := secretsNode(root)
-	if err != nil {
-		return nil
-	}
-
-	var paths []string
-	for _, item := range seq.Values {
-		m, ok := item.(*ast.MappingNode)
-		if !ok {
-			continue
-		}
-		if inc, ok := includePath(m); ok {
-			paths = append(paths, inc)
-		}
-	}
-	return paths
-}
-
-// ownSecrets returns the real (non-include) secrets declared directly in src,
-// without descending into includes. A file with no secrets: key at all yields
-// no secrets and no error - Load already requires the key on anything it
+// ownSecrets returns the secrets declared in src. A file with no secrets: key
+// at all yields no secrets and no error - Load already requires the key on anything it
 // loaded, so this is only ever reached for a legitimately empty file.
 func ownSecrets(src *FileSource) ([]Secret, error) {
 	seq, err := secretsNode(src.RootNode)
@@ -579,10 +601,6 @@ func ownSecrets(src *FileSource) ([]Secret, error) {
 		if !ok {
 			continue
 		}
-		if _, isInc := includePath(m); isInc {
-			continue
-		}
-
 		var s Secret
 		if err := dec.DecodeFromNode(m, &s); err != nil {
 			return nil, fmt.Errorf("%s: decoding secret: %w", src.Path, err)
@@ -692,28 +710,11 @@ func rootMappingValues(root ast.Node) []*ast.MappingValueNode {
 	}
 }
 
-func includePath(m *ast.MappingNode) (string, bool) {
-	for _, mv := range m.Values {
-		if mv.Key.GetToken().Value == "include" {
-			p := mv.Value.GetToken().Value
-
-			// allow just specifying the directory itself.
-			if !strings.HasSuffix(p, "sesam.yml") {
-				p = filepath.Join(p, "sesam.yml")
-			}
-
-			return p, true
-		}
-	}
-
-	return "", false
-}
-
 //////////////////
 // AST MUTATION //
 //////////////////
 
-// appendSecretsItems appends the given secret/include items to src's secrets
+// appendSecretsItems appends the given secret items to src's secrets
 // sequence. It creates the file's root and/or its secrets: key when missing, so
 // it works uniformly for an existing file and a brand-new in-memory one.
 func appendSecretsItems(src *FileSource, items []Secret) error {

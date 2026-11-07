@@ -30,7 +30,7 @@ func exists(path string) bool {
 	return err == nil
 }
 
-// resolvedPaths reloads mainPath from disk (Load resolves includes) and returns
+// resolvedPaths reloads mainPath from disk (sub-configs included) and returns
 // the sorted, merged secret paths.
 func resolvedPaths(t *testing.T, mainPath string) []string {
 	t.Helper()
@@ -85,7 +85,7 @@ func TestSecretAdd_FileAtMainLevel(t *testing.T) {
 }
 
 // TestSecretAdd_FileInSubdirNested: a file in a subdirectory with nested=true
-// gets its own sub/sesam.yml (included from main) and the secret path is
+// gets its own sub/sesam.yml and the secret path is
 // relative to that sub file.
 func TestSecretAdd_FileInSubdirNested(t *testing.T) {
 	dir := t.TempDir()
@@ -119,6 +119,51 @@ func TestSecretAdd_FileInSubdirFlat(t *testing.T) {
 
 	require.False(t, exists(filepath.Join(dir, "sub", "sesam.yml")))
 	require.Equal(t, []string{"existing.txt", "sub/api.key"}, resolvedPaths(t, mainPath))
+}
+
+// TestSecretAdd_FlatLandsInNearestSubfile: with nested=false a file is added
+// to the closest existing sesam.yml above it, not unconditionally to main.
+func TestSecretAdd_FlatLandsInNearestSubfile(t *testing.T) {
+	tests := []struct {
+		name    string
+		file    string
+		owner   string
+		recPath string
+	}{
+		{"same dir as sub-file", "sub/api.key", "sub/sesam.yml", "api.key"},
+		{"below sub-file", "sub/deep/api.key", "sub/sesam.yml", "deep/api.key"},
+		{"no covering sub-file", "other/api.key", "sesam.yml", "other/api.key"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			mainPath := writeMainFile(t, dir)
+			touch(t, filepath.Join(dir, tt.file))
+			require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "sesam.yml"), []byte("secrets: []\n"), 0o644))
+
+			cr, err := loadConfig(t, mainPath)
+			require.NoError(t, err)
+
+			require.NoError(t, cr.SecretAdd(filepath.FromSlash(tt.file), false, nil))
+			require.NoError(t, cr.Save())
+
+			owner, err := loadConfig(t, filepath.Join(dir, filepath.FromSlash(tt.owner)))
+			require.NoError(t, err)
+			secrets, err := ownSecrets(owner.MainFile)
+			require.NoError(t, err)
+			require.Contains(t, secretPaths(secrets), filepath.FromSlash(tt.recPath))
+		})
+	}
+}
+
+func secretPaths(secrets []Secret) []string {
+	out := make([]string, len(secrets))
+	for i, s := range secrets {
+		out[i] = s.Path
+	}
+	return out
 }
 
 // TestSecretAdd_ReaddChangesAccess: re-adding an already-tracked file is a
@@ -222,7 +267,7 @@ func TestSecretAdd_NoDuplicateSubThenMain(t *testing.T) {
 	cr, err := loadConfig(t, main)
 	require.NoError(t, err)
 
-	// Lands in sub/sesam.yml, included from main.
+	// Lands in sub/sesam.yml.
 	require.NoError(t, cr.SecretAdd(filepath.Join("sub", "api.key"), true, []string{"group1"}))
 	// Re-add the same physical file flat into main: must not duplicate.
 	require.NoError(t, cr.SecretAdd(filepath.Join("sub", "api.key"), false, []string{"group1"}))
@@ -234,7 +279,7 @@ func TestSecretAdd_NoDuplicateSubThenMain(t *testing.T) {
 
 // TestSecretAdd_NoDuplicateMainThenSub: the reverse direction — a file already
 // declared in the main file is not re-added into its own sub sesam.yml, and no
-// empty sub-file or dangling include is produced.
+// empty sub-file is produced.
 func TestSecretAdd_NoDuplicateMainThenSub(t *testing.T) {
 	dir := t.TempDir()
 	main := writeMainFile(t, dir)
@@ -403,29 +448,6 @@ func TestSecretAddIntoEmptySecretsList(t *testing.T) {
 			require.Equal(t, []string{"dev"}, accessFor(t, main, "a.txt"))
 		})
 	}
-}
-
-// A sub-config included by another sub-config must not get a second include
-// from main, or each of its secrets would load twice.
-func TestSecretAdd_NestedIncludedFromSubConfig(t *testing.T) {
-	dir := t.TempDir()
-	mainPath := filepath.Join(dir, "sesam.yml")
-	require.NoError(t, os.WriteFile(mainPath, []byte("secrets:\n  - include: a/sesam.yml\n"), 0o644))
-	touch(t, filepath.Join(dir, "a", "sesam.yml"))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "sesam.yml"), []byte("secrets:\n  - include: b/sesam.yml\n"), 0o644))
-	touch(t, filepath.Join(dir, "a", "b", "sesam.yml"))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "b", "sesam.yml"), []byte("secrets:\n  - path: old.key\n"), 0o644))
-	touch(t, filepath.Join(dir, "a", "b", "new.key"))
-
-	cr, err := loadConfig(t, mainPath)
-	require.NoError(t, err)
-	require.NoError(t, cr.SecretAdd(filepath.Join("a", "b", "new.key"), true, nil))
-	require.NoError(t, cr.Save())
-
-	body, err := os.ReadFile(mainPath)
-	require.NoError(t, err)
-	require.Equal(t, "secrets:\n  - include: a/sesam.yml\n", string(body))
-	require.Equal(t, []string{"new.key", "old.key"}, resolvedPaths(t, mainPath))
 }
 
 // Block items cannot be merged into flow-style lists or items, so those are

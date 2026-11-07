@@ -122,9 +122,9 @@ secrets:
 	}
 }
 
-// TestStateIncludedSecretPaths checks that a secret declared in an included
-// file is resolved against that file's directory, not the main file's.
-func TestStateIncludedSecretPaths(t *testing.T) {
+// TestStateSubSecretPaths checks that a secret declared in a sub-config is
+// resolved against that file's directory, not the main file's.
+func TestStateSubSecretPaths(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "svc"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "svc", "sesam.yml"), []byte(
@@ -133,7 +133,7 @@ func TestStateIncludedSecretPaths(t *testing.T) {
 
 	main := filepath.Join(dir, "sesam.yml")
 	require.NoError(t, os.WriteFile(main, []byte(
-		"secrets:\n  - path: top.txt\n  - include: svc/sesam.yml\n",
+		"secrets:\n  - path: top.txt\n",
 	), 0o644))
 
 	cfg, err := loadConfig(t, main)

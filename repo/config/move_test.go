@@ -26,7 +26,7 @@ func TestSecretMove_WithinMain(t *testing.T) {
 }
 
 // TestSecretMove_OutOfSubfilePrunes moves the only secret out of a sub-file into
-// the main file; the emptied sub-file (and its include) are pruned.
+// the main file; the emptied sub-file is pruned.
 func TestSecretMove_OutOfSubfilePrunes(t *testing.T) {
 	dir, main := buildConfig(t, true, "sub/api.key")
 

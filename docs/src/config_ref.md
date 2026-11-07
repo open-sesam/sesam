@@ -25,6 +25,14 @@ Forge-ids and URLs are resolved by the admin on first use. Any subsequent
 change to the remote content is flagged as a warning when running `sesam
 verify`.
 
+## Sub-configs
+
+Every `sesam.yml` below the main one is part of the config; there is nothing
+to reference. A sub-config only declares `secrets:`, with paths relative to its
+own directory; `users:` and `groups:` are only read from the main file.
+Directories that hold their own `.sesam` - a separate sesam repository - are
+skipped, along with everything beneath them.
+
 ## Validation
 
 Beyond the schema, which checks the shape of each file, `sesam` checks the
@@ -124,17 +132,7 @@ Each value is `array of string (non-empty)`.
 
 ## `secrets[]`
 
-List of secret definitions and sub-file includes.
-
-
-### Include form — delegates to a subordinate sesam.yml in a sub-directory
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `include` | `string (non-empty)` | yes | Path to a subordinate sesam.yml file |
-
-
-### Secret form — registers a file as a managed secret
+List of secret definitions. Paths are relative to the directory of the sesam.yml declaring them.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -176,5 +174,14 @@ secrets:
     desc: Production API key for the payment service
     access:
       - dev
-  - include: services/sesam.yml
+```
+
+`services/sesam.yml`, declaring the secrets of the `services/` directory -
+paths are relative to the file's own directory:
+
+```yaml
+secrets:
+  - path: db_password
+    access:
+      - dev
 ```
