@@ -216,4 +216,16 @@ func TestGitObjects(t *testing.T) {
 
 	_, _, err = objs.Blob("a\nb")
 	require.Error(t, err)
+
+	oids, err := objs.Blobs([]string{first + ":a dir/missing", first + ":other", second + ":a dir", second + ":other"})
+	require.NoError(t, err)
+	require.Equal(t, []string{oid, "", "", repo.BlobHash([]byte("x"))}, oids)
+
+	_, err = objs.Blobs([]string{second + ":other", "a\nb"})
+	require.Error(t, err)
+
+	// The reader stays usable after a batch.
+	_, ok, err = objs.Blob(second + ":other")
+	require.NoError(t, err)
+	require.True(t, ok)
 }
