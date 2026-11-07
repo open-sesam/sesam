@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -67,22 +68,61 @@ type secretEntry struct {
 	secret Secret
 }
 
-// Load is the entry function for ConfigRepository. The main sesam.yml file
-// and every sub-config in subs are passed as root-relative paths; finding the
-// subs is the caller's job. Each file is parsed into the AST and validated
-// against the JSON schema as it goes.
-func Load(root *os.Root, path string, subs []string) (*Config, error) {
-	return load(root, path, subs, true)
+// Load is the entry function for ConfigRepository. It reads the main file at
+// the root-relative path and every sub-config Discover finds. Each file is
+// parsed into the AST and validated against the JSON schema as it goes.
+func Load(root *os.Root, path string) (*Config, error) {
+	return load(root, path, true)
 }
 
 // LoadForRepair is like Load, but skips Validate()'s referential checks (an
 // unknown group member, an invalid name) - only the per-file schema and
 // structural checks (secretEntries) run.
-func LoadForRepair(root *os.Root, path string, subs []string) (*Config, error) {
-	return load(root, path, subs, false)
+func LoadForRepair(root *os.Root, path string) (*Config, error) {
+	return load(root, path, false)
 }
 
-func load(root *os.Root, path string, subs []string, validate bool) (*Config, error) {
+// Discover lists every sesam.yml below root, sorted. It skips .git, .sesam and
+// the fork dir as well as any directory holding its own .sesam (a separate
+// sesam repo). .gitignore is deliberately not consulted: the one sesam init
+// writes ignores every subdirectory, sub-configs included.
+func Discover(root *os.Root) ([]string, error) {
+	var paths []string
+	err := fs.WalkDir(root.FS(), ".", func(p string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel := filepath.FromSlash(p)
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".sesam", ".git", ".sesam-tmp":
+				return fs.SkipDir
+			}
+
+			if p != "." {
+				if _, err := root.Stat(filepath.Join(rel, ".sesam")); err == nil {
+					return fs.SkipDir
+				}
+			}
+			return nil
+		}
+
+		if entry.Name() == "sesam.yml" {
+			paths = append(paths, rel)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan for config files: %w", err)
+	}
+
+	slices.Sort(paths)
+	return paths, nil
+}
+
+func load(root *os.Root, path string, validate bool) (*Config, error) {
 	path = filepath.Clean(path)
 
 	// Load the JSON schema from the embedded FS so every file can be validated
@@ -105,8 +145,12 @@ func load(root *os.Root, path string, subs []string, validate bool) (*Config, er
 	configRepo.MainFile = src
 	configRepo.SourceFiles[path] = src
 
+	subs, err := Discover(root)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, sub := range subs {
-		sub = filepath.Clean(sub)
 		if _, ok := configRepo.SourceFiles[sub]; ok {
 			continue
 		}

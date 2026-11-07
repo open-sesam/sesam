@@ -85,55 +85,9 @@ func (v *View) cfg() (*sesamConf.Config, error) {
 	return v.config, nil
 }
 
-// loadConfig reads sesam.yml and every sub-config configPaths finds, fresh
-// from disk.
+// loadConfig reads sesam.yml and every sub-config, fresh from disk.
 func (v *View) loadConfig() (*sesamConf.Config, error) {
-	paths, err := v.configPaths()
-	if err != nil {
-		return nil, err
-	}
-
-	return sesamConf.Load(v.root, configFileName, paths)
-}
-
-// configPaths lists every config file in the repository, sorted. It skips
-// .git, .sesam and the fork dir as well as any directory holding its own
-// .sesam (a separate sesam repo). .gitignore is deliberately not consulted:
-// the one sesam init writes ignores every subdirectory, sub-configs included.
-func (v *View) configPaths() ([]string, error) {
-	var paths []string
-	err := fs.WalkDir(v.root.FS(), ".", func(p string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		rel := filepath.FromSlash(p)
-		if entry.IsDir() {
-			switch entry.Name() {
-			case sesamSuffix, gitSuffix, forkSuffix:
-				return fs.SkipDir
-			}
-
-			if p != "." {
-				if _, err := v.root.Stat(filepath.Join(rel, sesamSuffix)); err == nil {
-					return fs.SkipDir
-				}
-			}
-			return nil
-		}
-
-		if entry.Name() == configFileName {
-			paths = append(paths, rel)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("scan for config files: %w", err)
-	}
-
-	slices.Sort(paths)
-	return paths, nil
+	return sesamConf.Load(v.root, configFileName)
 }
 
 // closeState closes the audit log and drops the verified state. The root and
@@ -560,7 +514,7 @@ func (v *View) committedConfigChanges() ([]diff.Change, error) {
 	}
 	defer func() { _ = root.Close() }()
 
-	cfg, err := sesamConf.Load(root, configFileName, paths)
+	cfg, err := sesamConf.Load(root, configFileName)
 	if err != nil {
 		return nil, fmt.Errorf("load committed sesam.yml at HEAD: %w", err)
 	}
@@ -574,7 +528,7 @@ func (v *View) committedConfigChanges() ([]diff.Change, error) {
 }
 
 // committedConfigPaths lists the config files committed in tree below prefix,
-// as sesam-relative paths. Like configPaths it leaves out anything beneath a
+// as sesam-relative paths. Like config.Discover it leaves out anything beneath a
 // directory holding its own .sesam; gitignore does not apply to committed
 // files.
 func committedConfigPaths(tree *object.Tree, prefix string) ([]string, error) {

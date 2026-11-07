@@ -9,76 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestConfigPaths checks which sesam.yml files discovery picks up. Whole
-// relative walk paths must not be compared to the bare ".git"/".sesam"
-// constants: a nested one sits at some deeper path and has to be skipped too.
-func TestConfigPaths(t *testing.T) {
-	tests := []struct {
-		name  string
-		files map[string]string
-		want  []string
-	}{
-		{
-			name:  "plain sub-config",
-			files: map[string]string{"svc/sesam.yml": "secrets: []\n"},
-			want:  []string{"sesam.yml", "svc/sesam.yml"},
-		},
-		{
-			name:  "deeply nested sub-config",
-			files: map[string]string{"a/b/c/sesam.yml": "secrets: []\n"},
-			want:  []string{"a/b/c/sesam.yml", "sesam.yml"},
-		},
-		{
-			name:  "inside a nested .git",
-			files: map[string]string{"svc/.git/hooks/sesam.yml": "bogus"},
-			want:  []string{"sesam.yml"},
-		},
-		{
-			name:  "inside a nested .sesam",
-			files: map[string]string{"nested/.sesam/sesam.yml": "bogus"},
-			want:  []string{"sesam.yml"},
-		},
-		{
-			name: "separate sesam repo below",
-			files: map[string]string{
-				"other/.sesam/audit/init": "x",
-				"other/sesam.yml":         "bogus",
-				"other/deep/sesam.yml":    "bogus",
-			},
-			want: []string{"sesam.yml"},
-		},
-		{
-			name:  "inside the fork dir",
-			files: map[string]string{".sesam-tmp/sesam.yml": "bogus"},
-			want:  []string{"sesam.yml"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			admin := writeTestIdentity(t, "admin")
-			dir, r := bootstrapRepo(t, admin)
-
-			for name, body := range tt.files {
-				p := filepath.Join(dir, filepath.FromSlash(name))
-				require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o700))
-				require.NoError(t, os.WriteFile(p, []byte(body), 0o644))
-			}
-
-			paths, err := r.configPaths()
-			require.NoError(t, err)
-
-			want := make([]string, len(tt.want))
-			for i, w := range tt.want {
-				want[i] = filepath.FromSlash(w)
-			}
-			require.Equal(t, want, paths)
-		})
-	}
-}
-
 // TestCommittedConfigPaths checks discovery on a committed tree: the same
-// separate-repo boundary as configPaths, and paths relative to the sesam dir
+// separate-repo boundary as config.Discover, and paths relative to the sesam dir
 // when it sits below the worktree root.
 func TestCommittedConfigPaths(t *testing.T) {
 	tests := []struct {

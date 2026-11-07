@@ -96,12 +96,12 @@ func (r *Repo) ConfigReset(opts ConfigResetOpts) (*ConfigReset, error) {
 // resetConfig returns the config to write, filling in what had to be done to
 // get there. A nil config means the declaration already matched the audit log.
 func (r *Repo) resetConfig(root *os.Root, out *ConfigReset) (*sesamConf.Config, error) {
-	paths, err := r.configPaths()
+	paths, err := sesamConf.Discover(root)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg, err := sesamConf.LoadForRepair(root, configFileName, paths)
+	cfg, err := sesamConf.LoadForRepair(root, configFileName)
 	if err != nil {
 		// Unreadable, invalid structure, or simply gone - there is nothing to
 		// edit, so the file can only be built fresh from the audit log.

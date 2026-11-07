@@ -289,7 +289,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, err
 	}
 
-	configRepo, err := sesamConf.Load(root, "sesam.yml", nil)
+	configRepo, err := sesamConf.Load(root, "sesam.yml")
 	if err != nil {
 		return nil, err
 	}

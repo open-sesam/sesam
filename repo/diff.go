@@ -185,7 +185,7 @@ func (v *View) copyConfigTree(
 		return nil, nil, fmt.Errorf("open %s: %w", treeDir, err)
 	}
 
-	cfg, err = sesamConf.Load(root, configFileName, paths)
+	cfg, err = sesamConf.Load(root, configFileName)
 	if err != nil {
 		_ = root.Close()
 		return nil, nil, fmt.Errorf("load %s config copy: %w", name, err)

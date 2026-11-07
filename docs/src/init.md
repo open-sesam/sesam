@@ -6,6 +6,12 @@
 or you can create a whole new one. If you use an existing repository we recommend an empty sub-directory to manage
 your secret files in. The `.sesam` directory does not need to be on the same level as the `.git` folder.
 
+```admonish warning
+Nested `sesam` repositories are not supported: do not run `sesam init` inside a
+directory that already belongs to another `sesam` repository. Secrets are always
+managed relative to the one main `sesam.yml`.
+```
+
 ## Creating a new repository
 
 In the folder you've selected run:

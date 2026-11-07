@@ -1,7 +1,6 @@
 package config
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,22 +20,7 @@ func loadConfig(t *testing.T, mainPath string) (*Config, error) {
 	}
 	t.Cleanup(func() { _ = root.Close() })
 
-	main := filepath.Base(mainPath)
-	var subs []string
-	err = fs.WalkDir(root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && d.Name() == "sesam.yml" && p != main {
-			subs = append(subs, filepath.FromSlash(p))
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return Load(root, main, subs)
+	return Load(root, filepath.Base(mainPath))
 }
 
 // fileSourceFromYAML builds a *FileSource straight from a YAML body, without
@@ -325,4 +309,75 @@ func TestCreate_PrunesUnusedSubs(t *testing.T) {
 	require.Equal(t, []string{filepath.Join("drop", "sesam.yml")}, cr.Deleted())
 	require.False(t, exists(filepath.Join(dir, "drop", "sesam.yml")))
 	require.Equal(t, []string{"x.txt"}, resolvedPaths(t, filepath.Join(dir, "sesam.yml")))
+}
+
+// TestDiscover checks which sesam.yml files discovery picks up. Whole relative
+// walk paths must not be compared to the bare ".git"/".sesam" names: a nested
+// one sits at some deeper path and has to be skipped too.
+func TestDiscover(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+		want  []string
+	}{
+		{
+			name:  "plain sub-config",
+			files: map[string]string{"svc/sesam.yml": "secrets: []\n"},
+			want:  []string{"sesam.yml", "svc/sesam.yml"},
+		},
+		{
+			name:  "deeply nested sub-config",
+			files: map[string]string{"a/b/c/sesam.yml": "secrets: []\n"},
+			want:  []string{"a/b/c/sesam.yml", "sesam.yml"},
+		},
+		{
+			name:  "inside a nested .git",
+			files: map[string]string{"svc/.git/hooks/sesam.yml": "bogus"},
+			want:  []string{"sesam.yml"},
+		},
+		{
+			name:  "inside a nested .sesam",
+			files: map[string]string{"nested/.sesam/sesam.yml": "bogus"},
+			want:  []string{"sesam.yml"},
+		},
+		{
+			name: "separate sesam repo below",
+			files: map[string]string{
+				"other/.sesam/audit/init": "x",
+				"other/sesam.yml":         "bogus",
+				"other/deep/sesam.yml":    "bogus",
+			},
+			want: []string{"sesam.yml"},
+		},
+		{
+			name:  "inside the fork dir",
+			files: map[string]string{".sesam-tmp/sesam.yml": "bogus"},
+			want:  []string{"sesam.yml"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "sesam.yml"), []byte("secrets: []\n"), 0o644))
+			for name, body := range tt.files {
+				p := filepath.Join(dir, filepath.FromSlash(name))
+				require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o700))
+				require.NoError(t, os.WriteFile(p, []byte(body), 0o644))
+			}
+
+			root, err := os.OpenRoot(dir)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = root.Close() })
+
+			paths, err := Discover(root)
+			require.NoError(t, err)
+
+			want := make([]string, len(tt.want))
+			for i, w := range tt.want {
+				want[i] = filepath.FromSlash(w)
+			}
+			require.Equal(t, want, paths)
+		})
+	}
 }
