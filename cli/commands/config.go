@@ -204,7 +204,7 @@ func HandleConfigReset(_ context.Context, cmd *cli.Command, r *repo.Repo) error 
 	if reset.Rewritten {
 		slog.Info(fmt.Sprintf("sesam.yml cannot be repaired in place (%s)", reset.Reason))
 		if force {
-			slog.Info("wrote it fresh from the audit log - comments and descriptions are gone")
+			slog.Info("wrote sesam.yml and sub-configs fresh from the audit log - comments and descriptions are gone")
 		} else {
 			slog.Info("would write sesam.yml and sub-configs fresh from the audit log - comments and descriptions would be lost")
 		}
