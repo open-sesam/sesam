@@ -62,14 +62,6 @@ func auditLogHistory(
 	}
 	initHash := strings.TrimSpace(string(initData))
 
-	initHasLog, err := hasBlob(g, initCommitRev+":"+auditPathRel)
-	if err != nil {
-		return nil, fmt.Errorf("read audit log at init commit %s: %w", initCommitRev, err)
-	}
-	if !initHasLog {
-		return func(yield func(*auditLogSnapshot, error) bool) {}, nil
-	}
-
 	return func(yield func(*auditLogSnapshot, error) bool) {
 		objs, err := g.Objects()
 		if err != nil {
@@ -77,6 +69,15 @@ func auditLogHistory(
 			return
 		}
 		defer func() { _ = objs.Close() }()
+
+		_, initHasLog, err := objs.Blob(initCommitRev + ":" + auditPathRel)
+		if err != nil {
+			yield(nil, fmt.Errorf("read audit log at init commit %s: %w", initCommitRev, err))
+			return
+		}
+		if !initHasLog {
+			return
+		}
 
 		// Walk FIRST-PARENT (which is always "ours"). On merge commits we take
 		// the route the merge driver should have taken as well - except where
@@ -209,18 +210,6 @@ func logCarryingParent(
 	}
 
 	return "", false
-}
-
-// hasBlob reports whether rev, e.g. "<commit>:<path>", names a blob.
-func hasBlob(g *Git, rev string) (bool, error) {
-	objs, err := g.Objects()
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = objs.Close() }()
-
-	_, ok, err := objs.Blob(rev)
-	return ok, err
 }
 
 // auditLogIsPrefix tests if `old` is a prefix of `new`
