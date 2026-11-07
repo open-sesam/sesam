@@ -674,6 +674,19 @@ Show the built-in manual, or the help of a command
 or you can create a whole new one. If you use an existing repository we recommend an empty sub-directory to manage
 your secret files in. The \fB\&.sesam\fR directory does not need to be on the same level as the \fB\&.git\fR folder.
 
+.PP
+.RS
+
+.PP
+\fBWarning\fP
+
+.PP
+Nested \fBsesam\fR repositories are not supported: do not run \fBsesam init\fR inside a
+directory that already belongs to another \fBsesam\fR repository. Secrets are always
+managed relative to the one main \fBsesam.yml\fR\&.
+
+.RE
+
 .SS Creating a new repository
 In the folder you've selected run:
 

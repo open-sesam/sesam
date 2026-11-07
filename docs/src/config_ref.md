@@ -30,6 +30,8 @@ verify`.
 Every `sesam.yml` below the main one is part of the config; there is nothing
 to reference. A sub-config only declares `secrets:`, with paths relative to its
 own directory; `users:` and `groups:` are only read from the main file.
+Directories that hold their own `.sesam` - a separate sesam repository - are
+skipped, along with everything beneath them.
 
 ## Validation
 
