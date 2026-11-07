@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Git runs the git binary for the worktree that contains a sesam dir.
@@ -45,11 +46,20 @@ type GitCommit struct {
 	Parents []string
 }
 
+// openGitCache maps an absolute dir to its *Git, which is immutable.
+// shortcut: a repo re-created under the same path in a long-running process is
+// not noticed; drop the cache once callers share one *Git.
+var openGitCache sync.Map
+
 // OpenGit finds the git worktree that contains dir.
 func OpenGit(dir string) (*Git, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
+	}
+
+	if g, ok := openGitCache.Load(abs); ok {
+		return g.(*Git), nil
 	}
 
 	out, err := runGit(abs, "rev-parse", "--show-object-format", "--show-toplevel", "--show-prefix")
@@ -83,6 +93,7 @@ func OpenGit(dir string) (*Git, error) {
 		g.root = candidate
 	}
 
+	openGitCache.Store(abs, g)
 	return g, nil
 }
 
