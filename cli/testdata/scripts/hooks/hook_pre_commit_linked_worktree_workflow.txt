@@ -1,0 +1,27 @@
+# In a linked worktree git runs the pre-commit hook with GIT_DIR set but no
+# GIT_WORK_TREE, so git takes the current directory as the worktree root. The
+# hook must still stage the nested .sesam tree under sub/, not at the root.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+mkdir sub
+exec sesam init --user admin --sesam-dir sub --install-hooks=false
+exec git add -A
+exec git commit -m 'init sesam'
+
+exec git worktree add ../wt -b wt
+cd ../wt
+cp $WORK/newreadme sub/README.md
+
+# What git exports to hooks in a linked worktree.
+env GIT_DIR=$WORK/.git/worktrees/wt
+exec sesam --sesam-dir=sub hook pre-commit
+
+exec git diff --cached --name-only
+stdout '^sub/\.sesam/objects/README\.md\.sesam$'
+! stdout '^\.sesam/'
+
+-- newreadme --
+# changed readme

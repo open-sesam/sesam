@@ -37,7 +37,8 @@ stdout 'the stale \(S\) secrets take the incoming version when you finish'
 # Resolve s and seal, as the hint says. t is left alone and named.
 cp $TMPDIR/resolved.txt s
 exec sesam seal
-stderr 'changed only in the revealed file but not yet sealed'
+stderr 'stale secrets? were not sealed because they are newer than what is revealed'
+stderr 'git pull. without sesam.s hooks installed'
 stderr 'sesam:   t'
 exec sesam show .sesam/objects/s.sesam
 stdout 'RESOLVED'

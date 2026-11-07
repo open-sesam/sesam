@@ -282,9 +282,13 @@ Open secret in $VISUAL or $EDITOR and immediately seal it afterwards
 
 ### seal
 
-Encrypt and sign changed secrets
+Encrypt and sign changed secrets, and the given ones in any case
 
 **--clean**: Delete revealed secret files after successful seal
+
+**--force-diverged**: Also seal diverged secrets, keeping your plaintext over the object's changes
+
+**--force-stale**: Also seal stale secrets, overwriting their newer object with your plaintext
 
 **--help, -h**: show help
 
@@ -915,8 +919,8 @@ object were last written together. `sesam` works that out from the object
 versions `git` holds, so nothing has to be remembered on your machine:
 
 - `M` modified: you edited the plaintext. `sesam seal` takes it.
-- `S` stale: the object moved on (a pull, checkout or merge) and the plaintext is the old version. `sesam reveal` takes it; `sesam seal` leaves it alone.
-- `!` diverged: both at once, seen during a merge or by the hooks. Pick a side with `sesam reveal --all` or `sesam seal --all`.
+- `S` stale: the object moved on (a pull, checkout or merge) and the plaintext is the old version. `sesam reveal` takes it; `sesam seal` leaves it alone unless named (`sesam seal <path>`) or `--force-stale` is given.
+- `!` diverged: both at once, seen during a merge or by the hooks. Pick a side with `sesam reveal --all` or `sesam seal --force-diverged` (or `sesam seal <path>` for one).
 - `R` recipients changed: the content agrees, but who may read it changed. `sesam seal` re-encrypts it.
 - `U` conflicted: a merge left conflict markers in the plaintext.
 
@@ -1484,7 +1488,7 @@ $ git commit -am 'merge'
 - The `sesam.yml` files will always be resetted to the merged state. Any additional change will be lost.
 - Merging without the git integration is not possible. Doing so will likely result in a repository state that does not survive `sesam verify`.
 - If you have a secret that is binary in nature, we can't merge it with conflict markers. In this case we'll add a TODO `.theirs` version next to it and inform you.
-- Secrets only the other side changed keep your plaintext until you finish: `sesam status` lists them as stale (S) and the finalize takes the incoming version. Edit one of them before finishing and it is diverged (!) - the finalize refuses, and you pick: `sesam reveal --all` takes the incoming version, `sesam seal --all` keeps yours.
+- Secrets only the other side changed keep your plaintext until you finish: `sesam status` lists them as stale (S) and the finalize takes the incoming version. Edit one of them before finishing and it is diverged (!) - the finalize refuses, and you pick: `sesam reveal --all` takes the incoming version, `sesam seal --force-diverged` keeps yours.
 - A rebase or cherry-pick uses the same machinery, but `git` runs no hook when they finish. Check `sesam status` afterwards: it names the operation and what is left to do. Secrets that lag behind show as stale there; `sesam reveal` refreshes them and `sesam seal` leaves them alone until you do.
 
 # VERIFYING
