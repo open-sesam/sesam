@@ -258,6 +258,11 @@ func (o *GitObjects) request(command, rev string) (oid, typ string, size int, ok
 		return "", "", 0, false, fmt.Errorf("write to git cat-file: %w", err)
 	}
 
+	return o.readHeader(rev)
+}
+
+// readHeader parses the header git answers a request for rev with.
+func (o *GitObjects) readHeader(rev string) (oid, typ string, size int, ok bool, err error) {
 	line, err := o.out.ReadString('\n')
 	if err != nil {
 		return "", "", 0, false, fmt.Errorf("read from git cat-file: %w", err)
@@ -302,6 +307,48 @@ func (o *GitObjects) contents(rev string) (oid, typ string, data []byte, ok bool
 func (o *GitObjects) Blob(rev string) (string, bool, error) {
 	oid, typ, _, ok, err := o.request("info", rev)
 	return oid, ok && typ == "blob", err
+}
+
+// Blobs is Blob for many revs at once, "" where a rev names no blob. All
+// requests are written while the answers are read, so git does not wait on a
+// round trip per rev.
+func (o *GitObjects) Blobs(revs []string) ([]string, error) {
+	for _, rev := range revs {
+		if strings.Contains(rev, "\n") {
+			return nil, fmt.Errorf("git object name %q contains a newline", rev)
+		}
+	}
+
+	// Buffered: the writer must not block forever if reading stops early.
+	writeErr := make(chan error, 1)
+	go func() {
+		w := bufio.NewWriter(o.in)
+		for _, rev := range revs {
+			if _, err := fmt.Fprintf(w, "info %s\n", rev); err != nil {
+				writeErr <- err
+				return
+			}
+		}
+		writeErr <- w.Flush()
+	}()
+
+	oids := make([]string, len(revs))
+	for i, rev := range revs {
+		oid, typ, _, ok, err := o.readHeader(rev)
+		if err != nil {
+			return nil, err
+		}
+
+		if ok && typ == "blob" {
+			oids[i] = oid
+		}
+	}
+
+	if err := <-writeErr; err != nil {
+		return nil, fmt.Errorf("write to git cat-file: %w", err)
+	}
+
+	return oids, nil
 }
 
 // ReadBlob returns the content of the blob rev names. ok is false when rev
@@ -404,14 +451,21 @@ func verifyInitFileUnchangedWithRepo(sesamDir string, g *Git) (string, error) {
 	carriers := make(map[string][]string) // commit -> its parents
 	var order []string
 	var wantBlob string
+	var commits [][]string // each: commit, then its parents
+	var initRevs []string
 	for line := range strings.Lines(string(revs)) {
 		hashes := strings.Fields(line)
-		blob, ok, err := objs.Blob(hashes[0] + ":" + initRel)
-		if err != nil {
-			return "", err
-		}
+		commits = append(commits, hashes)
+		initRevs = append(initRevs, hashes[0]+":"+initRel)
+	}
 
-		if ok {
+	initBlobs, err := objs.Blobs(initRevs)
+	if err != nil {
+		return "", err
+	}
+
+	for i, hashes := range commits {
+		if blob := initBlobs[i]; blob != "" {
 			blobs[blob] = struct{}{}
 			wantBlob = blob
 			carriers[hashes[0]] = hashes[1:]
