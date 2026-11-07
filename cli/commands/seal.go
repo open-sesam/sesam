@@ -16,6 +16,10 @@ import (
 // Conflict markers are warned about, not refused: seal is what you reach for to
 // get out of a half-finished merge, so refusing would be the bigger trap.
 func HandleSeal(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+	if cmd.Bool("seal-all") && cmd.Args().Present() {
+		return errors.New("--all seals every secret, it takes no paths")
+	}
+
 	conflicted, err := r.ConflictedSecrets()
 	if err != nil {
 		return err
@@ -99,10 +103,15 @@ func printSkippedStale(res *repo.SealResult) {
 	}
 
 	pluralizedSecret := pluralize("secret", len(res.Stale))
+	verb, pronoun := "were", "they are"
+	if len(res.Stale) == 1 {
+		verb, pronoun = "was", "it is"
+	}
+
 	printNote(
 		fmt.Sprintf(
-			"%d stale %s were not sealed because they are newer than what is revealed:",
-			len(res.Stale), pluralizedSecret,
+			"%d stale %s %s not sealed because %s newer than what is revealed:",
+			len(res.Stale), pluralizedSecret, verb, pronoun,
 		),
 		res.Stale,
 		fmt.Sprintf(

@@ -1810,7 +1810,7 @@ Merging without the git integration is not possible. Doing so will likely result
 .IP \(bu 2
 If you have a secret that is binary in nature, we can't merge it with conflict markers. In this case we'll add a TODO \fB\&.theirs\fR version next to it and inform you.
 .IP \(bu 2
-Secrets only the other side changed keep your plaintext until you finish: \fBsesam status\fR lists them as stale (S) and the finalize takes the incoming version. Edit one of them before finishing and it is diverged (!) - the finalize refuses, and you pick: \fBsesam reveal --force-diverged\fR takes the incoming version, \fBsesam seal --force-diverged\fR keeps yours (or name single paths to either).
+Secrets only the other side changed keep your plaintext until you finish: \fBsesam status\fR lists them as stale (S) and the finalize takes the incoming version. Edit one of them before finishing and it is diverged (!) - the finalize refuses, and you pick per secret: \fBsesam reveal <path>\fR takes the incoming version, \fBsesam seal <path>\fR keeps yours (\fB--force-diverged\fR for all of them).
 .IP \(bu 2
 A rebase or cherry-pick uses the same machinery, but \fBgit\fR runs no hook when they finish. Check \fBsesam status\fR afterwards: it names the operation and what is left to do. Secrets that lag behind show as stale there; \fBsesam reveal\fR refreshes them and \fBsesam seal\fR leaves them alone until you do.
 
