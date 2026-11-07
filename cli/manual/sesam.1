@@ -350,10 +350,16 @@ Open secret in $VISUAL or $EDITOR and immediately seal it afterwards
 \fB--seal-all, --all\fP: Seal every secret from its plaintext as it is, stale and diverged ones included
 
 .SS seal
-Encrypt and sign changed secrets
+Encrypt and sign changed secrets, and the given ones in any case
 
 .PP
 \fB--clean\fP: Delete revealed secret files after successful seal
+
+.PP
+\fB--force-diverged\fP: Also seal diverged secrets, keeping your plaintext over the object's changes
+
+.PP
+\fB--force-stale\fP: Also seal stale secrets, overwriting their newer object with your plaintext
 
 .PP
 \fB--help, -h\fP: show help
@@ -1142,9 +1148,9 @@ versions \fBgit\fR holds, so nothing has to be remembered on your machine:
 .IP \(bu 2
 \fBM\fR modified: you edited the plaintext. \fBsesam seal\fR takes it.
 .IP \(bu 2
-\fBS\fR stale: the object moved on (a pull, checkout or merge) and the plaintext is the old version. \fBsesam reveal\fR takes it; \fBsesam seal\fR leaves it alone.
+\fBS\fR stale: the object moved on (a pull, checkout or merge) and the plaintext is the old version. \fBsesam reveal\fR takes it; \fBsesam seal\fR leaves it alone unless named (\fBsesam seal <path>\fR) or \fB--force-stale\fR is given.
 .IP \(bu 2
-\fB!\fR diverged: both at once, seen during a merge or by the hooks. Pick a side with \fBsesam reveal --all\fR or \fBsesam seal --all\fR\&.
+\fB!\fR diverged: both at once, seen during a merge or by the hooks. Pick a side with \fBsesam reveal --all\fR or \fBsesam seal --force-diverged\fR (or \fBsesam seal <path>\fR for one).
 .IP \(bu 2
 \fBR\fR recipients changed: the content agrees, but who may read it changed. \fBsesam seal\fR re-encrypts it.
 .IP \(bu 2
@@ -1801,7 +1807,7 @@ Merging without the git integration is not possible. Doing so will likely result
 .IP \(bu 2
 If you have a secret that is binary in nature, we can't merge it with conflict markers. In this case we'll add a TODO \fB\&.theirs\fR version next to it and inform you.
 .IP \(bu 2
-Secrets only the other side changed keep your plaintext until you finish: \fBsesam status\fR lists them as stale (S) and the finalize takes the incoming version. Edit one of them before finishing and it is diverged (!) - the finalize refuses, and you pick: \fBsesam reveal --all\fR takes the incoming version, \fBsesam seal --all\fR keeps yours.
+Secrets only the other side changed keep your plaintext until you finish: \fBsesam status\fR lists them as stale (S) and the finalize takes the incoming version. Edit one of them before finishing and it is diverged (!) - the finalize refuses, and you pick: \fBsesam reveal --all\fR takes the incoming version, \fBsesam seal --force-diverged\fR keeps yours.
 .IP \(bu 2
 A rebase or cherry-pick uses the same machinery, but \fBgit\fR runs no hook when they finish. Check \fBsesam status\fR afterwards: it names the operation and what is left to do. Secrets that lag behind show as stale there; \fBsesam reveal\fR refreshes them and \fBsesam seal\fR leaves them alone until you do.
 

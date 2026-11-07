@@ -676,6 +676,15 @@ type SealOpts struct {
 	// States is a classification the caller already ran; nil makes Seal run
 	// its own. Paths missing from it are compared with their object.
 	States SyncStates
+
+	// Paths are sealed from their plaintext whatever their state, stale and
+	// diverged included; everything else is sealed as usual.
+	Paths []string
+
+	// ForceStale and ForceDiverged seal every stale or diverged secret from
+	// its plaintext, like Paths does for named ones.
+	ForceStale    bool
+	ForceDiverged bool
 }
 
 // SealResult names what Seal left alone.

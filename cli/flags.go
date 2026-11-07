@@ -185,6 +185,14 @@ var flagsSeal = []cli.Flag{
 		Name:  "clean",
 		Usage: "Delete revealed secret files after successful seal",
 	},
+	&cli.BoolFlag{
+		Name:  "force-stale",
+		Usage: "Also seal stale secrets, overwriting their newer object with your plaintext",
+	},
+	&cli.BoolFlag{
+		Name:  "force-diverged",
+		Usage: "Also seal diverged secrets, keeping your plaintext over the object's changes",
+	},
 	flagSeal,
 }
 

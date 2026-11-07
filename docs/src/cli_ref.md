@@ -226,9 +226,13 @@ Open secret in $VISUAL or $EDITOR and immediately seal it afterwards
 
 ## seal
 
-Encrypt and sign changed secrets
+Encrypt and sign changed secrets, and the given ones in any case
 
 **--clean**: Delete revealed secret files after successful seal
+
+**--force-diverged**: Also seal diverged secrets, keeping your plaintext over the object's changes
+
+**--force-stale**: Also seal stale secrets, overwriting their newer object with your plaintext
 
 **--help, -h**: show help
 
