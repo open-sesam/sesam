@@ -32,7 +32,7 @@ func HandleSeal(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	}
 
 	if err := r.Update(func(s *repo.Stage) error {
-		return sealStage(cmd, r, s)
+		return sealStage(ctx, cmd, r, s)
 	}); err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func HandleSeal(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	if cmd.Bool("clean") {
 		res, err := r.Clean(ctx, repo.CleanOpts{
 			Aggressive: false,
-			Sync:       syncOpts(r.SesamDir()),
+			Sync:       syncOpts(ctx, r.SesamDir()),
 		})
 		if err != nil {
 			return err
@@ -55,10 +55,10 @@ func HandleSeal(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 // sealStage is the seal every mutating command ends with. Stale plaintext is
 // left out and named; a secret changed on both sides stops the command and
 // names both ways out.
-func sealStage(cmd *cli.Command, r *repo.Repo, s *repo.Stage) error {
-	res, err := s.Seal(repo.SealOpts{
+func sealStage(ctx context.Context, cmd *cli.Command, r *repo.Repo, s *repo.Stage) error {
+	res, err := s.Seal(ctx, repo.SealOpts{
 		All:  cmd.Bool("seal-all"),
-		Sync: syncOpts(r.SesamDir()),
+		Sync: syncOpts(ctx, r.SesamDir()),
 	})
 	if err != nil {
 		var diverged *repo.DivergedError

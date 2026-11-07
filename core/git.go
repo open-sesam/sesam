@@ -35,6 +35,7 @@ type Git struct {
 // --batch-command`, for loops that would otherwise start git per object.
 // Not safe for concurrent use.
 type GitObjects struct {
+	ctx context.Context // the process dies with it; see cause
 	cmd *exec.Cmd
 	in  io.WriteCloser
 	out *bufio.Reader
@@ -52,7 +53,7 @@ type GitCommit struct {
 var openGitCache sync.Map
 
 // OpenGit finds the git worktree that contains dir.
-func OpenGit(dir string) (*Git, error) {
+func OpenGit(ctx context.Context, dir string) (*Git, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -62,7 +63,7 @@ func OpenGit(dir string) (*Git, error) {
 		return g.(*Git), nil
 	}
 
-	out, err := runGit(abs, "rev-parse", "--show-object-format", "--show-toplevel", "--show-prefix")
+	out, err := runGit(ctx, abs, "rev-parse", "--show-object-format", "--show-toplevel", "--show-prefix")
 	if err != nil {
 		return nil, err
 	}
@@ -112,14 +113,17 @@ func sameDir(a, b string) bool {
 }
 
 // runGit runs git in dir and returns its stdout. stderr ends up in the error.
-func runGit(dir string, args ...string) ([]byte, error) {
+func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	//nolint:gosec // fixed git subcommands; args come from sesam itself.
-	cmd := exec.CommandContext(context.Background(), "git", args...)
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctxErr := ctx.Err(); err != nil && ctxErr != nil {
+		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), ctxErr)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, bytes.TrimSpace(stderr.Bytes()))
 	}
@@ -142,8 +146,8 @@ func (g *Git) Root() string {
 }
 
 // Output runs git in the worktree root and returns its stdout.
-func (g *Git) Output(args ...string) ([]byte, error) {
-	return runGit(g.root, args...)
+func (g *Git) Output(ctx context.Context, args ...string) ([]byte, error) {
+	return runGit(ctx, g.root, args...)
 }
 
 // BlobHash returns the object id git gives a blob with this content.
@@ -155,8 +159,8 @@ func (g *Git) BlobHash(data []byte) string {
 }
 
 // Head returns the commit HEAD points to, or "" on an unborn branch.
-func (g *Git) Head() (string, error) {
-	out, err := g.Output("rev-parse", "-q", "--verify", "HEAD^{commit}")
+func (g *Git) Head(ctx context.Context) (string, error) {
+	out, err := g.Output(ctx, "rev-parse", "-q", "--verify", "HEAD^{commit}")
 	if gitExitCode(err) == 1 {
 		return "", nil
 	}
@@ -168,8 +172,8 @@ func (g *Git) Head() (string, error) {
 }
 
 // ResolveCommit returns the commit rev names.
-func (g *Git) ResolveCommit(rev string) (string, error) {
-	out, err := g.Output("rev-parse", "--verify", "--end-of-options", rev+"^{commit}")
+func (g *Git) ResolveCommit(ctx context.Context, rev string) (string, error) {
+	out, err := g.Output(ctx, "rev-parse", "--verify", "--end-of-options", rev+"^{commit}")
 	if err != nil {
 		return "", err
 	}
@@ -178,8 +182,8 @@ func (g *Git) ResolveCommit(rev string) (string, error) {
 }
 
 // IsAncestor reports whether commit a is an ancestor of (or equal to) b.
-func (g *Git) IsAncestor(a, b string) (bool, error) {
-	_, err := g.Output("merge-base", "--is-ancestor", a, b)
+func (g *Git) IsAncestor(ctx context.Context, a, b string) (bool, error) {
+	_, err := g.Output(ctx, "merge-base", "--is-ancestor", a, b)
 	switch gitExitCode(err) {
 	case -1:
 		return err == nil, err
@@ -192,8 +196,8 @@ func (g *Git) IsAncestor(a, b string) (bool, error) {
 
 // TrackedFiles returns the worktree-relative paths in git's index under dir,
 // a worktree-relative directory ("." for all of them).
-func (g *Git) TrackedFiles(dir string) ([]string, error) {
-	out, err := g.Output("--literal-pathspecs", "ls-files", "-z", "--", dir)
+func (g *Git) TrackedFiles(ctx context.Context, dir string) ([]string, error) {
+	out, err := g.Output(ctx, "--literal-pathspecs", "ls-files", "-z", "--", dir)
 	if err != nil {
 		return nil, err
 	}
@@ -202,8 +206,8 @@ func (g *Git) TrackedFiles(dir string) ([]string, error) {
 }
 
 // UnmergedFiles returns the worktree-relative paths git lists as conflicted.
-func (g *Git) UnmergedFiles() ([]string, error) {
-	out, err := g.Output("ls-files", "-u", "-z")
+func (g *Git) UnmergedFiles(ctx context.Context) ([]string, error) {
+	out, err := g.Output(ctx, "ls-files", "-u", "-z")
 	if err != nil {
 		return nil, err
 	}
@@ -230,8 +234,8 @@ func splitNUL(out []byte) []string {
 }
 
 // Objects starts a reader for git objects. The caller must Close it.
-func (g *Git) Objects() (*GitObjects, error) {
-	cmd := exec.CommandContext(context.Background(), "git", "cat-file", "--batch-command")
+func (g *Git) Objects(ctx context.Context) (*GitObjects, error) {
+	cmd := exec.CommandContext(ctx, "git", "cat-file", "--batch-command")
 	cmd.Dir = g.root
 	cmd.Stderr = os.Stderr
 
@@ -249,7 +253,15 @@ func (g *Git) Objects() (*GitObjects, error) {
 		return nil, fmt.Errorf("start git cat-file: %w", err)
 	}
 
-	return &GitObjects{cmd: cmd, in: in, out: bufio.NewReader(out)}, nil
+	return &GitObjects{ctx: ctx, cmd: cmd, in: in, out: bufio.NewReader(out)}, nil
+}
+
+// cause reports a cancelled context instead of the broken pipe it leaves.
+func (o *GitObjects) cause(err error) error {
+	if ctxErr := o.ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return err
 }
 
 // Close stops the reader's git process.
@@ -264,9 +276,12 @@ func (o *GitObjects) request(command, rev string) (oid, typ string, size int, ok
 	if strings.ContainsAny(rev, "\n") {
 		return "", "", 0, false, fmt.Errorf("git object name %q contains a newline", rev)
 	}
+	if err := o.ctx.Err(); err != nil {
+		return "", "", 0, false, err
+	}
 
 	if _, err := fmt.Fprintf(o.in, "%s %s\n", command, rev); err != nil {
-		return "", "", 0, false, fmt.Errorf("write to git cat-file: %w", err)
+		return "", "", 0, false, fmt.Errorf("write to git cat-file: %w", o.cause(err))
 	}
 
 	return o.readHeader(rev)
@@ -276,7 +291,7 @@ func (o *GitObjects) request(command, rev string) (oid, typ string, size int, ok
 func (o *GitObjects) readHeader(rev string) (oid, typ string, size int, ok bool, err error) {
 	line, err := o.out.ReadString('\n')
 	if err != nil {
-		return "", "", 0, false, fmt.Errorf("read from git cat-file: %w", err)
+		return "", "", 0, false, fmt.Errorf("read from git cat-file: %w", o.cause(err))
 	}
 	line = strings.TrimSuffix(line, "\n")
 
@@ -307,7 +322,7 @@ func (o *GitObjects) contents(rev string) (oid, typ string, data []byte, ok bool
 	// The content is followed by a newline.
 	data = make([]byte, size+1)
 	if _, err := io.ReadFull(o.out, data); err != nil {
-		return "", "", nil, false, fmt.Errorf("read object %s: %w", oid, err)
+		return "", "", nil, false, fmt.Errorf("read object %s: %w", oid, o.cause(err))
 	}
 
 	return oid, typ, data[:size], true, nil
@@ -328,6 +343,10 @@ func (o *GitObjects) Blobs(revs []string) ([]string, error) {
 		if strings.Contains(rev, "\n") {
 			return nil, fmt.Errorf("git object name %q contains a newline", rev)
 		}
+	}
+
+	if err := o.ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	// Buffered: the writer must not block forever if reading stops early.
@@ -356,7 +375,7 @@ func (o *GitObjects) Blobs(revs []string) ([]string, error) {
 	}
 
 	if err := <-writeErr; err != nil {
-		return nil, fmt.Errorf("write to git cat-file: %w", err)
+		return nil, fmt.Errorf("write to git cat-file: %w", o.cause(err))
 	}
 
 	return oids, nil
@@ -416,16 +435,16 @@ func SesamGitPrefix(g *Git, sesamDir string) (string, error) {
 // constant and there are no pending changes; "" and an error otherwise. If
 // sesamDir is not a git repo a warning-level error is returned (caller decides
 // whether to treat it as fatal).
-func verifyInitFileUnchanged(sesamDir string) (string, error) {
-	g, err := OpenGit(sesamDir)
+func verifyInitFileUnchanged(ctx context.Context, sesamDir string) (string, error) {
+	g, err := OpenGit(ctx, sesamDir)
 	if err != nil {
 		return "", fmt.Errorf("not a git repository (skipping init-file history check): %w", err)
 	}
 
-	return verifyInitFileUnchangedWithRepo(sesamDir, g)
+	return verifyInitFileUnchangedWithRepo(ctx, sesamDir, g)
 }
 
-func verifyInitFileUnchangedWithRepo(sesamDir string, g *Git) (string, error) {
+func verifyInitFileUnchangedWithRepo(ctx context.Context, sesamDir string, g *Git) (string, error) {
 	prefix, err := SesamGitPrefix(g, sesamDir)
 	if err != nil {
 		return "", err
@@ -433,7 +452,7 @@ func verifyInitFileUnchangedWithRepo(sesamDir string, g *Git) (string, error) {
 
 	initRel := path.Join(prefix, ".sesam", "audit", "init")
 
-	head, err := g.Head()
+	head, err := g.Head(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -444,12 +463,12 @@ func verifyInitFileUnchangedWithRepo(sesamDir string, g *Git) (string, error) {
 
 	// Walk the full history and look the init blob up by path per commit. A
 	// path-limited log would simplify history and hide which commits carry it.
-	revs, err := g.Output("rev-list", "--parents", head)
+	revs, err := g.Output(ctx, "rev-list", "--parents", head)
 	if err != nil {
 		return "", err
 	}
 
-	objs, err := g.Objects()
+	objs, err := g.Objects(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -494,7 +513,7 @@ func verifyInitFileUnchangedWithRepo(sesamDir string, g *Git) (string, error) {
 		}
 	}
 
-	anchorHash, err := pickInitAnchor(g, objs, head, introducers)
+	anchorHash, err := pickInitAnchor(ctx, g, objs, head, introducers)
 	if err != nil {
 		return "", err
 	}
@@ -533,7 +552,7 @@ func verifyInitFileUnchangedWithRepo(sesamDir string, g *Git) (string, error) {
 // that introduced sesam commits the same init on a parallel line. One
 // descending from another means init was deleted and put back, which would move
 // the anchor and let an older log start a fresh, shorter history.
-func pickInitAnchor(g *Git, objs *GitObjects, head string, introducers []string) (string, error) {
+func pickInitAnchor(ctx context.Context, g *Git, objs *GitObjects, head string, introducers []string) (string, error) {
 	switch len(introducers) {
 	case 0:
 		return "", nil
@@ -547,7 +566,7 @@ func pickInitAnchor(g *Git, objs *GitObjects, head string, introducers []string)
 				continue
 			}
 
-			if ok, err := g.IsAncestor(a, b); err != nil {
+			if ok, err := g.IsAncestor(ctx, a, b); err != nil {
 				return "", fmt.Errorf("check ancestry of %s: %w", a, err)
 			} else if ok {
 				return "", fmt.Errorf(

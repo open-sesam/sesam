@@ -43,12 +43,12 @@ func TestCommittedConfigPaths(t *testing.T) {
 			}
 			gitCommitAll(t, dir, "configs")
 
-			g, err := core.OpenGit(dir)
+			g, err := core.OpenGit(t.Context(), dir)
 			require.NoError(t, err)
-			head, err := g.Head()
+			head, err := g.Head(t.Context())
 			require.NoError(t, err)
 
-			paths, err := committedConfigPaths(g, head, tt.prefix)
+			paths, err := committedConfigPaths(t.Context(), g, head, tt.prefix)
 			require.NoError(t, err)
 
 			want := make([]string, len(tt.want))
@@ -70,9 +70,9 @@ func TestGitAddConfigOnlyOwnTree(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "nested", ".sesam"), 0o700))
 	require.NoError(t, os.WriteFile(other, []byte("secrets: []\n"), 0o600))
 
-	require.NoError(t, r.GitAddConfig(nil))
+	require.NoError(t, r.GitAddConfig(t.Context(), nil))
 
-	staged, err := r.gitRepo.TrackedFiles(".")
+	staged, err := r.gitRepo.TrackedFiles(t.Context(), ".")
 	require.NoError(t, err)
 	require.Contains(t, staged, "sesam.yml")
 	require.NotContains(t, staged, "nested/sesam.yml")

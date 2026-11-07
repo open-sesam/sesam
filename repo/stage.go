@@ -393,12 +393,12 @@ func (s *Stage) UserKill(user string) error {
 // its object - is left out and reported; a secret that changed on both sides
 // is refused with a DivergedError, unless opts.All says to take the plaintext
 // as it is everywhere.
-func (s *Stage) Seal(opts SealOpts) (*SealResult, error) {
+func (s *Stage) Seal(ctx context.Context, opts SealOpts) (*SealResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if opts.All {
-		if err := s.secret.Seal(true, nil); err != nil {
+		if err := s.secret.Seal(ctx, true, nil); err != nil {
 			return nil, fmt.Errorf("failed to seal secrets: %w", err)
 		}
 
@@ -408,7 +408,7 @@ func (s *Stage) Seal(opts SealOpts) (*SealResult, error) {
 	states := opts.States
 	if states == nil {
 		var err error
-		if states, err = s.syncStates(opts.Sync); err != nil {
+		if states, err = s.syncStates(ctx, opts.Sync); err != nil {
 			return nil, err
 		}
 	}
@@ -431,7 +431,7 @@ func (s *Stage) Seal(opts SealOpts) (*SealResult, error) {
 		}
 	}
 
-	if err := s.secret.Seal(false, advice); err != nil {
+	if err := s.secret.Seal(ctx, false, advice); err != nil {
 		return nil, fmt.Errorf("failed to seal secrets: %w", err)
 	}
 
@@ -441,7 +441,7 @@ func (s *Stage) Seal(opts SealOpts) (*SealResult, error) {
 // SecretAdd starts tracking the secret(s) at each path. Paths are sesam-relative.
 // When additive, the groups are merged into an already-tracked secret's access
 // list instead of replacing it.
-func (s *Stage) SecretAdd(revealedPaths, groups []string, additive, nested bool) error {
+func (s *Stage) SecretAdd(ctx context.Context, revealedPaths, groups []string, additive, nested bool) error {
 	if len(revealedPaths) == 0 {
 		return fmt.Errorf("missing secret path: pass at least one path")
 	}
@@ -494,18 +494,18 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, additive, nested bool)
 		}
 	}
 
-	s.warnTracked(added)
+	s.warnTracked(ctx, added)
 	return nil
 }
 
 // warnTracked warns about secrets whose plaintext git already tracks:
 // .gitignore does not keep those out of the next commit.
-func (s *Stage) warnTracked(revealedPaths []string) {
+func (s *Stage) warnTracked(ctx context.Context, revealedPaths []string) {
 	prefix, err := core.SesamGitPrefix(s.gitRepo, s.sesamDir)
 	if err != nil {
 		return
 	}
-	trackedFiles, err := s.gitRepo.TrackedFiles(prefix)
+	trackedFiles, err := s.gitRepo.TrackedFiles(ctx, prefix)
 	if err != nil {
 		return
 	}

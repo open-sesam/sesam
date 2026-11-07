@@ -247,7 +247,7 @@ func testGitRepo(t *testing.T) (string, *Git) {
 	sesamDir := testRepo(t)
 	testGit(t, sesamDir, "init", "-q")
 
-	repo, err := OpenGit(sesamDir)
+	repo, err := OpenGit(t.Context(), sesamDir)
 	require.NoError(t, err)
 
 	return sesamDir, repo

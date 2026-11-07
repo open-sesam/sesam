@@ -107,10 +107,10 @@ func buildCategories(ctx context.Context, env doctorEnv) []doctorCategory {
 	return []doctorCategory{
 		{"System", []DoctorCheck{osCheck()}},
 		{"Installation", []DoctorCheck{sesamInPathCheck(), versionCheck(ctx, env)}},
-		{"Identity", []DoctorCheck{identityCheck(env)}},
+		{"Identity", []DoctorCheck{identityCheck(ctx, env)}},
 		{"Environment", []DoctorCheck{askpassCheck(), editorCheck(), clipboardCheck(ctx, env), completionCheck()}},
-		{"Git", []DoctorCheck{gitRepoCheck(env), gitCheck(ctx, env)}},
-		{"Repository", []DoctorCheck{sesamDirCheck(env)}},
+		{"Git", []DoctorCheck{gitRepoCheck(ctx, env), gitCheck(ctx, env)}},
+		{"Repository", []DoctorCheck{sesamDirCheck(ctx, env)}},
 	}
 }
 
@@ -268,7 +268,7 @@ func fetchLatestReleaseTag(ctx context.Context) (string, error) {
 	return payload.TagName, nil
 }
 
-func identityCheck(env doctorEnv) DoctorCheck {
+func identityCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 	paths := env.identityPaths
 	return &genericCheck{
 		name: "identity-configured",
@@ -289,7 +289,7 @@ func identityCheck(env doctorEnv) DoctorCheck {
 			identityTypeCheck(paths),
 			identityPermsCheck(paths),
 			identityPluginCheck(paths),
-			identityUserCheck(env),
+			identityUserCheck(ctx, env),
 		},
 	}
 }
@@ -383,9 +383,9 @@ func identityPluginCheck(paths []string) DoctorCheck {
 	}}
 }
 
-func identityUserCheck(env doctorEnv) DoctorCheck {
+func identityUserCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 	return &genericCheck{name: "identity-resolves-to-user", run: func() DoctorDiagnosis {
-		initialized, err := repo.IsInitialized(env.sesamDir)
+		initialized, err := repo.IsInitialized(ctx, env.sesamDir)
 		if err != nil {
 			return docInfo(fmt.Sprintf("no sesam repo to check against (%v)", err))
 		}
@@ -393,11 +393,11 @@ func identityUserCheck(env doctorEnv) DoctorCheck {
 			return docInfo("no sesam repo here yet - cannot map identity to a user")
 		}
 
-		r, err := repo.Load(env.sesamDir, env.identityPaths, repo.RepoOpts{
+		r, err := repo.Load(ctx, env.sesamDir, env.identityPaths, repo.RepoOpts{
 			Interactive:     true,
 			LockTimeout:     env.lockTimeout,
 			VerifyMode:      repo.VerifyModeDefault,
-			InMerge:         mergeState(env.sesamDir).InProgress(),
+			InMerge:         mergeState(ctx, env.sesamDir).InProgress(),
 			AskpassProgram:  env.askpass,
 			AskpassRequired: env.askpassReq,
 		})
@@ -490,7 +490,7 @@ func completionCheck() DoctorCheck {
 	}}
 }
 
-func gitRepoCheck(env doctorEnv) DoctorCheck {
+func gitRepoCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 	return &genericCheck{name: "git-repository", run: func() DoctorDiagnosis {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -499,10 +499,10 @@ func gitRepoCheck(env doctorEnv) DoctorCheck {
 
 		// The repo --sesam-dir names, not necessarily the one around the cwd.
 		dir := cwd
-		if resolved, err := repo.ResolveSesamDir(env.sesamDir); err == nil {
+		if resolved, err := repo.ResolveSesamDir(ctx, env.sesamDir); err == nil {
 			dir = resolved
 		}
-		root, err := repo.GitWorktreeRoot(dir)
+		root, err := repo.GitWorktreeRoot(ctx, dir)
 		if err != nil {
 			return docIssue("not inside a git repository", "run `git init` or cd into your repository")
 		}
@@ -699,11 +699,11 @@ func gitHooksCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 	}
 }
 
-func sesamDirCheck(env doctorEnv) DoctorCheck {
+func sesamDirCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 	return &genericCheck{
 		name: "sesam-directory",
 		run: func() DoctorDiagnosis {
-			resolved, err := repo.ResolveSesamDir(env.sesamDir)
+			resolved, err := repo.ResolveSesamDir(ctx, env.sesamDir)
 			if err != nil {
 				return docIssue(
 					fmt.Sprintf("could not resolve sesam dir: %v", err),
@@ -723,19 +723,19 @@ func sesamDirCheck(env doctorEnv) DoctorCheck {
 			return docHealthy(filepath.Join(resolved, ".sesam"))
 		},
 		subChecks: []DoctorCheck{
-			sesamDirPermsCheck(env),
-			gitignoreCheck(env),
-			gitattributesCheck(env),
+			sesamDirPermsCheck(ctx, env),
+			gitignoreCheck(ctx, env),
+			gitattributesCheck(ctx, env),
 		},
 	}
 }
 
-func sesamDirPermsCheck(env doctorEnv) DoctorCheck {
+func sesamDirPermsCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 	return &genericCheck{name: "sesam-directory-permissions", run: func() DoctorDiagnosis {
 		if runtime.GOOS == "windows" {
 			return docInfo("permission check skipped on Windows")
 		}
-		resolved, err := repo.ResolveSesamDir(env.sesamDir)
+		resolved, err := repo.ResolveSesamDir(ctx, env.sesamDir)
 		if err != nil {
 			return docFailed(err.Error())
 		}
@@ -750,16 +750,16 @@ func sesamDirPermsCheck(env doctorEnv) DoctorCheck {
 	}}
 }
 
-func gitignoreCheck(env doctorEnv) DoctorCheck {
+func gitignoreCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 	return &genericCheck{name: "gitignore", run: func() DoctorDiagnosis {
-		res, err := repo.CheckGitIgnore(env.sesamDir)
+		res, err := repo.CheckGitIgnore(ctx, env.sesamDir)
 		return managedFileDiagnosis(res, err, ".gitignore")
 	}}
 }
 
-func gitattributesCheck(env doctorEnv) DoctorCheck {
+func gitattributesCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 	return &genericCheck{name: "gitattributes", run: func() DoctorDiagnosis {
-		res, err := repo.CheckGitAttributes(env.sesamDir)
+		res, err := repo.CheckGitAttributes(ctx, env.sesamDir)
 		return managedFileDiagnosis(res, err, ".gitattributes")
 	}}
 }

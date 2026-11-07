@@ -43,7 +43,7 @@ func initTrackedRepo(t *testing.T, root string, tracked map[string]string) *core
 		testGit(t, root, "add", "-f", "--", rel)
 	}
 
-	repo, err := core.OpenGit(root)
+	repo, err := core.OpenGit(t.Context(), root)
 	require.NoError(t, err)
 
 	return repo
@@ -74,7 +74,7 @@ func TestCleanupRemovesUntrackedFiles(t *testing.T) {
 	stale := filepath.Join(root, "stale-secret")
 	writeFile(t, stale, "leaked plaintext")
 
-	require.NoError(t, cleanup(openCleanRoot(t, root), repo, nil))
+	require.NoError(t, cleanup(t.Context(), openCleanRoot(t, root), repo, nil))
 
 	require.False(t, exists(t, stale), "untracked file should have been removed")
 	require.True(t, exists(t, filepath.Join(root, "sesam.yml")), "tracked file should be preserved")
@@ -89,7 +89,7 @@ func TestCleanupKeepsHomeRelativeIdentity(t *testing.T) {
 	id := filepath.Join(root, "vault", "id.age")
 	writeFile(t, id, "AGE-SECRET-KEY-1")
 
-	require.NoError(t, cleanup(openCleanRoot(t, root), repo, nil, "~/vault/id.age"))
+	require.NoError(t, cleanup(t.Context(), openCleanRoot(t, root), repo, nil, "~/vault/id.age"))
 	require.True(t, exists(t, id))
 }
 
@@ -101,7 +101,7 @@ func TestCleanupPreservesModifiedTrackedFiles(t *testing.T) {
 	tracked := filepath.Join(root, "sesam.yml")
 	writeFile(t, tracked, "modified by user")
 
-	require.NoError(t, cleanup(openCleanRoot(t, root), repo, nil))
+	require.NoError(t, cleanup(t.Context(), openCleanRoot(t, root), repo, nil))
 
 	require.True(t, exists(t, tracked), "modified tracked file should survive")
 	got, err := os.ReadFile(tracked)
@@ -118,7 +118,7 @@ func TestCleanupSkipsSesamAndGitDirs(t *testing.T) {
 	gitScratch := filepath.Join(root, ".git", "untracked-by-design")
 	writeFile(t, gitScratch, "git internal")
 
-	require.NoError(t, cleanup(openCleanRoot(t, root), repo, nil))
+	require.NoError(t, cleanup(t.Context(), openCleanRoot(t, root), repo, nil))
 
 	require.True(t, exists(t, sesamScratch), ".sesam contents must not be touched")
 	require.True(t, exists(t, gitScratch), ".git contents must not be touched")
@@ -132,7 +132,7 @@ func TestCleanupRemovesUntrackedInSubdir(t *testing.T) {
 	stale := filepath.Join(root, "keep", "stale.txt")
 	writeFile(t, stale, "junk")
 
-	require.NoError(t, cleanup(openCleanRoot(t, root), repo, nil))
+	require.NoError(t, cleanup(t.Context(), openCleanRoot(t, root), repo, nil))
 
 	require.False(t, exists(t, stale), "untracked file in subdir should be removed")
 	require.True(t, exists(t, filepath.Join(root, "keep", "sesam.yml")), "tracked sibling should survive")
@@ -164,7 +164,7 @@ func TestCleanupPreservesTrackedFilesInNestedSesamDir(t *testing.T) {
 	stale := filepath.Join(sesamRoot, "secret.txt")
 	writeFile(t, stale, "leaked plaintext")
 
-	require.NoError(t, cleanup(openCleanRoot(t, sesamRoot), repo, nil))
+	require.NoError(t, cleanup(t.Context(), openCleanRoot(t, sesamRoot), repo, nil))
 
 	require.False(t, exists(t, stale), "untracked plaintext should be removed")
 	require.True(t, exists(t, filepath.Join(sesamRoot, "sesam.yml")), "tracked sesam.yml must survive")
@@ -176,7 +176,7 @@ func TestCleanupErrorsOnMissingSesamDir(t *testing.T) {
 	root := t.TempDir()
 	repo := initTrackedRepo(t, root, nil)
 
-	err := cleanup(openCleanRoot(t, root), repo, nil)
+	err := cleanup(t.Context(), openCleanRoot(t, root), repo, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not a sesam directory")
 }

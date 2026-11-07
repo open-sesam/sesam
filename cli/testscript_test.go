@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -23,7 +24,7 @@ const askpassTestPassphrase = "askpass-test-passphrase"
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
 		"sesam": func() {
-			err := Main(os.Args)
+			err := Main(context.Background(), os.Args)
 			if err == nil {
 				return
 			}

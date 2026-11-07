@@ -15,8 +15,8 @@ import (
 // CleanAggressive removes every untracked file under sesamDir, including
 // scratch state inside `.sesam/`. It is the package-level analogue of
 // `git clean -fdx` and does not require a loaded repository.
-func CleanAggressive(_ context.Context, sesamDir string, identityPaths []string, opts CleanOpts) error {
-	gr, err := openGitRepo(sesamDir)
+func CleanAggressive(ctx context.Context, sesamDir string, identityPaths []string, opts CleanOpts) error {
+	gr, err := openGitRepo(ctx, sesamDir)
 	if err != nil {
 		return err
 	}
@@ -27,7 +27,7 @@ func CleanAggressive(_ context.Context, sesamDir string, identityPaths []string,
 	}
 	defer func() { _ = root.Close() }()
 
-	return cleanup(root, gr, opts.CheckFunc, identityPaths...)
+	return cleanup(ctx, root, gr, opts.CheckFunc, identityPaths...)
 }
 
 // deleteRevealedSecrets removes the plaintext copy on disk for every secret in
@@ -68,6 +68,7 @@ func deleteRevealedSecrets(root *os.Root, secrets []core.SecretAccess, checkFn f
 // must not be deleted even if untracked — intended for identity files that
 // happen to live inside the worktree. All file I/O is confined to root.
 func cleanup(
+	ctx context.Context,
 	root *os.Root,
 	gitRepo *core.Git,
 	checkFn func(path string) (bool, error),
@@ -110,7 +111,7 @@ func cleanup(
 		return fmt.Errorf("resolve sesam dir within worktree: %w", err)
 	}
 
-	trackedFiles, err := gitRepo.TrackedFiles(prefix)
+	trackedFiles, err := gitRepo.TrackedFiles(ctx, prefix)
 	if err != nil {
 		return fmt.Errorf("read git index: %w", err)
 	}

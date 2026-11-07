@@ -27,7 +27,7 @@ func applyConfig(t *testing.T, r *Repo) ([]diff.Change, error) {
 		if len(applied) == 0 {
 			return nil
 		}
-		_, err = s.Seal(SealOpts{})
+		_, err = s.Seal(t.Context(), SealOpts{})
 		return err
 	})
 
@@ -74,7 +74,7 @@ func TestConfigApply(t *testing.T) {
 	// README starts out admin-only; widen it so the config below narrowing it
 	// back is a change and not a no-op.
 	require.NoError(t, r.Update(func(s *Stage) error {
-		return s.SecretAdd([]string{"README.md"}, []string{"dev"}, false, false)
+		return s.SecretAdd(t.Context(), []string{"README.md"}, []string{"dev"}, false, false)
 	}))
 
 	writeMainConfig(t, dir, "users:\n"+
@@ -192,7 +192,7 @@ func TestConfigApplyTellsUser(t *testing.T) {
 	// bob can read what he was given access to.
 	require.NoError(t, r.Close())
 	bobRepo := reloadSesamRepo(t, dir, bob)
-	require.NoError(t, bobRepo.RevealAll())
+	require.NoError(t, bobRepo.RevealAll(t.Context()))
 }
 
 // TestConfigApplyLeavesConfigAlone is the point of bypassing the Stage
@@ -472,7 +472,7 @@ func TestConfigApplyNonAdmin(t *testing.T) {
 
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "dev.env"), []byte("pw=1"), 0o600))
 			require.NoError(t, r.Update(func(s *Stage) error {
-				return s.SecretAdd([]string{"dev.env"}, []string{"dev"}, false, false)
+				return s.SecretAdd(t.Context(), []string{"dev.env"}, []string{"dev"}, false, false)
 			}))
 			require.NoError(t, r.Close())
 

@@ -53,15 +53,15 @@ func identityToUser(identities core.Identities, users map[string]core.Recipients
 // loadIdentities reads all given paths and parses all identities. Encrypted
 // identities are unlocked via the system keyring, falling back to askpass and
 // then stdin when allowed.
-func loadIdentities(identityPaths []string, pluginUI *core.PluginUI) (core.Identities, error) {
-	return loadIdentitiesWith(identityPaths, RepoOpts{Interactive: true}.passphraseProvider, pluginUI)
+func loadIdentities(ctx context.Context, identityPaths []string, pluginUI *core.PluginUI) (core.Identities, error) {
+	return loadIdentitiesWith(ctx, identityPaths, RepoOpts{Interactive: true}.passphraseProvider, pluginUI)
 }
 
 // loadIdentitiesWith parses every identity at the given paths. newProvider
 // builds the PassphraseProvider for a single identity, keyed by that key's own
 // fingerprint, so each encrypted key gets a distinct keyring entry instead of
 // sharing one (which would cross-contaminate passphrases between keys).
-func loadIdentitiesWith(identityPaths []string, newProvider func(keyFingerprint string) core.PassphraseProvider, pluginUI *core.PluginUI) (core.Identities, error) {
+func loadIdentitiesWith(ctx context.Context, identityPaths []string, newProvider func(keyFingerprint string) core.PassphraseProvider, pluginUI *core.PluginUI) (core.Identities, error) {
 	if len(identityPaths) == 0 {
 		return nil, fmt.Errorf("at least one --identity or SESAM_ID env var required")
 	}
@@ -89,7 +89,7 @@ func loadIdentitiesWith(identityPaths []string, newProvider func(keyFingerprint 
 		keyFingerprint := core.KeyFingerprint(data)
 		prompt := fmt.Sprintf("🔐 sesam passphrase for %s (%s): ", filepath.Base(expandedPath), keyFingerprint)
 		provider := newProvider(keyFingerprint)
-		identity, err := core.ParseIdentity(key, provider, pluginUI, prompt)
+		identity, err := core.ParseIdentity(ctx, key, provider, pluginUI, prompt)
 		if err != nil {
 			return nil, err
 		}
@@ -109,8 +109,8 @@ func loadIdentitiesWith(identityPaths []string, newProvider func(keyFingerprint 
 // openGitRepo opens the git repository that contains sesamRoot. git walks up
 // parent directories, so this works whether .sesam lives at the worktree root
 // or in a subdir.
-func openGitRepo(sesamDir string) (*core.Git, error) {
-	repo, err := core.OpenGit(sesamDir)
+func openGitRepo(ctx context.Context, sesamDir string) (*core.Git, error) {
+	repo, err := core.OpenGit(ctx, sesamDir)
 	if err != nil {
 		return nil, fmt.Errorf("open git repo at %s: %w", sesamDir, err)
 	}
@@ -119,10 +119,10 @@ func openGitRepo(sesamDir string) (*core.Git, error) {
 
 // gitAdd runs `git add -A` on sesam-relative paths. It honors GIT_INDEX_FILE,
 // which git sets for hooks.
-func gitAdd(sesamDir string, paths ...string) error {
+func gitAdd(ctx context.Context, sesamDir string, paths ...string) error {
 	args := append([]string{"--literal-pathspecs", "-C", sesamDir, "add", "-A", "--"}, paths...)
 	//nolint:gosec // fixed git subcommand; paths are sesam's own and passed after "--".
-	out, err := exec.CommandContext(context.Background(), "git", args...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git add %s: %w: %s", strings.Join(paths, " "), err, bytes.TrimSpace(out))
 	}

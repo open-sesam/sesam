@@ -42,7 +42,7 @@ func TestCheckGitConfigReportsHooks(t *testing.T) {
 	require.Empty(t, c.Actual)
 
 	// After installing, it matches the expected `sesam ... hook pre-commit`.
-	require.NoError(t, InstallHooks(dir))
+	require.NoError(t, InstallHooks(t.Context(), dir))
 	checks, err = CheckGitConfig(t.Context(), dir)
 	require.NoError(t, err)
 	c, ok = findGitConfigCheck(checks, "hook.sesam-precommit.command")

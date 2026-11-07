@@ -10,22 +10,22 @@ import (
 
 // HandleOpen reveals what is missing or stale and keeps plaintext edited here,
 // naming it. --all overwrites everything.
-func HandleOpen(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+func HandleOpen(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	if cmd.Args().Present() {
 		// Revealing single files is not supported (yet); don't pretend it is.
 		return fmt.Errorf("reveal takes no paths, it reveals every secret: %v", cmd.Args().Slice())
 	}
 
 	if cmd.Bool("all") {
-		return r.RevealAll()
+		return r.RevealAll(ctx)
 	}
 
-	states, err := r.SyncStates(syncOpts(r.SesamDir()))
+	states, err := r.SyncStates(ctx, syncOpts(ctx, r.SesamDir()))
 	if err != nil {
 		return err
 	}
 
-	if err := refreshStale(r, states, true); err != nil {
+	if err := refreshStale(ctx, r, states, true); err != nil {
 		return err
 	}
 
@@ -36,14 +36,14 @@ func HandleOpen(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 // refreshStale reveals the plaintext whose object moved away from it (and,
 // with missing, the plaintext that is not there at all), then records those
 // paths as in sync so a Seal handed the same states only checks recipients.
-func refreshStale(r *repo.Repo, states repo.SyncStates, missing bool) error {
+func refreshStale(ctx context.Context, r *repo.Repo, states repo.SyncStates, missing bool) error {
 	want := []repo.SecretState{repo.SecretStateStale}
 	if missing {
 		want = append(want, repo.SecretStateNoRevealedPath)
 	}
 
 	paths := states.Paths(want...)
-	if err := r.RevealPaths(paths); err != nil {
+	if err := r.RevealPaths(ctx, paths); err != nil {
 		return err
 	}
 

@@ -32,7 +32,7 @@ const (
 // Commands wrapped in commands.WithRepo load a sesam Repo (acquire lock,
 // build managers, defer Close) and hand it to the handler; the wrapping
 // makes it obvious which commands need an initialized sesam repository.
-func Main(args []string) error {
+func Main(ctx context.Context, args []string) error {
 	installHelpOrdering()
 
 	cli.VersionFlag = &cli.BoolFlag{
@@ -539,7 +539,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 		return activeProfile.stop(cmd.String("memprofile"))
 	}
 
-	return app.Run(context.Background(), args)
+	return app.Run(ctx, args)
 }
 
 func hasArgumentSeparator(args, commandArgs []string) bool {
