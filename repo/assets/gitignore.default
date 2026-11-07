@@ -5,6 +5,7 @@
 !.sesam/**
 .sesam/tmp/
 .sesam/tmp/**
+.sesam.lock
 .sesam/no-git-integration-warning
 !sesam.yml
 !.gitignore

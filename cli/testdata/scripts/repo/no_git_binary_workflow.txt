@@ -1,6 +1,5 @@
-# Every repo-backed command runs the git-integration nudge, which reads
-# `git --version`. Without git on $PATH there is no version to compare against -
-# that has to degrade to "no config-based hooks", not take the command down.
+# git is a hard requirement: sesam shells out to it for every repo-backed
+# command, so without git on $PATH they must fail with a clear error.
 
 exec git init
 exec git config user.email test@sesam.dev
@@ -14,9 +13,8 @@ exec git commit -m 'init sesam'
 hide-git
 ! exec git --version
 
-exec sesam status
-stdout 'in sync'
-stderr 'failed to figure out git --version'
+! exec sesam status
+stderr 'executable file not found'
 
-exec sesam log
-stdout 'initialized repo'
+! exec sesam log
+stderr 'executable file not found'

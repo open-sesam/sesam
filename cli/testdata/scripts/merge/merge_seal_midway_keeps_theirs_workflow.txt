@@ -37,7 +37,7 @@ stdout 'the stale \(S\) secrets take the incoming version when you finish'
 # Resolve s and seal, as the hint says. t is left alone and named.
 cp $TMPDIR/resolved.txt s
 exec sesam seal
-stderr 'not sealed - the object is newer than the plaintext'
+stderr 'changed only in the revealed file but not yet sealed'
 stderr 'sesam:   t'
 exec sesam show .sesam/objects/s.sesam
 stdout 'RESOLVED'

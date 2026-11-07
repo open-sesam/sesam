@@ -414,6 +414,33 @@ func (sm *SecretManager) readSecretFooter(path string) (*secretFooter, error) {
 	return footer, nil
 }
 
+// Reveal verifies and decrypts one managed secret to dst. Discard output on error.
+func (sm *SecretManager) Reveal(revealedPath string, dst io.Writer) error {
+	secret, exists := sm.State.SecretExists(revealedPath)
+	if !exists {
+		return fmt.Errorf("no such secret: %s", revealedPath)
+	}
+	if !sm.State.UserHasAccess(sm.Signer.UserName(), secret.AccessGroups) {
+		return fmt.Errorf("user %s has no access to %s", sm.Signer.UserName(), revealedPath)
+	}
+
+	srcFd, err := sm.root.Open(sm.cryptPath(revealedPath))
+	if err != nil {
+		return fmt.Errorf("opening secret file failed: %w", err)
+	}
+	defer closeLogged(srcFd)
+
+	_, err = RevealStreamAndVerify(
+		srcFd,
+		dst,
+		sm.Identities.AgeIdentities(),
+		sm.Keyring,
+		sm.State.SealerAuthorized,
+		revealedPath,
+	)
+	return err
+}
+
 // RevealAll writes out every secret the user can read, whatever the plaintext
 // holds right now.
 func (sm *SecretManager) RevealAll() error {

@@ -83,11 +83,11 @@ func printSkippedStale(res *repo.SealResult) {
 
 	printNote(
 		fmt.Sprintf(
-			"%d stale %s not sealed - the object is newer than the plaintext:",
+			"%d of your local %s were changed only in the revealed file but not yet sealed:",
 			len(res.Stale), pluralize("secret", len(res.Stale)),
 		),
 		res.Stale,
-		"`sesam reveal` refreshes the plaintext, `sesam seal --all` seals your version anyway.",
+		"Please decide if you want to keep the changes (`sesam seal --all`) or if you want to overwrite with the incoming changes (`sesam reveal`).",
 	)
 }
 

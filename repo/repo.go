@@ -598,11 +598,13 @@ type VerifyOptions struct {
 
 // VerifyReport carries the per-check outcome from Verify.
 type VerifyReport struct {
-	Success          bool                   `json:"success"`
-	Integrity        *core.IntegrityReport  `json:"integrity,omitempty"`
-	TruncateError    error                  `json:"truncate_error,omitempty"`
-	ForgeCheckReport *core.ForgeReport      `json:"forge_report,omitempty"`
-	SharedPublicKeys []core.SharedPublicKey `json:"shared_public_keys,omitempty"`
+	Success       bool                  `json:"success"`
+	Integrity     *core.IntegrityReport `json:"integrity,omitempty"`
+	TruncateError error                 `json:"truncate_error,omitempty"`
+	// TruncateStoppedAt is the commit the history check could not read past.
+	TruncateStoppedAt string                 `json:"truncate_stopped_at,omitempty"`
+	ForgeCheckReport  *core.ForgeReport      `json:"forge_report,omitempty"`
+	SharedPublicKeys  []core.SharedPublicKey `json:"shared_public_keys,omitempty"`
 
 	// CommittedConfigChanges are steps sesam.yml currently declares that the
 	// config committed at HEAD would already carry out on its own. Verify only

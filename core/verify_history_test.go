@@ -3,9 +3,11 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -153,6 +155,168 @@ func TestAuditLogIsPrefix(t *testing.T) {
 	}
 }
 
+// ---------- auditLogCovers ----------
+
+func TestAuditLogCovers(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// e is an entry by alice; its name doubles as detail and signature.
+	e := func(op Operation, name string, minute int) AuditEntrySigned {
+		return AuditEntrySigned{
+			AuditEntry: AuditEntry{
+				Operation: op,
+				ChangedBy: "alice",
+				Detail:    []byte(`"` + name + `"`),
+				Time:      t0.Add(time.Duration(minute) * time.Minute),
+			},
+			Signature: name,
+		}
+	}
+
+	// resigned is what a merge makes of a theirs entry.
+	resigned := func(x AuditEntrySigned) AuditEntrySigned {
+		x.ChangedByBeforeMerge = x.ChangedBy
+		x.ChangedBy = "merger"
+		x.Signature += "'"
+		return x
+	}
+
+	merge := func(name string, base uint64, tip *AuditEntrySigned, withHash bool, dropped int, res ...ConflictResolutionEntry) AuditEntrySigned {
+		d := DetailMerge{BaseSeqID: base, TheirTipSeqID: tip.SeqID, Dropped: dropped, Resolutions: res}
+		if withHash {
+			d.TheirTipHash = tip.Hash()
+		}
+
+		detail, err := json.Marshal(d)
+		require.NoError(t, err)
+
+		x := e(OpMerge, name, 100)
+		x.Detail = detail
+		return x
+	}
+
+	// log numbers its entries the way a real log does.
+	log := func(entries ...AuditEntrySigned) *AuditLog {
+		for i := range entries {
+			entries[i].SeqID = uint64(i + 1)
+		}
+		return &AuditLog{Entries: entries}
+	}
+
+	initE, a := e(OpInit, "init", 0), e(OpSecretAdd, "a", 1)
+	f := e(OpUserTell, "f", 2)
+	d1, d2, d3 := e(OpUserTell, "d1", 3), e(OpSeal, "d2", 4), e(OpUserKill, "d3", 5)
+	d3.Detail = []byte(`{"user":"bob"}`)
+
+	// develop: init a d1 d2 (d3). Copies, so seq ids are set per log.
+	develop := log(initE, a, d1, d2)
+	develop3 := log(initE, a, d1, d2, d3)
+	tip, tip3 := develop.Entries[3], develop3.Entries[4]
+
+	// olderKill does what d3 does, but is another entry.
+	olderKill := e(OpUserKill, "d3", 9)
+	olderKill.Signature = "older"
+	olderKill.Detail = d3.Detail
+
+	// forged has tip's seq id but other content.
+	forged := tip
+	forged.Signature = "forged"
+
+	tests := []struct {
+		name    string
+		newLog  *AuditLog
+		oldLog  *AuditLog
+		wantErr string
+	}{
+		{
+			name:   "plain append",
+			newLog: log(initE, a, d1, d2, f),
+			oldLog: develop,
+		},
+		{
+			name:   "branch merged develop, then squashed",
+			newLog: log(initE, a, f, resigned(d1), merge("m", 2, &tip, true, 1)),
+			oldLog: develop,
+		},
+		{
+			name: "branch merged develop twice, then squashed",
+			newLog: log(
+				initE, a, f, resigned(d1), merge("m1", 2, &tip, true, 1),
+				resigned(d3), merge("m2", 4, &tip3, true, 0),
+			),
+			oldLog: develop3,
+		},
+		{
+			name:    "merge names another tip",
+			newLog:  log(initE, a, f, resigned(d1), merge("m", 2, &develop.Entries[2], true, 1)),
+			oldLog:  develop,
+			wantErr: "differ at index 2",
+		},
+		{
+			name:    "merge hash does not match the tip",
+			newLog:  log(initE, a, f, resigned(d1), merge("m", 2, &forged, true, 1)),
+			oldLog:  develop,
+			wantErr: "differ at index 2",
+		},
+		{
+			name:   "legacy merge, dropped seal accounted for",
+			newLog: log(initE, a, f, resigned(d1), merge("m", 2, &tip, false, 1)),
+			oldLog: develop,
+		},
+		{
+			// e.g. a change_access that was already satisfied: deduped, not recorded.
+			name:   "legacy merge left out a non-removal",
+			newLog: log(initE, a, f, merge("m", 2, &tip, false, 1)),
+			oldLog: develop,
+		},
+		{
+			name:    "legacy merge lost a kill it did not record",
+			newLog:  log(initE, a, d1, d2, f, merge("m", 4, &tip3, false, 1)),
+			oldLog:  develop3,
+			wantErr: "differ at index 4",
+		},
+		{
+			name: "legacy merge recorded dropping another user's kill",
+			newLog: log(initE, a, d1, d2, f, merge("m", 4, &tip3, false, 1, ConflictResolutionEntry{
+				Operation: OpUserKill, Action: MergeDropped, ChangedByBeforeMerge: "alice", Target: "carol",
+			})),
+			oldLog:  develop3,
+			wantErr: "differ at index 4",
+		},
+		{
+			name: "legacy merge recorded dropping the kill",
+			newLog: log(initE, a, d1, d2, f, merge("m", 4, &tip3, false, 1, ConflictResolutionEntry{
+				Operation: OpUserKill, Action: MergeDropped, ChangedByBeforeMerge: "alice", Target: "bob",
+			})),
+			oldLog: develop3,
+		},
+		{
+			// An equal kill may be an older one of a since re-told user.
+			name:    "legacy merge cannot excuse a lost kill as dedupe",
+			newLog:  log(initE, a, d1, d2, olderKill, merge("m", 4, &tip3, false, 1)),
+			oldLog:  develop3,
+			wantErr: "differ at index 4",
+		},
+		{
+			name:    "no merge at all",
+			newLog:  log(initE, a, f),
+			oldLog:  develop,
+			wantErr: "bigger",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := auditLogCovers(tt.newLog, tt.oldLog)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // ---------- auditLogHistory ----------
 
 func TestAuditLogHistory(t *testing.T) {
@@ -204,7 +368,7 @@ func TestAuditLogHistory(t *testing.T) {
 				stranger := newTestUser(t, "stranger")
 				return Identities{stranger.Identity}
 			},
-			wantSnaps: []int{},
+			wantSnaps: []int{-1},
 		},
 	}
 
@@ -224,6 +388,10 @@ func TestAuditLogHistory(t *testing.T) {
 			var gotSnaps []int
 			for snap, err := range iter {
 				require.NoError(t, err)
+				if snap.Log == nil {
+					gotSnaps = append(gotSnaps, -1) // no access: the walk ends here
+					continue
+				}
 				gotSnaps = append(gotSnaps, len(snap.Log.Entries))
 			}
 
@@ -238,11 +406,15 @@ func TestAuditLogHistory(t *testing.T) {
 
 // ---------- VerifyHistory ----------
 
+// errOnly drops VerifyHistory's stoppedAt for tests that only check the error.
+func errOnly(_ string, err error) error { return err }
+
 func TestVerifyHistory(t *testing.T) {
 	tests := []struct {
-		name    string
-		setup   func(t *testing.T, f *historyFixture)
-		wantErr string // substring; empty means no error
+		name        string
+		setup       func(t *testing.T, f *historyFixture)
+		wantErr     string // substring; empty means no error
+		wantStopped bool   // the walk ended at a log ids cannot read
 	}{
 		{
 			name:  "single init commit",
@@ -290,6 +462,7 @@ func TestVerifyHistory(t *testing.T) {
 				f.commit(t, "tell alice")
 				f.Ids = Identities{alice.Identity}
 			},
+			wantStopped: true,
 		},
 	}
 
@@ -298,7 +471,8 @@ func TestVerifyHistory(t *testing.T) {
 			f := newHistoryFixture(t)
 			tt.setup(t, f)
 
-			err := VerifyHistory(f.SesamDir, f.Repo, f.Ids, NewNonInteractivePluginUI(), "")
+			stoppedAt, err := VerifyHistory(f.SesamDir, f.Repo, f.Ids, NewNonInteractivePluginUI(), "")
+			require.Equal(t, tt.wantStopped, stoppedAt != "", "stoppedAt=%q", stoppedAt)
 			if tt.wantErr == "" {
 				require.NoError(t, err)
 			} else {
@@ -322,14 +496,14 @@ func TestVerifyHistoryAnchorHandedDown(t *testing.T) {
 	require.NotEmpty(t, anchor)
 
 	ui := NewNonInteractivePluginUI()
-	require.NoError(t, VerifyHistory(f.SesamDir, f.Repo, f.Ids, ui, anchor))
-	require.NoError(t, VerifyHistory(f.SesamDir, f.Repo, f.Ids, ui, ""))
+	require.NoError(t, errOnly(VerifyHistory(f.SesamDir, f.Repo, f.Ids, ui, anchor)))
+	require.NoError(t, errOnly(VerifyHistory(f.SesamDir, f.Repo, f.Ids, ui, "")))
 
 	f.truncateLog(t)
 	f.commit(t, "truncate")
 
-	require.ErrorContains(t, VerifyHistory(f.SesamDir, f.Repo, f.Ids, ui, anchor), "not a prefix")
-	require.ErrorContains(t, VerifyHistory(f.SesamDir, f.Repo, f.Ids, ui, ""), "not a prefix")
+	require.ErrorContains(t, errOnly(VerifyHistory(f.SesamDir, f.Repo, f.Ids, ui, anchor)), "not a prefix")
+	require.ErrorContains(t, errOnly(VerifyHistory(f.SesamDir, f.Repo, f.Ids, ui, "")), "not a prefix")
 }
 
 // TestVerifyHistory_NoCommitsYet covers the case where the repo has no commits
@@ -339,7 +513,7 @@ func TestVerifyHistoryAnchorHandedDown(t *testing.T) {
 // nil because there's nothing to verify.
 func TestVerifyHistory_NoCommitsYet(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
-	require.NoError(t, VerifyHistory(sesamDir, repo, Identities{}, NewNonInteractivePluginUI(), ""))
+	require.NoError(t, errOnly(VerifyHistory(sesamDir, repo, Identities{}, NewNonInteractivePluginUI(), "")))
 }
 
 // TestVerifyHistory_NoSesamInit covers the case where the repo has commits but
@@ -352,7 +526,7 @@ func TestVerifyHistory_NoSesamInit(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(sesamDir, "README.md"), []byte("hi"), 0o600))
 	gitCommitAll(t, repo, "unrelated commit, no sesam init")
 
-	require.NoError(t, VerifyHistory(sesamDir, repo, Identities{}, NewNonInteractivePluginUI(), ""))
+	require.NoError(t, errOnly(VerifyHistory(sesamDir, repo, Identities{}, NewNonInteractivePluginUI(), "")))
 }
 
 // TestVerifyHistory_NoLogJsonl exercises the iter.Next() == io.EOF branch:
@@ -374,7 +548,7 @@ func TestVerifyHistory_NoLogJsonl(t *testing.T) {
 
 	gitCommitAll(t, repo, "init file only, no log.jsonl")
 
-	require.NoError(t, VerifyHistory(sesamDir, repo, Identities{}, NewNonInteractivePluginUI(), ""))
+	require.NoError(t, errOnly(VerifyHistory(sesamDir, repo, Identities{}, NewNonInteractivePluginUI(), "")))
 }
 
 // TestVerifyHistoryVaultAddedOnSideBranch covers the shape a normal PR flow
@@ -402,7 +576,7 @@ func TestVerifyHistoryVaultAddedOnSideBranch(t *testing.T) {
 
 	require.NoError(
 		t,
-		VerifyHistory(sesamDir, repo, Identities{admin.Identity}, NewNonInteractivePluginUI(), ""),
+		errOnly(VerifyHistory(sesamDir, repo, Identities{admin.Identity}, NewNonInteractivePluginUI(), "")),
 		"walking past the commit that introduced the vault is the end of history, not tampering",
 	)
 }
