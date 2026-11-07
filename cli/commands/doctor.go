@@ -530,8 +530,8 @@ func gitCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 		},
 		subChecks: []DoctorCheck{
 			gitVersionCheck(ctx),
-			gitConfigCheck(env),
-			gitHooksCheck(env),
+			gitConfigCheck(ctx, env),
+			gitHooksCheck(ctx, env),
 		},
 	}
 }
@@ -561,14 +561,14 @@ func gitVersionCheck(ctx context.Context) DoctorCheck {
 // gitConfigCheck reads the managed git config once and exposes each entry as a
 // sub-check. The parent only reports whether the config was readable at all, so
 // per-entry problems still surface below it rather than being hidden.
-func gitConfigCheck(env doctorEnv) DoctorCheck {
+func gitConfigCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 	var (
 		once    sync.Once
 		checks  []repo.GitConfigCheck
 		loadErr error
 	)
 	load := func() {
-		once.Do(func() { checks, loadErr = repo.CheckGitConfig(env.sesamDir) })
+		once.Do(func() { checks, loadErr = repo.CheckGitConfig(ctx, env.sesamDir) })
 	}
 
 	// Every entry is optional: each has an init flag to opt out of it.
@@ -627,14 +627,14 @@ func gitConfigCheck(env doctorEnv) DoctorCheck {
 // as the merge/diff/alias wiring. They only exist when git is new enough; when
 // expectedGitConfig omits them (older git) the entries are absent from the
 // results and reported as unavailable rather than misconfigured.
-func gitHooksCheck(env doctorEnv) DoctorCheck {
+func gitHooksCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 	var (
 		once    sync.Once
 		checks  []repo.GitConfigCheck
 		loadErr error
 	)
 	load := func() {
-		once.Do(func() { checks, loadErr = repo.CheckGitConfig(env.sesamDir) })
+		once.Do(func() { checks, loadErr = repo.CheckGitConfig(ctx, env.sesamDir) })
 	}
 
 	supported := func() bool {

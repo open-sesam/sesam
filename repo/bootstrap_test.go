@@ -279,3 +279,28 @@ func TestGitConfigHasSection(t *testing.T) {
 		})
 	}
 }
+
+func TestGitConfigLocalList(t *testing.T) {
+	dir := freshGitRepo(t)
+	require.NoError(t, gitConfigLocal(dir, "merge.sesam-Sub%2Fdir.driver", "sesam merge %O\n%A"))
+	require.NoError(t, gitConfigLocal(dir, "--add", "alias.sesam", "first"))
+	require.NoError(t, gitConfigLocal(dir, "--add", "alias.sesam", "last"))
+
+	config, err := gitConfigList(t.Context(), dir, "--local")
+	require.NoError(t, err)
+
+	tests := []struct {
+		entry gitConfigEntry
+		want  string
+	}{
+		{gitConfigEntry{section: "Merge", subsection: "sesam-Sub%2Fdir", option: "Driver"}, "sesam merge %O\n%A"},
+		{gitConfigEntry{section: "alias", option: "sesam"}, "last"},
+		{gitConfigEntry{section: "hook", subsection: "sesam-sub%2Fdir", option: "command"}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.entry.key(), func(t *testing.T) {
+			require.Equal(t, tt.want, config[tt.entry.listKey()])
+		})
+	}
+}
