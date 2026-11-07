@@ -46,7 +46,7 @@ func (e *ExitCodeError) Code() int {
 }
 
 func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
-	drv, err := openMergeDriver(cmd)
+	drv, err := openMergeDriver(ctx, cmd)
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 	// %A is still ours in both unsealed cases, so the object has to be sealed
 	// before the operation is finished. Only an operation that ends in `git
 	// commit` runs the pre-commit hook that would do it for them.
-	kind := mergeState(drv.sesamDir)
+	kind := mergeState(ctx, drv.sesamDir)
 	unsealed := res.Seal != repo.MergeSealDone && !kind.RunsPreCommit()
 
 	switch res.Seal {
@@ -156,7 +156,7 @@ func sealAdvice(kind mergeKind, whenHooked string) string {
 }
 
 func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
-	drv, err := openMergeDriver(cmd)
+	drv, err := openMergeDriver(ctx, cmd)
 	if err != nil {
 		return err
 	}
@@ -192,7 +192,7 @@ func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
 	// Even though we exit without error here (which git would normally take as "continue with merge commit")
 	// we rely on the pre-merge-commit hook to fail. This allows the user to handle conflicts he/she would have
 	// resolved differently.
-	fmt.Fprint(os.Stderr, mergeDriverSummary(cr.Resolutions, mergeState(drv.sesamDir)))
+	fmt.Fprint(os.Stderr, mergeDriverSummary(cr.Resolutions, mergeState(ctx, drv.sesamDir)))
 
 	return nil
 }
@@ -213,13 +213,13 @@ type mergeDriver struct {
 	conflictMarkerSize             int
 }
 
-func openMergeDriver(cmd *cli.Command) (*mergeDriver, error) {
+func openMergeDriver(ctx context.Context, cmd *cli.Command) (*mergeDriver, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 
-	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+	sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +237,7 @@ func openMergeDriver(cmd *cli.Command) (*mergeDriver, error) {
 	}
 
 	identityPaths := cmd.StringSlice("identity")
-	ids, err := repo.LoadIdentities(identityPaths, repo.RepoOpts{
+	ids, err := repo.LoadIdentities(ctx, identityPaths, repo.RepoOpts{
 		AskpassProgram:  cmd.String("askpass"),
 		AskpassRequired: askpassRequired(),
 	})
@@ -361,7 +361,7 @@ var theirsCheckoutPath = filepath.Join(core.SesamTmpDir(), "theirs")
 // so the work happens once and the rest read the file it left behind.
 func theirStateFunc(ctx context.Context, cmd *cli.Command, drv *mergeDriver) repo.TheirStateFunc {
 	return func() (*core.VerifiedState, error) {
-		rev, err := mergeSource(drv.sesamDir, drv.theirPath)
+		rev, err := mergeSource(ctx, drv.sesamDir, drv.theirPath)
 		if err != nil {
 			return nil, err
 		}
@@ -432,7 +432,7 @@ func ensureTheirsVerified(ctx context.Context, sesamDir, rev string, identityPat
 		return err
 	}
 
-	theirs, err := repo.Load(checkoutDir, identityPaths, opts)
+	theirs, err := repo.Load(ctx, checkoutDir, identityPaths, opts)
 	if err != nil {
 		return fmt.Errorf("load %s: %w", rev, err)
 	}

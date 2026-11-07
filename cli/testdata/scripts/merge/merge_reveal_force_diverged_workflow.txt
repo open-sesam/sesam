@@ -1,0 +1,49 @@
+# `sesam reveal --force-diverged` takes the incoming version of every diverged
+# secret, but unlike --all it keeps edits the merge did not touch.
+
+sesam-repo admin base.txt theirs.txt edited.txt
+
+cp $TMPDIR/base.txt s
+cp $TMPDIR/base.txt local
+exec sesam add s local --group admin
+exec git add -A
+exec git commit -m 'add s local'
+
+exec git checkout -b topic
+cp $TMPDIR/theirs.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'topic: change s'
+
+exec git checkout master
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'ours: add bob'
+
+! exec git merge topic
+cp $TMPDIR/edited.txt s
+cp $TMPDIR/edited.txt local
+exec sesam status
+stdout '! s'
+stdout 'M local'
+
+exec sesam reveal --force-diverged
+stderr 'discarded your unsealed edits in 1 secret'
+stderr 'sesam:   s'
+stderr 'kept 1 edited secret'
+stderr 'sesam:   local'
+exec cat s
+stdout 'THEIRS'
+exec cat local
+stdout 'MY-EDIT'
+
+exec git commit -m 'merge topic'
+exec sesam show .sesam/objects/s.sesam
+stdout 'THEIRS'
+
+-- base.txt --
+BASE
+-- theirs.txt --
+THEIRS
+-- edited.txt --
+MY-EDIT

@@ -392,13 +392,13 @@ func (s *Stage) UserKill(user string) error {
 // Seal writes edited plaintext into the objects. Stale plaintext - older than
 // its object - is left out and reported; a secret that changed on both sides
 // is refused with a DivergedError, unless opts.All says to take the plaintext
-// as it is everywhere.
-func (s *Stage) Seal(opts SealOpts) (*SealResult, error) {
+// as it is everywhere, or opts.Paths and the Force flags do so for some.
+func (s *Stage) Seal(ctx context.Context, opts SealOpts) (*SealResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if opts.All {
-		if err := s.secret.Seal(true, nil); err != nil {
+		if err := s.secret.Seal(ctx, true, nil); err != nil {
 			return nil, fmt.Errorf("failed to seal secrets: %w", err)
 		}
 
@@ -408,17 +408,34 @@ func (s *Stage) Seal(opts SealOpts) (*SealResult, error) {
 	states := opts.States
 	if states == nil {
 		var err error
-		if states, err = s.syncStates(opts.Sync); err != nil {
+		if states, err = s.syncStates(ctx, opts.Sync); err != nil {
 			return nil, err
 		}
 	}
 
-	if diverged := states.Paths(SecretStateDiverged); len(diverged) > 0 {
+	force, err := forcedPaths(states, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	var diverged []string
+	for _, p := range states.Paths(SecretStateDiverged) {
+		if !force[p] {
+			diverged = append(diverged, p)
+		}
+	}
+	if len(diverged) > 0 {
 		return nil, &DivergedError{Paths: diverged}
 	}
 
+	var stale []string
 	advice := make(map[string]core.SealAdvice, len(states))
 	for p, state := range states {
+		if force[p] {
+			advice[p] = core.AdviceChanged
+			continue
+		}
+
 		switch state {
 		case SecretStateInSync, SecretStateRecipientsChanged:
 			advice[p] = core.AdviceUnchanged
@@ -426,22 +443,57 @@ func (s *Stage) Seal(opts SealOpts) (*SealResult, error) {
 			advice[p] = core.AdviceChanged
 		case SecretStateStale:
 			advice[p] = core.AdviceKeep
+			stale = append(stale, p)
 		default:
 			// missing plaintext, no access: sealOrPreserve preserves the object.
 		}
 	}
 
-	if err := s.secret.Seal(false, advice); err != nil {
+	if err := s.secret.Seal(ctx, false, advice); err != nil {
 		return nil, fmt.Errorf("failed to seal secrets: %w", err)
 	}
 
-	return &SealResult{Stale: states.Paths(SecretStateStale)}, nil
+	slices.Sort(stale)
+	return &SealResult{Stale: stale}, nil
+}
+
+// forcedPaths is the set of secrets opts wants sealed from their plaintext
+// regardless of state. Named paths must be tracked and have readable plaintext,
+// or the seal would silently preserve their object instead.
+func forcedPaths(states SyncStates, opts SealOpts) (map[string]bool, error) {
+	force := make(map[string]bool, len(opts.Paths))
+	for _, p := range opts.Paths {
+		state, ok := states[p]
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("%s: not a tracked secret", p)
+		case state == SecretStateUserHasNoAccess:
+			return nil, fmt.Errorf("%s: you have no access to this secret", p)
+		case state == SecretStateNoRevealedPath:
+			return nil, fmt.Errorf("%s: no plaintext to seal, reveal it first", p)
+		}
+
+		force[p] = true
+	}
+
+	var forceStates []SecretState
+	if opts.ForceStale {
+		forceStates = append(forceStates, SecretStateStale)
+	}
+	if opts.ForceDiverged {
+		forceStates = append(forceStates, SecretStateDiverged)
+	}
+	for _, p := range states.Paths(forceStates...) {
+		force[p] = true
+	}
+
+	return force, nil
 }
 
 // SecretAdd starts tracking the secret(s) at each path. Paths are sesam-relative.
 // When additive, the groups are merged into an already-tracked secret's access
 // list instead of replacing it.
-func (s *Stage) SecretAdd(revealedPaths, groups []string, additive, nested bool) error {
+func (s *Stage) SecretAdd(ctx context.Context, revealedPaths, groups []string, additive, nested bool) error {
 	if len(revealedPaths) == 0 {
 		return fmt.Errorf("missing secret path: pass at least one path")
 	}
@@ -494,25 +546,25 @@ func (s *Stage) SecretAdd(revealedPaths, groups []string, additive, nested bool)
 		}
 	}
 
-	s.warnTracked(added)
+	s.warnTracked(ctx, added)
 	return nil
 }
 
 // warnTracked warns about secrets whose plaintext git already tracks:
 // .gitignore does not keep those out of the next commit.
-func (s *Stage) warnTracked(revealedPaths []string) {
-	idx, err := s.gitRepo.Storer.Index()
-	if err != nil {
-		return
-	}
+func (s *Stage) warnTracked(ctx context.Context, revealedPaths []string) {
 	prefix, err := core.SesamGitPrefix(s.gitRepo, s.sesamDir)
 	if err != nil {
 		return
 	}
+	trackedFiles, err := s.gitRepo.TrackedFiles(ctx, prefix)
+	if err != nil {
+		return
+	}
 
-	tracked := make(map[string]bool, len(idx.Entries))
-	for _, e := range idx.Entries {
-		tracked[e.Name] = true
+	tracked := make(map[string]bool, len(trackedFiles))
+	for _, name := range trackedFiles {
+		tracked[name] = true
 	}
 
 	for _, p := range revealedPaths {

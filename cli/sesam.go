@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"slices"
+	"strings"
 	"syscall"
 
 	"github.com/urfave/cli/v3"
@@ -32,7 +34,7 @@ const (
 // Commands wrapped in commands.WithRepo load a sesam Repo (acquire lock,
 // build managers, defer Close) and hand it to the handler; the wrapping
 // makes it obvious which commands need an initialized sesam repository.
-func Main(args []string) error {
+func Main(ctx context.Context, args []string) error {
 	installHelpOrdering()
 
 	cli.VersionFlag = &cli.BoolFlag{
@@ -246,20 +248,23 @@ we assume 'sesam show path/to/secret' as convenience.`,
 				Usage:         "Open secret in $VISUAL or $EDITOR and immediately seal it afterwards",
 			},
 			{
-				Name:     "seal",
-				Category: catSecrets,
-				Flags:    flagsSeal,
-				Action:   commands.WithRepo(commands.HandleSeal),
-				Usage:    "Encrypt and sign changed secrets",
+				Name:          "seal",
+				Category:      catSecrets,
+				Flags:         flagsSeal,
+				ArgsUsage:     "[<path>...]",
+				ShellComplete: completeSecrets,
+				Action:        commands.WithRepo(commands.HandleSeal),
+				Usage:         "Encrypt and sign changed secrets, and the given ones in any case",
 			},
 			{
 				Name:          "open",
 				Category:      catSecrets,
 				Aliases:       []string{"reveal"},
 				Flags:         flagsReveal,
+				ArgsUsage:     "[<path>...]",
 				Action:        commands.WithRepo(commands.HandleOpen),
-				ShellComplete: completeFlags,
-				Usage:         "Decrypt all secrets available to the current user",
+				ShellComplete: completeSecrets,
+				Usage:         "Decrypt all secrets available to the current user, and the given ones over your edits",
 			},
 			{
 				Name:      "run",
@@ -514,6 +519,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 		if !runInvocation {
 			ctx, stopSignals = signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 		}
+		pinGitWorkTree(ctx)
 		if cmd.Bool("no-color") && !runInvocation {
 			// hack to make sure color is always ignored without passing it to everywhere we use termenv.
 			_ = os.Setenv("NO_COLOR", "1")
@@ -539,7 +545,24 @@ we assume 'sesam show path/to/secret' as convenience.`,
 		return activeProfile.stop(cmd.String("memprofile"))
 	}
 
-	return app.Run(context.Background(), args)
+	return app.Run(ctx, args)
+}
+
+// pinGitWorkTree makes the worktree git meant explicit. With GIT_DIR set but no
+// GIT_WORK_TREE - git runs hooks in linked worktrees like that - git takes the
+// current directory as the worktree root, which goes wrong as soon as sesam
+// runs git from inside a nested sesam dir.
+func pinGitWorkTree(ctx context.Context) {
+	if os.Getenv("GIT_DIR") == "" || os.Getenv("GIT_WORK_TREE") != "" {
+		return
+	}
+
+	out, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return // e.g. a bare GIT_DIR: there is no worktree to pin
+	}
+
+	_ = os.Setenv("GIT_WORK_TREE", strings.TrimSuffix(string(out), "\n"))
 }
 
 func hasArgumentSeparator(args, commandArgs []string) bool {

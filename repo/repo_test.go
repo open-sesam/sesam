@@ -95,7 +95,7 @@ func TestLoad_Negative(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Load(tc.dirFn(t), tc.idPaths, RepoOpts{})
+			_, err := Load(t.Context(), tc.dirFn(t), tc.idPaths, RepoOpts{})
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantErr)
 		})
@@ -168,7 +168,7 @@ func TestRepo_Whoami_UnknownIdentity(t *testing.T) {
 	stranger := writeTestIdentity(t, "stranger")
 
 	dir := bootstrappedDir(t, admin)
-	r, err := Load(dir, []string{stranger.Path}, RepoOpts{})
+	r, err := Load(t.Context(), dir, []string{stranger.Path}, RepoOpts{})
 	require.Error(t, err, "Load should refuse an identity that cannot decrypt the audit log")
 	require.Contains(t, err.Error(), "failed to load audit log")
 	require.Nil(t, r)
@@ -198,7 +198,7 @@ func TestRepo_SecretAdd_RejectsBadInputs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := r.Update(func(s *Stage) error { return s.SecretAdd(tc.paths, tc.groups, false, false) })
+			err := r.Update(func(s *Stage) error { return s.SecretAdd(t.Context(), tc.paths, tc.groups, false, false) })
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantErr)
 		})
@@ -214,7 +214,7 @@ func TestRepo_SecretAddRemove_RoundTrip(t *testing.T) {
 	require.NoError(t, os.WriteFile(plaintext, []byte("hunter2\n"), 0o600))
 
 	require.NoError(t, r.Update(func(s *Stage) error {
-		return s.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}, false, false)
+		return s.SecretAdd(t.Context(), []string{"secrets/api.token"}, []string{"admin"}, false, false)
 	}))
 
 	secrets, err := r.ListSecrets(nil)
@@ -495,12 +495,12 @@ func TestRepo_SealReveal_RoundTrip(t *testing.T) {
 	require.NoError(t, os.Remove(revealed))
 	require.False(t, fileExists(t, revealed), "plaintext removed before reveal")
 
-	require.NoError(t, r.RevealAll())
+	require.NoError(t, r.RevealAll(t.Context()))
 	got, err := os.ReadFile(revealed)
 	require.NoError(t, err)
 	require.Equal(t, original, got, "Reveal restores the original plaintext")
 
-	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(SealOpts{All: true}); return err }), "Seal on an already-sealed tree is a no-op")
+	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(t.Context(), SealOpts{All: true}); return err }), "Seal on an already-sealed tree is a no-op")
 }
 
 // --- Clean (method dispatch) ----------------------------------------------
@@ -536,7 +536,7 @@ func TestRepo_Clean_AggressiveAlsoWipesUnknownUntracked(t *testing.T) {
 // --- LoadIdentities / ResolveSesamDir (cheap helpers) ----------------------
 
 func TestLoadIdentities_RequiresAtLeastOnePath(t *testing.T) {
-	_, err := LoadIdentities(nil, RepoOpts{})
+	_, err := LoadIdentities(t.Context(), nil, RepoOpts{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "at least one --identity")
 }
@@ -544,7 +544,7 @@ func TestLoadIdentities_RequiresAtLeastOnePath(t *testing.T) {
 func TestLoadIdentities_RoundTrip(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 
-	ids, err := LoadIdentities([]string{admin.Path}, RepoOpts{})
+	ids, err := LoadIdentities(t.Context(), []string{admin.Path}, RepoOpts{})
 	require.NoError(t, err)
 	require.Len(t, ids, 1)
 	require.Equal(t, []string{admin.Recipient}, ids.RecipientStrings())
@@ -567,7 +567,7 @@ func TestResolveSesamDir(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ResolveSesamDir(tc.in)
+			got, err := ResolveSesamDir(t.Context(), tc.in)
 			require.NoError(t, err)
 			gotResolved, err := filepath.EvalSymlinks(got)
 			require.NoError(t, err)
@@ -617,7 +617,7 @@ func writeRepoFile(t *testing.T, dir, rel, content string) {
 // bootstrap README.md and any other entries).
 func statusStates(t *testing.T, r *Repo, opts StatusOpts) map[string]SecretState {
 	t.Helper()
-	st, err := r.Status(opts)
+	st, err := r.Status(t.Context(), opts)
 	require.NoError(t, err)
 
 	out := make(map[string]SecretState, len(st.Files))
@@ -634,7 +634,7 @@ func TestRepoStatusStates(t *testing.T) {
 	add := func(rel, content string) {
 		t.Helper()
 		writeRepoFile(t, dir, rel, content)
-		require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{rel}, []string{"admin"}, false, false) }))
+		require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd(t.Context(), []string{rel}, []string{"admin"}, false, false) }))
 	}
 
 	add("secrets/same", "identical")
@@ -643,7 +643,7 @@ func TestRepoStatusStates(t *testing.T) {
 	add("secrets/unsealed", "seal-removed")
 
 	// Add only records the audit entry; seal writes the ciphertext objects.
-	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(SealOpts{All: true}); return err }))
+	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(t.Context(), SealOpts{All: true}); return err }))
 	require.NoError(t, r.Close())
 
 	// Reload so the runtime user (whoami) is resolved - Status needs it to
@@ -691,8 +691,10 @@ func TestRepoStatusRecipientDrift(t *testing.T) {
 	dir, r := bootstrapRepo(t, admin)
 
 	writeRepoFile(t, dir, "secrets/dev", "dev-content")
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/dev"}, []string{"dev"}, false, false) }))
-	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(SealOpts{All: true}); return err }))
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.SecretAdd(t.Context(), []string{"secrets/dev"}, []string{"dev"}, false, false)
+	}))
+	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(t.Context(), SealOpts{All: true}); return err }))
 	require.Equal(t, SecretStateInSync, statusStates(t, r, StatusOpts{})["secrets/dev"])
 
 	// Tell bob into "dev" but do not seal: the recipient set now differs from
@@ -714,7 +716,9 @@ func TestRepoStatusUserHasNoAccess(t *testing.T) {
 
 	// A secret in a group bob will never belong to.
 	writeRepoFile(t, dir, "secrets/ops", "ops-only")
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/ops"}, []string{"ops"}, false, false) }))
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.SecretAdd(t.Context(), []string{"secrets/ops"}, []string{"ops"}, false, false)
+	}))
 
 	// Tell bob, but only into "dev" - he has no access to the "ops" secret.
 	require.NoError(t, r.Update(func(s *Stage) error {
@@ -735,8 +739,10 @@ func TestRepoStatusDiffDir(t *testing.T) {
 	dir, r := bootstrapRepo(t, admin)
 
 	writeRepoFile(t, dir, "secrets/diff", "v1-sealed")
-	require.NoError(t, r.Update(func(s *Stage) error { return s.SecretAdd([]string{"secrets/diff"}, []string{"admin"}, false, false) }))
-	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(SealOpts{All: true}); return err }))
+	require.NoError(t, r.Update(func(s *Stage) error {
+		return s.SecretAdd(t.Context(), []string{"secrets/diff"}, []string{"admin"}, false, false)
+	}))
+	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(t.Context(), SealOpts{All: true}); return err }))
 	require.NoError(t, r.Close())
 
 	// Reload so whoami is resolved (Init does not set it).
@@ -745,7 +751,7 @@ func TestRepoStatusDiffDir(t *testing.T) {
 	// Modify the working copy so sealed and revealed differ.
 	writeRepoFile(t, dir, "secrets/diff", "v2-working")
 
-	st, err := r.Status(StatusOpts{WriteDiffDirs: true})
+	st, err := r.Status(t.Context(), StatusOpts{WriteDiffDirs: true})
 	require.NoError(t, err)
 	require.NotEmpty(t, st.DiffDir)
 	t.Cleanup(func() { _ = os.RemoveAll(st.DiffDir) })

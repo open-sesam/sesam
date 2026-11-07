@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -12,12 +13,12 @@ import (
 // EditSecret reveals one secret to .sesam/tmp, runs edit on that file, copies
 // the result back into the worktree, and seals the repository. seal.Sync also
 // decides whether the plaintext or the object is the current content.
-func (r *Repo) EditSecret(revealedPath string, edit func(path string) error, seal SealOpts) error {
+func (r *Repo) EditSecret(ctx context.Context, revealedPath string, edit func(path string) error, seal SealOpts) error {
 	if edit == nil {
 		return fmt.Errorf("missing editor")
 	}
 
-	tmpPath, err := r.stageForEdit(revealedPath, seal.Sync)
+	tmpPath, err := r.stageForEdit(ctx, revealedPath, seal.Sync)
 	if err != nil {
 		return err
 	}
@@ -31,7 +32,7 @@ func (r *Repo) EditSecret(revealedPath string, edit func(path string) error, sea
 	}
 
 	return r.Update(func(s *Stage) error {
-		_, err := s.Seal(seal)
+		_, err := s.Seal(ctx, seal)
 		return err
 	})
 }
@@ -39,7 +40,7 @@ func (r *Repo) EditSecret(revealedPath string, edit func(path string) error, sea
 // stageForEdit puts the secret's current content into .sesam/tmp: the plaintext
 // when the user has one (unsealed edits included), the object when the
 // plaintext is missing or older than the object.
-func (r *Repo) stageForEdit(revealedPath string, sync SyncOpts) (string, error) {
+func (r *Repo) stageForEdit(ctx context.Context, revealedPath string, sync SyncOpts) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -54,7 +55,7 @@ func (r *Repo) stageForEdit(revealedPath string, sync SyncOpts) (string, error) 
 	}
 
 	sync.Paths = []string{revealedPath}
-	states, err := r.syncStates(sync)
+	states, err := r.syncStates(ctx, sync)
 	if err != nil {
 		return "", err
 	}

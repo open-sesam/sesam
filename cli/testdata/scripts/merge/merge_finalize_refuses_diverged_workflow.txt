@@ -38,13 +38,13 @@ cp $TMPDIR/edited.txt s
 exec sesam status
 stdout '! s'
 stdout '1 diverged'
-stdout 'sesam reveal --all. takes the incoming version, .sesam seal --all. keeps yours'
+stdout 'sesam reveal --force-diverged. takes the incoming version, .sesam seal --force-diverged. keeps yours'
 
 ! exec git commit -m 'merge topic'
 stderr '1 secret changed both here and in this merge'
 stderr '  s'
-stderr 'sesam reveal --all. takes the incoming version'
-stderr 'sesam seal --all. keeps yours'
+stderr 'sesam reveal --force-diverged. takes the incoming version'
+stderr 'sesam seal --force-diverged. keeps yours'
 stderr 'git merge --abort. starts over'
 
 # Nothing was decided for them: the plaintext is untouched, the object theirs.
@@ -54,7 +54,7 @@ exec sesam show .sesam/objects/s.sesam
 stdout 'THEIRS'
 
 # Keeping the edit is one explicit command away.
-exec sesam seal --all
+exec sesam seal --force-diverged
 exec git commit -m 'merge topic'
 exec sesam show .sesam/objects/s.sesam
 stdout 'MY-EDIT'

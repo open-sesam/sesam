@@ -31,12 +31,13 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 			return err
 		}
 
-		sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+		sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
 		if err != nil {
 			return err
 		}
 
 		r, err := repo.Load(
+			ctx,
 			sesamDir,
 			cmd.StringSlice("identity"),
 			repo.RepoOpts{
@@ -45,7 +46,7 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 				AskpassRequired: askpassRequired(),
 				LockTimeout:     cmd.Duration("lock-timeout"),
 				VerifyMode:      verifyMode,
-				InMerge:         mergeState(sesamDir).InProgress(),
+				InMerge:         mergeState(ctx, sesamDir).InProgress(),
 			},
 		)
 		if err != nil {
@@ -64,7 +65,7 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 			slog.Warn("close repo failed", slog.Any("error", closeErr))
 		}()
 
-		nudgeMissingGitIntegration(r)
+		nudgeMissingGitIntegration(ctx, r)
 
 		return action(ctx, cmd, r)
 	}
@@ -74,12 +75,12 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 // git integration was never wired up (the typical "cloned and forgot `sesam
 // init`" case). Best-effort: any check failure is logged, never fatal, so it can
 // never block a command.
-func nudgeMissingGitIntegration(r *repo.Repo) {
+func nudgeMissingGitIntegration(ctx context.Context, r *repo.Repo) {
 	if r.GitIntegrationNudgeSuppressed() {
 		return
 	}
 
-	installed, err := r.GitIntegrationInstalled()
+	installed, err := r.GitIntegrationInstalled(ctx)
 	if err != nil {
 		slog.Debug("could not determine git integration status", slog.Any("err", err))
 		return
@@ -147,7 +148,7 @@ func printInfo(format string, args ...any) {
 }
 
 // waysOut is the one sentence every "pick a side" message ends with.
-const waysOut = "`sesam reveal --all` takes the incoming version, `sesam seal --all` keeps yours"
+const waysOut = "`sesam reveal --force-diverged` takes the incoming version, `sesam seal --force-diverged` keeps yours"
 
 // printNote is sesam's "left these alone" notice on stderr: a headline, the
 // paths, and how to get on. git shows nothing of it, the plaintext is gitignored.

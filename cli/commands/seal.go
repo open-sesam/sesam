@@ -31,8 +31,21 @@ func HandleSeal(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		)
 	}
 
+	paths, err := toRepoPaths(r.SesamDir(), cmd.Args().Slice())
+	if err != nil {
+		return err
+	}
+
+	opts := repo.SealOpts{
+		All:           cmd.Bool("seal-all"),
+		Sync:          syncOpts(ctx, r.SesamDir()),
+		Paths:         paths,
+		ForceStale:    cmd.Bool("force-stale"),
+		ForceDiverged: cmd.Bool("force-diverged"),
+	}
+
 	if err := r.Update(func(s *repo.Stage) error {
-		return sealStage(cmd, r, s)
+		return sealWith(ctx, s, opts)
 	}); err != nil {
 		return err
 	}
@@ -40,7 +53,7 @@ func HandleSeal(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	if cmd.Bool("clean") {
 		res, err := r.Clean(ctx, repo.CleanOpts{
 			Aggressive: false,
-			Sync:       syncOpts(r.SesamDir()),
+			Sync:       syncOpts(ctx, r.SesamDir()),
 		})
 		if err != nil {
 			return err
@@ -55,11 +68,15 @@ func HandleSeal(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 // sealStage is the seal every mutating command ends with. Stale plaintext is
 // left out and named; a secret changed on both sides stops the command and
 // names both ways out.
-func sealStage(cmd *cli.Command, r *repo.Repo, s *repo.Stage) error {
-	res, err := s.Seal(repo.SealOpts{
+func sealStage(ctx context.Context, cmd *cli.Command, r *repo.Repo, s *repo.Stage) error {
+	return sealWith(ctx, s, repo.SealOpts{
 		All:  cmd.Bool("seal-all"),
-		Sync: syncOpts(r.SesamDir()),
+		Sync: syncOpts(ctx, r.SesamDir()),
 	})
+}
+
+func sealWith(ctx context.Context, s *repo.Stage, opts repo.SealOpts) error {
+	res, err := s.Seal(ctx, opts)
 	if err != nil {
 		var diverged *repo.DivergedError
 		if errors.As(err, &diverged) {
@@ -81,13 +98,19 @@ func printSkippedStale(res *repo.SealResult) {
 		return
 	}
 
+	pluralizedSecret := pluralize("secret", len(res.Stale))
 	printNote(
 		fmt.Sprintf(
-			"%d of your local %s were changed only in the revealed file but not yet sealed:",
-			len(res.Stale), pluralize("secret", len(res.Stale)),
+			"%d stale %s were not sealed because they are newer than what is revealed:",
+			len(res.Stale), pluralizedSecret,
 		),
 		res.Stale,
-		"Please decide if you want to keep the changes (`sesam seal --all`) or if you want to overwrite with the incoming changes (`sesam reveal`).",
+		fmt.Sprintf(
+			"This happens when git brought in a newer version but nothing revealed it, e.g. a `git pull` without sesam's hooks installed.\n"+
+				"sesam: Please decide: `sesam reveal` takes the newer %s, `sesam seal <path>` (or `--force-stale` for all) seals your %s anyway.",
+			pluralizedSecret,
+			pluralizedSecret,
+		),
 	)
 }
 

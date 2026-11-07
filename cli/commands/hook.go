@@ -22,14 +22,14 @@ func silentWithRepo(verifyMode repo.VerifyMode, action RepoAction) cli.ActionFun
 		// while the git helpers below only take Abs() of what they are given. Run
 		// from a subdirectory the two would name different trees, and the git
 		// pathspec would then match nothing.
-		sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+		sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
 		if err != nil {
 			slog.Warn("sesam hook: failed to resolve sesam dir", slog.Any("err", err))
 			// do not abort the git operation!
 			return nil
 		}
 
-		exists, err := repo.IsInitialized(sesamDir)
+		exists, err := repo.IsInitialized(ctx, sesamDir)
 		if err != nil {
 			slog.Warn(
 				"sesam hook: failed to check if sesam repo exists",
@@ -45,13 +45,13 @@ func silentWithRepo(verifyMode repo.VerifyMode, action RepoAction) cli.ActionFun
 			return nil
 		}
 
-		r, err := repo.Load(sesamDir, cmd.StringSlice("identity"), repo.RepoOpts{
+		r, err := repo.Load(ctx, sesamDir, cmd.StringSlice("identity"), repo.RepoOpts{
 			Interactive:     true,
 			LockTimeout:     cmd.Duration("lock-timeout"),
 			AskpassProgram:  cmd.String("askpass"),
 			AskpassRequired: askpassRequired(),
 			VerifyMode:      verifyMode,
-			InMerge:         mergeState(sesamDir).InProgress(),
+			InMerge:         mergeState(ctx, sesamDir).InProgress(),
 		})
 		if err != nil {
 			return err
@@ -77,7 +77,7 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 	return silentWithRepo(repo.VerifyModeNoDisk, func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		// If we're in a merge, then we need to straighten a few things before we can really commit.
 		sesamDir := r.SesamDir()
-		kind := mergeState(sesamDir)
+		kind := mergeState(ctx, sesamDir)
 		merging := kind.InProgress()
 
 		// Refuse to seal markers into the ciphertext - git can't see them, since
@@ -97,7 +97,7 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 			}
 		}
 
-		states, err := r.SyncStates(syncOpts(sesamDir))
+		states, err := r.SyncStates(ctx, syncOpts(ctx, sesamDir))
 		if err != nil {
 			return err
 		}
@@ -106,7 +106,7 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 			return divergedError(diverged, kind)
 		}
 
-		if err := refreshStale(r, states, false); err != nil {
+		if err := refreshStale(ctx, r, states, false); err != nil {
 			return err
 		}
 
@@ -119,7 +119,7 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 				}
 			}
 
-			_, err := s.Seal(repo.SealOpts{States: states})
+			_, err := s.Seal(ctx, repo.SealOpts{States: states})
 			return err
 		}); err != nil {
 			return err
@@ -157,12 +157,12 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 				return fmt.Errorf("reset config after merge: %w", err)
 			}
 
-			if err := r.GitAddConfig(cfgReset.Deleted); err != nil {
+			if err := r.GitAddConfig(ctx, cfgReset.Deleted); err != nil {
 				return fmt.Errorf("stage config after merge reset: %w", err)
 			}
 		}
 
-		return r.GitAddDotSesam()
+		return r.GitAddDotSesam(ctx)
 	})(ctx, cmd)
 }
 
@@ -206,16 +206,16 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 		// so neither branch below may run: both reveal from the objects and would
 		// throw the resolution away. `git checkout -b` is allowed with an unmerged
 		// index, so this has to gate the branch path too.
-		if mergeState(r.SesamDir()).InProgress() {
+		if mergeState(ctx, r.SesamDir()).InProgress() {
 			return nil
 		}
 
-		sync := syncOpts(r.SesamDir())
+		sync := syncOpts(ctx, r.SesamDir())
 		if branchCheckout && isCommitHash(prev) {
 			sync.Before = prev
 		}
 
-		states, err := r.SyncStates(sync)
+		states, err := r.SyncStates(ctx, sync)
 		if err != nil {
 			slog.Warn("failed to compare secrets after checkout", slog.Any("err", err))
 			return nil
@@ -238,7 +238,7 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 			if err != nil {
 				slog.Warn("failed to clean up previous revealed secrets", slog.Any("err", err))
 			}
-			if err := refreshStale(r, states, true); err != nil {
+			if err := refreshStale(ctx, r, states, true); err != nil {
 				slog.Warn("failed to reveal secrets after checkout", slog.Any("err", err))
 			}
 			return nil
@@ -249,11 +249,11 @@ func HandleHookPostCheckout(ctx context.Context, cmd *cli.Command) error {
 		// stale. Take the checked-out object where the plaintext is still the
 		// previous version, then seal to record it in the log so the repo is
 		// consistent again (a no-op when nothing drifted).
-		if err := refreshStale(r, states, true); err != nil {
+		if err := refreshStale(ctx, r, states, true); err != nil {
 			slog.Warn("failed to reveal secrets after checkout", slog.Any("err", err))
 		}
 		if err := r.Update(func(s *repo.Stage) error {
-			_, err := s.Seal(repo.SealOpts{States: states})
+			_, err := s.Seal(ctx, repo.SealOpts{States: states})
 			return err
 		}); err != nil {
 			slog.Warn("failed to reseal after file checkout", slog.Any("err", err))
@@ -302,7 +302,7 @@ func HandleHookPostMerge(ctx context.Context, cmd *cli.Command) error {
 			listPaths, before = stagedSecretPaths, "HEAD"
 		}
 
-		paths, err := listPaths(sesamDir)
+		paths, err := listPaths(ctx, sesamDir)
 		if err != nil {
 			slog.Warn("failed to list merged secrets", slog.Any("err", err))
 			return nil
@@ -311,11 +311,11 @@ func HandleHookPostMerge(ctx context.Context, cmd *cli.Command) error {
 			return nil
 		}
 
-		sync := syncOpts(sesamDir)
+		sync := syncOpts(ctx, sesamDir)
 		sync.Paths = paths
-		sync.Before = resolveRev(sesamDir, before)
+		sync.Before = resolveRev(ctx, sesamDir, before)
 
-		states, err := r.SyncStates(sync)
+		states, err := r.SyncStates(ctx, sync)
 		if err != nil {
 			slog.Warn("failed to compare merged secrets", slog.Any("err", err))
 			return nil
@@ -326,7 +326,7 @@ func HandleHookPostMerge(ctx context.Context, cmd *cli.Command) error {
 		// driver's, waiting to be resolved). Only the untouched one is refreshed.
 		printKeptEdits(states)
 
-		if err := refreshStale(r, states, true); err != nil {
+		if err := refreshStale(ctx, r, states, true); err != nil {
 			slog.Warn("failed to reveal secrets after merge", slog.Any("err", err))
 		}
 
@@ -339,20 +339,20 @@ func HandleHookPostMerge(ctx context.Context, cmd *cli.Command) error {
 // committing, leaving a fully resolved index. The user then runs `git commit`,
 // whose pre-commit reseals + reconciles - so a merge finalizes with no `git add`.
 // A merge that never touched sesam auto-commits like any other.
-func HandleHookPreMergeCommit(_ context.Context, cmd *cli.Command) error {
-	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+func HandleHookPreMergeCommit(ctx context.Context, cmd *cli.Command) error {
+	sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
 	if err != nil {
 		//nolint:nilerr // never block a merge on our own resolution error
 		return nil
 	}
 
-	exists, err := repo.IsInitialized(sesamDir)
+	exists, err := repo.IsInitialized(ctx, sesamDir)
 	if err != nil || !exists {
 		//nolint:nilerr // not a sesam repo (or unreadable) => let git auto-commit
 		return nil
 	}
 
-	changed, err := mergeTouchedSesam(sesamDir)
+	changed, err := mergeTouchedSesam(ctx, sesamDir)
 	if err != nil {
 		slog.Warn("pre-merge-commit: sesam-change check failed; forcing manual finalize", slog.Any("err", err))
 		changed = true // fail safe: never auto-commit an unsealed sesam merge
@@ -367,10 +367,10 @@ func HandleHookPreMergeCommit(_ context.Context, cmd *cli.Command) error {
 
 // HandleHookInstall (re)installs the git hooks. It only touches git config, so
 // it does not load the repo (no lock, no audit-log verify).
-func HandleHookInstall(_ context.Context, cmd *cli.Command) error {
-	return repo.InstallHooks(cmd.String("sesam-dir"))
+func HandleHookInstall(ctx context.Context, cmd *cli.Command) error {
+	return repo.InstallHooks(ctx, cmd.String("sesam-dir"))
 }
 
-func HandleHookUninstall(_ context.Context, cmd *cli.Command) error {
-	return repo.UninstallHooks(cmd.String("sesam-dir"))
+func HandleHookUninstall(ctx context.Context, cmd *cli.Command) error {
+	return repo.UninstallHooks(ctx, cmd.String("sesam-dir"))
 }
