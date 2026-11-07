@@ -38,7 +38,7 @@ stdout '1 stale'
 
 # Sealing skips it and says why; the picked content survives.
 exec sesam seal
-stderr 'stale secrets? were not sealed because they are newer than what is revealed'
+stderr '1 stale secret was not sealed because it is newer than what is revealed'
 stderr 'git pull. without sesam.s hooks installed'
 stderr 'sesam:   s'
 exec sesam show .sesam/objects/s.sesam

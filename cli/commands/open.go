@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/urfave/cli/v3"
@@ -12,6 +13,10 @@ import (
 // naming it. Named paths and --force-diverged take the object over such edits;
 // --all overwrites everything.
 func HandleOpen(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+	if cmd.Bool("all") && cmd.Args().Present() {
+		return errors.New("--all reveals every secret, it takes no paths")
+	}
+
 	if cmd.Bool("all") {
 		return r.RevealAll(ctx)
 	}
