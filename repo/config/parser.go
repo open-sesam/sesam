@@ -581,22 +581,6 @@ func (c *Config) writeFile(src *FileSource) error {
 // AST NAVIGATION //
 ////////////////////
 
-// hasInclude reports whether any secrets item of a file still carries the
-// removed include: key.
-func hasInclude(root ast.Node) bool {
-	seq, err := secretsNode(root)
-	if err != nil {
-		return false
-	}
-
-	for _, item := range seq.Values {
-		if m, ok := item.(*ast.MappingNode); ok && findMappingValue(m, "include") != nil {
-			return true
-		}
-	}
-	return false
-}
-
 // ownSecrets returns the secrets declared in src. A file with no secrets: key
 // at all yields no secrets and no error - Load already requires the key on anything it
 // loaded, so this is only ever reached for a legitimately empty file.
