@@ -17,14 +17,10 @@ func TestGitAddConfigOnlyOwnTree(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(other), 0o700))
 	require.NoError(t, os.WriteFile(other, []byte("secrets: []\n"), 0o600))
 
-	require.NoError(t, r.GitAddConfig(nil))
+	require.NoError(t, r.GitAddConfig(t.Context(), nil))
 
-	idx, err := r.gitRepo.Storer.Index()
+	staged, err := r.gitRepo.TrackedFiles(t.Context(), ".")
 	require.NoError(t, err)
-	var staged []string
-	for _, e := range idx.Entries {
-		staged = append(staged, e.Name)
-	}
 	require.Contains(t, staged, "sesam.yml")
 	require.NotContains(t, staged, "nested/sesam.yml")
 }

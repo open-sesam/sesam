@@ -55,7 +55,7 @@ type Identities []*Identity
 // that don't display a prompt (e.g. the OS keyring lookup) may ignore it,
 // but should forward it to their fallback.
 type PassphraseProvider interface {
-	ReadPassphrase(prompt string) ([]byte, error)
+	ReadPassphrase(ctx context.Context, prompt string) ([]byte, error)
 	PassphraseVerified(passphrase []byte, success bool)
 }
 
@@ -226,7 +226,7 @@ func sshKeyToIdentity(rawKey any) (*Identity, error) {
 // taken as the identity payload. For plugin identities the `# public key: …`
 // line is the recipient encoding sesam compares against the audit log and is
 // therefore required.
-func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *PluginUI, prompt string) (*Identity, error) {
+func ParseIdentity(ctx context.Context, key string, passphraseProvider PassphraseProvider, pluginUI *PluginUI, prompt string) (*Identity, error) {
 	ageLine, recipientHint := scanAgeIdentity(key)
 
 	switch {
@@ -257,7 +257,7 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *
 	// ("age-encryption.org/v1") or in ASCII-armored form
 	// ("-----BEGIN AGE ENCRYPTED FILE-----").
 	case strings.HasPrefix(ageLine, "-----BEGIN AGE"), strings.HasPrefix(ageLine, "age-encryption.org/v1"):
-		return parseEncryptedAgeIdentity(key, passphraseProvider, pluginUI, prompt)
+		return parseEncryptedAgeIdentity(ctx, key, passphraseProvider, pluginUI, prompt)
 	}
 
 	// Try parsing it as an unencrypted SSH key first, since it's apparently not age.
@@ -277,7 +277,7 @@ func ParseIdentity(key string, passphraseProvider PassphraseProvider, pluginUI *
 		return nil, fmt.Errorf("no passphrase supplied")
 	}
 
-	passphrase, err := passphraseProvider.ReadPassphrase(prompt)
+	passphrase, err := passphraseProvider.ReadPassphrase(ctx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read passphrase: %w", err)
 	}
@@ -434,18 +434,18 @@ func (p *pluginIdentityWithHint) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
 	return p.inner.Unwrap(stanzas)
 }
 
-func (spp *StdinPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
+func (spp *StdinPassphraseProvider) ReadPassphrase(ctx context.Context, prompt string) ([]byte, error) {
 	if prompt == "" {
 		prompt = "Passphrase: "
 	}
 	return readline.Password(prompt)
 }
 
-func (ap *AskpassProvider) ReadPassphrase(prompt string) ([]byte, error) {
+func (ap *AskpassProvider) ReadPassphrase(ctx context.Context, prompt string) ([]byte, error) {
 	program := ap.program()
 	if program == "" {
 		if ap != nil && ap.Fallback != nil {
-			return ap.Fallback.ReadPassphrase(prompt)
+			return ap.Fallback.ReadPassphrase(ctx, prompt)
 		}
 		return nil, errAskpassUnavailable
 	}
@@ -453,7 +453,7 @@ func (ap *AskpassProvider) ReadPassphrase(prompt string) ([]byte, error) {
 		prompt = "Passphrase: "
 	}
 
-	out, err := exec.CommandContext(context.Background(), program, prompt).Output() // #nosec G204 -- askpass helper is explicitly configured by the user/environment.
+	out, err := exec.CommandContext(ctx, program, prompt).Output() // #nosec G204 -- askpass helper is explicitly configured by the user/environment.
 	if err != nil {
 		return nil, fmt.Errorf("askpass failed: %w", err)
 	}
@@ -478,7 +478,7 @@ func (spp *StdinPassphraseProvider) PassphraseVerified(passphrase []byte, succes
 	// no-op
 }
 
-func (kpp *KeyringPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
+func (kpp *KeyringPassphraseProvider) ReadPassphrase(ctx context.Context, prompt string) ([]byte, error) {
 	stored, err := keyring.Get(keyringService, kpp.KeyFingerprint)
 	if err == nil {
 		kpp.fromKeyring = true
@@ -492,7 +492,7 @@ func (kpp *KeyringPassphraseProvider) ReadPassphrase(prompt string) ([]byte, err
 
 	// Do NOT cache here: we don't yet know if this passphrase is correct.
 	// Caching happens in passphraseVerified, once decryption has succeeded.
-	return kpp.Fallback.ReadPassphrase(prompt)
+	return kpp.Fallback.ReadPassphrase(ctx, prompt)
 }
 
 // DeleteAllCachedPassphrases will delete all cached passphrases in the keyring.
@@ -527,6 +527,7 @@ func (kpp *KeyringPassphraseProvider) PassphraseVerified(passphrase []byte, succ
 }
 
 func parseEncryptedAgeIdentity(
+	ctx context.Context,
 	key string,
 	passphraseProvider PassphraseProvider,
 	pluginUI *PluginUI,
@@ -535,7 +536,7 @@ func parseEncryptedAgeIdentity(
 	if passphraseProvider == nil {
 		return nil, fmt.Errorf("no passphrase supplied")
 	}
-	passphrase, err := passphraseProvider.ReadPassphrase(prompt)
+	passphrase, err := passphraseProvider.ReadPassphrase(ctx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read passphrase: %w", err)
 	}
@@ -563,7 +564,7 @@ func parseEncryptedAgeIdentity(
 	}
 	passphraseProvider.PassphraseVerified(passphrase, true)
 
-	return ParseIdentity(string(data), nil, pluginUI, prompt)
+	return ParseIdentity(ctx, string(data), nil, pluginUI, prompt)
 }
 
 // IdentityToUser checks which public key corresponds to which recipient public key.
