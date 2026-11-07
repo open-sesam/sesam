@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -247,9 +246,7 @@ func (c *Config) loadFile(path string) (*FileSource, error) {
 	if err := yaml.Unmarshal(bs, &doc); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if hasInclude(file.Docs[0].Body) {
-		return nil, errors.New("include is no longer supported; remove it - sub-configs are discovered automatically")
-	}
+
 	if err := c.validate(doc, path); err != nil {
 		return nil, err
 	}
