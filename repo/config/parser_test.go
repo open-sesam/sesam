@@ -258,8 +258,7 @@ secrets:
 }
 
 // TestLoad_RejectsInclude: the include: form was replaced by discovery, so a
-// leftover entry - in the main file or a sub-file - fails with a hint
-// instead of a generic schema error.
+// leftover entry - in the main file or a sub-file - fails schema validation.
 func TestLoad_RejectsInclude(t *testing.T) {
 	tests := []struct {
 		name string
@@ -280,7 +279,7 @@ func TestLoad_RejectsInclude(t *testing.T) {
 
 			_, err := loadConfig(t, main)
 			require.Error(t, err)
-			require.Contains(t, err.Error(), "include is no longer supported")
+			require.Contains(t, err.Error(), "additional properties 'include' not allowed")
 		})
 	}
 }

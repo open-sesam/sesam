@@ -51,17 +51,17 @@ cp broken.yml junk/sesam.yml
 stderr 'junk/sesam.yml'
 rm junk
 
-# A leftover include fails with a hint instead of a schema error.
+# A leftover include fails schema validation.
 cp sesam.yml sesam.yml.bak
 exec sh -c 'printf "  - include: svc\n" >> sesam.yml'
 ! exec sesam config diff
-stderr 'include is no longer supported'
+stderr 'additional properties .include. not allowed'
 cp sesam.yml.bak sesam.yml
 
 # A rewrite from the audit log keeps each secret in its sub-config.
 cp broken.yml sesam.yml
 exec sesam config reset --force
-stderr 'wrote it fresh'
+stderr 'wrote sesam.yml and sub-configs fresh'
 grep 'path: token.env' svc/sesam.yml
 grep 'path: key.env' app/sesam.yml
 ! grep 'token' sesam.yml
