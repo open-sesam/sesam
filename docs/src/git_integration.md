@@ -39,7 +39,7 @@ This hook does the following:
 
 Plaintext you edited but did not seal is never touched by either. `git` cannot
 warn about it (revealed files are gitignored), so the hook tells you what it kept:
-`sesam seal` keeps your version, `sesam reveal --all` takes the checked-out one.
+`sesam seal` keeps your version, `sesam reveal <path>` takes the checked-out one.
 
 ```admonish note
 This is not being called when running `git reset`. If you do this, you should probably run `sesam open` explicitly.
@@ -223,7 +223,7 @@ $ git commit -am 'merge'
 - The `sesam.yml` files will always be resetted to the merged state. Any additional change will be lost.
 - Merging without the git integration is not possible. Doing so will likely result in a repository state that does not survive `sesam verify`.
 - If you have a secret that is binary in nature, we can't merge it with conflict markers. In this case we'll add a TODO `.theirs` version next to it and inform you.
-- Secrets only the other side changed keep your plaintext until you finish: `sesam status` lists them as stale (S) and the finalize takes the incoming version. Edit one of them before finishing and it is diverged (!) - the finalize refuses, and you pick: `sesam reveal --all` takes the incoming version, `sesam seal --force-diverged` keeps yours.
+- Secrets only the other side changed keep your plaintext until you finish: `sesam status` lists them as stale (S) and the finalize takes the incoming version. Edit one of them before finishing and it is diverged (!) - the finalize refuses, and you pick: `sesam reveal --force-diverged` takes the incoming version, `sesam seal --force-diverged` keeps yours (or name single paths to either).
 - A rebase or cherry-pick uses the same machinery, but `git` runs no hook when they finish. Check `sesam status` afterwards: it names the operation and what is left to do. Secrets that lag behind show as stale there; `sesam reveal` refreshes them and `sesam seal` leaves them alone until you do.
 
 ### Internal flow

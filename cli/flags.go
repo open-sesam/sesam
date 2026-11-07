@@ -218,6 +218,10 @@ var flagsReveal = []cli.Flag{
 		Aliases: []string{"a"},
 		Usage:   "Reveal every secret, overwriting plaintext you edited",
 	},
+	&cli.BoolFlag{
+		Name:  "force-diverged",
+		Usage: "Also reveal diverged secrets, overwriting your edits with the object's version",
+	},
 }
 
 // flagsAdd contains controls for adding secrets.
