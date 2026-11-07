@@ -64,7 +64,7 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 			slog.Warn("close repo failed", slog.Any("error", closeErr))
 		}()
 
-		nudgeMissingGitIntegration(r)
+		nudgeMissingGitIntegration(ctx, r)
 
 		return action(ctx, cmd, r)
 	}
@@ -74,12 +74,12 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 // git integration was never wired up (the typical "cloned and forgot `sesam
 // init`" case). Best-effort: any check failure is logged, never fatal, so it can
 // never block a command.
-func nudgeMissingGitIntegration(r *repo.Repo) {
+func nudgeMissingGitIntegration(ctx context.Context, r *repo.Repo) {
 	if r.GitIntegrationNudgeSuppressed() {
 		return
 	}
 
-	installed, err := r.GitIntegrationInstalled()
+	installed, err := r.GitIntegrationInstalled(ctx)
 	if err != nil {
 		slog.Debug("could not determine git integration status", slog.Any("err", err))
 		return

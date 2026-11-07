@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -227,6 +228,15 @@ type gitConfigEntry struct {
 	option     string
 	value      string
 	report     bool
+}
+
+// listKey is key as `git config --list` prints it: section and option
+// lowercased, the subsection kept as is.
+func (e gitConfigEntry) listKey() string {
+	if e.subsection == "" {
+		return strings.ToLower(e.section + "." + e.option)
+	}
+	return strings.ToLower(e.section) + "." + e.subsection + "." + strings.ToLower(e.option)
 }
 
 // key is the real git-config key; display may leave out the per-repo suffix.
@@ -463,6 +473,31 @@ func gitConfigGet(dir string, args ...string) (string, error) {
 	}
 
 	return strings.TrimSuffix(string(out), "\n"), nil
+}
+
+// gitConfigList reads the git config of dir in one go, args selecting the
+// scope (e.g. "--local"; none for the effective config). A key set several
+// times maps to its last value, like `git config --get`.
+func gitConfigList(ctx context.Context, dir string, args ...string) (map[string]string, error) {
+	//nolint:gosec // fixed git subcommand; args are sesam's own.
+	cmd := exec.CommandContext(ctx, "git", slices.Concat([]string{"-C", dir, "config", "--list", "-z"}, args)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git config --list %s: %w", strings.Join(args, " "), err)
+	}
+
+	// Each entry is "<key>\n<value>\0"; a key without value has no newline.
+	config := make(map[string]string)
+	for entry := range strings.SplitSeq(string(out), "\x00") {
+		if entry == "" {
+			continue
+		}
+
+		key, value, _ := strings.Cut(entry, "\n")
+		config[key] = value
+	}
+
+	return config, nil
 }
 
 // sesamSubsectionSuffix returns the suffix appended to sesam's git-config

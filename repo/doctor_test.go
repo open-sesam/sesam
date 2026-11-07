@@ -34,7 +34,7 @@ func TestCheckGitConfigReportsHooks(t *testing.T) {
 	dir, _ := bootstrapRepo(t, admin) // installs no git config; auto-closed via t.Cleanup
 
 	// Reported as present-but-unset: doctor renders this as "not installed".
-	checks, err := CheckGitConfig(dir)
+	checks, err := CheckGitConfig(t.Context(), dir)
 	require.NoError(t, err)
 	c, ok := findGitConfigCheck(checks, "hook.sesam-precommit.command")
 	require.True(t, ok, "hook command entry must be reported, not filtered out")
@@ -43,7 +43,7 @@ func TestCheckGitConfigReportsHooks(t *testing.T) {
 
 	// After installing, it matches the expected `sesam ... hook pre-commit`.
 	require.NoError(t, InstallHooks(dir))
-	checks, err = CheckGitConfig(dir)
+	checks, err = CheckGitConfig(t.Context(), dir)
 	require.NoError(t, err)
 	c, ok = findGitConfigCheck(checks, "hook.sesam-precommit.command")
 	require.True(t, ok)
@@ -82,7 +82,7 @@ func TestInitMultipleSesamReposKeepDistinctHooks(t *testing.T) {
 	// Each repo still sees its own installed pre-commit hook, pointing at its
 	// own sesam dir.
 	for _, sub := range []string{"sub-a", "sub-b"} {
-		checks, err := CheckGitConfig(filepath.Join(dir, sub))
+		checks, err := CheckGitConfig(t.Context(), filepath.Join(dir, sub))
 		require.NoError(t, err)
 		c, ok := findGitConfigCheck(checks, "hook.sesam-precommit.command")
 		require.True(t, ok)

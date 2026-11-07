@@ -674,8 +674,8 @@ const noGitIntegrationWarningFile = ".sesam/no-git-integration-warning"
 // present. A fresh clone that never ran init has none; that is the case the
 // load-time nudge targets (the integration lives in .git/config, which is not
 // cloned).
-func (v *View) GitIntegrationInstalled() (bool, error) {
-	checks, err := CheckGitConfig(v.sesamDir)
+func (v *View) GitIntegrationInstalled(ctx context.Context) (bool, error) {
+	checks, err := CheckGitConfig(ctx, v.sesamDir)
 	if err != nil {
 		return false, err
 	}

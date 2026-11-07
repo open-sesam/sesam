@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,7 +43,7 @@ func GitWorktreeRoot(dir string) (string, error) {
 // doctor` (those flagged report in expectedGitConfig - merge/diff/alias and, on
 // git >= 2.54, the hook commands) against what `sesam init` would install for
 // the repo at sesamDir.
-func CheckGitConfig(sesamDir string) ([]GitConfigCheck, error) {
+func CheckGitConfig(ctx context.Context, sesamDir string) ([]GitConfigCheck, error) {
 	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
 	if err != nil {
 		return nil, err
@@ -53,16 +54,18 @@ func CheckGitConfig(sesamDir string) ([]GitConfigCheck, error) {
 		return nil, err
 	}
 
+	local, err := gitConfigList(ctx, resolvedDir, "--local")
+	if err != nil {
+		return nil, fmt.Errorf("read local git config: %w", err)
+	}
+
 	var checks []GitConfigCheck
 	for _, e := range entries {
 		if !e.report {
 			continue
 		}
 
-		actual, err := gitConfigGet(resolvedDir, "--local", e.key())
-		if err != nil {
-			return nil, fmt.Errorf("read local git config: %w", err)
-		}
+		actual := local[e.listKey()]
 
 		checks = append(checks, GitConfigCheck{
 			Path:     e.display,
