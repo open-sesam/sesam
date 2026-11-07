@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"slices"
+	"strings"
 	"syscall"
 
 	"github.com/urfave/cli/v3"
@@ -514,6 +516,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 		if !runInvocation {
 			ctx, stopSignals = signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 		}
+		pinGitWorkTree(ctx)
 		if cmd.Bool("no-color") && !runInvocation {
 			// hack to make sure color is always ignored without passing it to everywhere we use termenv.
 			_ = os.Setenv("NO_COLOR", "1")
@@ -540,6 +543,23 @@ we assume 'sesam show path/to/secret' as convenience.`,
 	}
 
 	return app.Run(ctx, args)
+}
+
+// pinGitWorkTree makes the worktree git meant explicit. With GIT_DIR set but no
+// GIT_WORK_TREE - git runs hooks in linked worktrees like that - git takes the
+// current directory as the worktree root, which goes wrong as soon as sesam
+// runs git from inside a nested sesam dir.
+func pinGitWorkTree(ctx context.Context) {
+	if os.Getenv("GIT_DIR") == "" || os.Getenv("GIT_WORK_TREE") != "" {
+		return
+	}
+
+	out, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return // e.g. a bare GIT_DIR: there is no worktree to pin
+	}
+
+	_ = os.Setenv("GIT_WORK_TREE", strings.TrimSuffix(string(out), "\n"))
 }
 
 func hasArgumentSeparator(args, commandArgs []string) bool {

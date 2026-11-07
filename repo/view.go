@@ -488,7 +488,11 @@ func (v *View) committedConfigChanges(ctx context.Context) ([]diff.Change, error
 	}
 	defer func() { _ = objs.Close() }()
 
-	if _, ok, err := objs.Blob(head + ":" + path.Join(prefix, filepath.ToSlash(configFileName))); err != nil || !ok {
+	_, ok, err := objs.Blob(head + ":" + path.Join(prefix, filepath.ToSlash(configFileName)))
+	if err != nil {
+		return nil, fmt.Errorf("look up committed sesam.yml: %w", err)
+	}
+	if !ok {
 		// sesam.yml itself was never committed (e.g. the very first apply):
 		// there is nothing to compare the declaration against.
 		return nil, nil
