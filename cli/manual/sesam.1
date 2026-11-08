@@ -1892,13 +1892,18 @@ will do some slightly more costly checks to see if anything malicious might be
 going on.
 
 .SS Audit Log truncation check
-Check git history from \fBHEAD\fR back to the init commit to see if each older audit
-log is a prefix of the newer one. The log is completely linear, so this catches
-malicious truncation events. If an older audit log cannot be decrypted by the
-current identity, verification stops at that point without treating it as a failure.
+Check git history from the staged audit log through \fBHEAD\fR back to the init
+commit to see if each older audit log is a prefix of the newer one. The log is
+completely linear, so this catches malicious truncation events. If an older
+audit log cannot be decrypted by the current identity, verification stops at
+that point without treating it as a failure.
 
 .PP
-This will be run on \fBsesam verify --truncate\fR
+Including the staged log means a rewritten log is refused by the pre-commit hook
+instead of surfacing later in CI.
+
+.PP
+This will be run on \fBsesam verify --truncate\fR and by the pre-commit hook.
 
 .SS File integrity check
 The \fBage\fR encryption format cannot give us a way to detect if a file was
@@ -2166,6 +2171,12 @@ to a good commit and have them re-run the operation correctly.
 \fBA stale on-disk root hash.\fP A partial checkout can restore an object
 without its audit log. \fBsesam open\fR followed by \fBsesam seal\fR reconciles it;
 the hooks normally do this for you on checkout.
+.IP \(bu 2
+\fBAn older \fB\&.sesam\fR brought back by git.\fP \fBgit checkout <rev> -- .sesam\fR, a
+\fBgit revert\fR of a vault commit or an audit log merge conflict resolved by
+taking one side, followed by a sesam command that writes on top of it. The
+pre-commit hook refuses such a commit; \fBgit checkout HEAD -- .sesam\fR and
+redoing the change with sesam fixes it.
 .IP \(bu 2
 \fBGenuine tampering.\fP Truncation or substitution of the audit log (see below).
 

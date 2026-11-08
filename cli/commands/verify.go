@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -58,6 +59,37 @@ func verifyOpts(cmd *cli.Command) repo.VerifyOptions {
 	return opts
 }
 
+// rewrittenHints explains a rewritten audit log: why it matters, how it
+// usually happens and how to get out.
+func rewrittenHints(e *core.AuditLogRewrittenError) []string {
+	sesam := e.SesamPath
+	lines := []string{
+		"  Note that sesam's audit log may only grow. Every commit has to keep all entries of its parent's log.",
+		"  Dropped or rewritten entries could otherwise undo what was recorded, e.g. bring back a removed user.",
+		"  Often this happens due to git commands bringing back an older log, e.g. by one of those cases:",
+		"    - git checkout <rev> -- " + sesam + "   (or git restore --source=<rev>)",
+		"    - git revert of a commit that changed " + sesam,
+		"    - a merge conflict in " + sesam + "/audit/log.jsonl resolved by taking one side (git checkout --theirs)",
+	}
+
+	if e.Newer == "" {
+		// problematic log is staged, but not committed
+		return append(lines,
+			"  To fix it, take "+sesam+" from HEAD and redo your change with sesam:",
+			"",
+			"    git checkout HEAD -- ':/"+sesam+"' && sesam seal",
+			"",
+			"  If you are amending a commit on purpose to drop its entries, `git commit --no-verify` skips this check.",
+		)
+	}
+
+	return append(lines,
+		"  To fix it, rewrite history so commit "+e.Newer+" no longer drops entries: redo it on top of its parent's log,",
+		"  or squash it with the commits around it if the result only grows the log (e.g. `git rebase -i "+e.Newer+"^`).",
+		"  Note that the change was already committed, so you will have to force-push if it was published already.",
+	)
+}
+
 func printReport(opts repo.VerifyOptions, report *repo.VerifyReport) {
 	out := termenv.NewOutput(os.Stdout)
 
@@ -91,6 +123,13 @@ func printReport(opts repo.VerifyOptions, report *repo.VerifyReport) {
 				red("truncated"),
 				red(report.TruncateError.Error()),
 			))
+
+			var rewritten *core.AuditLogRewrittenError
+			if errors.As(report.TruncateError, &rewritten) {
+				for _, line := range rewrittenHints(rewritten) {
+					slog.Warn(line)
+				}
+			}
 		} else {
 			slog.Info(fmt.Sprintf("Audit log history: %s", green("ok")))
 		}

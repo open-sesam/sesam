@@ -1,0 +1,54 @@
+# Checking out an older .sesam and sealing on top of it forks the audit log:
+# the next commit would drop entries HEAD already holds. Committed history alone
+# looks fine until that commit lands, so the hook compares the staged log too.
+
+sesam-repo admin a.txt b.txt c.txt d.txt
+exec sesam hook install
+
+cp $TMPDIR/a.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'one'
+cp $TMPDIR/b.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'two'
+cp $TMPDIR/c.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'three'
+
+exec git checkout HEAD^^ -- .sesam
+exec sesam seal
+exec git add -A
+
+# verify sees it before the commit, naming the staged changes.
+! exec sesam verify --all
+stderr 'is not a prefix of the staged changes'
+stderr 'audit log may only grow'
+stderr 'git checkout <rev> -- .sesam'
+stderr 'git checkout HEAD -- .:/.sesam. && sesam seal'
+
+# The hook refuses the commit.
+! exec git commit -m 'oops'
+stderr 'is not a prefix of the staged changes'
+stderr 'verification failed'
+exec git log --oneline
+! stdout 'oops'
+
+# The suggested way out: take .sesam from HEAD and seal again.
+exec git checkout HEAD -- ':/.sesam'
+cp $TMPDIR/d.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'redo'
+exec sesam verify --all
+
+-- a.txt --
+A
+-- b.txt --
+B
+-- c.txt --
+C
+-- d.txt --
+D

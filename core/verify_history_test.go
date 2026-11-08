@@ -57,6 +57,12 @@ func (f *historyFixture) commit(t *testing.T, msg string) {
 	gitCommitAll(t, f.Repo, msg)
 }
 
+// stage stages everything without committing.
+func (f *historyFixture) stage(t *testing.T) {
+	t.Helper()
+	testGit(t, f.Repo.Root(), "add", "-A")
+}
+
 // tellUser adds newUser via the UserManager. This rewrites the audit key
 // envelope on log.jsonl line 1 to include newUser's recipient, so older
 // commits (pre-tell) remain inaccessible to newUser.
@@ -377,7 +383,7 @@ func TestAuditLogHistory(t *testing.T) {
 			f := newHistoryFixture(t)
 			tt.setup(t, f)
 
-			iter, err := auditLogHistory(t.Context(), f.SesamDir, f.Repo, tt.ids(t, f), tt.fromRev, "")
+			iter, err := auditLogHistory(t.Context(), f.SesamDir, f.Repo, tt.ids(t, f), tt.fromRev, "", false)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				require.ErrorContains(t, err, tt.wantErr)
@@ -438,6 +444,31 @@ func TestVerifyHistory(t *testing.T) {
 				f.commit(t, "tampered: drop last entry")
 			},
 			wantErr: "is not a prefix of commit",
+		},
+		{
+			name: "staged log extending HEAD's passes",
+			setup: func(t *testing.T, f *historyFixture) {
+				f.addSeal(t)
+				f.stage(t)
+			},
+		},
+		{
+			name: "staged log dropping HEAD's entries is caught",
+			setup: func(t *testing.T, f *historyFixture) {
+				f.addSeal(t)
+				f.commit(t, "added seal")
+				f.truncateLog(t)
+				f.stage(t)
+			},
+			wantErr: "is not a prefix of the staged changes",
+		},
+		{
+			name: "unstaged rewrite is not what gets committed",
+			setup: func(t *testing.T, f *historyFixture) {
+				f.addSeal(t)
+				f.commit(t, "added seal")
+				f.truncateLog(t)
+			},
 		},
 		{
 			name: "audit log missing in intermediate commit",
