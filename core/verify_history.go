@@ -1,12 +1,14 @@
 package core
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"iter"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"filippo.io/age"
 	"github.com/go-git/go-git/v5"
@@ -18,7 +20,8 @@ import (
 // so callers can attribute errors to a specific revision.
 type auditLogSnapshot struct {
 	Commit plumbing.Hash
-	Log    *AuditLog
+	// Log is nil when we have no access to it; the walk ends there.
+	Log *AuditLog
 }
 
 func auditLogHistory(
@@ -154,6 +157,7 @@ func auditLogHistory(
 					if errors.As(err, &nie) {
 						// Current user had no access at this commit — we have no way
 						// to verify further back, but this is not a verification failure.
+						yield(&auditLogSnapshot{Commit: commit.Hash}, nil)
 						return
 					}
 
@@ -224,7 +228,6 @@ func logCarryingParent(
 }
 
 // auditLogIsPrefix tests if `old` is a prefix of `new`
-// If this is not the case, an error with the specifics are returned.
 func auditLogIsPrefix(new, old *AuditLog) error {
 	oel, nel := len(old.Entries), len(new.Entries)
 	if oel > nel {
@@ -235,19 +238,117 @@ func auditLogIsPrefix(new, old *AuditLog) error {
 		return fmt.Errorf("neither audit log may be completely empty")
 	}
 
-	for oldIdx := oel - 1; oldIdx >= 0; oldIdx-- {
-		oldEntry := old.Entries[oldIdx]
-		newEntry := new.Entries[oldIdx]
-		if newEntry.Signature != oldEntry.Signature {
-			return fmt.Errorf("audit log entries differ at index %d (seq_id %d)", oldIdx, oldEntry.SeqID)
+	for idx := range old.Entries {
+		if new.Entries[idx].Signature != old.Entries[idx].Signature {
+			return fmt.Errorf("audit log entries differ at index %d (seq_id %d)", idx, old.Entries[idx].SeqID)
 		}
 	}
 
 	return nil
 }
 
+// auditLogCovers tests that every entry of `old` is accounted for in `new`:
+// either `old` is a prefix of `new`, or `new` holds a merge that took in
+// exactly `old`. The latter is what a branch looks like that merged its
+// upstream and was then squashed into it.
+func auditLogCovers(new, old *AuditLog) error {
+	prefixErr := auditLogIsPrefix(new, old)
+	if prefixErr == nil || mergeTookIn(new.Entries, old.Entries) {
+		return nil
+	}
+
+	return prefixErr
+}
+
+// mergeTookIn reports whether a merge entry in `entries` took in exactly `taken`.
+// A merge takes in all of theirs: each entry was in its base, which ours carries
+// too, or the merge decided on it.
+func mergeTookIn(entries, taken []AuditEntrySigned) bool {
+	tip := &taken[len(taken)-1]
+	for i := range entries {
+		if entries[i].Operation != OpMerge {
+			continue
+		}
+
+		d, err := parseDetail[DetailMerge](&entries[i])
+		if err != nil || d.TheirTipSeqID != tip.SeqID {
+			continue
+		}
+
+		if d.TheirTipHash != "" {
+			if ok, _ := tip.HashMatches(d.TheirTipHash); ok {
+				return true
+			}
+
+			continue
+		}
+
+		// Merges from before TheirTipHash: bind by content instead.
+		if legacyMergeTookIn(entries, taken) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// legacyMergeTookIn reports whether every removal in `taken` is in `entries`
+// or recorded as dropped by one of its merges. Anything else a merge may leave
+// out without a record: seals and merge entries are redone, already satisfied
+// entries are deduped.
+func legacyMergeTookIn(entries, taken []AuditEntrySigned) bool {
+	have := make(map[string]int, len(entries))
+	recorded := make(map[string]int)
+	for i := range entries {
+		have[entryOriginKey(&entries[i])]++
+		if entries[i].Operation != OpMerge {
+			continue
+		}
+
+		d, err := parseDetail[DetailMerge](&entries[i])
+		if err != nil {
+			continue
+		}
+
+		for _, r := range d.Resolutions {
+			if r.Action == MergeDropped {
+				recorded[string(r.Operation)+"\x00"+r.ChangedByBeforeMerge+"\x00"+r.Target]++
+			}
+		}
+	}
+
+	for i := range taken {
+		e := &taken[i]
+		if !revokesAccess(e.Operation) {
+			continue
+		}
+
+		if key := entryOriginKey(e); have[key] > 0 {
+			have[key]--
+			continue
+		}
+
+		dropKey := string(e.Operation) + "\x00" + cmp.Or(e.ChangedByBeforeMerge, e.ChangedBy) + "\x00" + entryUserTarget(e)
+		if recorded[dropKey] == 0 {
+			return false
+		}
+
+		recorded[dropKey]--
+	}
+
+	return true
+}
+
+// entryOriginKey identifies an entry across a merge's re-signing, which keeps
+// operation, detail and time but moves the author to ChangedByBeforeMerge.
+func entryOriginKey(e *AuditEntrySigned) string {
+	return entryContentKey(&e.AuditEntry) + "\x00" +
+		e.Time.UTC().Format(time.RFC3339Nano) + "\x00" +
+		cmp.Or(e.ChangedByBeforeMerge, e.ChangedBy)
+}
+
 // VerifyHistory checks that, along the FIRST-PARENT chain from HEAD, every older
-// audit log is a prefix of the newer one (append-only, no truncation), and that
+// audit log is accounted for in the newer one (see auditLogCovers), and that
 // the tip chain-verifies. Where that chain has no vault - a merge that brought
 // one in from its second parent - the walk crosses over to the parent that does,
 // so the log's own ancestry is followed down to the trust anchor.
@@ -260,6 +361,9 @@ func auditLogIsPrefix(new, old *AuditLog) error {
 // finding it walks the whole history, and Verify already did that. Pass "" to
 // have it determined here, which also re-runs the init-file check.
 //
+// stoppedAt is the commit whose log ids cannot read, where the walk ended
+// early; empty when it reached the trust anchor.
+//
 // CAVEAT: Right now we do not recognize renames: If the sesam repo was moved from secret/ to secrets/
 // then this function does not find the old audit log before that rename. We could use git's renames,
 // but there will edge cases too if the file was renamed and a user was rotated (git looks for 50% matching content).
@@ -269,7 +373,7 @@ func VerifyHistory(
 	ids Identities,
 	pluginUI *PluginUI,
 	initCommitRev string,
-) error {
+) (stoppedAt string, err error) {
 	auditLogIter, err := auditLogHistory(
 		sesamDir,
 		repo,
@@ -278,26 +382,30 @@ func VerifyHistory(
 		initCommitRev,
 	)
 	if err != nil {
-		return fmt.Errorf("build audit log history: %w", err)
+		return "", fmt.Errorf("build audit log history: %w", err)
 	}
 
 	var prev *auditLogSnapshot
 	for curr, err := range auditLogIter {
 		if err != nil {
-			return err
+			return "", err
+		}
+
+		if curr.Log == nil {
+			return curr.Commit.String(), nil
 		}
 
 		if prev == nil {
 			// First iteration yields the newest log. We chain-verify it once;
 			// older logs inherit validity by being prefixes of it (transitively).
 			if _, err := VerifyChain(curr.Log, EmptyKeyring(), pluginUI); err != nil {
-				return fmt.Errorf("verify audit log chain at commit %s: %w", curr.Commit, err)
+				return "", fmt.Errorf("verify audit log chain at commit %s: %w", curr.Commit, err)
 			}
 		} else {
-			// Walking backward: prev is the newer (longer) log, curr is the older
-			// (shorter) one that should be its prefix.
-			if err := auditLogIsPrefix(prev.Log, curr.Log); err != nil {
-				return fmt.Errorf(
+			// Walking backward: prev is the newer log, curr is the older one
+			// whose entries it has to account for.
+			if err := auditLogCovers(prev.Log, curr.Log); err != nil {
+				return "", fmt.Errorf(
 					"audit log at commit %s is not a prefix of commit %s: %w",
 					curr.Commit, prev.Commit, err,
 				)
@@ -307,5 +415,5 @@ func VerifyHistory(
 		prev = curr
 	}
 
-	return nil
+	return "", nil
 }

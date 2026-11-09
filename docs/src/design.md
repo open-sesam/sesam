@@ -61,7 +61,6 @@ Additionally `age` offers a full [plugin
 system](https://github.com/FiloSottile/awesome-age#plugins), making extending
 `sesam` with new ways of authenticating (e.g. FIDO keys) easier.
 
-
 ### Why not a clean/smudge filter?
 
 The obvious git-native approach would be a [clean/smudge filter](https://git-scm.com/book/en/v2/Customizing-Git-Git-Attributes) à la git-crypt:
@@ -76,7 +75,7 @@ don't do this. sesam keeps the ciphertext as a real file under
   `git` compares `clean(worktree)` against the stored blob to decide if a file
   changed. Non-deterministic clean output means every checkout, stash or
   `add -A` can mark unchanged secrets as modified, causing spurious re-encrypts
-  and history churn. [We are ](https://github.com/FiloSottile/age/discussions/507)[ not alone](https://blog.9wd.eu/posts/git-encryption-age/) alone on that view either.
+  and history churn. [We are](https://github.com/FiloSottile/age/discussions/507)[not alone](https://blog.9wd.eu/posts/git-encryption-age/) alone on that view either.
 
 - **The current layout is fail-safe; a filter fails open:** In our model the plaintext
   paths are gitignored and only ciphertext objects are tracked, so committing a
@@ -269,7 +268,6 @@ renaming files atomically easier.
 
 `sesam` protects against the following threats:
 
-
 | Threat                                                        | In scope     | Mitigated by                                                  |
 |---------------------------------------------------------------|--------------|---------------------------------------------------------------|
 | Read-only attacker on the git remote                          | Yes          | age hybrid encryption of all files in `.sesam/objects`        |
@@ -282,7 +280,6 @@ renaming files atomically easier.
 | Local machine compromise / identity-key extraction            | Out of scope | User responsibility (e.g. encrypted fs)                                           |
 | Removed user reading secrets they previously had access to    | Out of scope | Requires explicit `rotate`; see Confidentiality section       |
 | Social engineering of an admin (e.g. `sesam tell attacker`)   | Out of scope | -                                                             |
-
 
 ### Aspects
 
@@ -357,9 +354,10 @@ are not prevented at the storage layer, but they are *detectable*:
 - **Replacement** is caught because the init UUID and signature in
   `.sesam/audit/init` are pinned in the first commit and checked over
   git history.
-- **Truncation** is caught by verifying that the audit log at each
-  prior commit is a strict *prefix* of the log at the next - i.e. the
-  log never shrinks across history.
+- **Truncation** is caught by verifying that every entry of the audit
+  log at each prior commit is accounted for at the next: the old log is
+  a *prefix* of the new one, or the new one holds an admin-signed merge
+  that took in exactly the old log (e.g. after a squash merge).
 
 *Caveat:* This only holds true when force pushes are not allowed or at least noticed.
 
@@ -432,8 +430,10 @@ There are two mechanisms that can detect such:
   During verification we compare this stored hash to the hash of the first audit-log entry.
   This test catches complete log substitution.
 - A more thorough test is to check if the audit log is only growing. Since it's append only we would notice
-  truncations by going back in history and seeing if each commit contains an audit log that is an prefix to
-  the audit log in the commit afterwards. This test is too expensive to be run all the time but will also notice
+  truncations by going back in history and seeing if each commit contains an audit log that is a prefix to
+  the audit log in the commit afterwards. A branch that merged its upstream and was then squashed into it
+  puts its own entries first; the merge entry names the hash of the upstream log it took in, which then
+  counts as accounted for. This test is too expensive to be run all the time but will also notice
   if the log was truncated.
 
 #### Denial of Service via broken repo
@@ -479,7 +479,6 @@ Stored under `.sesam/audit/log.jsonl`.
 
 Entry structure:
 
-
 | Field        | Description                                              |
 |--------------|----------------------------------------------------------|
 | `seq_id`     | Monotonic sequence number (starting at 1)                |
@@ -490,9 +489,7 @@ Entry structure:
 | `detail`     | Operation-specific data (see below)                      |
 | `signature`  | Ed25519 signature over all other fields (canonical JSON) |
 
-
 Operation types:
-
 
 | Operation                  | Detail fields                       | Notes                                          |
 |----------------------------|-------------------------------------|------------------------------------------------|
@@ -509,7 +506,6 @@ Operation types:
 | `secret.move`              | OldRevealedPath, NewRevealedPath    | Rename or move a secret.                        |
 | `secret.remove`            | RevealedPath                        | Only users with access may remove.             |
 | `seal`                     | RootHash, FilesSealed               | Hash over all sorted signatures.               |
-
 
 Initial group membership is part of the `user.tell` detail; later changes go
 through `user.change_groups`. Admin status is determined by membership in the

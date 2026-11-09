@@ -374,11 +374,14 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 	if opts.Truncation {
 		// The anchor comes from the load-time Verify, which already walked the
 		// history for it - VerifyHistory would otherwise walk it a second time.
-		if err := core.VerifyHistory(
+		stoppedAt, err := core.VerifyHistory(
 			v.sesamDir, v.gitRepo, v.identities, v.opts.pluginUI(), v.vstate.InitCommit(),
-		); err != nil {
+		)
+		if err != nil {
 			report.TruncateError = core.JSONError{Err: err}
 		}
+
+		report.TruncateStoppedAt = stoppedAt
 	}
 
 	if opts.KeyReuse {

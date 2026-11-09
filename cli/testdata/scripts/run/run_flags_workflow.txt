@@ -1,0 +1,62 @@
+# run honors the verification mode and finalizes sesam's own profiles.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam init --user admin
+cp raw-fixture raw.txt
+exec sesam add raw.txt
+rm raw.txt
+
+exec sesam --verify-mode no-disk run --secret RAW=raw.txt -- touch started-no-disk
+exists started-no-disk
+
+exec sesam --cpuprofile cpu.pprof run --secret RAW=raw.txt -- touch started-cpu
+exists cpu.pprof
+exists started-cpu
+
+exec sesam run --secret RAW=raw.txt --cpuprofile cpu-after.pprof -- touch started-cpu-after
+exists cpu-after.pprof
+exists started-cpu-after
+
+exec sesam --memprofile mem.pprof run --secret RAW=raw.txt -- touch started-mem
+exists mem.pprof
+exists started-mem
+
+exec sesam run --secret RAW=raw.txt --verify-mode no-disk -- touch started-no-disk-after
+exists started-no-disk-after
+
+# An extra object changes the root hash but not the selected secret itself.
+cp .sesam/objects/raw.txt.sesam .sesam/objects/extra.txt.sesam
+! exec sesam run --secret RAW=raw.txt -- touch started-default
+stderr 'root hash mismatch'
+! exists started-default
+
+! exec sesam --verify-mode all run --secret RAW=raw.txt -- touch started-all
+stderr 'root hash mismatch'
+! exists started-all
+
+exec sesam --verify-mode no-disk run --secret RAW=raw.txt -- sh -c 'cat "$RAW"'
+cmp stdout raw-fixture
+exec sesam run --verify-mode no-disk --secret RAW=raw.txt -- sh -c 'cat "$RAW"'
+cmp stdout raw-fixture
+rm .sesam/objects/extra.txt.sesam
+
+# Invalid modes are rejected regardless of flag position.
+! exec sesam --verify-mode invalid run --secret RAW=raw.txt -- touch started-invalid
+stderr 'invalid verify mode: invalid'
+! exists started-invalid
+! exec sesam run --verify-mode invalid --secret RAW=raw.txt -- touch started-invalid-after
+stderr 'invalid verify mode: invalid'
+! exists started-invalid-after
+
+# Skipping the root-hash check does not bypass verification of selected secrets.
+cp .sesam/objects/raw.txt.sesam $TMPDIR/raw-object
+cp raw-fixture .sesam/objects/raw.txt.sesam
+! exec sesam --verify-mode no-disk run --secret RAW=raw.txt -- touch started-corrupt
+stderr 'read secret raw.txt:'
+! exists started-corrupt
+cp $TMPDIR/raw-object .sesam/objects/raw.txt.sesam
+
+-- raw-fixture --
+raw

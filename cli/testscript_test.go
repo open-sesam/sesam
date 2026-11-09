@@ -15,6 +15,7 @@ import (
 	"github.com/rogpeppe/go-internal/testscript"
 	"opensesam.org/sesam/cli/commands"
 	"opensesam.org/sesam/cli/docgen"
+	"opensesam.org/sesam/repo"
 )
 
 const askpassTestPassphrase = "askpass-test-passphrase"
@@ -25,6 +26,11 @@ func TestMain(m *testing.M) {
 			err := Main(os.Args)
 			if err == nil {
 				return
+			}
+
+			var runExitErr *repo.ExitError
+			if errors.As(err, &runExitErr) {
+				os.Exit(runExitErr.ExitCode())
 			}
 
 			// Mirror main.go: the merge drivers talk to git through exit codes,

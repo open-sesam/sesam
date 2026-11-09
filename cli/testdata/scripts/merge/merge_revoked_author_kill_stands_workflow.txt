@@ -1,0 +1,52 @@
+# A kill or recipient removal by an admin whom our side removed since the base
+# still stands: the merging admin re-signs it. Dropping it would bring the
+# killed user or key back - on develop too, once the branch is squashed into it.
+
+sesam-repo admin base.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group admin
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group dev
+exec sesam tell --user dave --recipient age1tdy2pxsfwpxxe0c9cuwty8zpsv6uuhf4zyug5f9lfl982lh3tctqrw2ll7 --group dev
+exec sesam user add-recipient --user dave --recipient 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGton+aQGCo+e3c/DPpR6qXCZwBNlh15Aqwua74O/SFA'
+exec git add -A
+exec git commit -m 'base: bob admin, carol and dave dev'
+exec git branch develop
+
+# develop: bob kills carol and removes dave's second key.
+exec git checkout develop
+env SESAM_ID=$BOB_KEY
+exec sesam kill --user carol
+exec sesam user remove-recipient --user dave --recipient 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGton+aQGCo+e3c/DPpR6qXCZwBNlh15Aqwua74O/SFA'
+exec git add -A
+exec git commit -m 'develop: bob kills carol, removes a key of dave'
+
+# feature: admin kills bob, then merges develop.
+env SESAM_ID=$ADMIN_KEY
+exec git checkout -b feature HEAD~1
+grep AAAAC3NzaC1lZDI1NTE5AAAAIGton sesam.yml
+exec sesam kill --user bob
+exec git add -A
+exec git commit -m 'feature: kill bob'
+
+! exec git merge --no-edit develop
+stderr 'author bob was revoked on our side, but the removal stands'
+exec git commit --no-edit
+exec sesam user ls
+! stdout carol
+! grep AAAAC3NzaC1lZDI1NTE5AAAAIGton sesam.yml
+
+# Squashed into develop, carol and the key stay gone.
+exec git checkout develop
+exec git merge --squash feature
+exec git commit --no-verify -m 'squash feature'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+exec sesam user ls
+! stdout carol
+! stdout bob
+! grep AAAAC3NzaC1lZDI1NTE5AAAAIGton sesam.yml
+
+-- base.txt --
+S=BASE

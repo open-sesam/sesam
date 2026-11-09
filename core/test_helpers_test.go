@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -16,17 +17,21 @@ import (
 )
 
 // revealableBy reports whether u can decrypt and reveal revealedPath from its
-// sealed object, driving the production reveal path. A "not a recipient"
+// sealed object independently of current access policy. A "not a recipient"
 // outcome is reported as false rather than an error - the recipient-membership
 // probe the user-manager tests need.
-func revealableBy(t *testing.T, sesamDir string, u *testUser, kr Keyring, al *AuditLog, state *VerifiedState, revealedPath string) bool {
+func revealableBy(t *testing.T, sesamDir string, u *testUser, kr Keyring, state *VerifiedState, revealedPath string) bool {
 	t.Helper()
 
-	mgr, err := BuildSecretManager(sesamDir, testRoot(t, sesamDir), Identities{u.Identity}, u.Signer, kr, al, state, "")
+	root := testRoot(t, sesamDir)
+	src, err := root.Open(ObjectPath(revealedPath))
 	require.NoError(t, err)
+	defer src.Close()
 
-	err = revealSecret(mgr, revealedPath)
+	var plaintext bytes.Buffer
+	_, err = RevealStreamAndVerify(src, &plaintext, Identities{u.Identity}.AgeIdentities(), kr, state.SealerAuthorized, revealedPath)
 	if err == nil {
+		require.NoError(t, root.WriteFile(revealedPath, plaintext.Bytes(), 0o600))
 		return true
 	}
 

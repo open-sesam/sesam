@@ -1,0 +1,99 @@
+# Stacked PRs: f2 is branched off f1. f1 is squashed into develop, then f2 -
+# retargeted to develop - is squashed too. GitHub merges without sesam's
+# drivers or hooks; .git/info/attributes stands in for that by forcing a plain
+# text merge of the log. develop must verify after each squash.
+
+sesam-repo admin base.txt dev.txt github-attributes
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+exec git branch develop
+
+# f1 tells bob; f2 stacks on it and tells carol.
+exec git checkout -b f1
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'f1: tell bob'
+exec git checkout -b f2
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'f2: tell carol'
+
+# Case 1: f2 sits on f1's final commit. f1 lands.
+exec git checkout develop
+cp $TMPDIR/github-attributes .git/info/attributes
+exec git merge --squash f1
+exec git commit --no-verify -m 'squash f1'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+# f2 cannot land as it is: bob's tell rotated the audit key, which re-encrypts
+# every line of the log, so a plain text merge conflicts. GitHub refuses.
+! exec git merge --squash f2
+stdout 'CONFLICT \(content\): Merge conflict in .sesam/audit/log.jsonl'
+exec git reset --hard
+rm .git/info/attributes
+
+# f2 updates from develop with sesam, then lands.
+exec git checkout f2
+! exec git merge --no-edit develop
+exec git commit --no-edit
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+exec git checkout develop
+cp $TMPDIR/github-attributes .git/info/attributes
+exec git merge --squash f2
+exec git commit --no-verify -m 'squash f2'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+exec sesam user ls
+stdout bob
+stdout carol
+rm .git/info/attributes
+
+# Case 2: f1 gets a review fix after f2 branched, and develop moves too. f1
+# lands; f2 then has to update from develop (with sesam) before it can land.
+exec git reset --hard HEAD~2
+exec git branch -f f2 f2~1
+exec git checkout f1
+cp $TMPDIR/dev.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'f1: review fix'
+
+exec git checkout develop
+cp $TMPDIR/github-attributes .git/info/attributes
+exec git merge --squash f1
+exec git commit --no-verify -m 'squash f1'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+rm .git/info/attributes
+
+exec git checkout f2
+! exec git merge --no-edit develop
+exec git commit --no-edit
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+exec git checkout develop
+cp $TMPDIR/github-attributes .git/info/attributes
+exec git merge --squash f2
+exec git commit --no-verify -m 'squash f2'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+exec sesam user ls
+stdout bob
+stdout carol
+
+-- base.txt --
+S=BASE
+-- dev.txt --
+S=DEV
+-- github-attributes --
+.sesam/audit/log.jsonl merge=text
+.sesam/objects/**/*.sesam merge=binary
+.sesam/signkeys/**/*.age merge=binary
+sesam.yml merge=text

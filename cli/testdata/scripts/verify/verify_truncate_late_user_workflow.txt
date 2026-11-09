@@ -1,0 +1,35 @@
+# A user told in later cannot decrypt the older logs, so the history walk stops
+# there. That is no failure, but it is said: the check did not reach init.
+
+sesam-repo admin base.txt new.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group dev
+exec git add -A
+exec git commit -m 'add s'
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'tell bob'
+
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+! stderr 'only checked down to'
+
+env SESAM_ID=$BOB_KEY
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+stderr 'Audit log history: only checked down to commit [0-9a-f]+ - your identity cannot read the logs before'
+
+# The pre-commit hook runs the same walk but keeps quiet about it.
+exec sesam reveal
+cp $TMPDIR/new.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'bob edits s'
+! stderr 'only checked down to'
+
+-- base.txt --
+S=BASE
+-- new.txt --
+S=NEW

@@ -1,0 +1,67 @@
+# Both sides rename the same user; theirs then kills it (carol) or removes one
+# of its keys (dave) under its new name. bob is only renamed by ours; theirs
+# rotates his sign key before killing him, so his keys differ by then. Our rename wins, so that name does not
+# exist after the merge - the removal must land on our name, not be dropped as
+# "already removed". Otherwise a squash brings carol back on develop.
+
+sesam-repo admin base.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group dev
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group dev
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec sesam tell --user dave --recipient age1tdy2pxsfwpxxe0c9cuwty8zpsv6uuhf4zyug5f9lfl982lh3tctqrw2ll7 --group dev
+exec sesam user add-recipient --user dave --recipient 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGton+aQGCo+e3c/DPpR6qXCZwBNlh15Aqwua74O/SFA'
+exec git add -A
+exec git commit -m 'base: carol, bob, dave with two keys'
+exec git branch develop
+
+# develop: rename, then remove under the new name.
+exec git checkout develop
+exec sesam user rename carol carla
+exec sesam kill --user carla
+exec sesam user rename dave dan
+exec sesam user remove-recipient --user dan --recipient 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGton+aQGCo+e3c/DPpR6qXCZwBNlh15Aqwua74O/SFA'
+exec sesam user regen-sign-key --user bob
+exec sesam kill --user bob
+exec git add -A
+exec git commit -m 'develop: rename + remove'
+
+# feature: rename both differently, then merge develop.
+exec git checkout -b feature HEAD~1
+exec sesam user rename carol cara
+exec sesam user rename dave davey
+exec sesam user rename bob robert
+exec git add -A
+exec git commit -m 'feature: rename'
+
+! exec git merge --no-edit develop
+stderr 'user carla is cara on our side; killed under that name'
+stderr 'user dan is davey on our side; removed the recipients there'
+stderr 'user dan is davey on our side; dropped sign-key rotation - run .sesam user regen-sign-key --user davey.'
+stderr 'user bob is robert on our side; killed under that name'
+
+# git cannot pair carol's sign key rename with develop's delete; keep ours.
+exec git add -A
+exec git commit --no-edit
+exec sesam user ls
+! stdout cara
+! stdout robert
+stdout davey
+! grep AAAAC3NzaC1lZDI1NTE5AAAAIGton sesam.yml
+exec sesam verify
+stderr 'Integrity: ok'
+
+# Squashed into develop, carol stays gone and dave's key stays removed.
+exec git checkout develop
+exec git merge --squash feature
+exec git commit --no-verify -m 'squash feature'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+exec sesam user ls
+! stdout cara
+! stdout robert
+! grep AAAAC3NzaC1lZDI1NTE5AAAAIGton sesam.yml
+
+-- base.txt --
+S=BASE

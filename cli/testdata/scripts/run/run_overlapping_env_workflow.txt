@@ -1,0 +1,49 @@
+# Overlapping dotenv files warn with both paths and use the last value.
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+exec sesam init --user admin
+cp first-fixture a.env
+cp second-fixture b.env
+cp custom-fixture c.vars
+exec sesam add a.env b.env c.vars
+rm a.env b.env c.vars
+
+exec sesam run --env-file a.env --env-file b.env -- env
+stdout '^DUP=second-secret$'
+stderr 'name=DUP'
+stderr 'previous_file=a.env'
+stderr 'file=b.env'
+! stderr 'first-secret|second-secret'
+
+exec sesam run --env-file b.env --env-file a.env -- env
+stdout '^DUP=first-secret$'
+stderr 'previous_file=b.env'
+stderr 'file=a.env'
+
+# --all follows sorted paths; explicit --env-file flags are processed afterward.
+exec sesam run --all -- env
+stdout '^DUP=second-secret$'
+stderr 'previous_file=a.env'
+stderr 'file=b.env'
+exec sesam run --all --env-file a.env -- env
+stdout '^DUP=first-secret$'
+stderr 'previous_file=b.env'
+stderr 'file=a.env'
+
+exec sesam run --all --env-pattern '\.vars$' -- env
+stdout '^DUP=third-secret$'
+stderr 'previous_file=b.env'
+stderr 'file=c.vars'
+! stderr 'first-secret|second-secret|third-secret'
+
+! exists a.env
+! exists b.env
+! exists c.vars
+
+-- first-fixture --
+DUP=first-secret
+-- second-fixture --
+DUP=second-secret
+-- custom-fixture --
+DUP=third-secret

@@ -1,0 +1,65 @@
+# Two feature branches both merge develop; the first is squashed, the second
+# merges the (now reordered) develop again and is squashed too. develop must
+# verify after each squash.
+
+sesam-repo admin base.txt dev.txt
+
+cp $TMPDIR/base.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'add s'
+exec git branch develop
+exec git branch f1
+exec git branch f2
+
+exec git checkout f1
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'f1: tell bob'
+
+exec git checkout f2
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'f2: tell carol'
+
+exec git checkout develop
+cp $TMPDIR/dev.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'develop: reseal'
+
+# Both features update from develop.
+exec git checkout f1
+! exec git merge --no-edit develop
+exec git commit --no-edit
+exec git checkout f2
+! exec git merge --no-edit develop
+exec git commit --no-edit
+
+# f1 lands.
+exec git checkout develop
+exec git merge --squash f1
+exec git commit --no-verify -m 'squash f1'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+# f2 updates from the reordered develop and lands.
+exec git checkout f2
+! exec git merge --no-edit develop
+exec git commit --no-edit
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+
+exec git checkout develop
+exec git merge --squash f2
+exec git commit --no-verify -m 'squash f2'
+exec sesam verify --truncate
+stderr 'Audit log history: ok'
+exec sesam user ls
+stdout bob
+stdout carol
+
+-- base.txt --
+S=BASE
+-- dev.txt --
+S=DEV
