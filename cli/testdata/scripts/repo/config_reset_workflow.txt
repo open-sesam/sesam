@@ -48,14 +48,14 @@ cp broken.yml sesam.yml
 exec sesam config reset
 ! stdout .
 stderr 'cannot be repaired in place'
-stderr 'would write it fresh'
+stderr 'would write sesam.yml and sub-configs fresh'
 stderr 'pass --force'
 grep 'valid yaml at all' sesam.yml
 
 exec sesam config reset --force
 ! stdout .
 stderr 'cannot be repaired in place'
-stderr 'wrote it fresh'
+stderr 'wrote sesam.yml and sub-configs fresh'
 stderr 'comments and descriptions are gone'
 
 # What it wrote describes the log exactly, so apply has nothing to do.

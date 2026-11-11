@@ -41,13 +41,10 @@ type User struct {
 // SECRET CONFIG //
 ///////////////////
 
-// Secret is a data view of one entry in a secrets: sequence. When Include is
-// set (and the other fields are zero) the value represents an
-// `- include: <path>` placeholder rather than a real secret. Like User it is a
+// Secret is a data view of one entry in a secrets: sequence. Like User it is a
 // view over the AST, used both to decode existing entries and to marshal new
 // nodes before they are inserted.
 type Secret struct {
-	Include     string   `yaml:"include,omitempty" json:"include,omitempty"`
 	Name        string   `yaml:"name,omitempty" json:"name,omitempty"`
 	Path        string   `yaml:"path,omitempty" json:"path,omitempty"`
 	Access      []string `yaml:"access,omitempty" json:"access,omitempty"`

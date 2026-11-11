@@ -76,13 +76,18 @@ const configFileName = "sesam.yml"
 
 func (v *View) cfg() (*sesamConf.Config, error) {
 	if v.config == nil {
-		c, err := sesamConf.Load(v.root, configFileName)
+		c, err := v.loadConfig()
 		if err != nil {
 			return nil, fmt.Errorf("load config: %w", err)
 		}
 		v.config = c
 	}
 	return v.config, nil
+}
+
+// loadConfig reads sesam.yml and every sub-config, fresh from disk.
+func (v *View) loadConfig() (*sesamConf.Config, error) {
+	return sesamConf.Load(v.root, configFileName)
 }
 
 // closeState closes the audit log and drops the verified state. The root and
@@ -412,7 +417,7 @@ func (v *View) configConflicts() ([]diff.Change, error) {
 // declaredState reads sesam.yml fresh rather than through the cached config:
 // the user may well have edited it since this repo was opened.
 func (v *View) declaredState() (*sesamConf.State, error) {
-	cfg, err := sesamConf.Load(v.root, configFileName)
+	cfg, err := v.loadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
@@ -425,7 +430,7 @@ func (v *View) declaredState() (*sesamConf.State, error) {
 	return declared, nil
 }
 
-// MergedConfig returns sesam.yml with every included file flattened into it.
+// MergedConfig returns sesam.yml with every sub-config flattened into it.
 func (v *View) MergedConfig() (*sesamConf.Document, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -435,7 +440,7 @@ func (v *View) MergedConfig() (*sesamConf.Document, error) {
 	}
 
 	// Fresh, like declaredState: what the file says now.
-	cfg, err := sesamConf.Load(v.root, configFileName)
+	cfg, err := v.loadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
@@ -495,7 +500,7 @@ func (v *View) committedConfigChanges() ([]diff.Change, error) {
 		return nil, nil
 	}
 
-	paths, err := v.configPaths()
+	paths, err := committedConfigPaths(tree, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -523,6 +528,63 @@ func (v *View) committedConfigChanges() ([]diff.Change, error) {
 	}
 
 	return diff.Delta(v.vstate, declared).Changes, nil
+}
+
+// committedConfigPaths lists the config files committed in tree below prefix,
+// as sesam-relative paths. Like config.Discover it leaves out anything beneath a
+// directory holding its own .sesam; gitignore does not apply to committed
+// files.
+func committedConfigPaths(tree *object.Tree, prefix string) ([]string, error) {
+	sub := tree
+	if prefix != "." {
+		var err error
+		if sub, err = tree.Tree(prefix); err != nil {
+			return nil, fmt.Errorf("read tree %s: %w", prefix, err)
+		}
+	}
+
+	var (
+		candidates []string
+		boundaries = map[string]bool{}
+	)
+
+	err := sub.Files().ForEach(func(f *object.File) error {
+		segments := strings.Split(f.Name, "/")
+		for i, seg := range segments[:len(segments)-1] {
+			if seg == sesamSuffix && i > 0 {
+				boundaries[path.Join(segments[:i]...)] = true
+			}
+		}
+
+		if segments[len(segments)-1] == configFileName {
+			candidates = append(candidates, f.Name)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list committed files: %w", err)
+	}
+
+	var paths []string
+	for _, c := range candidates {
+		if !underBoundary(c, boundaries) {
+			paths = append(paths, filepath.FromSlash(c))
+		}
+	}
+
+	slices.Sort(paths)
+	return paths, nil
+}
+
+// underBoundary reports whether the slash path p lies inside one of the
+// directories in boundaries.
+func underBoundary(p string, boundaries map[string]bool) bool {
+	for dir := path.Dir(p); dir != "."; dir = path.Dir(dir) {
+		if boundaries[dir] {
+			return true
+		}
+	}
+	return false
 }
 
 // writeCommittedConfigs materializes the given config paths as they are in
@@ -656,7 +718,7 @@ func (v *View) GitAddDotSesam() error {
 	return gitAdd(v.sesamDir, sesamSuffix)
 }
 
-// GitAddConfig stages sesam.yml, every config file it includes, and
+// GitAddConfig stages sesam.yml, every sub-config, and
 // deleted - paths a reset removed from disk - so a regenerated config tree
 // lands in git's index exactly as it sits in the worktree. Needed because the
 // sesam-ours merge driver leaves sesam.yml's own index entry untouched: only

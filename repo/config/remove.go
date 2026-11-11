@@ -14,8 +14,7 @@ import (
 //
 // The matching secret entry is cut from whichever sesam.yml holds it (the main
 // file or a subdirectory file). Any subdirectory sesam.yml left empty by the
-// removal is deleted from disk and its include entry dropped from the parent
-// file, cascading upward; the main file is never deleted.
+// removal is deleted from disk; the main file is never deleted.
 func (c *Config) SecretRemove(path string) error {
 	target := filepath.Clean(path)
 
@@ -42,8 +41,7 @@ func (c *Config) SecretRemove(path string) error {
 		return err
 	}
 
-	// Delete any subdirectory file emptied by the removal (and the include
-	// that points at it), cascading upward.
+	// Delete any subdirectory file emptied by the removal.
 	return c.pruneEmptySources()
 }
 
@@ -69,38 +67,37 @@ func removeNode(src *FileSource, node *ast.MappingNode) error {
 	return nil
 }
 
-// pruneEmptySources deletes every subdirectory file left without any secrets
-// or includes, dropping the include that points at it from its parent. It
-// repeats until no further file empties out, so a chain of nested includes
-// collapses in one call. The main file is never deleted.
-func (c *Config) pruneEmptySources() error {
-	for {
-		var emptied []string
-		for path, src := range c.SourceFiles {
-			if src == c.MainFile {
-				continue
-			}
-
-			if isEmptySource(src) {
-				emptied = append(emptied, path)
-			}
-		}
-
-		if len(emptied) == 0 {
-			return nil
-		}
-
-		for _, path := range emptied {
-			if err := c.deleteSource(path); err != nil {
-				return err
-			}
-		}
-	}
+// Prune deletes every sub-config left without any secrets, for callers that
+// build a config through Create rather than the mutators (which prune on
+// their own).
+func (c *Config) Prune() error {
+	return c.pruneEmptySources()
 }
 
-// isEmptySource reports whether src no longer carries any secret or include
-// entry and can therefore be deleted.
+// pruneEmptySources deletes every subdirectory file left without any secrets.
+// The main file is never deleted.
+func (c *Config) pruneEmptySources() error {
+	for _, src := range c.sources() {
+		if src == c.MainFile || !isEmptySource(src) {
+			continue
+		}
+
+		if err := c.deleteSource(src.Path); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// isEmptySource reports whether src no longer carries any secret and can
+// therefore be deleted. A file never given an item in memory counts as empty:
+// whatever it held on disk has to go.
 func isEmptySource(src *FileSource) bool {
+	if src.RootNode == nil {
+		return true
+	}
+
 	seq, err := secretsNode(src.RootNode)
 	if err != nil {
 		return false
@@ -109,10 +106,9 @@ func isEmptySource(src *FileSource) bool {
 	return len(seq.Values) == 0
 }
 
-// deleteSource removes the include pointing at path from any parent file,
-// drops the file from the repository and deletes it from disk.
+// deleteSource drops the file at path from the repository and deletes it from
+// disk.
 func (c *Config) deleteSource(path string) error {
-	c.removeIncludeTo(path)
 	delete(c.SourceFiles, path)
 
 	if err := c.root.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -121,30 +117,4 @@ func (c *Config) deleteSource(path string) error {
 	c.deleted = append(c.deleted, path)
 
 	return nil
-}
-
-// removeIncludeTo cuts any include entry resolving to target from every loaded
-// file, carrying its comment out with it.
-func (c *Config) removeIncludeTo(target string) {
-	target = filepath.Clean(target)
-
-	for _, src := range c.SourceFiles {
-		dir := filepath.Dir(src.Path)
-
-		seq, err := secretsNode(src.RootNode)
-		if err != nil {
-			continue
-		}
-
-		for i := 0; i < len(seq.Values); {
-			m, ok := seq.Values[i].(*ast.MappingNode)
-			if ok {
-				if inc, isInc := includePath(m); isInc && filepath.Clean(filepath.Join(dir, inc)) == target {
-					removeSeqValue(seq, i)
-					continue // a value shifted into slot i; re-check it
-				}
-			}
-			i++
-		}
-	}
 }
