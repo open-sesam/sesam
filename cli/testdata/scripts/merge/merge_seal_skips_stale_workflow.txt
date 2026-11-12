@@ -38,7 +38,8 @@ stdout '1 stale'
 
 # Sealing skips it and says why; the picked content survives.
 exec sesam seal
-stderr 'changed only in the revealed file but not yet sealed'
+stderr '1 stale secret was not sealed because it is newer than what is revealed'
+stderr 'git pull. without sesam.s hooks installed'
 stderr 'sesam:   s'
 exec sesam show .sesam/objects/s.sesam
 stdout 'CHANGED'

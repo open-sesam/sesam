@@ -226,9 +226,13 @@ Open secret in $VISUAL or $EDITOR and immediately seal it afterwards
 
 ## seal
 
-Encrypt and sign changed secrets
+Encrypt and sign changed secrets, and the given ones in any case
 
 **--clean**: Delete revealed secret files after successful seal
+
+**--force-diverged**: Also seal diverged secrets, keeping your plaintext over the object's changes
+
+**--force-stale**: Also seal stale secrets, overwriting their newer object with your plaintext
 
 **--help, -h**: show help
 
@@ -236,9 +240,11 @@ Encrypt and sign changed secrets
 
 ## open, reveal
 
-Decrypt all secrets available to the current user
+Decrypt all secrets available to the current user, and the given ones over your edits
 
 **--all, -a**: Reveal every secret, overwriting plaintext you edited
+
+**--force-diverged**: Also reveal diverged secrets, overwriting your edits with the object's version
 
 **--help, -h**: show help
 
