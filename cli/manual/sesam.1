@@ -401,7 +401,7 @@ Run a command with secret files and dotenv variables
 Show overview over repo state (revealed, sealed, unmanaged, ...)
 
 .PP
-\fB--all, -a\fP: Also show in-sync secrets and unmanaged files (hidden by default)
+\fB--all, -a\fP: Also show in-sync secrets, unmanaged files and secrets you have no access to (hidden by default)
 
 .PP
 \fB--diff, -d\fP: Show the actual diff using git (extra args are passed to git)
@@ -411,6 +411,9 @@ Show overview over repo state (revealed, sealed, unmanaged, ...)
 
 .PP
 \fB--json\fP: Print output as JSON
+
+.PP
+\fB--no-access\fP: Also show secrets you have no access to (hidden by default, only counted)
 
 .PP
 \fB--users, -u\fP: Show users instead of groups

@@ -450,7 +450,11 @@ var flagsStatus = []cli.Flag{
 	&cli.BoolFlag{
 		Name:    "all",
 		Aliases: []string{"a"},
-		Usage:   "Also show in-sync secrets and unmanaged files (hidden by default)",
+		Usage:   "Also show in-sync secrets, unmanaged files and secrets you have no access to (hidden by default)",
+	},
+	&cli.BoolFlag{
+		Name:  "no-access",
+		Usage: "Also show secrets you have no access to (hidden by default, only counted)",
 	},
 	flagJSON,
 }

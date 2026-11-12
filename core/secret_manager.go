@@ -602,9 +602,9 @@ func (sm *SecretManager) SecretMove(oldRevealedPath, newRevealedPath string) err
 // to seal this path. Use `sesam reveal` or `sesam verify --all` for that.
 func ShowSecret(root *os.Root, ids Identities, path string, dst io.Writer) (bool, error) {
 	if !strings.HasSuffix(path, ".sesam") {
-		if err := validSecretPath(root, path); err == nil {
-			// user apparently gave the direct revealed path. Let's map it to the
-			// actual object file as a convenience feature.
+		// Revealed path given: map it to its object. The plaintext need not
+		// exist (not revealed, or no access).
+		if err := validSecretPathFormat(path); err == nil {
 			path = filepath.Join(".sesam", "objects", path+".sesam")
 		}
 	}
