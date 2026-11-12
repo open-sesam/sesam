@@ -69,33 +69,33 @@ func (k mergeKind) RunsPreCommit() bool {
 
 // mergeState reports which merge-like operation is in progress. Refs are checked
 // before the index, since a rebase or cherry-pick also leaves unmerged entries.
-func mergeState(sesamDir string) mergeKind {
-	kind, _ := inspectMerge(sesamDir)
+func mergeState(ctx context.Context, sesamDir string) mergeKind {
+	kind, _ := inspectMerge(ctx, sesamDir)
 	return kind
 }
 
 // mergeSource resolves the commit being merged in. Falls back to `theirPath`,
 // the blob git handed the driver, when git names the operation but not its
 // source (a cherry-pick sets no ref until it stops).
-func mergeSource(sesamDir, theirPath string) (string, error) {
-	_, rev := inspectMerge(sesamDir)
+func mergeSource(ctx context.Context, sesamDir, theirPath string) (string, error) {
+	_, rev := inspectMerge(ctx, sesamDir)
 	if rev != "" {
 		return rev, nil
 	}
 
-	worktreeRoot, err := repo.GitWorktreeRoot(sesamDir)
+	worktreeRoot, err := repo.GitWorktreeRoot(ctx, sesamDir)
 	if err != nil {
 		return "", err
 	}
 
-	if sha := commitContaining(worktreeRoot, theirPath); sha != "" {
+	if sha := commitContaining(ctx, worktreeRoot, theirPath); sha != "" {
 		return sha, nil
 	}
 
 	// A stash pop merges against the stash entry, which git keeps out of --all
 	// so commitContaining never finds it. Verifying against the wrong revision
 	// only ever refuses the merge, so this is safe as a last guess.
-	if sha, err := gitOutput(worktreeRoot, "rev-parse", "-q", "--verify", "refs/stash"); err == nil && sha != "" {
+	if sha, err := gitOutput(ctx, worktreeRoot, "rev-parse", "-q", "--verify", "refs/stash"); err == nil && sha != "" {
 		return sha, nil
 	}
 
@@ -105,13 +105,13 @@ func mergeSource(sesamDir, theirPath string) (string, error) {
 // inspectMerge asks git once what is going on and, where git says so, which
 // commit is coming in. The two questions read the same markers, so they are
 // answered together rather than by two probes that can disagree.
-func inspectMerge(sesamDir string) (mergeKind, string) {
-	worktreeRoot, err := repo.GitWorktreeRoot(sesamDir)
+func inspectMerge(ctx context.Context, sesamDir string) (mergeKind, string) {
+	worktreeRoot, err := repo.GitWorktreeRoot(ctx, sesamDir)
 	if err != nil {
 		return mergeKindNone, ""
 	}
 
-	gitDir, err := gitOutput(worktreeRoot, "rev-parse", "--absolute-git-dir")
+	gitDir, err := gitOutput(ctx, worktreeRoot, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		return mergeKindNone, ""
 	}
@@ -132,7 +132,7 @@ func inspectMerge(sesamDir string) (mergeKind, string) {
 		{"REVERT_HEAD", mergeKindRevert},
 		{"MERGE_HEAD", mergeKindMerge},
 	} {
-		if sha, err := gitOutput(worktreeRoot, "rev-parse", "-q", "--verify", probe.ref); err == nil {
+		if sha, err := gitOutput(ctx, worktreeRoot, "rev-parse", "-q", "--verify", probe.ref); err == nil {
 			return probe.kind, sha
 		}
 	}
@@ -157,8 +157,8 @@ func inspectMerge(sesamDir string) (mergeKind, string) {
 
 	// Nothing named it, but the index is still unmerged - a conflicted stash pop
 	// looks like this, and the stash entry is what it merged against.
-	if out, err := gitOutput(worktreeRoot, "ls-files", "--unmerged"); err == nil && out != "" {
-		stash, _ := gitOutput(worktreeRoot, "rev-parse", "-q", "--verify", "refs/stash")
+	if out, err := gitOutput(ctx, worktreeRoot, "ls-files", "--unmerged"); err == nil && out != "" {
+		stash, _ := gitOutput(ctx, worktreeRoot, "rev-parse", "-q", "--verify", "refs/stash")
 		return mergeKindOther, stash
 	}
 
@@ -187,49 +187,49 @@ func isCommitHash(rev string) bool {
 // user edited. ORIG_HEAD and the last reflog positions are always offered as
 // candidates: after a hookless pull or a cherry-pick they are the only trace of
 // what the plaintext was revealed from.
-func syncOpts(sesamDir string) repo.SyncOpts {
-	worktreeRoot, err := repo.GitWorktreeRoot(sesamDir)
+func syncOpts(ctx context.Context, sesamDir string) repo.SyncOpts {
+	worktreeRoot, err := repo.GitWorktreeRoot(ctx, sesamDir)
 	if err != nil {
 		return repo.SyncOpts{}
 	}
 
 	var opts repo.SyncOpts
-	if out, ok := gitProbe(worktreeRoot, "rev-list", "-g", "-n", "4", "HEAD"); ok {
+	if out, ok := gitProbe(ctx, worktreeRoot, "rev-list", "-g", "-n", "4", "HEAD"); ok {
 		opts.Candidates = strings.Fields(out)
 	}
-	if sha, ok := gitProbe(worktreeRoot, "rev-parse", "--verify", "ORIG_HEAD^{commit}"); ok {
+	if sha, ok := gitProbe(ctx, worktreeRoot, "rev-parse", "--verify", "ORIG_HEAD^{commit}"); ok {
 		opts.Candidates = append(opts.Candidates, sha)
 	}
 
-	if kind := mergeState(sesamDir); kind.InProgress() {
+	if kind := mergeState(ctx, sesamDir); kind.InProgress() {
 		ref := "HEAD"
 		if kind == mergeKindRebase {
 			ref = "ORIG_HEAD"
 		}
 
-		opts.Before = resolveRev(sesamDir, ref)
+		opts.Before = resolveRev(ctx, sesamDir, ref)
 	}
 
 	return opts
 }
 
 // resolveRev returns the commit ref names, or "" when it names none.
-func resolveRev(sesamDir, ref string) string {
-	worktreeRoot, err := repo.GitWorktreeRoot(sesamDir)
+func resolveRev(ctx context.Context, sesamDir, ref string) string {
+	worktreeRoot, err := repo.GitWorktreeRoot(ctx, sesamDir)
 	if err != nil {
 		return ""
 	}
 
-	sha, _ := gitProbe(worktreeRoot, "rev-parse", "--verify", ref+"^{commit}")
+	sha, _ := gitProbe(ctx, worktreeRoot, "rev-parse", "--verify", ref+"^{commit}")
 	return sha
 }
 
 // gitProbe is gitOutput for questions git may well answer with an error - a ref
 // that does not exist, an unborn HEAD. Its stderr is dropped, and an empty
 // answer counts as none.
-func gitProbe(dir string, args ...string) (string, bool) {
+func gitProbe(ctx context.Context, dir string, args ...string) (string, bool) {
 	//nolint:gosec // fixed git subcommands; args are constants from this file.
-	cmd := exec.CommandContext(context.Background(), "git", args...)
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 
 	out, err := cmd.Output()
@@ -243,8 +243,8 @@ func gitProbe(dir string, args ...string) (string, bool) {
 
 // mergeTouchedSesam reports whether an in-progress merge changed anything under
 // the sesam dir (staged index vs HEAD).
-func mergeTouchedSesam(sesamDir string) (bool, error) {
-	worktreeRoot, prefix, err := worktreePrefix(sesamDir)
+func mergeTouchedSesam(ctx context.Context, sesamDir string) (bool, error) {
+	worktreeRoot, prefix, err := worktreePrefix(ctx, sesamDir)
 	if err != nil {
 		return false, err
 	}
@@ -252,7 +252,7 @@ func mergeTouchedSesam(sesamDir string) (bool, error) {
 	// `git diff --cached --quiet` exits 0 for no change, 1 for a change.
 	//nolint:gosec // fixed git subcommand; pathspec is derived from the repo layout.
 	cmd := exec.CommandContext(
-		context.Background(),
+		ctx,
 		"git", "diff", "--cached", "--quiet", "HEAD", "--",
 		filepath.Join(prefix, core.SesamDir()),
 	)
@@ -276,18 +276,18 @@ func mergeTouchedSesam(sesamDir string) (bool, error) {
 // committed. Those objects are authoritative - git may have taken one side
 // without calling our driver. Conflicted secrets never show up here: their
 // object is untouched.
-func stagedSecretPaths(sesamDir string) ([]string, error) {
-	return changedSecretPaths(sesamDir, "diff", "--cached", "--name-only", "HEAD")
+func stagedSecretPaths(ctx context.Context, sesamDir string) ([]string, error) {
+	return changedSecretPaths(ctx, sesamDir, "diff", "--cached", "--name-only", "HEAD")
 }
 
 // mergedSecretPaths returns the revealed paths whose object the merge that just
 // finished changed. HEAD has already moved by then, so ORIG_HEAD is the handle.
-func mergedSecretPaths(sesamDir string) ([]string, error) {
-	return changedSecretPaths(sesamDir, "diff", "--name-only", "ORIG_HEAD", "HEAD")
+func mergedSecretPaths(ctx context.Context, sesamDir string) ([]string, error) {
+	return changedSecretPaths(ctx, sesamDir, "diff", "--name-only", "ORIG_HEAD", "HEAD")
 }
 
-func changedSecretPaths(sesamDir string, gitArgs ...string) ([]string, error) {
-	worktreeRoot, prefix, err := worktreePrefix(sesamDir)
+func changedSecretPaths(ctx context.Context, sesamDir string, gitArgs ...string) ([]string, error) {
+	worktreeRoot, prefix, err := worktreePrefix(ctx, sesamDir)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +301,7 @@ func changedSecretPaths(sesamDir string, gitArgs ...string) ([]string, error) {
 	// core.quotePath=false is not enough: a newline or quote in the name stays
 	// escaped either way.
 	args := slices.Concat(gitArgs, []string{"-z", "--", objectsDir})
-	out, err := gitOutputRaw(worktreeRoot, args...)
+	out, err := gitOutputRaw(ctx, worktreeRoot, args...)
 	if err != nil {
 		return nil, fmt.Errorf("git diff for changed objects: %w", err)
 	}
@@ -329,8 +329,8 @@ func changedSecretPaths(sesamDir string, gitArgs ...string) ([]string, error) {
 }
 
 // worktreePrefix returns the git worktree root and the sesam dir relative to it.
-func worktreePrefix(sesamDir string) (root, prefix string, err error) {
-	root, err = repo.GitWorktreeRoot(sesamDir)
+func worktreePrefix(ctx context.Context, sesamDir string) (root, prefix string, err error) {
+	root, err = repo.GitWorktreeRoot(ctx, sesamDir)
 	if err != nil {
 		return "", "", fmt.Errorf("locate worktree root: %w", err)
 	}
@@ -349,8 +349,8 @@ func worktreePrefix(sesamDir string) (root, prefix string, err error) {
 }
 
 // gitOutput runs git in dir and returns its trimmed stdout.
-func gitOutput(dir string, args ...string) (string, error) {
-	out, err := gitOutputRaw(dir, args...)
+func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	out, err := gitOutputRaw(ctx, dir, args...)
 	if err != nil {
 		return "", err
 	}
@@ -360,9 +360,9 @@ func gitOutput(dir string, args ...string) (string, error) {
 
 // gitOutputRaw is gitOutput without the trim - for output where whitespace is
 // data, i.e. path lists (a file name may start or end with a space).
-func gitOutputRaw(dir string, args ...string) (string, error) {
+func gitOutputRaw(ctx context.Context, dir string, args ...string) (string, error) {
 	//nolint:gosec // fixed git subcommands; args are constants from this file.
-	cmd := exec.CommandContext(context.Background(), "git", args...)
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 
 	var buf bytes.Buffer
@@ -412,7 +412,7 @@ func rebasePickedCommit(gitDir string) string {
 // would be the obvious way, but `git worktree add` fires post-checkout, which
 // would have sesam clean and reveal into the temporary tree.
 func extractSesamDir(ctx context.Context, sesamDir, rev, destDir string) error {
-	worktreeRoot, prefix, err := worktreePrefix(sesamDir)
+	worktreeRoot, prefix, err := worktreePrefix(ctx, sesamDir)
 	if err != nil {
 		return err
 	}
@@ -446,13 +446,13 @@ func extractSesamDir(ctx context.Context, sesamDir, rev, destDir string) error {
 // commitContaining finds a commit that carries the blob in `file`. Picking the
 // wrong one is safe: its audit log would not vouch for the object either, and
 // the verification refuses.
-func commitContaining(worktreeRoot, file string) string {
-	blob, err := gitOutput(worktreeRoot, "hash-object", "--", file)
+func commitContaining(ctx context.Context, worktreeRoot, file string) string {
+	blob, err := gitOutput(ctx, worktreeRoot, "hash-object", "--", file)
 	if err != nil {
 		return ""
 	}
 
-	sha, err := gitOutput(worktreeRoot, "log", "--all", "--format=%H", "-n", "1", "--find-object="+blob)
+	sha, err := gitOutput(ctx, worktreeRoot, "log", "--all", "--format=%H", "-n", "1", "--find-object="+blob)
 	if err != nil {
 		return ""
 	}

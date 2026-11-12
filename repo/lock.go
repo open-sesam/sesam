@@ -17,14 +17,14 @@ import (
 // atomically swaps the whole `.sesam` directory (see stage.go), and a lock
 // file inside it would get a fresh inode on every swap, breaking flock's
 // per-inode mutual exclusion. Keeping it a sibling gives it a stable inode.
-func (r *Repo) acquireLock() error {
+func (r *Repo) acquireLock(ctx context.Context) error {
 	sesamDir := filepath.Join(r.sesamDir, sesamSuffix)
 	if _, err := os.Stat(sesamDir); err != nil {
 		return fmt.Errorf("sesam directory missing at %s: %w", sesamDir, err)
 	}
 
 	lockPath := filepath.Join(r.sesamDir, sesamLockName)
-	fl, err := acquireRepoLock(lockPath, r.opts.lockTimeout())
+	fl, err := acquireRepoLock(ctx, lockPath, r.opts.lockTimeout())
 	if err != nil {
 		return err
 	}
@@ -48,8 +48,8 @@ func TryAcquireMergeLock(sesamDir string) (*flock.Flock, error) {
 	return fl, nil
 }
 
-func acquireRepoLock(lockPath string, timeout time.Duration) (*flock.Flock, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+func acquireRepoLock(ctx context.Context, lockPath string, timeout time.Duration) (*flock.Flock, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	fl := flock.New(lockPath)

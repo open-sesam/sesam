@@ -50,6 +50,7 @@ func HandleRun(ctx context.Context, cmd *cli.Command) (err error) {
 	}
 
 	r, err := repo.Load(
+		ctx,
 		cmd.String("sesam-dir"),
 		cmd.StringSlice("identity"),
 		repo.RepoOpts{

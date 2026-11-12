@@ -57,11 +57,11 @@ func HandleTell(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if noSeal {
 			return nil
 		}
-		return sealStage(cmd, r, s)
+		return sealStage(ctx, cmd, r, s)
 	})
 }
 
-func HandleKill(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+func HandleKill(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	user := cmd.String("user")
 	noSeal := cmd.Bool("no-seal")
 
@@ -73,11 +73,11 @@ func HandleKill(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if noSeal {
 			return nil
 		}
-		return sealStage(cmd, r, s)
+		return sealStage(ctx, cmd, r, s)
 	})
 }
 
-func HandleUserChangeGroups(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+func HandleUserChangeGroups(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	user := cmd.String("user")
 	groups, additive, err := resolveGroups(cmd, true)
 	if err != nil {
@@ -92,7 +92,7 @@ func HandleUserChangeGroups(_ context.Context, cmd *cli.Command, r *repo.Repo) e
 		if noSeal {
 			return nil
 		}
-		return sealStage(cmd, r, s)
+		return sealStage(ctx, cmd, r, s)
 	})
 }
 
@@ -120,7 +120,7 @@ func HandleUserAddRecipient(ctx context.Context, cmd *cli.Command, r *repo.Repo)
 		if noSeal {
 			return nil
 		}
-		return sealStage(cmd, r, s)
+		return sealStage(ctx, cmd, r, s)
 	})
 }
 
@@ -179,11 +179,11 @@ func HandleUserRemoveRecipient(ctx context.Context, cmd *cli.Command, r *repo.Re
 		if noSeal {
 			return nil
 		}
-		return sealStage(cmd, r, s)
+		return sealStage(ctx, cmd, r, s)
 	})
 }
 
-func HandleUserRegenerateSignKey(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+func HandleUserRegenerateSignKey(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	user := cmd.String("user")
 	noSeal := cmd.Bool("no-seal")
 
@@ -194,6 +194,6 @@ func HandleUserRegenerateSignKey(_ context.Context, cmd *cli.Command, r *repo.Re
 		if noSeal {
 			return nil
 		}
-		return sealStage(cmd, r, s)
+		return sealStage(ctx, cmd, r, s)
 	})
 }
