@@ -28,4 +28,4 @@ exec git checkout ours
 # The rename is dropped, and the group change that rides on it is skipped rather
 # than making OUR bob an admin.
 stderr 'rename source alice gone on our side'
-stderr 'references bob, whose rename/move was dropped on merge'
+stderr 'references bob, whose rename/move was not kept on merge'

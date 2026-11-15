@@ -285,7 +285,7 @@ func validSecretPathFormat(revealedPath string) error {
 	// "./x" or "a//x" would share the object of "x" while carrying their own
 	// access groups.
 	if slashed := filepath.ToSlash(revealedPath); path.Clean(slashed) != slashed {
-		return fmt.Errorf("path is not in canonical form (want %s): %s", path.Clean(slashed), revealedPath)
+		return fmt.Errorf("path is not clean, use %s: %s", path.Clean(slashed), revealedPath)
 	}
 
 	return nil

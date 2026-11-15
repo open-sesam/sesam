@@ -104,6 +104,25 @@ detect this by comparing against an older copy — a local clone, a CI checkout,
 colleague's repo. Compare against a known-good copy before trusting anything, and
 disable force-push at your forge (see [Initialisation](./init.md)).
 
+## Truncation error
+
+`sesam verify` complains with a error similar to this one:
+
+```
+● Audit Log History: truncated - audit log at commit 4220c197a1dfbf0b8f206666919b54bd2556e097 is not a prefix of commit f9c28cf41a9c4ac6dbbb6c038606848832f2677a: audit log entries differ at index 86 (seq_id 87)
+```
+
+This can happen if you used `git` commands that reset the audit log to a previous, shorter state. Two typical cases would be:
+
+- `git checkout -- .sesam`: This might checkout an older version of the audit log.
+- `git revert`: If the previous commit has changed the audit log, then the revert commit will truncate the log.
+
+Remember: The rule is that the audit log may only grow. To fix this, you have several options (assuming you're on a feature branch):
+
+- Squash the commits in questions, so there is no ordering anymore and the audit log state wins.
+- Rebase your branch and drop the commits that are causing problems.
+- Checkout the last good state and redo your changes.
+
 ## `git merge` said "Automatic merge failed" but nothing looks broken
 
 That is by design. When both branches changed the vault, `sesam` merges the audit
@@ -138,7 +157,10 @@ the vault that way. Merge one branch at a time.
 
 Only admins. A merge re-signs the audit log and needs access to every affected
 secret - both of which admins have. A non-admin merge aborts with `not an admin`;
-ask an admin to run it.
+ask an admin to run it for you.
+
+Alternatively, if you're on a feature branch you can also resort to rebasing your branch
+on the state you want to merge with.
 
 ## I ran `sesam uninstall` and now re-`init` fails with "init file check: … has uncommitted changes"
 

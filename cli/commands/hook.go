@@ -366,7 +366,7 @@ func HandleHookPreMergeCommit(ctx context.Context, cmd *cli.Command) error {
 		return nil
 	}
 
-	fmt.Fprintln(os.Stderr, "sesam: merge changed the vault - run `git commit` to finalize (seal + reconcile + verify).")
+	fmt.Fprintln(os.Stderr, "sesam: merge changed the vault - run `git commit` to finish the merge (it seals, cleans up and verifies).")
 	return &ExitCodeError{code: 1, print: false}
 }
 

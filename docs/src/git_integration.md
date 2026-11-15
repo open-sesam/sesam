@@ -9,6 +9,11 @@ On `init`, we setup [diff filters](https://git-scm.com/book/en/v2/Customizing-Gi
 This means that `git` will pipe every change through `sesam show` before showing as diff.
 
 Try for example committing your secrets and then run `git log -p` to see how secrets evolved over time.
+Beside the changed plaintext, it will also show you a JSON representation of how the audit log changed.
+
+Remember that `git` sees only the files in `.sesam/objects`, so that path will
+appear in `git` output instead of the actual revealed path. If you do not have access
+to a file, then the diff output will be empty.
 
 Files you don't have access to will not be shown.
 
@@ -47,14 +52,8 @@ This is not being called when running `git reset`. If you do this, you should pr
 
 ### `post-merge`
 
-`git` does not run `post-checkout` after a merge, and a fast-forward merge (what
-`git pull` usually is) runs no other hook either. Without this hook the revealed
-files would keep the pre-merge content while the sealed objects moved on - and
-the next `sesam seal` would write the stale plaintext back over what you pulled.
-
-This hook reveals the secrets whose objects the merge changed, as long as their
-plaintext still holds the pre-merge version. Edited plaintext stays and is named,
-a conflict you are mid-way through resolving included.
+This does more or less the same as `post-checkout`, but is run after a merge to make sure that all
+revealed files are up-to-date (and do not have their pre-merge content).
 
 ### `pre-commit`
 
@@ -64,22 +63,27 @@ and no accidental tampering was done. This is done by this hook before every com
 - Reveal secrets whose object changed while their plaintext did not (might happen on merge or single-file checkout)
 - Seal all files you edited.
 - Refuse when a secret changed on both sides - you edited it and `git` replaced its object - and name both ways out.
-- Run `sesam verify --all`.
+- Run `sesam verify --all` and refuse if it fails.
 
 If errors happen the commit will be aborted and you can check if there is indeed something wrong.
 If you decide that all is good you can still continue with `git commit --no-verify` (this skips running the hook temporarily).
 
 ## Merging branches
 
+```admonish info
+The merge driver is only used when both sides changed. If you never modified the sesam state in your branch,
+but pull in a branch that has, then git just will do the right thing, by replacing all changed files.
+```
+
 ```admonish warn
 As the other hooks, git >= 2.54 is required!
 Merging without will inevtiably cause a broken repo state.
 ```
 
-Encrypted files appear as random bytes. Even the very same content can result
-in totally different ciphertext. That's not something that `git merge` can
-handle - it needs to see the revealed files. Of course, only authorized users
-have access to it.
+Encrypted files appear as random bytes to `git`. Even the very same content can
+result in totally different ciphertext. That's not something that `git merge`
+can handle - it needs to see the revealed files. Of course, only authorized
+users have access to it.
 
 Luckily, we have the audit log. This log has been modified in both branches and
 can be traced to a common root. Assuming a user has sufficient privileges (i.e.

@@ -624,7 +624,7 @@ func IdentityToUser(id *Identity, userToPub map[string]Recipients) (string, erro
 	}
 
 	if sr := string(resp); sr != dummyText {
-		return "", fmt.Errorf("encrypt+decrypt test worked but different outcome: %s", sr)
+		return "", fmt.Errorf("encrypt+decrypt test worked but got a different result: %s", sr)
 	}
 
 	// all good, we can return.

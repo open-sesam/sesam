@@ -395,7 +395,7 @@ func ParseRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
 		}
 		pr, perr := parsePluginRecipient(arg, pluginUI)
 		if perr != nil {
-			return nil, fmt.Errorf("not a recognised age recipient: %w", errors.Join(xerr, perr))
+			return nil, fmt.Errorf("not a recognized age recipient: %w", errors.Join(xerr, perr))
 		}
 		r, s = pr.Recipient, pr.String()
 	case strings.HasPrefix(arg, "ssh-"):

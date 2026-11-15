@@ -106,12 +106,12 @@ func (p *RunPreparation) Environment(inherited, filePaths []string) ([]string, e
 	owners := make(map[string]string, len(env))
 	for _, encoded := range env {
 		name, _, _ := strings.Cut(encoded, "=")
-		owners[name] = "inherited environment"
+		owners[name] = "your environment"
 	}
 
 	add := func(entry runEntry, source string) error {
 		if previous, exists := owners[entry.name]; exists {
-			return fmt.Errorf("environment variable %q from %s collides with %s", entry.name, source, previous)
+			return fmt.Errorf("environment variable %q is set by both %s and %s", entry.name, previous, source)
 		}
 
 		encoded := entry.name + "=" + string(entry.value)
@@ -347,7 +347,7 @@ func validateRunSelectors(secrets []RunSecret, envFiles []string) error {
 	seen := make(map[string]string, len(secrets)+len(envFiles))
 	check := func(path, mode string) error {
 		if path == "" || path == "." || filepath.IsAbs(path) || filepath.Clean(path) != path || path == ".." || strings.HasPrefix(path, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("%s selector %q is not a canonical sesam-relative file path", mode, path)
+			return fmt.Errorf("%s selector %q is not a clean sesam-relative file path", mode, path)
 		}
 		if previous, exists := seen[path]; exists {
 			if previous == mode {

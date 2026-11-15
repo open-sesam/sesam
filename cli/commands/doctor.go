@@ -123,7 +123,7 @@ func osCheck() DoctorCheck {
 			return docWarn("macOS is not tested yet, but should mostly work", "please report any macOS issues you run into")
 		case "windows":
 			return docIssue(
-				"Windows is unsupported and likely to misbehave (symlinks, file modes, paths)",
+				"Windows is unsupported and likely to break (symlinks, file modes, paths)",
 				"run sesam under WSL2 or on a Linux/macOS host",
 			)
 		default:
@@ -413,7 +413,7 @@ func identityUserCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 		if err != nil {
 			return docIssue(fmt.Sprintf("could not determine the current user: %v", err), "")
 		}
-		return docHealthy(fmt.Sprintf("recognised as user »%s«", who))
+		return docHealthy(fmt.Sprintf("recognized as user »%s«", who))
 	}}
 }
 
@@ -912,7 +912,7 @@ func RunDoctor(ctx context.Context, env doctorEnv) error {
 
 	blueTip := out.String("Tip:").Foreground(out.Color(colorBlue))
 	fmt.Printf("%s include this output when filing a bug report,\n", blueTip)
-	fmt.Println("     just double check that anything sensitive is readacted.")
+	fmt.Println("     just double check that anything sensitive is redacted.")
 	fmt.Println()
 	fmt.Printf("%s `sesam doctor` finds only issues related to installation issues.\n", blueTip)
 	fmt.Println("     If you want integrity check then run `sesam verify`.")
