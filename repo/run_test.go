@@ -136,7 +136,7 @@ func TestPrepareRunRejectsInvalidSelectors(t *testing.T) {
 		{name: "duplicate secret", secrets: []RunSecret{{Name: "A", Path: "a"}, {Name: "B", Path: "a"}}, wantErr: "duplicate secret selector"},
 		{name: "duplicate env file", envFiles: []string{"a", "a"}, wantErr: "duplicate env file selector"},
 		{name: "same path in both modes", secrets: []RunSecret{{Name: "A", Path: "a"}}, envFiles: []string{"a"}, wantErr: "both secret and env file"},
-		{name: "noncanonical", secrets: []RunSecret{{Name: "A", Path: "./a"}}, wantErr: "not a canonical"},
+		{name: "noncanonical", secrets: []RunSecret{{Name: "A", Path: "./a"}}, wantErr: "not a clean"},
 		{name: "name starts with digit", secrets: []RunSecret{{Name: "9A", Path: "a"}}, wantErr: "invalid secret variable name"},
 		{name: "name contains punctuation", secrets: []RunSecret{{Name: "A-B", Path: "a"}}, wantErr: "invalid secret variable name"},
 	}
@@ -329,27 +329,27 @@ func TestRunPreparationEnvironmentRejectsCollisions(t *testing.T) {
 			opts:       RunOptions{Secrets: []RunSecret{{Path: "a"}}},
 			inherited:  []string{"SESAM_A=parent"},
 			plaintexts: map[string]string{"a": "one"},
-			wantErr:    "inherited environment",
+			wantErr:    "your environment",
 		},
 		{
 			name:       "file and dotenv",
 			opts:       RunOptions{Secrets: []RunSecret{{Name: "FILE", Path: "a-b"}}, EnvFiles: []string{"one.env"}},
 			plaintexts: map[string]string{"a-b": "one", "one.env": "FILE=two"},
-			wantErr:    `from env file "one.env" collides with file secret "FILE"`,
+			wantErr:    `is set by both file secret "FILE" and env file "one.env"`,
 		},
 		{
 			name:       "file and inherited",
 			opts:       RunOptions{Secrets: []RunSecret{{Name: "FILE", Path: "a-b"}}},
 			inherited:  []string{"FILE=parent"},
 			plaintexts: map[string]string{"a-b": "one"},
-			wantErr:    "inherited environment",
+			wantErr:    "your environment",
 		},
 		{
 			name:       "dotenv and inherited",
 			opts:       RunOptions{EnvFiles: []string{"one.env"}},
 			inherited:  []string{"DUP=parent"},
 			plaintexts: map[string]string{"one.env": "DUP=child"},
-			wantErr:    `from env file "one.env" collides with inherited environment`,
+			wantErr:    `is set by both your environment and env file "one.env"`,
 		},
 	}
 

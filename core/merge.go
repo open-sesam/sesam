@@ -268,8 +268,8 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 		adminKill, adminKillFatal := isMergeAdminKill(their, merger)
 		if adminKillFatal {
 			return nil, nil, fmt.Errorf(
-				"theirs %s and git already applied that to %s - the merged audit log and the sign key tree would disagree, "+
-					"leaving the repository unloadable; abort the merge and let another admin merge instead",
+				"theirs %s and git already applied that to %s - the merged audit log and the sign key tree would not match "+
+					"and sesam could no longer load the repo; abort the merge and let another admin merge instead",
 				adminKill, signKeyPath("", merger),
 			)
 		}
@@ -281,7 +281,7 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 			r = dropWith(adminKill, true)
 			r.Target = merger
 		case orphanName != "":
-			r = dropWith("references "+orphanName+", whose rename/move was dropped on merge; skipped", true)
+			r = dropWith("references "+orphanName+", whose rename/move was not kept on merge; skipped", true)
 			r.Target = orphanName
 		case revoked != "" && !revokesAccess(their.Operation):
 			// Verified on their branch, but we revoked the author since the base.
@@ -587,7 +587,7 @@ func detailField[T AuditDetail](pick func(*T) string) func(*AuditEntrySigned) st
 // This table defines what happens on incoming audit log entries:
 var mergeOpTable = map[Operation]opInfo{
 	OpSeal: {
-		resolve: alwaysDrop("seal superseded by post-merge reseal", false),
+		resolve: alwaysDrop("seal replaced by the reseal after the merge", false),
 	},
 	OpInit: {
 		resolve: alwaysDrop("unexpected init among new entries", true),
@@ -821,7 +821,7 @@ func resolveUserRegenKey(their *AuditEntrySigned, s *mergeStates) (r resolution)
 	b, inBase := s.base.UserExists(d.User)
 	o, inOurs := s.ours.UserExists(d.User)
 	if inBase && inOurs && o.SignPubKey != b.SignPubKey {
-		return dropWith("sign key of "+d.User+" rotated on both sides; kept ours (their key holder is stranded)", true)
+		return dropWith("sign key of "+d.User+" rotated on both sides; kept ours (their user can no longer sign)", true)
 	}
 
 	return applyAs(their)
@@ -930,7 +930,7 @@ func resolveUserRmRecipients(their *AuditEntrySigned, s *mergeStates) (r resolut
 		}
 	}
 	if !ok {
-		return dropWith("user "+d.User+" gone; removal already satisfied", false)
+		return dropWith("user "+d.User+" gone; already removed", false)
 	}
 
 	// If none of the keys are still present (e.g. our side already removed the same

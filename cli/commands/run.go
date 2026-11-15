@@ -46,7 +46,7 @@ func HandleRun(ctx context.Context, cmd *cli.Command) (err error) {
 	inheritedEnv := os.Environ()
 	target, err := exec.LookPath(arguments[0])
 	if err != nil {
-		return fmt.Errorf("find command %q using inherited PATH: %w", arguments[0], err)
+		return fmt.Errorf("find command %q in your PATH: %w", arguments[0], err)
 	}
 
 	r, err := repo.Load(

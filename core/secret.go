@@ -151,7 +151,7 @@ func SealStream(
 
 	encW, err := age.Encrypt(mw, rcps...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initiate encryption: %w", err)
+		return nil, fmt.Errorf("failed to start encryption: %w", err)
 	}
 
 	_, err = io.Copy(encW, io.TeeReader(rd, contentHash))

@@ -29,7 +29,7 @@ exec git commit -m 'squashed intro'
 exec git checkout stacked
 ! exec git merge master -m 'merge master'
 ! stderr 'missing key line'
-stderr 'audit log was therefore semantically merged'
+stderr 'sesam merged the audit log entry by entry'
 exec git commit -m 'merge master'
 
 exec sesam verify

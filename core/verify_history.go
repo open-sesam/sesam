@@ -103,7 +103,7 @@ func auditLogHistory(
 	initPathAbs := filepath.Join(sesamDir, ".sesam", "audit", "init")
 	initData, err := ReadFileLimited(initPathAbs, 256)
 	if err != nil {
-		return nil, fmt.Errorf("read init trust anchor: %w", err)
+		return nil, fmt.Errorf("read audit init file: %w", err)
 	}
 	initHash := strings.TrimSpace(string(initData))
 

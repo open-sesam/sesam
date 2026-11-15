@@ -289,7 +289,7 @@ func (um *UserManager) UserRmRecipient(ctx context.Context, user string, pubKeyS
 
 func (um *UserManager) UserRegenerateSignKey(user string) error {
 	if !um.signUser.IsAdmin() {
-		return fmt.Errorf("need to be admin for regnerating signing keys")
+		return fmt.Errorf("only admins can regenerate signing keys")
 	}
 
 	// Validate up front: GenerateSignKeyAt writes a key file, so bail before any

@@ -55,7 +55,7 @@ func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
 
 	revealedPath, ok := core.RevealedPath(drv.path)
 	if !ok {
-		return fmt.Errorf("%%P needs to be a sesam object - gitattributes wrongly configured?")
+		return fmt.Errorf("%%P needs to be a sesam object - is .gitattributes set up correctly?")
 	}
 
 	res, err := repo.MergeSecret(
@@ -164,7 +164,7 @@ func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
 	defer drv.close()
 
 	if !strings.HasSuffix(drv.path, core.SesamDir()+"/audit/log.jsonl") {
-		return fmt.Errorf("%%P needs to be the audit log path but is %s - gitattributes wrongly configured?", drv.path)
+		return fmt.Errorf("%%P needs to be the audit log path but is %s - is .gitattributes set up correctly?", drv.path)
 	}
 
 	cr, err := repo.MergeAuditLog(
@@ -315,7 +315,7 @@ func mergeDriverSummary(resolutions []core.ConflictResolutionEntry, kind mergeKi
 
 	var b strings.Builder
 	b.WriteString("sesam: both sides changed the audit log.\n")
-	b.WriteString("sesam: the audit log was therefore semantically merged.\n")
+	b.WriteString("sesam: so sesam merged the audit log entry by entry.\n")
 	b.WriteString("sesam:\n")
 	if len(lines) > 0 {
 		b.WriteString("sesam: a list of automated decisions you might want to review follows:\n")
@@ -487,7 +487,7 @@ func readInitAnchor(dir string) (string, error) {
 	//nolint:gosec // dir is ours; the file name is fixed.
 	data, err := os.ReadFile(filepath.Join(dir, core.AuditInitPath()))
 	if err != nil {
-		return "", fmt.Errorf("read init anchor: %w", err)
+		return "", fmt.Errorf("read audit init file: %w", err)
 	}
 
 	return strings.TrimSpace(string(data)), nil

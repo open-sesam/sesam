@@ -345,7 +345,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 
 	if _, err := r.secret.SecretAdd("README.md", []string{"admin"}, false); err != nil {
-		return nil, fmt.Errorf("failed to bootstrap readme secret: %w", err)
+		return nil, fmt.Errorf("failed to create README secret: %w", err)
 	}
 
 	eggs := []string{
@@ -480,7 +480,7 @@ func Load(ctx context.Context, sesamDir string, ids []string, opts RepoOpts) (*R
 	// live .sesam is always authoritative (the commit swap is atomic), so the
 	// fork is always safe to reap.
 	if err := root.RemoveAll(forkSuffix); err != nil {
-		return nil, fmt.Errorf("reap stale stage fork: %w", err)
+		return nil, fmt.Errorf("remove leftover staging copy: %w", err)
 	}
 
 	identities := opts.Identities
