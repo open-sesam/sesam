@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -24,7 +25,7 @@ func printError(msg string) {
 }
 
 func main() {
-	err := cli.Main(os.Args)
+	err := cli.Main(context.Background(), os.Args)
 	if err == nil {
 		return
 	}

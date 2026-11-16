@@ -9,15 +9,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/go-git/go-git/v5"
 	"opensesam.org/sesam/core"
 )
 
 // CleanAggressive removes every untracked file under sesamDir, including
 // scratch state inside `.sesam/`. It is the package-level analogue of
 // `git clean -fdx` and does not require a loaded repository.
-func CleanAggressive(_ context.Context, sesamDir string, identityPaths []string, opts CleanOpts) error {
-	gr, err := openGitRepo(sesamDir)
+func CleanAggressive(ctx context.Context, sesamDir string, identityPaths []string, opts CleanOpts) error {
+	gr, err := openGitRepo(ctx, sesamDir)
 	if err != nil {
 		return err
 	}
@@ -28,7 +27,7 @@ func CleanAggressive(_ context.Context, sesamDir string, identityPaths []string,
 	}
 	defer func() { _ = root.Close() }()
 
-	return cleanup(root, gr, opts.CheckFunc, identityPaths...)
+	return cleanup(ctx, root, gr, opts.CheckFunc, identityPaths...)
 }
 
 // deleteRevealedSecrets removes the plaintext copy on disk for every secret in
@@ -69,8 +68,9 @@ func deleteRevealedSecrets(root *os.Root, secrets []core.SecretAccess, checkFn f
 // must not be deleted even if untracked — intended for identity files that
 // happen to live inside the worktree. All file I/O is confined to root.
 func cleanup(
+	ctx context.Context,
 	root *os.Root,
-	gitRepo *git.Repository,
+	gitRepo *core.Git,
 	checkFn func(path string) (bool, error),
 	exclude ...string,
 ) error {
@@ -96,16 +96,6 @@ func cleanup(
 		}
 	}
 
-	idx, err := gitRepo.Storer.Index()
-	if err != nil {
-		return fmt.Errorf("read git index: %w", err)
-	}
-
-	tracked := make(map[string]struct{}, len(idx.Entries))
-	for _, e := range idx.Entries {
-		tracked[filepath.FromSlash(e.Name)] = struct{}{}
-	}
-
 	// Index entries are worktree-relative, but the walk below yields
 	// sesam-relative paths. For a nested sesam dir they differ by the
 	// worktree->sesamDir prefix; without prepending it every tracked lookup
@@ -119,6 +109,16 @@ func cleanup(
 	prefix, err := core.SesamGitPrefix(gitRepo, absSesamDir)
 	if err != nil {
 		return fmt.Errorf("resolve sesam dir within worktree: %w", err)
+	}
+
+	trackedFiles, err := gitRepo.TrackedFiles(ctx, prefix)
+	if err != nil {
+		return fmt.Errorf("read git index: %w", err)
+	}
+
+	tracked := make(map[string]struct{}, len(trackedFiles))
+	for _, name := range trackedFiles {
+		tracked[filepath.FromSlash(name)] = struct{}{}
 	}
 	prefix = filepath.FromSlash(prefix)
 	if prefix == "." {

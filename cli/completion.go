@@ -120,7 +120,7 @@ func completeSecrets(ctx context.Context, cmd *cli.Command) {
 		return
 	}
 
-	sesamDir := completionSesamDir(cmd)
+	sesamDir := completionSesamDir(ctx, cmd)
 	root := filepath.Join(sesamDir, core.SesamObjectsDir())
 	w := cmd.Root().Writer
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -140,8 +140,8 @@ func completeSecrets(ctx context.Context, cmd *cli.Command) {
 
 // completionSesamDir finds the sesam dir the way commands do, walking up
 // from the cwd, so completion also works in subdirectories.
-func completionSesamDir(cmd *cli.Command) string {
-	if dir, err := repo.ResolveSesamDir(cmd.String("sesam-dir")); err == nil {
+func completionSesamDir(ctx context.Context, cmd *cli.Command) string {
+	if dir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir")); err == nil {
 		return dir
 	}
 	return cmd.String("sesam-dir")
@@ -153,7 +153,7 @@ func completionSesamDir(cmd *cli.Command) string {
 func completeUsers(ctx context.Context, cmd *cli.Command) {
 	prev := rawPrevArg()
 	if prev == "--"+flagUser || prev == "-u" {
-		root := filepath.Join(completionSesamDir(cmd), ".sesam", "signkeys")
+		root := filepath.Join(completionSesamDir(ctx, cmd), ".sesam", "signkeys")
 		w := cmd.Root().Writer
 		entries, _ := os.ReadDir(root)
 		for _, e := range entries {

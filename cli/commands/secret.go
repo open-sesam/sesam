@@ -13,7 +13,7 @@ import (
 )
 
 // HandleAdd adds a secret path to sesam metadata.
-func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+func HandleAdd(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	if !cmd.Args().Present() {
 		return fmt.Errorf("need at least one path")
 	}
@@ -34,19 +34,19 @@ func HandleAdd(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	noSeal := cmd.Bool("no-seal")
 	nested := cmd.Bool("nested")
 	return r.Update(func(s *repo.Stage) error {
-		if err := s.SecretAdd(paths, groups, additive, nested); err != nil {
+		if err := s.SecretAdd(ctx, paths, groups, additive, nested); err != nil {
 			return err
 		}
 		if noSeal {
 			return nil
 		}
 
-		return sealStage(cmd, r, s)
+		return sealStage(ctx, cmd, r, s)
 	})
 }
 
 // HandleRemove removes a secret path from sesam metadata.
-func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+func HandleRemove(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	if cmd.Args().Len() == 0 {
 		return fmt.Errorf("missing secret path: pass a path argument")
 	}
@@ -83,9 +83,9 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 
 	if !force && len(removed) > 0 {
 		// Edited or never sealed plaintext is the only copy of its content.
-		opts := syncOpts(r.SesamDir())
+		opts := syncOpts(ctx, r.SesamDir())
 		opts.Paths = removed
-		states, err := r.SyncStates(opts)
+		states, err := r.SyncStates(ctx, opts)
 		if err != nil {
 			return err
 		}
@@ -107,7 +107,7 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if noSeal {
 			return nil
 		}
-		return sealStage(cmd, r, s)
+		return sealStage(ctx, cmd, r, s)
 	}); err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func HandleRemove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 	return nil
 }
 
-func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
+func HandleMove(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	oldRevealedPath := cmd.StringArg("oldpath")
 	newRevealedPath := cmd.StringArg("newpath")
 
@@ -141,6 +141,6 @@ func HandleMove(_ context.Context, cmd *cli.Command, r *repo.Repo) error {
 		if err := s.SecretMove(paths[0], paths[1], nested); err != nil {
 			return err
 		}
-		return sealStage(cmd, r, s)
+		return sealStage(ctx, cmd, r, s)
 	})
 }

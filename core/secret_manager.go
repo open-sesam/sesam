@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -221,7 +222,7 @@ func (sm *SecretManager) changeAccess(revealedPath string, groups []string) erro
 // Seal writes every secret's plaintext into its object. `all` reseals even what
 // is in sync; otherwise `advice` (may be nil) says per plaintext what is already
 // known about it, and everything else is compared with its object.
-func (sm *SecretManager) Seal(all bool, advice map[string]SealAdvice) error {
+func (sm *SecretManager) Seal(ctx context.Context, all bool, advice map[string]SealAdvice) error {
 	objects := sm.objectsDir()
 	if err := sm.root.MkdirAll(objects, 0o700); err != nil {
 		return fmt.Errorf("create objects dir: %w", err)
@@ -238,6 +239,10 @@ func (sm *SecretManager) Seal(all bool, advice map[string]SealAdvice) error {
 
 	for _, vsecret := range sm.State.Secrets {
 		errg.Go(func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
 			sig, err := sm.sealOrPreserve(vsecret.RevealedPath, all, advice[vsecret.RevealedPath])
 			if err != nil {
 				return fmt.Errorf("seal %s: %w", vsecret.RevealedPath, err)
@@ -443,31 +448,35 @@ func (sm *SecretManager) Reveal(revealedPath string, dst io.Writer) error {
 
 // RevealAll writes out every secret the user can read, whatever the plaintext
 // holds right now.
-func (sm *SecretManager) RevealAll() error {
-	return sm.reveal(nil)
+func (sm *SecretManager) RevealAll(ctx context.Context) error {
+	return sm.reveal(ctx, nil)
 }
 
 // RevealPaths writes out the named secrets, whatever their plaintext holds.
 // Unknown or inaccessible paths are skipped, so callers can pass a raw list
 // from git.
-func (sm *SecretManager) RevealPaths(paths []string) error {
+func (sm *SecretManager) RevealPaths(ctx context.Context, paths []string) error {
 	want := make(map[string]bool, len(paths))
 	for _, p := range paths {
 		want[p] = true
 	}
 
-	return sm.reveal(want)
+	return sm.reveal(ctx, want)
 }
 
 // reveal writes out every secret in want, or all of them when want is nil. The
 // nil case stays in here: an empty RevealPaths must reveal nothing, not everything.
-func (sm *SecretManager) reveal(want map[string]bool) error {
+func (sm *SecretManager) reveal(ctx context.Context, want map[string]bool) error {
 	parallelJobs := 4 * runtime.GOMAXPROCS(0)
 	g := new(errgroup.Group)
 	g.SetLimit(parallelJobs)
 
 	for _, vsecret := range sm.State.Secrets {
 		g.Go(func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
 			if want != nil && !want[vsecret.RevealedPath] {
 				return nil
 			}

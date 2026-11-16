@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -23,7 +24,7 @@ const askpassTestPassphrase = "askpass-test-passphrase"
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
 		"sesam": func() {
-			err := Main(os.Args)
+			err := Main(context.Background(), os.Args)
 			if err == nil {
 				return
 			}
@@ -209,8 +210,7 @@ func cmdEnvsubst(ts *testscript.TestScript, neg bool, args []string) {
 
 // cmdHideGit trims $PATH down to the directory testscript.Main put the command
 // binaries in, so `git` is gone while `sesam` itself stays runnable. That is
-// the "git is not installed" case; everything sesam does through go-git has to
-// keep working.
+// the "git is not installed" case.
 func cmdHideGit(ts *testscript.TestScript, neg bool, args []string) {
 	if neg || len(args) > 0 {
 		ts.Fatalf("usage: hide-git")

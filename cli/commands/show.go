@@ -40,7 +40,7 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 		return cli.ShowSubcommandHelp(cmd)
 	}
 
-	ids, err := repo.LoadIdentities(identityPaths, repo.RepoOpts{
+	ids, err := repo.LoadIdentities(ctx, identityPaths, repo.RepoOpts{
 		AskpassProgram:  cmd.String("askpass"),
 		AskpassRequired: askpassRequired(),
 	})
@@ -73,7 +73,7 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 		return copyToClipboard(ctx, clipBuf.Bytes(), clipOpts)
 	}
 
-	sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+	sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
 	if err != nil {
 		return err
 	}

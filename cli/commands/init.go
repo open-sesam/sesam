@@ -62,14 +62,14 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 	ids := cmd.StringSlice("identity")
 	sesamDir := cmd.String("sesam-dir")
 
-	initialized, err := repo.IsInitialized(sesamDir)
+	initialized, err := repo.IsInitialized(ctx, sesamDir)
 	if err != nil {
 		return err
 	}
 
 	if initialized {
 		printInfo("sesam seems to be already initialized - re-running setup…")
-		return repo.Setup(sesamDir, ids, opts)
+		return repo.Setup(ctx, sesamDir, ids, opts)
 	}
 
 	r, err := repo.Init(ctx, sesamDir, ids, opts)
@@ -133,7 +133,7 @@ func HandleUninstall(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	if err := repo.Uninstall(cmd.String("sesam-dir"), all); err != nil {
+	if err := repo.Uninstall(ctx, cmd.String("sesam-dir"), all); err != nil {
 		return err
 	}
 

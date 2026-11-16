@@ -45,12 +45,12 @@ func HandleEditSecret(ctx context.Context, cmd *cli.Command, r *repo.Repo) error
 		return fmt.Errorf("find editor %q: %w", editor, err)
 	}
 
-	return r.EditSecret(paths[0], func(path string) error {
+	return r.EditSecret(ctx, paths[0], func(path string) error {
 		// #nosec G204,G702 -- editorPath was explicitly configured and resolved with LookPath.
 		editorCmd := exec.CommandContext(ctx, editorPath, append(editorArgs[1:], path)...)
 		editorCmd.Stdin = os.Stdin
 		editorCmd.Stdout = os.Stdout
 		editorCmd.Stderr = os.Stderr
 		return editorCmd.Run()
-	}, repo.SealOpts{All: cmd.Bool("seal-all"), Sync: syncOpts(r.SesamDir())})
+	}, repo.SealOpts{All: cmd.Bool("seal-all"), Sync: syncOpts(ctx, r.SesamDir())})
 }

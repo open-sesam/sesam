@@ -2,6 +2,7 @@ package repo
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -17,7 +18,7 @@ type repoMockPassphraseProvider struct {
 	prompt     string
 }
 
-func (m *repoMockPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
+func (m *repoMockPassphraseProvider) ReadPassphrase(_ context.Context, prompt string) ([]byte, error) {
 	m.prompt = prompt
 	return m.passphrase, nil
 }
@@ -80,7 +81,7 @@ func TestIdentityToUser(t *testing.T) {
 
 	parse := func(t *testing.T, ageID *age.X25519Identity) *core.Identity {
 		t.Helper()
-		id, err := core.ParseIdentity(ageID.String(), nil, core.NewNonInteractivePluginUI(), "")
+		id, err := core.ParseIdentity(t.Context(), ageID.String(), nil, core.NewNonInteractivePluginUI(), "")
 		require.NoError(t, err)
 		return id
 	}
@@ -173,7 +174,7 @@ func TestLoadIdentities_FailureModes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ids, err := loadIdentities(tc.paths, core.NewNonInteractivePluginUI())
+			ids, err := loadIdentities(t.Context(), tc.paths, core.NewNonInteractivePluginUI())
 			if tc.wantErr != "" {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tc.wantErr)
@@ -197,6 +198,7 @@ func TestLoadIdentitiesWithEncryptedAgeIdentity(t *testing.T) {
 
 	provider := &repoMockPassphraseProvider{passphrase: passphrase}
 	ids, err := loadIdentitiesWith(
+		t.Context(),
 		[]string{path},
 		func(keyFingerprint string) core.PassphraseProvider {
 			require.Equal(t, core.KeyFingerprint([]byte(key)), keyFingerprint)

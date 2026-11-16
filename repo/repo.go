@@ -23,8 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
 	"github.com/gofrs/flock"
 	"opensesam.org/sesam/core"
 	sesamConf "opensesam.org/sesam/repo/config"
@@ -174,26 +172,32 @@ func (opts RepoOpts) passphraseProvider(keyFingerprint string) core.PassphrasePr
 }
 
 // LoadIdentities reads the user's age identity files.
-func LoadIdentities(identityPaths []string, opts RepoOpts) (core.Identities, error) {
-	return loadIdentitiesWith(identityPaths, opts.passphraseProvider, opts.pluginUI())
+func LoadIdentities(ctx context.Context, identityPaths []string, opts RepoOpts) (core.Identities, error) {
+	return loadIdentitiesWith(ctx, identityPaths, opts.passphraseProvider, opts.pluginUI())
 }
 
-func guessInitUserNameFromGitConfig(repo *git.Repository) (string, error) {
+func guessInitUserNameFromGitConfig(ctx context.Context, repo *core.Git) (string, error) {
 	// This checks:
 	// - repo .git/config
 	// - ~/.gitconfig
 	// - /etc/gitconfig
-	cfg, err := repo.ConfigScoped(config.SystemScope)
+	// and whatever they include.
+	email, err := gitConfigGet(ctx, repo.Root(), "user.email")
 	if err != nil {
 		return "", fmt.Errorf("failed to read git config: %w", err)
 	}
 
-	if cfg.User.Email != "" {
-		return strings.ToLower(cfg.User.Email), nil
+	if email != "" {
+		return strings.ToLower(email), nil
 	}
 
-	if cfg.User.Name != "" {
-		n := cfg.User.Name
+	name, err := gitConfigGet(ctx, repo.Root(), "user.name")
+	if err != nil {
+		return "", fmt.Errorf("failed to read git config: %w", err)
+	}
+
+	if name != "" {
+		n := name
 		n = strings.ReplaceAll(n, " ", "_")
 		n = strings.ReplaceAll(n, "/", "_")
 		n = strings.ToLower(n)
@@ -207,8 +211,8 @@ func guessInitUserNameFromGitConfig(repo *git.Repository) (string, error) {
 // sesamPath until it finds a directory containing `.sesam/`, or returns
 // the absolute path of sesamPath unchanged if none is found (the latter
 // is used during `sesam init` before `.sesam/` exists).
-func ResolveSesamDir(sesamPath string) (string, error) {
-	return resolveSesamDir(sesamPath)
+func ResolveSesamDir(ctx context.Context, sesamPath string) (string, error) {
+	return resolveSesamDir(ctx, sesamPath)
 }
 
 // Init initializes a new sesam repository at sesamDir.
@@ -219,7 +223,7 @@ func ResolveSesamDir(sesamPath string) (string, error) {
 //
 // The initial user's name is derived from git config (if possible) or taken from the options if given explicitly.
 func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitOpts) (*Repo, error) {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +233,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 
 	if opts.InitialUserName == "" {
-		opts.InitialUserName, err = guessInitUserNameFromGitConfig(gitRepo)
+		opts.InitialUserName, err = guessInitUserNameFromGitConfig(ctx, gitRepo)
 		if err != nil {
 			return nil, err
 		}
@@ -262,7 +266,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		}
 	}()
 
-	identities, err := loadIdentities(idPaths, r.pluginUI)
+	identities, err := loadIdentities(ctx, idPaths, r.pluginUI)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +279,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, err
 	}
 
-	if err := r.acquireLock(); err != nil {
+	if err := r.acquireLock(ctx); err != nil {
 		return nil, err
 	}
 
@@ -310,12 +314,12 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 
 	r.keyring = core.EmptyKeyring()
 
-	verifyFn := core.Verify
+	var vstate *core.VerifiedState
 	if opts.VerifyMode == VerifyModeNoDisk {
-		verifyFn = core.VerifyChain
+		vstate, err = core.VerifyChain(auditLog, r.keyring, r.pluginUI)
+	} else {
+		vstate, err = core.Verify(ctx, auditLog, r.keyring, r.pluginUI)
 	}
-
-	vstate, err := verifyFn(auditLog, r.keyring, r.pluginUI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}
@@ -331,7 +335,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, fmt.Errorf("failed to build user manager: %w", err)
 	}
 
-	if err := configureGitIntegration(gitRepo, resolvedDir, opts); err != nil {
+	if err := configureGitIntegration(ctx, gitRepo, resolvedDir, opts); err != nil {
 		return nil, err
 	}
 
@@ -355,12 +359,12 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	}
 
 	opts.PrintStep(eggs[rand.IntN(len(eggs))]) //nolint:gosec
-	if err := r.secret.Seal(true, nil); err != nil {
+	if err := r.secret.Seal(ctx, true, nil); err != nil {
 		return nil, err
 	}
 
 	opts.PrintStep("Staging initial files…")
-	stageInitFiles(resolvedDir)
+	stageInitFiles(ctx, resolvedDir)
 
 	opts.PrintStep("Welcome to…")
 	success = true
@@ -368,8 +372,8 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 }
 
 // IsInitialized reports whether sesamDir already holds a sesam repository (sesam.yml present)
-func IsInitialized(sesamDir string) (bool, error) {
-	resolvedDir, _, err := resolveSesamDirAndGit(sesamDir)
+func IsInitialized(ctx context.Context, sesamDir string) (bool, error) {
+	resolvedDir, _, err := resolveSesamDirAndGit(ctx, sesamDir)
 	if err != nil {
 		return false, err
 	}
@@ -386,8 +390,8 @@ func IsInitialized(sesamDir string) (bool, error) {
 
 // Setup wires sesam's git integration into an already-initialized repository.
 // This is meant to be called to onboard users that cloned the repo but did not run init.
-func Setup(sesamDir string, idPaths []string, opts RepoInitOpts) error {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+func Setup(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitOpts) error {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
 	if err != nil {
 		return err
 	}
@@ -399,7 +403,7 @@ func Setup(sesamDir string, idPaths []string, opts RepoInitOpts) error {
 		return fmt.Errorf("stat sesam.yml: %w", err)
 	}
 
-	if err := configureGitIntegration(gitRepo, resolvedDir, opts); err != nil {
+	if err := configureGitIntegration(ctx, gitRepo, resolvedDir, opts); err != nil {
 		return err
 	}
 
@@ -411,7 +415,7 @@ func Setup(sesamDir string, idPaths []string, opts RepoInitOpts) error {
 	// Load maps the identity to a known user and would hard-fail for a user
 	// who is not a recipient yet. That is expected on a fresh clone, so we
 	// downgrade it to a hint rather than failing the (already done) wiring.
-	r, err := Load(resolvedDir, idPaths, opts.RepoOpts)
+	r, err := Load(ctx, resolvedDir, idPaths, opts.RepoOpts)
 	if err != nil {
 		opts.PrintStep("Git is wired up, but your identity can't be used here yet (%v).", err)
 		opts.PrintStep("If you are new to this repo, ask an admin to run `sesam tell` for you, then `sesam reveal`.")
@@ -421,7 +425,7 @@ func Setup(sesamDir string, idPaths []string, opts RepoInitOpts) error {
 
 	who, _ := r.Whoami()
 	opts.PrintStep("Revealing secrets available to »%s«…", who)
-	if err := r.RevealAll(); err != nil {
+	if err := r.RevealAll(ctx); err != nil {
 		opts.PrintStep("Could not reveal yet (%v) - run `sesam reveal` once your access is set up.", err)
 	}
 
@@ -430,8 +434,8 @@ func Setup(sesamDir string, idPaths []string, opts RepoInitOpts) error {
 
 // Load loads an existing sesam repository at sesamDir. The on-disk repo
 // lock is held until Close.
-func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+func Load(ctx context.Context, sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +455,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 		}
 	}()
 
-	if err := r.acquireLock(); err != nil {
+	if err := r.acquireLock(ctx); err != nil {
 		return nil, err
 	}
 
@@ -464,7 +468,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 
 	identities := opts.Identities
 	if identities == nil {
-		identities, err = LoadIdentities(ids, opts)
+		identities, err = LoadIdentities(ctx, ids, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -480,12 +484,12 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	r.auditLog = auditLog
 
 	// Disable a couple checks if we're mid-merge.
-	verifyFn := core.Verify
+	var vstate *core.VerifiedState
 	if opts.VerifyMode == VerifyModeNoDisk || opts.InMerge {
-		verifyFn = core.VerifyChain
+		vstate, err = core.VerifyChain(auditLog, r.keyring, r.pluginUI)
+	} else {
+		vstate, err = core.Verify(ctx, auditLog, r.keyring, r.pluginUI)
 	}
-
-	vstate, err := verifyFn(auditLog, r.keyring, r.pluginUI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
 	}
@@ -516,7 +520,7 @@ func Load(sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
 	return r, nil
 }
 
-func newRepo(sesamDir string, root *os.Root, gitRepo *git.Repository, ids []string, opts RepoOpts) *Repo {
+func newRepo(sesamDir string, root *os.Root, gitRepo *core.Git, ids []string, opts RepoOpts) *Repo {
 	// sesamDir is already absolute - resolveSesamDirAndGit normalizes it, the
 	// single place that resolves it against the cwd. config stays nil and is
 	// lazy-loaded on first use (View.cfg); Init sets it eagerly after writing it.
@@ -807,8 +811,8 @@ type StatusOpts struct {
 
 // Uninstall removes the git integration of sesam from the git repo,
 // and if all is true it will remove also all sesam specific files.
-func Uninstall(sesamDir string, all bool) error {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+func Uninstall(ctx context.Context, sesamDir string, all bool) error {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
 	if err != nil {
 		return fmt.Errorf("failed to resolve: %w", err)
 	}
@@ -818,7 +822,7 @@ func Uninstall(sesamDir string, all bool) error {
 		return nil
 	}
 
-	if err := clearGitConfig(gitRepo, resolvedDir, ""); err != nil {
+	if err := clearGitConfig(ctx, gitRepo, resolvedDir, ""); err != nil {
 		return fmt.Errorf("failed to clear git config: %w", err)
 	}
 
@@ -865,30 +869,30 @@ func Uninstall(sesamDir string, all bool) error {
 
 // InstallHooks (re)installs sesam's git hooks for the repo at sesamDir. It only
 // writes git config, so it neither loads the audit log nor takes the repo lock.
-func InstallHooks(sesamDir string) error {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+func InstallHooks(ctx context.Context, sesamDir string) error {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
 	if err != nil {
 		return err
 	}
 
-	if ok, err := IsInitialized(resolvedDir); err != nil {
+	if ok, err := IsInitialized(ctx, resolvedDir); err != nil {
 		return err
 	} else if !ok {
 		return fmt.Errorf("no sesam repository at %s", resolvedDir)
 	}
 
-	return ensureGitConfig(gitRepo, resolvedDir, RepoInitOpts{
+	return ensureGitConfig(ctx, gitRepo, resolvedDir, RepoInitOpts{
 		GitConfigOpts: GitConfigOpts{InstallHooks: true},
 	})
 }
 
 // UninstallHooks removes sesam's git hooks from the repo at sesamDir. Like
 // InstallHooks it only touches git config.
-func UninstallHooks(sesamDir string) error {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(sesamDir)
+func UninstallHooks(ctx context.Context, sesamDir string) error {
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
 	if err != nil {
 		return err
 	}
 
-	return clearGitConfig(gitRepo, resolvedDir, "hook")
+	return clearGitConfig(ctx, gitRepo, resolvedDir, "hook")
 }

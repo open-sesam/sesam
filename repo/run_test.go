@@ -435,10 +435,10 @@ func TestRepoPrepareRunReadsEncryptedObjects(t *testing.T) {
 	writeRepoFile(t, dir, "raw.txt", "raw-value\n")
 	writeRepoFile(t, dir, "vars.env", "TOKEN='dotenv value'\nEMPTY=")
 	require.NoError(t, r.Update(func(s *Stage) error {
-		if err := s.SecretAdd([]string{"raw.txt", "vars.env"}, []string{"admin"}, false, false); err != nil {
+		if err := s.SecretAdd(t.Context(), []string{"raw.txt", "vars.env"}, []string{"admin"}, false, false); err != nil {
 			return err
 		}
-		_, err := s.Seal(SealOpts{All: true})
+		_, err := s.Seal(t.Context(), SealOpts{All: true})
 		return err
 	}))
 	require.NoError(t, os.Remove(filepath.Join(dir, "raw.txt")))
@@ -470,10 +470,10 @@ func TestRepoPrepareRunStreamsLargeFiles(t *testing.T) {
 			content := strings.Repeat("x", size)
 			writeRepoFile(t, dir, "raw.txt", content)
 			require.NoError(t, r.Update(func(s *Stage) error {
-				if err := s.SecretAdd([]string{"raw.txt"}, []string{"admin"}, false, false); err != nil {
+				if err := s.SecretAdd(t.Context(), []string{"raw.txt"}, []string{"admin"}, false, false); err != nil {
 					return err
 				}
-				_, err := s.Seal(SealOpts{All: true})
+				_, err := s.Seal(t.Context(), SealOpts{All: true})
 				return err
 			}))
 			require.NoError(t, os.Remove(filepath.Join(dir, "raw.txt")))
@@ -493,16 +493,16 @@ func TestRepoPrepareRunChecksCurrentUserAccess(t *testing.T) {
 	writeRepoFile(t, dir, "secrets/vars.env", "TOKEN='dotenv value'")
 	writeRepoFile(t, dir, "secrets/ops.txt", "ops-value")
 	require.NoError(t, r.Update(func(s *Stage) error {
-		if err := s.SecretAdd([]string{"secrets/raw.txt", "secrets/vars.env"}, []string{"dev"}, false, false); err != nil {
+		if err := s.SecretAdd(t.Context(), []string{"secrets/raw.txt", "secrets/vars.env"}, []string{"dev"}, false, false); err != nil {
 			return err
 		}
-		if err := s.SecretAdd([]string{"secrets/ops.txt"}, []string{"ops"}, false, false); err != nil {
+		if err := s.SecretAdd(t.Context(), []string{"secrets/ops.txt"}, []string{"ops"}, false, false); err != nil {
 			return err
 		}
 		if err := s.UserTell(context.Background(), bob.Name, []string{bob.Recipient}, []string{"dev"}, false); err != nil {
 			return err
 		}
-		_, err := s.Seal(SealOpts{All: true})
+		_, err := s.Seal(t.Context(), SealOpts{All: true})
 		return err
 	}))
 	require.NoError(t, r.Close())
@@ -543,10 +543,10 @@ func TestRepoPrepareRunAllExplicitOverrides(t *testing.T) {
 	writeRepoFile(t, dir, "z.txt", "last")
 	writeRepoFile(t, dir, "a.txt", "first")
 	require.NoError(t, r.Update(func(s *Stage) error {
-		if err := s.SecretAdd([]string{"vars.env", "z.txt", "a.txt"}, []string{"admin"}, false, false); err != nil {
+		if err := s.SecretAdd(t.Context(), []string{"vars.env", "z.txt", "a.txt"}, []string{"admin"}, false, false); err != nil {
 			return err
 		}
-		_, err := s.Seal(SealOpts{All: true})
+		_, err := s.Seal(t.Context(), SealOpts{All: true})
 		return err
 	}))
 	prepared, err := r.PrepareRun(RunOptions{

@@ -338,7 +338,7 @@ func TestConfigResetRewriteKeepsSubConfigs(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "svc"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "svc", "token"), []byte("tok"), 0o600))
 	require.NoError(t, r.Update(func(s *Stage) error {
-		return s.SecretAdd([]string{"svc/token"}, []string{"admin"}, false, true)
+		return s.SecretAdd(t.Context(), []string{"svc/token"}, []string{"admin"}, false, true)
 	}))
 
 	sub := filepath.Join(dir, "svc", configFileName)

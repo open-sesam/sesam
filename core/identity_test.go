@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
@@ -44,7 +45,7 @@ type mockPassphraseProvider struct {
 	verifiedSuccess bool
 }
 
-func (m *mockPassphraseProvider) ReadPassphrase(prompt string) ([]byte, error) {
+func (m *mockPassphraseProvider) ReadPassphrase(_ context.Context, prompt string) ([]byte, error) {
 	m.called = true
 	m.lastPrompt = prompt
 	return m.passphrase, nil
@@ -59,7 +60,7 @@ func TestAskpassProviderReadsPassphrase(t *testing.T) {
 	t.Parallel()
 	helper := writeAskpassHelper(t, "printf '%s\\n' secret")
 
-	passphrase, err := (&AskpassProvider{Program: helper}).ReadPassphrase("Prompt: ")
+	passphrase, err := (&AskpassProvider{Program: helper}).ReadPassphrase(t.Context(), "Prompt: ")
 	require.NoError(t, err)
 	require.Equal(t, []byte("secret"), passphrase)
 }
@@ -68,14 +69,14 @@ func TestAskpassProviderTrimsProgram(t *testing.T) {
 	t.Parallel()
 	helper := writeAskpassHelper(t, "printf flag")
 
-	passphrase, err := (&AskpassProvider{Program: " " + helper + " "}).ReadPassphrase("Prompt: ")
+	passphrase, err := (&AskpassProvider{Program: " " + helper + " "}).ReadPassphrase(t.Context(), "Prompt: ")
 	require.NoError(t, err)
 	require.Equal(t, []byte("flag"), passphrase)
 }
 
 func TestAskpassProviderUnavailable(t *testing.T) {
 	t.Parallel()
-	_, err := (&AskpassProvider{}).ReadPassphrase("Prompt: ")
+	_, err := (&AskpassProvider{}).ReadPassphrase(t.Context(), "Prompt: ")
 	require.ErrorIs(t, err, errAskpassUnavailable)
 }
 
@@ -83,7 +84,7 @@ func TestAskpassProviderFallsBackWhenUnconfigured(t *testing.T) {
 	t.Parallel()
 	fallback := &mockPassphraseProvider{passphrase: []byte("fallback")}
 
-	passphrase, err := (&AskpassProvider{Fallback: fallback}).ReadPassphrase("Prompt: ")
+	passphrase, err := (&AskpassProvider{Fallback: fallback}).ReadPassphrase(t.Context(), "Prompt: ")
 	require.NoError(t, err)
 	require.Equal(t, []byte("fallback"), passphrase)
 	require.True(t, fallback.called)
@@ -95,7 +96,7 @@ func TestAskpassProviderDoesNotFallBackWhenHelperFails(t *testing.T) {
 	helper := writeAskpassHelper(t, "exit 1")
 	fallback := &mockPassphraseProvider{passphrase: []byte("fallback")}
 
-	_, err := (&AskpassProvider{Program: helper, Fallback: fallback}).ReadPassphrase("Prompt: ")
+	_, err := (&AskpassProvider{Program: helper, Fallback: fallback}).ReadPassphrase(t.Context(), "Prompt: ")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "askpass failed")
 	require.False(t, fallback.called)
@@ -149,7 +150,7 @@ func TestParseIdentityAgeNative(t *testing.T) {
 	ageID, err := age.GenerateX25519Identity()
 	require.NoError(t, err)
 
-	id, err := ParseIdentity(ageID.String(), nil, nil, "")
+	id, err := ParseIdentity(t.Context(), ageID.String(), nil, nil, "")
 	require.NoError(t, err)
 	require.Equal(t, ageID.Recipient().String(), id.Public().String())
 }
@@ -159,7 +160,7 @@ func TestParseIdentityAgePQ(t *testing.T) {
 	pqID, err := age.GenerateHybridIdentity()
 	require.NoError(t, err)
 
-	id, err := ParseIdentity(pqID.String(), nil, nil, "")
+	id, err := ParseIdentity(t.Context(), pqID.String(), nil, nil, "")
 	require.NoError(t, err)
 	require.Equal(t, pqID.Recipient().String(), id.Public().String())
 }
@@ -173,7 +174,7 @@ func TestParseIdentitySSHEd25519Unencrypted(t *testing.T) {
 	require.NoError(t, err)
 
 	pemBytes := pem.EncodeToMemory(pemBlock)
-	id, err := ParseIdentity(string(pemBytes), nil, nil, "")
+	id, err := ParseIdentity(t.Context(), string(pemBytes), nil, nil, "")
 	require.NoError(t, err)
 	require.NotNil(t, id.Public())
 }
@@ -190,12 +191,12 @@ func TestParseIdentitySSHEncryptedWithPassphrase(t *testing.T) {
 	pemBytes := pem.EncodeToMemory(pemBlock)
 
 	// Should fail without a passphrase provider.
-	_, err = ParseIdentity(string(pemBytes), nil, nil, "")
+	_, err = ParseIdentity(t.Context(), string(pemBytes), nil, nil, "")
 	require.Error(t, err, "should fail without passphrase")
 
 	// Should succeed with the mock provider.
 	mock := &mockPassphraseProvider{passphrase: passphrase}
-	id, err := ParseIdentity(string(pemBytes), mock, nil, "")
+	id, err := ParseIdentity(t.Context(), string(pemBytes), mock, nil, "")
 	require.NoError(t, err)
 	require.True(t, mock.called, "passphrase provider should have been called")
 	require.NotNil(t, id.Public())
@@ -216,7 +217,7 @@ func TestParseIdentityForwardsPromptToProvider(t *testing.T) {
 	pemBytes := pem.EncodeToMemory(pemBlock)
 
 	mock := &mockPassphraseProvider{passphrase: passphrase}
-	_, err = ParseIdentity(string(pemBytes), mock, nil, "Passphrase for admin.age: ")
+	_, err = ParseIdentity(t.Context(), string(pemBytes), mock, nil, "Passphrase for admin.age: ")
 	require.NoError(t, err)
 	require.Equal(t, "Passphrase for admin.age: ", mock.lastPrompt,
 		"ParseIdentity must thread the prompt to PassphraseProvider")
@@ -232,7 +233,7 @@ func TestParseIdentitySSHWrongPassphrase(t *testing.T) {
 
 	pemBytes := pem.EncodeToMemory(pemBlock)
 	mock := &mockPassphraseProvider{passphrase: []byte("wrong")}
-	_, err = ParseIdentity(string(pemBytes), mock, nil, "")
+	_, err = ParseIdentity(t.Context(), string(pemBytes), mock, nil, "")
 	require.Error(t, err, "should fail with wrong passphrase")
 	require.True(t, mock.verifiedCalled, "PassphraseVerified must be called even on failure")
 	require.False(t, mock.verifiedSuccess, "a wrong passphrase must report failure")
@@ -269,7 +270,7 @@ func TestKeyringPassphraseCachesOnlyOnSuccess(t *testing.T) {
 		KeyFingerprint: fp,
 		Fallback:       &mockPassphraseProvider{passphrase: []byte("wrong")},
 	}
-	_, err := ParseIdentity(string(pemBytes), wrong, nil, "")
+	_, err := ParseIdentity(t.Context(), string(pemBytes), wrong, nil, "")
 	require.Error(t, err)
 
 	_, gerr := keyring.Get(keyringService, fp)
@@ -280,7 +281,7 @@ func TestKeyringPassphraseCachesOnlyOnSuccess(t *testing.T) {
 		KeyFingerprint: fp,
 		Fallback:       &mockPassphraseProvider{passphrase: []byte("correct-horse")},
 	}
-	_, err = ParseIdentity(string(pemBytes), ok, nil, "")
+	_, err = ParseIdentity(t.Context(), string(pemBytes), ok, nil, "")
 	require.NoError(t, err)
 
 	got, gerr := keyring.Get(keyringService, fp)
@@ -303,7 +304,7 @@ func TestKeyringPassphraseEvictsStaleEntry(t *testing.T) {
 
 	// Keyring-only (no fallback): the stored passphrase is tried and fails.
 	prov := &KeyringPassphraseProvider{KeyFingerprint: fp}
-	_, err := ParseIdentity(string(pemBytes), prov, nil, "")
+	_, err := ParseIdentity(t.Context(), string(pemBytes), prov, nil, "")
 	require.Error(t, err)
 
 	_, gerr := keyring.Get(keyringService, fp)
@@ -315,7 +316,7 @@ func TestParseIdentityPluginRequiresPublicKeyHeader(t *testing.T) {
 	identity := plugin.EncodeIdentity("yubikey", []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
 
 	// Without # public key: header sesam can't match the identity to a user.
-	_, err := ParseIdentity(identity, nil, NewInteractivePluginUI(), "")
+	_, err := ParseIdentity(t.Context(), identity, nil, NewInteractivePluginUI(), "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "public key")
 }
@@ -327,7 +328,7 @@ func TestParseIdentityPluginWithPublicKeyHeader(t *testing.T) {
 
 	file := "# created: 2026-05-16\n# public key: " + recipient + "\n" + identity + "\n"
 
-	id, err := ParseIdentity(file, nil, NewInteractivePluginUI(), "")
+	id, err := ParseIdentity(t.Context(), file, nil, NewInteractivePluginUI(), "")
 	require.NoError(t, err)
 	require.Equal(t, recipient, id.Public().String())
 }
@@ -339,7 +340,7 @@ func TestParseIdentityAgeKeyWithComments(t *testing.T) {
 	require.NoError(t, err)
 
 	file := "# created: 2026-05-16\n# public key: " + ageID.Recipient().String() + "\n" + ageID.String() + "\n"
-	id, err := ParseIdentity(file, nil, nil, "")
+	id, err := ParseIdentity(t.Context(), file, nil, nil, "")
 	require.NoError(t, err)
 	require.Equal(t, ageID.Recipient().String(), id.Public().String())
 }
@@ -353,7 +354,7 @@ func TestParseIdentityEncryptedAgeNativeWithPassphrase(t *testing.T) {
 	key := encryptIdentityForTest(t, ageID.String()+"\n", passphrase, false)
 	mock := &mockPassphraseProvider{passphrase: passphrase}
 
-	id, err := ParseIdentity(key, mock, nil, "Passphrase for admin.age: ")
+	id, err := ParseIdentity(t.Context(), key, mock, nil, "Passphrase for admin.age: ")
 	require.NoError(t, err)
 	require.True(t, mock.called, "passphrase provider should have been called")
 	require.Equal(t, "Passphrase for admin.age: ", mock.lastPrompt)
@@ -371,7 +372,7 @@ func TestParseIdentityEncryptedAgeArmored(t *testing.T) {
 	key := encryptIdentityForTest(t, ageID.String()+"\n", passphrase, true)
 	mock := &mockPassphraseProvider{passphrase: passphrase}
 
-	id, err := ParseIdentity(key, mock, nil, "")
+	id, err := ParseIdentity(t.Context(), key, mock, nil, "")
 	require.NoError(t, err)
 	require.Equal(t, ageID.Recipient().String(), id.Public().String())
 	require.True(t, mock.verifiedCalled, "PassphraseVerified must be called")
@@ -384,7 +385,7 @@ func TestParseIdentityEncryptedAgeRequiresPassphraseProvider(t *testing.T) {
 	require.NoError(t, err)
 
 	key := encryptIdentityForTest(t, ageID.String()+"\n", []byte("correct"), false)
-	_, err = ParseIdentity(key, nil, nil, "")
+	_, err = ParseIdentity(t.Context(), key, nil, nil, "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no passphrase supplied")
 }
@@ -397,7 +398,7 @@ func TestParseIdentityEncryptedAgeWrongPassphrase(t *testing.T) {
 	key := encryptIdentityForTest(t, ageID.String()+"\n", []byte("correct"), false)
 	mock := &mockPassphraseProvider{passphrase: []byte("wrong")}
 
-	_, err = ParseIdentity(key, mock, nil, "")
+	_, err = ParseIdentity(t.Context(), key, mock, nil, "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to decrypt age identity")
 	require.True(t, mock.verifiedCalled, "PassphraseVerified must be called even on failure")
@@ -479,7 +480,7 @@ func TestParseIdentityInvalidInputs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseIdentity(tc.key, nil, nil, "")
+			_, err := ParseIdentity(t.Context(), tc.key, nil, nil, "")
 			require.Error(t, err)
 		})
 	}

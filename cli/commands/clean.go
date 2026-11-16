@@ -38,7 +38,7 @@ func HandleClean(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Bool("aggressive") {
 		// Walk up to the nearest .sesam like WithRepo does; the raw flag value
 		// would only work from the sesam dir itself.
-		sesamDir, err := repo.ResolveSesamDir(cmd.String("sesam-dir"))
+		sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
 		if err != nil {
 			return err
 		}
@@ -56,7 +56,7 @@ func HandleCleanWithRepo(ctx context.Context, cmd *cli.Command, r *repo.Repo) er
 	res, err := r.Clean(ctx, repo.CleanOpts{
 		Aggressive:            false,
 		CleanEditedOrUnsealed: cmd.Bool("unsealed"),
-		Sync:                  syncOpts(r.SesamDir()),
+		Sync:                  syncOpts(ctx, r.SesamDir()),
 		CheckFunc: func(path string) (bool, error) {
 			return cleanCheck(path, quiet, dryRun)
 		},

@@ -163,7 +163,7 @@ func TestStageSealOnlyLeavesConfigUntouched(t *testing.T) {
 	before, err := os.Stat(cfgPath)
 	require.NoError(t, err)
 
-	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(SealOpts{All: true}); return err }))
+	require.NoError(t, r.Update(func(s *Stage) error { _, err := s.Seal(t.Context(), SealOpts{All: true}); return err }))
 
 	after, err := os.Stat(cfgPath)
 	require.NoError(t, err)
@@ -229,7 +229,7 @@ func TestStageSecretAddRejectsForbiddenPath(t *testing.T) {
 	for _, path := range cases {
 		t.Run(path, func(t *testing.T) {
 			err := r.Update(func(s *Stage) error {
-				return s.SecretAdd([]string{path}, []string{"admin"}, false, false)
+				return s.SecretAdd(t.Context(), []string{path}, []string{"admin"}, false, false)
 			})
 			require.Error(t, err, "add %q must fail", path)
 		})
@@ -255,10 +255,10 @@ func TestStageSecretMoveRejectsForbiddenDestination(t *testing.T) {
 			require.NoError(t, os.MkdirAll(filepath.Dir(src), 0o700))
 			require.NoError(t, os.WriteFile(src, []byte("hunter2\n"), 0o600))
 			require.NoError(t, r.Update(func(s *Stage) error {
-				if err := s.SecretAdd([]string{"secrets/api.token"}, []string{"admin"}, false, false); err != nil {
+				if err := s.SecretAdd(t.Context(), []string{"secrets/api.token"}, []string{"admin"}, false, false); err != nil {
 					return err
 				}
-				_, err := s.Seal(SealOpts{})
+				_, err := s.Seal(t.Context(), SealOpts{})
 				return err
 			}))
 
@@ -289,7 +289,7 @@ func TestStageSecretMoveKeepsDestinationAndRollsBack(t *testing.T) {
 	require.NoError(t, os.WriteFile(src, []byte("hunter2\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("mine\n"), 0o600))
 	require.NoError(t, r.Update(func(s *Stage) error {
-		return s.SecretAdd([]string{"api.token"}, []string{"admin"}, false, false)
+		return s.SecretAdd(t.Context(), []string{"api.token"}, []string{"admin"}, false, false)
 	}))
 
 	err := r.Update(func(s *Stage) error {
