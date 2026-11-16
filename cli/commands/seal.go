@@ -16,6 +16,10 @@ import (
 // Conflict markers are warned about, not refused: seal is what you reach for to
 // get out of a half-finished merge, so refusing would be the bigger trap.
 func HandleSeal(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+	if cmd.Bool("seal-all") && cmd.Args().Present() {
+		return errors.New("--all seals every secret, it takes no paths")
+	}
+
 	conflicted, err := r.ConflictedSecrets()
 	if err != nil {
 		return err
@@ -31,8 +35,21 @@ func HandleSeal(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 		)
 	}
 
+	paths, err := toRepoPaths(r.SesamDir(), cmd.Args().Slice())
+	if err != nil {
+		return err
+	}
+
+	opts := repo.SealOpts{
+		All:           cmd.Bool("seal-all"),
+		Sync:          syncOpts(ctx, r.SesamDir()),
+		Paths:         paths,
+		ForceStale:    cmd.Bool("force-stale"),
+		ForceDiverged: cmd.Bool("force-diverged"),
+	}
+
 	if err := r.Update(func(s *repo.Stage) error {
-		return sealStage(ctx, cmd, r, s)
+		return sealWith(ctx, s, opts)
 	}); err != nil {
 		return err
 	}
@@ -56,10 +73,14 @@ func HandleSeal(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 // left out and named; a secret changed on both sides stops the command and
 // names both ways out.
 func sealStage(ctx context.Context, cmd *cli.Command, r *repo.Repo, s *repo.Stage) error {
-	res, err := s.Seal(ctx, repo.SealOpts{
+	return sealWith(ctx, s, repo.SealOpts{
 		All:  cmd.Bool("seal-all"),
 		Sync: syncOpts(ctx, r.SesamDir()),
 	})
+}
+
+func sealWith(ctx context.Context, s *repo.Stage, opts repo.SealOpts) error {
+	res, err := s.Seal(ctx, opts)
 	if err != nil {
 		var diverged *repo.DivergedError
 		if errors.As(err, &diverged) {
@@ -81,13 +102,24 @@ func printSkippedStale(res *repo.SealResult) {
 		return
 	}
 
+	pluralizedSecret := pluralize("secret", len(res.Stale))
+	verb, pronoun := "were", "they are"
+	if len(res.Stale) == 1 {
+		verb, pronoun = "was", "it is"
+	}
+
 	printNote(
 		fmt.Sprintf(
-			"%d of your local %s were changed only in the revealed file but not yet sealed:",
-			len(res.Stale), pluralize("secret", len(res.Stale)),
+			"%d stale %s %s not sealed because %s newer than what is revealed:",
+			len(res.Stale), pluralizedSecret, verb, pronoun,
 		),
 		res.Stale,
-		"Please decide if you want to keep the changes (`sesam seal --all`) or if you want to overwrite with the incoming changes (`sesam reveal`).",
+		fmt.Sprintf(
+			"This happens when git brought in a newer version but nothing revealed it, e.g. a `git pull` without sesam's hooks installed.\n"+
+				"sesam: Please decide: `sesam reveal` takes the newer %s, `sesam seal <path>` (or `--force-stale` for all) seals your %s anyway.",
+			pluralizedSecret,
+			pluralizedSecret,
+		),
 	)
 }
 

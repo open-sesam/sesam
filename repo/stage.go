@@ -392,7 +392,7 @@ func (s *Stage) UserKill(user string) error {
 // Seal writes edited plaintext into the objects. Stale plaintext - older than
 // its object - is left out and reported; a secret that changed on both sides
 // is refused with a DivergedError, unless opts.All says to take the plaintext
-// as it is everywhere.
+// as it is everywhere, or opts.Paths and the Force flags do so for some.
 func (s *Stage) Seal(ctx context.Context, opts SealOpts) (*SealResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -413,12 +413,29 @@ func (s *Stage) Seal(ctx context.Context, opts SealOpts) (*SealResult, error) {
 		}
 	}
 
-	if diverged := states.Paths(SecretStateDiverged); len(diverged) > 0 {
+	force, err := forcedPaths(states, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	var diverged []string
+	for _, p := range states.Paths(SecretStateDiverged) {
+		if !force[p] {
+			diverged = append(diverged, p)
+		}
+	}
+	if len(diverged) > 0 {
 		return nil, &DivergedError{Paths: diverged}
 	}
 
+	var stale []string
 	advice := make(map[string]core.SealAdvice, len(states))
 	for p, state := range states {
+		if force[p] {
+			advice[p] = core.AdviceChanged
+			continue
+		}
+
 		switch state {
 		case SecretStateInSync, SecretStateRecipientsChanged:
 			advice[p] = core.AdviceUnchanged
@@ -426,6 +443,7 @@ func (s *Stage) Seal(ctx context.Context, opts SealOpts) (*SealResult, error) {
 			advice[p] = core.AdviceChanged
 		case SecretStateStale:
 			advice[p] = core.AdviceKeep
+			stale = append(stale, p)
 		default:
 			// missing plaintext, no access: sealOrPreserve preserves the object.
 		}
@@ -435,7 +453,41 @@ func (s *Stage) Seal(ctx context.Context, opts SealOpts) (*SealResult, error) {
 		return nil, fmt.Errorf("failed to seal secrets: %w", err)
 	}
 
-	return &SealResult{Stale: states.Paths(SecretStateStale)}, nil
+	slices.Sort(stale)
+	return &SealResult{Stale: stale}, nil
+}
+
+// forcedPaths is the set of secrets opts wants sealed from their plaintext
+// regardless of state. Named paths must be tracked and have readable plaintext,
+// or the seal would silently preserve their object instead.
+func forcedPaths(states SyncStates, opts SealOpts) (map[string]bool, error) {
+	force := make(map[string]bool, len(opts.Paths))
+	for _, p := range opts.Paths {
+		state, ok := states[p]
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("%s: not a tracked secret", p)
+		case state == SecretStateUserHasNoAccess:
+			return nil, fmt.Errorf("%s: you have no access to this secret", p)
+		case state == SecretStateNoRevealedPath:
+			return nil, fmt.Errorf("%s: no plaintext to seal, reveal it first", p)
+		}
+
+		force[p] = true
+	}
+
+	var forceStates []SecretState
+	if opts.ForceStale {
+		forceStates = append(forceStates, SecretStateStale)
+	}
+	if opts.ForceDiverged {
+		forceStates = append(forceStates, SecretStateDiverged)
+	}
+	for _, p := range states.Paths(forceStates...) {
+		force[p] = true
+	}
+
+	return force, nil
 }
 
 // SecretAdd starts tracking the secret(s) at each path. Paths are sesam-relative.

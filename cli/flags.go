@@ -185,6 +185,14 @@ var flagsSeal = []cli.Flag{
 		Name:  "clean",
 		Usage: "Delete revealed secret files after successful seal",
 	},
+	&cli.BoolFlag{
+		Name:  "force-stale",
+		Usage: "Also seal stale secrets, overwriting their newer object with your plaintext",
+	},
+	&cli.BoolFlag{
+		Name:  "force-diverged",
+		Usage: "Also seal diverged secrets, keeping your plaintext over the object's changes",
+	},
 	flagSeal,
 }
 
@@ -209,6 +217,10 @@ var flagsReveal = []cli.Flag{
 		Name:    "all",
 		Aliases: []string{"a"},
 		Usage:   "Reveal every secret, overwriting plaintext you edited",
+	},
+	&cli.BoolFlag{
+		Name:  "force-diverged",
+		Usage: "Also reveal diverged secrets, overwriting your edits with the object's version",
 	},
 }
 
