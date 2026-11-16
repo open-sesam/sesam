@@ -56,6 +56,7 @@ func verifyOpts(cmd *cli.Command) repo.VerifyOptions {
 		// branch you did not author yourself.
 	}
 
+	opts.TruncationWorktree = opts.Truncation
 	return opts
 }
 
@@ -72,15 +73,22 @@ func rewrittenHints(e *core.AuditLogRewrittenError) []string {
 		"    - a merge conflict in " + sesam + "/audit/log.jsonl resolved by taking one side (git checkout --theirs)",
 	}
 
-	if e.Newer == "" {
-		// problematic log is staged, but not committed
-		return append(lines,
+	if e.Newer == core.SnapshotStaged || e.Newer == core.SnapshotWorktree {
+		// problematic log is not committed yet
+		lines = append(lines,
 			"  To fix it, take "+sesam+" from HEAD and redo your change with sesam:",
 			"",
 			"    git checkout HEAD -- ':/"+sesam+"' && sesam seal",
-			"",
-			"  If you are amending a commit on purpose to drop its entries, `git commit --no-verify` skips this check.",
 		)
+
+		if e.Newer == core.SnapshotStaged {
+			lines = append(lines,
+				"",
+				"  If you are amending a commit on purpose to drop its entries, `git commit --no-verify` skips this check.",
+			)
+		}
+
+		return lines
 	}
 
 	return append(lines,

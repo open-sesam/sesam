@@ -7,17 +7,25 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"filippo.io/age"
 )
 
+// Snapshot names for logs that are not committed yet; all others are commits.
+const (
+	SnapshotStaged   = ""
+	SnapshotWorktree = "worktree"
+)
+
 // auditLogSnapshot pairs an audit log with the commit it was read from,
-// so callers can attribute errors to a specific revision. Commit is empty
-// for the staged log.
+// so callers can attribute errors to a specific revision. Commit is a
+// Snapshot* name for uncommitted logs.
 type auditLogSnapshot struct {
 	Commit string
 	Log    *AuditLog
@@ -26,7 +34,7 @@ type auditLogSnapshot struct {
 // AuditLogRewrittenError: the log at Newer does not account for every entry
 // of the log at Older - entries were dropped or replaced.
 type AuditLogRewrittenError struct {
-	// Older and Newer are commits; Newer is empty when it is the staged log.
+	// Older and Newer are commits or Snapshot* names.
 	Older, Newer string
 
 	// SesamPath is the vault's .sesam directory, relative to the worktree root.
@@ -37,17 +45,20 @@ type AuditLogRewrittenError struct {
 
 func (e *AuditLogRewrittenError) Error() string {
 	return fmt.Sprintf(
-		"audit log at commit %s is not a prefix of %s: %v",
-		e.Older, snapshotName(e.Newer), e.Err,
+		"audit log at %s is not a prefix of %s: %v",
+		snapshotName(e.Older), snapshotName(e.Newer), e.Err,
 	)
 }
 
 func (e *AuditLogRewrittenError) Unwrap() error { return e.Err }
 
-// snapshotName names where a log was read from: a commit, or the index.
+// snapshotName names where a log was read from: a commit, the index or the worktree.
 func snapshotName(commit string) string {
-	if commit == "" {
+	switch commit {
+	case SnapshotStaged:
 		return "the staged changes"
+	case SnapshotWorktree:
+		return "the working tree"
 	}
 	return "commit " + commit
 }
@@ -60,6 +71,7 @@ func auditLogHistory(
 	fromRev string,
 	initCommitRev string,
 	staged bool,
+	worktree *os.Root,
 ) (iter.Seq2[*auditLogSnapshot, error], error) {
 	if initCommitRev == "" {
 		// No anchor handed down, so the init-file check has not run for this
@@ -112,6 +124,21 @@ func auditLogHistory(
 			return
 		}
 
+		// The worktree log is what sesam works on and what `git add` would stage.
+		if worktree != nil {
+			auditLog, err := loadAuditLogFile(worktree, auditLogPath(""), ids)
+			if err != nil {
+				yield(nil, fmt.Errorf("load audit log in the working tree: %w", err))
+				return
+			}
+
+			auditLog.SesamDir = sesamDir
+			auditLog.InitHash = initHash
+			if !yield(&auditLogSnapshot{Commit: SnapshotWorktree, Log: auditLog}, nil) {
+				return
+			}
+		}
+
 		var lastBlob string
 
 		// The staged log is what the next commit will hold, so it has to cover
@@ -129,10 +156,29 @@ func auditLogHistory(
 				return
 			}
 
-			// Not staged (or conflicted, which git refuses to commit anyway) or
-			// unchanged: nothing beyond HEAD to check.
+			// A staged deletion drops every entry HEAD holds. A conflicted log
+			// has no stage 0 entry either, but git refuses to commit that anyway.
+			if !found && head != "" {
+				stages, err := objs.Blobs([]string{":1:" + auditPathRel, ":2:" + auditPathRel, ":3:" + auditPathRel})
+				if err != nil {
+					yield(nil, fmt.Errorf("read conflicted audit log: %w", err))
+					return
+				}
+
+				if slices.Equal(stages, []string{"", "", ""}) {
+					yield(nil, &AuditLogRewrittenError{
+						Older:     fromCommit,
+						Newer:     SnapshotStaged,
+						SesamPath: path.Join(prefix, ".sesam"),
+						Err:       errors.New("the audit log is deleted"),
+					})
+					return
+				}
+			}
+
+			// Unchanged (or conflicted): nothing beyond HEAD to check.
 			if found && idx != head {
-				snap, err := loadSnapshot(objs, idx, "", sesamDir, initHash, ids)
+				snap, err := loadSnapshot(objs, idx, SnapshotStaged, sesamDir, initHash, ids)
 				if err != nil {
 					yield(nil, err)
 					return
@@ -415,8 +461,8 @@ func entryOriginKey(e *AuditEntrySigned) string {
 		cmp.Or(e.ChangedByBeforeMerge, e.ChangedBy)
 }
 
-// VerifyHistory checks that, along the FIRST-PARENT chain from the staged log
-// through HEAD, every older audit log is accounted for in the newer one (see
+// VerifyHistory checks that, along the FIRST-PARENT chain from the worktree log
+// (if worktree is non-nil) and the staged log through HEAD, every older audit log is accounted for in the newer one (see
 // auditLogCovers), and that the tip chain-verifies. Where that chain has no
 // vault - a merge that brought one in from its second parent - the walk crosses
 // over to the parent that does, so the log's own ancestry is followed down to
@@ -443,6 +489,7 @@ func VerifyHistory(
 	ids Identities,
 	pluginUI *PluginUI,
 	initCommitRev string,
+	worktree *os.Root,
 ) (stoppedAt string, err error) {
 	prefix, err := SesamGitPrefix(g, sesamDir)
 	if err != nil {
@@ -458,6 +505,7 @@ func VerifyHistory(
 		"HEAD",
 		initCommitRev,
 		true,
+		worktree,
 	)
 	if err != nil {
 		return "", fmt.Errorf("build audit log history: %w", err)

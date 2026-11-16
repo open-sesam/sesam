@@ -369,11 +369,16 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 	}
 
 	if opts.Truncation {
+		var worktree *os.Root
+		if opts.TruncationWorktree {
+			worktree = v.root
+		}
+
 		// The anchor comes from the load-time Verify, which already walked the
 		// history for it - VerifyHistory would otherwise walk it a second time.
 		stoppedAt, err := core.VerifyHistory(
 			ctx,
-			v.sesamDir, v.gitRepo, v.identities, v.opts.pluginUI(), v.vstate.InitCommit(),
+			v.sesamDir, v.gitRepo, v.identities, v.opts.pluginUI(), v.vstate.InitCommit(), worktree,
 		)
 		if err != nil {
 			report.TruncateError = core.JSONError{Err: err}

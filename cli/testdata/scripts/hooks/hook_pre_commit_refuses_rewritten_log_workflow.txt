@@ -44,6 +44,29 @@ exec git add -A
 exec git commit -m 'redo'
 exec sesam verify --all
 
+# Not staging the rollback does not help: verify reads the working tree, and the
+# hook stages .sesam itself before checking.
+exec git checkout HEAD^^ -- .sesam
+exec git reset -q -- .sesam
+! exec sesam verify --all
+stderr 'is not a prefix of the working tree'
+cp $TMPDIR/a.txt other
+exec git add -f other
+! exec git commit -m 'oops2'
+stderr 'is not a prefix of the staged changes'
+
+# Neither does unstaging the log altogether.
+exec git checkout HEAD -- ':/.sesam'
+exec git checkout HEAD^^ -- .sesam
+exec git rm -q --cached .sesam/audit/log.jsonl
+! exec sesam verify --all
+stderr 'is not a prefix of the staged changes: the audit log is deleted'
+! exec git commit -m 'oops3'
+stderr 'is not a prefix of the staged changes'
+
+exec git log --oneline
+! stdout 'oops'
+
 -- a.txt --
 A
 -- b.txt --
