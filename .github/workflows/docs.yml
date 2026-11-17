@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - feat/opensesam-import
+    # Path filters are not evaluated for tag pushes, so every release redeploys.
+    tags:
+      - "v*"
     paths:
       - "docs/**"
       - "cli/**"
@@ -39,7 +42,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # needed for mdbook-gitinfo
+          fetch-depth: 0 # needed for mdbook-gitinfo and the tag builds
+          # /docs/ is always main; a tag push only adds that tag's book.
+          ref: ${{ github.ref_type == 'tag' && 'main' || github.ref }}
 
       # Everything from mise.toml, as in ci.yml: go for scripts/gen-vanity-imports.sh
       # and `task docgen`, mdbook and its preprocessors for the book. Listing
@@ -92,6 +97,11 @@ jobs:
           cp docs/landing/index.html docs/landing/bg.png docs/landing/bg.webp public/
           cp docs/src/sesam_bg.png docs/src/arabic-pattern.svg docs/src/arabic-pattern-dark.svg public/
           cp docs/book/favicon.svg docs/book/favicon.png public/
+
+      # One book per vX.Y.Z tag under /docs/<tag>/, plus the version dropdown
+      # injected into every page (main at /docs/ included).
+      - name: Build versioned docs
+        run: scripts/build-docs-versions.sh public/docs
 
       # Vanity-import pages so `go get opensesam.org/sesam/...` resolves to the
       # GitHub repo (see https://go.dev/ref/mod). One go-import page per package,
