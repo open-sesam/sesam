@@ -1,0 +1,31 @@
+# Secrets a user cannot decrypt are only counted by `sesam status`, listed with
+# --no-access or --all. `sesam show` on one names the access problem.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'init sesam'
+
+# bob's clone has no plaintext for the admin-only README.
+rm README.md
+
+exec sesam --identity $BOB_KEY status
+! stdout 'README\.md'
+stdout '1 no access'
+
+exec sesam --identity $BOB_KEY status --no-access
+stdout 'x README\.md'
+
+exec sesam --identity $BOB_KEY status --all
+stdout 'x README\.md'
+
+! exec sesam --identity $BOB_KEY show README.md
+stderr 'no access to README\.md'
+
+# The admin can show it although it is not revealed.
+exec sesam show README.md
+stdout .

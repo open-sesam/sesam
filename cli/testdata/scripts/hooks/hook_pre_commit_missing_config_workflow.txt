@@ -1,0 +1,46 @@
+# sesam.yml can be rebuilt from .sesam, so a missing one is a damaged repo, not
+# none at all: the hook must still guard .sesam instead of stepping aside.
+
+sesam-repo admin a.txt b.txt
+exec sesam hook install
+
+cp $TMPDIR/a.txt s
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'one'
+cp $TMPDIR/b.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'two'
+
+# Roll back the log and drop sesam.yml: the hook still refuses.
+exec git checkout HEAD^ -- .sesam
+rm sesam.yml
+exec git add -A
+! exec git commit -m 'oops'
+stderr 'is not a prefix of the staged changes'
+exec git log --oneline
+! stdout 'oops'
+
+# init on the half repo re-runs setup and points at the way back.
+exec git checkout HEAD -- .sesam
+exec sesam init
+stdout 'sesam.yml is missing - run `sesam config reset --force`'
+exec sesam config reset --force
+exists sesam.yml
+
+# Without the vault (git rm leaves ignored leftovers in .sesam), setup refuses
+# instead of sending you back to init.
+exec git rm -q -r .sesam
+! exec sesam init
+stderr 'no audit log at'
+stderr 'git checkout HEAD -- .*\.sesam'
+
+# Following the advice gets the vault back as it was.
+exec git checkout HEAD -- $WORK/.sesam
+exec sesam verify --all
+
+-- a.txt --
+A
+-- b.txt --
+B

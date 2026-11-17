@@ -118,6 +118,9 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 			_, err := fmt.Fprintln(out, "<sesam: not a recipient of this secret>")
 			return err
 		}
+		if errors.As(showErr, &noMatch) {
+			return fmt.Errorf("no access to %s - you are not a recipient (see `sesam status --no-access`)", object)
+		}
 		if showErr != nil {
 			return showErr
 		}
@@ -135,6 +138,6 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 			return onShown()
 		}
 
-		return fmt.Errorf("not sure what this is: %s", object)
+		return fmt.Errorf("cannot `show` this: %s", object)
 	})(ctx, cmd)
 }

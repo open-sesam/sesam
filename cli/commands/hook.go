@@ -125,6 +125,11 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 			return err
 		}
 
+		// Verify what gets committed: the staged log, after sesam's own changes.
+		if err := r.GitAddDotSesam(ctx); err != nil {
+			return err
+		}
+
 		verifyOpts := repo.VerifyOptions{
 			Truncation: true,
 			KeyReuse:   true,

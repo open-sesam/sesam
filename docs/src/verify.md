@@ -65,12 +65,18 @@ going on.
 
 ### Audit Log truncation check
 
-Check git history from `HEAD` back to the init commit to see if each older audit
-log is a prefix of the newer one. The log is completely linear, so this catches
-malicious truncation events. If an older audit log cannot be decrypted by the
-current identity, verification stops at that point without treating it as a failure.
+Check git history from the working tree's audit log over the staged one
+through `HEAD` back to the init commit to see if each older audit log is a
+prefix of the newer one. The log is
+completely linear, so this catches malicious truncation events. If an older
+audit log cannot be decrypted by the current identity, verification stops at
+that point without treating it as a failure.
 
-This will be run on `sesam verify --truncate`
+Including the staged log means a rewritten log is refused by the pre-commit hook
+instead of surfacing later in CI. The hook stages `.sesam` before it checks and
+leaves out the working tree, since only the staged log gets committed.
+
+This will be run on `sesam verify --truncate` and by the pre-commit hook.
 
 ### File integrity check
 

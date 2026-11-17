@@ -322,13 +322,15 @@ Run a command with secret files and dotenv variables
 
 Show overview over repo state (revealed, sealed, unmanaged, ...)
 
-**--all, -a**: Also show in-sync secrets and unmanaged files (hidden by default)
+**--all, -a**: Also show in-sync secrets, unmanaged files and secrets you have no access to (hidden by default)
 
 **--diff, -d**: Show the actual diff using git (extra args are passed to git)
 
 **--help, -h**: show help
 
 **--json**: Print output as JSON
+
+**--no-access**: Also show secrets you have no access to (hidden by default, only counted)
 
 **--users, -u**: Show users instead of groups
 
@@ -1560,12 +1562,18 @@ going on.
 
 ### Audit Log truncation check
 
-Check git history from `HEAD` back to the init commit to see if each older audit
-log is a prefix of the newer one. The log is completely linear, so this catches
-malicious truncation events. If an older audit log cannot be decrypted by the
-current identity, verification stops at that point without treating it as a failure.
+Check git history from the working tree's audit log over the staged one
+through `HEAD` back to the init commit to see if each older audit log is a
+prefix of the newer one. The log is
+completely linear, so this catches malicious truncation events. If an older
+audit log cannot be decrypted by the current identity, verification stops at
+that point without treating it as a failure.
 
-This will be run on `sesam verify --truncate`
+Including the staged log means a rewritten log is refused by the pre-commit hook
+instead of surfacing later in CI. The hook stages `.sesam` before it checks and
+leaves out the working tree, since only the staged log gets committed.
+
+This will be run on `sesam verify --truncate` and by the pre-commit hook.
 
 ### File integrity check
 
@@ -1782,6 +1790,11 @@ verified state and what's on disk disagree; the cause is usually one of:
 - **A stale on-disk root hash.** A partial checkout can restore an object
   without its audit log. `sesam open` followed by `sesam seal` reconciles it;
   the hooks normally do this for you on checkout.
+- **An older `.sesam` brought back by git.** `git checkout <rev> -- .sesam`, a
+  `git revert` of a vault commit or an audit log merge conflict resolved by
+  taking one side, followed by a sesam command that writes on top of it. The
+  pre-commit hook refuses such a commit; `git checkout HEAD -- .sesam` and
+  redoing the change with sesam fixes it.
 - **Genuine tampering.** Truncation or substitution of the audit log (see below).
 
 If verify reports the **audit log was truncated** or the **init file changed**,

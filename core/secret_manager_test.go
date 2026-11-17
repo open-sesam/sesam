@@ -1042,6 +1042,20 @@ func TestShowSecretRevealedPathConvenience(t *testing.T) {
 	require.Equal(t, "content123", buf.String())
 }
 
+func TestShowSecretRevealedPathWithoutPlaintext(t *testing.T) {
+	mgr := testSecretManager(t)
+	s := testSecret(t, mgr, "secrets/tok", "content123")
+	_, err := sealSecret(mgr, s, mgr.recipientsFor(s), mgr.cryptPath(s), "testuser")
+	require.NoError(t, err)
+	require.NoError(t, mgr.root.Remove("secrets/tok"))
+
+	var buf bytes.Buffer
+	ok, err := ShowSecret(mgr.root, mgr.Identities, "secrets/tok", &buf)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "content123", buf.String())
+}
+
 // ShowSecret must resolve a revealed path against its sesamDir argument,
 // not against the caller's current working directory. The previous
 // implementation did `filepath.Join(".sesam", "objects", path+".sesam")`

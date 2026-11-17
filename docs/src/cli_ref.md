@@ -266,13 +266,15 @@ Run a command with secret files and dotenv variables
 
 Show overview over repo state (revealed, sealed, unmanaged, ...)
 
-**--all, -a**: Also show in-sync secrets and unmanaged files (hidden by default)
+**--all, -a**: Also show in-sync secrets, unmanaged files and secrets you have no access to (hidden by default)
 
 **--diff, -d**: Show the actual diff using git (extra args are passed to git)
 
 **--help, -h**: show help
 
 **--json**: Print output as JSON
+
+**--no-access**: Also show secrets you have no access to (hidden by default, only counted)
 
 **--users, -u**: Show users instead of groups
 

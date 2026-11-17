@@ -91,6 +91,11 @@ verified state and what's on disk disagree; the cause is usually one of:
 - **A stale on-disk root hash.** A partial checkout can restore an object
   without its audit log. `sesam open` followed by `sesam seal` reconciles it;
   the hooks normally do this for you on checkout.
+- **An older `.sesam` brought back by git.** `git checkout <rev> -- .sesam`, a
+  `git revert` of a vault commit or an audit log merge conflict resolved by
+  taking one side, followed by a sesam command that writes on top of it. The
+  pre-commit hook refuses such a commit; `git checkout HEAD -- .sesam` and
+  redoing the change with sesam fixes it.
 - **Genuine tampering.** Truncation or substitution of the audit log (see below).
 
 If verify reports the **audit log was truncated** or the **init file changed**,

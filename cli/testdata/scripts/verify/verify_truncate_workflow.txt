@@ -21,10 +21,13 @@ exec sesam verify --truncate
 stderr 'Audit log history: ok'
 
 # Roll the log back to its (shorter) c1 content but move HEAD forward: the
-# parent commit's log is now longer than HEAD's -> truncation.
+# parent commit's log is now longer than HEAD's -> truncation. The pre-commit
+# hook refuses such a commit, so it has to be skipped to get one into history.
 cp log-c1.jsonl .sesam/audit/log.jsonl
 exec git add -A
-exec git commit -m 'c3'
+! exec git commit -m 'c3'
+stderr 'is not a prefix of the staged changes'
+exec git commit --no-verify -m 'c3'
 
 # no-disk isolates the history check from the on-disk root-hash mismatch the
 # rollback also introduces.

@@ -371,21 +371,26 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	return r, nil
 }
 
-// IsInitialized reports whether sesamDir already holds a sesam repository (sesam.yml present)
+// IsInitialized reports whether sesamDir already holds a sesam repository:
+// its audit log or sesam.yml present. Either alone is a damaged repo, not none
+// at all, so hooks still guard it. A bare .sesam dir does not count: git leaves
+// its ignored files behind when checking out a branch without the vault.
 func IsInitialized(ctx context.Context, sesamDir string) (bool, error) {
 	resolvedDir, _, err := resolveSesamDirAndGit(ctx, sesamDir)
 	if err != nil {
 		return false, err
 	}
 
-	switch _, err := os.Stat(filepath.Join(resolvedDir, "sesam.yml")); {
-	case err == nil:
-		return true, nil
-	case os.IsNotExist(err):
-		return false, nil
-	default:
-		return false, fmt.Errorf("stat sesam.yml: %w", err)
+	for _, name := range []string{filepath.Join(sesamSuffix, "audit", "log.jsonl"), "sesam.yml"} {
+		switch _, err := os.Stat(filepath.Join(resolvedDir, name)); {
+		case err == nil:
+			return true, nil
+		case !os.IsNotExist(err):
+			return false, fmt.Errorf("stat %s: %w", name, err)
+		}
 	}
+
+	return false, nil
 }
 
 // Setup wires sesam's git integration into an already-initialized repository.
@@ -396,15 +401,27 @@ func Setup(ctx context.Context, sesamDir string, idPaths []string, opts RepoInit
 		return err
 	}
 
-	if _, err := os.Stat(filepath.Join(resolvedDir, "sesam.yml")); err != nil {
+	// The vault is the audit log in .sesam; sesam.yml can be rebuilt from it.
+	logPath := filepath.Join(sesamSuffix, "audit", "log.jsonl")
+	if _, err := os.Stat(filepath.Join(resolvedDir, logPath)); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("no sesam repository at %s - run `sesam init` to create one", resolvedDir)
+			return fmt.Errorf(
+				"no audit log at %s - restore it from git: git checkout HEAD -- %s",
+				filepath.Join(resolvedDir, logPath), filepath.Join(resolvedDir, sesamSuffix),
+			)
 		}
-		return fmt.Errorf("stat sesam.yml: %w", err)
+		return fmt.Errorf("stat %s: %w", logPath, err)
 	}
 
 	if err := configureGitIntegration(ctx, gitRepo, resolvedDir, opts); err != nil {
 		return err
+	}
+
+	switch _, err := os.Stat(filepath.Join(resolvedDir, "sesam.yml")); {
+	case os.IsNotExist(err):
+		opts.PrintStep("sesam.yml is missing - run `sesam config reset --force` to rebuild it.")
+	case err != nil:
+		return fmt.Errorf("stat sesam.yml: %w", err)
 	}
 
 	if len(idPaths) == 0 {
@@ -578,6 +595,10 @@ type SecretInfo struct {
 type VerifyOptions struct {
 	// Truncation checks if the audit log was truncated over the git history.
 	Truncation bool
+
+	// TruncationWorktree makes Truncation also check the uncommitted log on disk,
+	// not only the staged one.
+	TruncationWorktree bool
 
 	// KeyReuse checks if different users re-use the same public keys.
 	// This should be forbidden by logic in sesam while adding for a single

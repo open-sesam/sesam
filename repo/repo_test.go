@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -58,6 +59,40 @@ func TestInit_Negative(t *testing.T) {
 			)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+// Either marker alone is a damaged repo, which hooks must still guard.
+func TestIsInitialized_EitherMarker(t *testing.T) {
+	cases := []struct {
+		name  string
+		files []string
+		want  bool
+	}{
+		{name: "empty", want: false},
+		{name: "leftover .sesam dir", files: []string{".sesam/tmp/"}, want: false},
+		{name: "only audit log", files: []string{".sesam/audit/log.jsonl"}, want: true},
+		{name: "only sesam.yml", files: []string{"sesam.yml"}, want: true},
+		{name: "both", files: []string{".sesam/audit/log.jsonl", "sesam.yml"}, want: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := freshGitRepo(t)
+			for _, f := range tc.files {
+				p := filepath.Join(dir, f)
+				if strings.HasSuffix(f, "/") {
+					require.NoError(t, os.MkdirAll(p, 0o700))
+				} else {
+					require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o700))
+					require.NoError(t, os.WriteFile(p, nil, 0o600))
+				}
+			}
+
+			got, err := IsInitialized(t.Context(), dir)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
 		})
 	}
 }
