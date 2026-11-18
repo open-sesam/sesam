@@ -51,6 +51,8 @@ type syncFacts struct {
 	recipientsChanged bool
 	// matchesOlder: ... of some earlier version of it that git holds.
 	matchesOlder bool
+	// objectNewer: the worktree object was written after the plaintext.
+	objectNewer bool
 	// objectMoved: the worktree object differs from the one at SyncOpts.Before.
 	objectMoved bool
 	// unmerged: git still lists the object as conflicted, so a plaintext that
@@ -94,10 +96,11 @@ func (s SyncStates) Paths(states ...SecretState) []string {
 // SyncStates says, per secret, which side moved since plaintext and object were
 // last written together. The plaintext is matched against the object versions
 // git knows: the worktree's, HEAD's, then opts.Before and opts.Candidates.
-// Matching the worktree object is in sync; matching an older version is stale;
-// matching none is modified - or diverged, when opts.Before shows the object
-// moved as well. Nothing is stored between passes: git holds the object's
-// history and every object's footer holds a keyed hash of its plaintext.
+// Matching the worktree object is in sync; matching an older, newer-on-disk
+// object is stale; matching none is modified - or diverged, when opts.Before
+// shows the object moved as well. Nothing is stored between passes: git holds
+// the object's history and every object's footer holds a keyed hash of its
+// plaintext.
 func (v *View) SyncStates(ctx context.Context, opts SyncOpts) (SyncStates, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -188,7 +191,7 @@ func classify(f syncFacts) SecretState {
 	case f.unmerged:
 		// A resolution in progress, whatever it happens to equal.
 		return SecretStateNotInSync
-	case f.matchesOlder:
+	case f.matchesOlder && f.objectNewer:
 		return SecretStateStale
 	case f.objectMoved:
 		return SecretStateDiverged
@@ -205,7 +208,8 @@ func (v *View) probeWorktree(s core.SecretAccess) (syncFacts, string, error) {
 		return f, "", nil
 	}
 
-	if _, err := v.root.Stat(s.RevealedPath); err != nil {
+	plaintextInfo, err := v.root.Stat(s.RevealedPath)
+	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return f, "", nil
 		}
@@ -214,7 +218,8 @@ func (v *View) probeWorktree(s core.SecretAccess) (syncFacts, string, error) {
 	}
 	f.plaintext = true
 
-	data, err := v.root.ReadFile(v.secret.SealedPath(s.RevealedPath))
+	sealedPath := v.secret.SealedPath(s.RevealedPath)
+	data, err := v.root.ReadFile(sealedPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return f, "", nil
@@ -223,6 +228,12 @@ func (v *View) probeWorktree(s core.SecretAccess) (syncFacts, string, error) {
 		return f, "", fmt.Errorf("read object of %s: %w", s.RevealedPath, err)
 	}
 	f.object = true
+
+	objectInfo, err := v.root.Stat(sealedPath)
+	if err != nil {
+		return f, "", fmt.Errorf("stat object of %s: %w", s.RevealedPath, err)
+	}
+	f.objectNewer = objectInfo.ModTime().After(plaintextInfo.ModTime())
 
 	match, err := v.secret.MatchObject(s.RevealedPath, bytes.NewReader(data))
 	if err != nil {
