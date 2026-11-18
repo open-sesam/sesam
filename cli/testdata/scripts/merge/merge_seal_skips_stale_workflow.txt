@@ -53,10 +53,10 @@ exec sesam seal
 exec sesam status
 ! stdout 'stale'
 
-# --all is the way to insist on the plaintext, stale or not.
+# Rewriting an older version after the object makes it a local modification.
 cp $TMPDIR/base.txt s
 exec sesam status
-stdout '1 stale'
+stdout '1 modified'
 exec sesam seal --all
 exec sesam show .sesam/objects/s.sesam
 stdout 'BASE'
