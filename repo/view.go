@@ -403,6 +403,25 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 	return report, nil
 }
 
+// Identities returns the identities the view was unlocked with, so a second
+// repo opened alongside does not have to ask for them again.
+func (v *View) Identities() core.Identities {
+	return v.identities
+}
+
+// VerifyStagedLog checks only that the staged audit log keeps every entry of
+// HEAD's - cheap enough for a hook on every commit.
+func (v *View) VerifyStagedLog(ctx context.Context) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.isClosed() {
+		return ErrClosed
+	}
+
+	return core.VerifyStagedLog(ctx, v.sesamDir, v.gitRepo, v.identities, v.vstate.InitCommit())
+}
+
 // configConflicts reports which of sesam.yml's currently declared changes are
 // already reflected in the config committed at HEAD - the same signal `sesam
 // config apply` uses to refuse them. Verify cannot refuse anything, being read-only,

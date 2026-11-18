@@ -461,6 +461,54 @@ func entryOriginKey(e *AuditEntrySigned) string {
 		cmp.Or(e.ChangedByBeforeMerge, e.ChangedBy)
 }
 
+// VerifyStagedLog checks that the staged audit log accounts for every entry of
+// HEAD's - the first step of VerifyHistory, without walking any further. A
+// staged log equal to HEAD's, or a HEAD log ids cannot read, passes.
+func VerifyStagedLog(ctx context.Context, sesamDir string, g *Git, ids Identities, initCommitRev string) error {
+	prefix, err := SesamGitPrefix(g, sesamDir)
+	if err != nil {
+		return err
+	}
+
+	auditLogIter, err := auditLogHistory(ctx, sesamDir, g, ids, "HEAD", initCommitRev, true, nil)
+	if err != nil {
+		return fmt.Errorf("build audit log history: %w", err)
+	}
+
+	var staged *auditLogSnapshot
+	for curr, err := range auditLogIter {
+		if err != nil {
+			return err
+		}
+
+		if staged == nil {
+			if curr.Commit != SnapshotStaged {
+				return nil
+			}
+
+			staged = curr
+			continue
+		}
+
+		if curr.Log == nil {
+			return nil
+		}
+
+		if err := auditLogCovers(staged.Log, curr.Log); err != nil {
+			return &AuditLogRewrittenError{
+				Older:     curr.Commit,
+				Newer:     SnapshotStaged,
+				SesamPath: path.Join(prefix, ".sesam"),
+				Err:       err,
+			}
+		}
+
+		return nil
+	}
+
+	return nil
+}
+
 // VerifyHistory checks that, along the FIRST-PARENT chain from the worktree log
 // (if worktree is non-nil) and the staged log through HEAD, every older audit log is accounted for in the newer one (see
 // auditLogCovers), and that the tip chain-verifies. Where that chain has no

@@ -1,0 +1,50 @@
+# Reverting a tell kills the user with a new entry - the log only ever grows.
+# Reverting that revert tells them again, with the key material on record.
+
+env GIT_EDITOR=true
+sesam-repo admin
+exec sesam hook install
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'tell bob'
+
+# A dry run plans the inverse and touches nothing.
+exec sesam revert --dry-run HEAD
+stdout '^- user bob$'
+exec git status --porcelain
+! stdout .
+
+# A plain git revert of HEAD runs no driver and no pre-commit. The
+# prepare-commit-msg hook catches the truncated log and points to sesam revert.
+! exec git revert --no-edit HEAD
+stderr 'drops entries that HEAD holds'
+stderr 'git reset --merge., then .sesam revert [0-9a-f]+'
+exec git reset --merge
+exec git log --oneline
+! stdout 'Revert'
+
+exec sesam revert HEAD
+stdout '^- user bob$'
+stderr 'git revert --continue'
+exec git revert --continue
+exec git log -1 --format=%s
+stdout 'Revert "tell bob"'
+
+exec sesam user list
+! stdout bob
+exec sesam show .sesam/audit/log.jsonl
+stdout '"user.kill"'
+exec sesam verify --all
+! stderr 'not a prefix'
+
+# Reverting the revert brings bob back.
+exec sesam revert HEAD
+stdout '^\+ user bob \(groups: dev\)$'
+exec git revert --continue
+exec sesam user list
+stdout bob
+exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl
+stdout '"user.tell"'
+exec sesam verify --all
+! stderr 'not a prefix'

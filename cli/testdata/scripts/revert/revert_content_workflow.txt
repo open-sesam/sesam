@@ -1,0 +1,97 @@
+# Reverting a seal puts the old content back, merged onto what HEAD holds now:
+# later edits stay, conflicting ones leave markers to resolve by hand.
+
+env GIT_EDITOR=true
+sesam-repo admin v1.txt v2.txt v3.txt v4.txt t1.txt t2.txt resolved.txt
+exec sesam hook install
+
+cp $TMPDIR/v1.txt s
+cp $TMPDIR/t1.txt t
+exec sesam add s t --group admin
+exec git add -A
+exec git commit -m 'add s and t'
+
+cp $TMPDIR/v2.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'change s'
+
+cp $TMPDIR/t2.txt t
+exec sesam seal
+exec git add -A
+exec git commit -m 'change t'
+
+# The drivers would merge the log backwards for an older commit. The log driver
+# refuses, which aborts the whole revert before any secret was touched.
+! exec git revert --no-edit HEAD~1
+stderr 'would remove entries from the append-only audit log'
+stderr 'run .sesam revert <commit>. instead'
+exec git status --porcelain
+! stdout .
+cmp s $TMPDIR/v2.txt
+
+# t changed since, but not in the reverted commit: it is left alone.
+exec sesam revert HEAD~1
+stdout '^~ content of s$'
+! stdout 'content of t'
+exec git revert --continue
+cmp s $TMPDIR/v1.txt
+cmp t $TMPDIR/t2.txt
+exec sesam status
+! stdout 'not in sync|stale|diverged'
+exec sesam verify --all
+stderr 'Integrity: ok'
+! stderr 'not a prefix'
+
+# A clean checkout reveals the reverted content.
+rm s
+exec sesam reveal
+cmp s $TMPDIR/v1.txt
+
+# Now one that conflicts: s changed on the same line after the reverted commit.
+cp $TMPDIR/v4.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'change s again'
+cp $TMPDIR/v3.txt s
+exec sesam seal
+exec git add -A
+exec git commit -m 'and again'
+
+exec sesam revert HEAD~1
+stdout '^! content of s \(1 conflict\)$'
+stderr 'resolve the conflict markers in s, then run .sesam seal s. and .git add .sesam.'
+grep '^<<<<<<<' s
+
+# The hook refuses to commit markers.
+! exec git revert --continue
+stderr 'unresolved conflicts'
+
+cp $TMPDIR/resolved.txt s
+exec sesam seal s
+exec git add .sesam
+exec git revert --continue
+cmp s $TMPDIR/resolved.txt
+exec sesam verify --all
+stderr 'Integrity: ok'
+! stderr 'not a prefix'
+
+-- v1.txt --
+user=alice
+password=one
+-- v2.txt --
+user=alice
+password=two
+-- v3.txt --
+user=alice
+password=three
+-- v4.txt --
+user=alice
+password=four
+-- t1.txt --
+token=a
+-- t2.txt --
+token=b
+-- resolved.txt --
+user=alice
+password=resolved

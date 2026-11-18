@@ -7,9 +7,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/urfave/cli/v3"
+	"opensesam.org/sesam/core"
 	"opensesam.org/sesam/repo"
 )
 
@@ -18,6 +22,11 @@ import (
 // non-sesam repo.
 func silentWithRepo(verifyMode repo.VerifyMode, action RepoAction) cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) (err error) {
+		// `sesam revert` holds the repo while it runs git itself.
+		if os.Getenv(envRevert) == "1" {
+			return nil
+		}
+
 		// Resolve up front: repo.Load/IsInitialized walk up to the nearest .sesam,
 		// while the git helpers below only take Abs() of what they are given. Run
 		// from a subdirectory the two would name different trees, and the git
@@ -102,12 +111,19 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 			return err
 		}
 
-		if diverged := states.Paths(repo.SecretStateDiverged); len(diverged) > 0 {
+		// `sesam revert` restored plaintext that matches an older object, and it
+		// sealed or conflicted everything itself. Taking that for stale or
+		// diverged would throw a hand-resolved conflict away, so it is sealed.
+		reverting := kind == mergeKindRevert
+
+		if diverged := states.Paths(repo.SecretStateDiverged); len(diverged) > 0 && !reverting {
 			return divergedError(diverged, kind)
 		}
 
-		if err := refreshStale(ctx, r, states, false); err != nil {
-			return err
+		if !reverting {
+			if err := refreshStale(ctx, r, states, false); err != nil {
+				return err
+			}
 		}
 
 		if err := r.Update(func(s *repo.Stage) error {
@@ -119,7 +135,7 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 				}
 			}
 
-			_, err := s.Seal(ctx, repo.SealOpts{States: states})
+			_, err := s.Seal(ctx, repo.SealOpts{States: states, ForceStale: reverting, ForceDiverged: reverting})
 			return err
 		}); err != nil {
 			return err
@@ -337,6 +353,96 @@ func HandleHookPostMerge(ctx context.Context, cmd *cli.Command) error {
 
 		return nil
 	})(ctx, cmd)
+}
+
+// HandleHookPrepareCommitMsg refuses a `git revert` commit whose staged audit
+// log drops entries of HEAD's. That is the one hook a plain `git revert` runs:
+// it commits without pre-commit and would truncate the log unnoticed. Other
+// commits are left to pre-commit, which `--no-verify` may skip on purpose.
+func HandleHookPrepareCommitMsg(ctx context.Context, cmd *cli.Command) error {
+	// git passes (message file, source, commit). "commit" is an amend or -c/-C.
+	msgFile, source := cmd.Args().Get(0), cmd.Args().Get(1)
+	if source == "commit" {
+		return nil
+	}
+
+	rev := revertedCommit(msgFile)
+	if rev == "" {
+		return nil
+	}
+
+	// Only load the repo - and ask for a passphrase - when the log changed at all.
+	sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
+	if err != nil {
+		return nil //nolint:nilerr // a hook must never abort a commit outside sesam
+	}
+
+	if changed, err := stagedLogChanged(ctx, sesamDir); err != nil || !changed {
+		return nil //nolint:nilerr // e.g. no HEAD yet: nothing to drop entries of
+	}
+
+	return silentWithRepo(repo.VerifyModeNoDisk, func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
+		err := r.VerifyStagedLog(ctx)
+
+		var rewritten *core.AuditLogRewrittenError
+		if !errors.As(err, &rewritten) {
+			return err
+		}
+
+		// git already gave up on the commit and keeps no revert state.
+		return fmt.Errorf(
+			"the staged audit log drops entries that HEAD holds - refusing to commit:\n  %w\n\n%s",
+			err, gitRevertRefusal(rev, "git reset --merge"),
+		)
+	})(ctx, cmd)
+}
+
+// revertedCommit reads the commit a `git revert` message names, "" if the
+// message is not one.
+func revertedCommit(msgFile string) string {
+	//nolint:gosec // git hands us the message file of the commit in progress.
+	data, err := os.ReadFile(msgFile)
+	if err != nil {
+		return ""
+	}
+
+	m := revertMsgPattern.FindSubmatch(data)
+	if m == nil {
+		return ""
+	}
+
+	return string(m[1])
+}
+
+// revertMsgPattern matches the line `git revert` puts into its message.
+var revertMsgPattern = regexp.MustCompile(`This reverts commit ([0-9a-f]{7,64})`)
+
+// stagedLogChanged reports whether the index holds another audit log than HEAD.
+func stagedLogChanged(ctx context.Context, sesamDir string) (bool, error) {
+	worktreeRoot, prefix, err := worktreePrefix(ctx, sesamDir)
+	if err != nil {
+		return false, err
+	}
+
+	logPath := filepath.ToSlash(filepath.Join(prefix, core.SesamDir(), "audit", "log.jsonl"))
+	if _, ok := gitProbe(ctx, worktreeRoot, "rev-parse", "--verify", "HEAD^{commit}"); !ok {
+		return false, nil
+	}
+
+	//nolint:gosec // fixed git subcommand; the path is derived from the repo layout.
+	c := exec.CommandContext(ctx, "git", "diff", "--cached", "--quiet", "HEAD", "--", logPath)
+	c.Dir = worktreeRoot
+
+	err = c.Run()
+	exitErr := new(exec.ExitError)
+	switch {
+	case err == nil:
+		return false, nil
+	case errors.As(err, &exitErr) && exitErr.ExitCode() == 1:
+		return true, nil
+	default:
+		return false, err
+	}
 }
 
 // HandleHookPreMergeCommit runs when git is about to auto-commit a clean merge.

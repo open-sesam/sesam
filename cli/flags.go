@@ -425,6 +425,15 @@ var flagsConfigReset = []cli.Flag{
 }
 
 // flagsConfigApply contains output and sealing controls for applying the config.
+var flagsRevert = []cli.Flag{
+	&cli.BoolFlag{
+		Name:    "dry-run",
+		Aliases: []string{"n"},
+		Usage:   "Only show what the revert would do",
+	},
+	flagJSON,
+}
+
 var flagsConfigApply = []cli.Flag{
 	&cli.BoolFlag{
 		Name:    "force",

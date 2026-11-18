@@ -134,6 +134,16 @@ Check sesam installation for possible problems
 
 **--help, -h**: show help
 
+## revert
+
+Revert a commit by appending the inverse of its audit log entries
+
+**--dry-run, -n**: Only show what the revert would do
+
+**--help, -h**: show help
+
+**--json**: Print output as JSON
+
 ## hook
 
 Util to manage git hooks
@@ -161,6 +171,12 @@ Execute the pre-merge-commit hook - meant to be run by git!
 ### post-merge
 
 Execute the post-merge hook - meant to be run by git!
+
+**--help, -h**: show help
+
+### prepare-commit-msg
+
+Execute the prepare-commit-msg hook - meant to be run by git!
 
 **--help, -h**: show help
 

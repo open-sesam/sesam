@@ -190,6 +190,16 @@ Check sesam installation for possible problems
 
 **--help, -h**: show help
 
+### revert
+
+Revert a commit by appending the inverse of its audit log entries
+
+**--dry-run, -n**: Only show what the revert would do
+
+**--help, -h**: show help
+
+**--json**: Print output as JSON
+
 ### hook
 
 Util to manage git hooks
@@ -217,6 +227,12 @@ Execute the pre-merge-commit hook - meant to be run by git!
 ### hook post-merge
 
 Execute the post-merge hook - meant to be run by git!
+
+**--help, -h**: show help
+
+### hook prepare-commit-msg
+
+Execute the prepare-commit-msg hook - meant to be run by git!
 
 **--help, -h**: show help
 
@@ -1338,6 +1354,13 @@ and no accidental tampering was done. This is done by this hook before every com
 If errors happen the commit will be aborted and you can check if there is indeed something wrong.
 If you decide that all is good you can still continue with `git commit --no-verify` (this skips running the hook temporarily).
 
+### `prepare-commit-msg`
+
+A plain `git revert` commits on its own without running `pre-commit`. This hook
+is the one it does run: if the commit is a revert and its staged audit log drops
+entries that `HEAD` holds, the commit is refused. See Reverting
+commits for what to do instead.
+
 ### Merging branches
 
 > **Warning**
@@ -1494,6 +1517,53 @@ $ git commit -am 'merge'
 - If you have a secret that is binary in nature, we can't merge it with conflict markers. In this case we'll add a TODO `.theirs` version next to it and inform you.
 - Secrets only the other side changed keep your plaintext until you finish: `sesam status` lists them as stale (S) and the finalize takes the incoming version. Edit one of them before finishing and it is diverged (!) - the finalize refuses, and you pick per secret: `sesam reveal <path>` takes the incoming version, `sesam seal <path>` keeps yours (`--force-diverged` for all of them).
 - A rebase or cherry-pick uses the same machinery, but `git` runs no hook when they finish. Check `sesam status` afterwards: it names the operation and what is left to do. Secrets that lag behind show as stale there; `sesam reveal` refreshes them and `sesam seal` leaves them alone until you do.
+
+### Reverting commits
+
+`git revert <commit>` undoes a commit by applying its diff in reverse. For the
+audit log that means removing the entries the commit appended - which is
+exactly what an append-only log must never do. Undoing a sesam change instead
+needs *new* entries that do the opposite: a kill for a tell, a tell for a kill,
+a reseal with the old content for a seal, and so on.
+
+`sesam revert <commit>` does that:
+
+```shell
+$ sesam revert HEAD~2
+- user bob
+~ content of db/password
+  skipped user.regenerate_sign_key alice: a signing key is never rolled back
+sesam: review the result, then finish with `git revert --continue`
+$ git revert --continue
+```
+
+What happens on the technical level:
+
+- The `.sesam` of the commit and of its parent are unpacked and verified, like
+  the incoming branch of a merge.
+- The difference between the two is turned into inverse operations and rebased
+  onto `HEAD`: whatever changed since the commit is kept. A group the commit
+  added is removed again, a group added later stays.
+- Secrets whose content the commit changed get their old content back via a
+  three-way merge onto what `HEAD` holds now. A conflict leaves markers in the
+  revealed file: resolve them, then `sesam seal <path>` and `git add .sesam`.
+- `git revert --no-commit` reverts everything outside the vault as usual. The
+  inverse entries are then appended and sealed, and the revert is left for you
+  to review and finish with `git revert --continue`.
+
+Parts of a commit that cannot be undone are skipped and named in the output:
+
+- A rotated signing key is never rolled back.
+- A user or secret that was renamed, moved or removed since is left alone.
+- A secret you cannot read keeps its content.
+
+Merge commits and commits that hold an audit log merge are refused; revert the
+commits they brought in instead. A re-told user gets the key material recorded
+before, never a freshly resolved forge key, and a new signing key.
+
+A plain `git revert` is stopped where sesam can see it: the audit log merge
+driver aborts the revert of an older commit, and the `prepare-commit-msg` hook
+refuses the revert of the last one.
 
 # VERIFYING
 
@@ -1794,7 +1864,7 @@ verified state and what's on disk disagree; the cause is usually one of:
   `git revert` of a vault commit or an audit log merge conflict resolved by
   taking one side, followed by a sesam command that writes on top of it. The
   pre-commit hook refuses such a commit; `git checkout HEAD -- .sesam` and
-  redoing the change with sesam fixes it.
+  redoing the change with sesam fixes it. To undo a commit, use `sesam revert`.
 - **Genuine tampering.** Truncation or substitution of the audit log (see below).
 
 If verify reports the **audit log was truncated** or the **init file changed**,

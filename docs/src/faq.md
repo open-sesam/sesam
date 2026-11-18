@@ -95,7 +95,7 @@ verified state and what's on disk disagree; the cause is usually one of:
   `git revert` of a vault commit or an audit log merge conflict resolved by
   taking one side, followed by a sesam command that writes on top of it. The
   pre-commit hook refuses such a commit; `git checkout HEAD -- .sesam` and
-  redoing the change with sesam fixes it.
+  redoing the change with sesam fixes it. To undo a commit, use `sesam revert`.
 - **Genuine tampering.** Truncation or substitution of the audit log (see below).
 
 If verify reports the **audit log was truncated** or the **init file changed**,

@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,6 +20,16 @@ type ExitCodeError struct {
 	code  int
 	print bool
 }
+
+// unverifiedRevisionError reports a revision whose .sesam failed verification;
+// the report was already printed.
+type unverifiedRevisionError struct {
+	rev string
+}
+
+// envRevert marks the git commands `sesam revert` runs itself: the drivers
+// keep our side, since sesam writes the inverse afterwards, and hooks do nothing.
+const envRevert = "SESAM_REVERT"
 
 func (e *ExitCodeError) Error() string {
 	if e.err == nil {
@@ -46,6 +57,10 @@ func (e *ExitCodeError) Code() int {
 }
 
 func HandleMergeSecret(ctx context.Context, cmd *cli.Command) error {
+	if revertGuard() {
+		return nil
+	}
+
 	drv, err := openMergeDriver(ctx, cmd)
 	if err != nil {
 		return err
@@ -156,6 +171,10 @@ func sealAdvice(kind mergeKind, whenHooked string) string {
 }
 
 func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
+	if revertGuard() {
+		return nil
+	}
+
 	drv, err := openMergeDriver(ctx, cmd)
 	if err != nil {
 		return err
@@ -176,6 +195,12 @@ func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
 		drv.originPath,
 		drv.conflictMarkerSize,
 	)
+	if errors.Is(err, core.ErrBackwardsMerge) {
+		// git names neither the operation nor the commit to a driver. Exit 129
+		// makes it abort the whole operation, so there is nothing to undo.
+		err = errors.New(gitRevertRefusal("", ""))
+	}
+
 	if err != nil {
 		// git reads <= 128 as a plain conflict the user could `git add` away;
 		// only > 128 aborts the merge.
@@ -195,6 +220,29 @@ func HandleMergeAuditLog(ctx context.Context, cmd *cli.Command) error {
 	fmt.Fprint(os.Stderr, mergeDriverSummary(cr.Resolutions, mergeState(ctx, drv.sesamDir)))
 
 	return nil
+}
+
+// revertGuard reports whether the driver runs inside `sesam revert`, which
+// writes the inverse itself: our side is kept as it is, exit 0 leaving %A.
+func revertGuard() bool {
+	return os.Getenv(envRevert) == "1"
+}
+
+// gitRevertRefusal explains why git cannot revert sesam's state and what does.
+// undo is how to get rid of what git did so far, empty when git did nothing.
+func gitRevertRefusal(rev, undo string) string {
+	if rev == "" {
+		rev = "<commit>"
+	}
+
+	next := "sesam: run `sesam revert " + short(rev) + "` instead."
+	if undo != "" {
+		next = "sesam: run `" + undo + "`, then `sesam revert " + short(rev) + "`."
+	}
+
+	return "sesam: `git revert` would remove entries from the append-only audit log.\n" +
+		"sesam: undoing a sesam change needs new, inverse entries instead (a kill for a tell, ...).\n" +
+		next
 }
 
 // mergeDriver is everything git hands a merge driver, resolved once: both of
@@ -420,36 +468,17 @@ func readTheirState(sesamDir, rev string) (*core.VerifiedState, error) {
 // git runs a driver per conflicting path, so this happens once and the rest of
 // the invocations read the file.
 func ensureTheirsVerified(ctx context.Context, sesamDir, rev string, identityPaths []string, opts repo.RepoOpts) error {
-	checkoutDir := filepath.Join(sesamDir, theirsCheckoutPath)
-	if err := extractSesamDir(ctx, sesamDir, rev, checkoutDir); err != nil {
-		return fmt.Errorf("unpack %s: %w", rev, err)
-	}
+	theirs, err := loadVerifiedRevision(ctx, sesamDir, rev, filepath.Join(sesamDir, theirsCheckoutPath), identityPaths, opts)
+	if err != nil {
+		var unverified *unverifiedRevisionError
+		if errors.As(err, &unverified) {
+			return fmt.Errorf("the branch being merged in does not verify - refusing to merge it")
+		}
 
-	// we need to double check that that the incoming audit log is actually from the same root as ours.
-	// otherwise some attacker could craft an audit log that is not based on ours.
-	// usually, this would be noticed in the audit log merge driver, but it's here as double bolt.
-	if err := requireSameInitAnchor(sesamDir, checkoutDir); err != nil {
 		return err
 	}
 
-	theirs, err := repo.Load(ctx, checkoutDir, identityPaths, opts)
-	if err != nil {
-		return fmt.Errorf("load %s: %w", rev, err)
-	}
-
 	defer func() { _ = theirs.Close() }()
-
-	// Truncation and forge checks need the history and the network; neither says
-	// anything about whether the objects we are about to merge are sound.
-	report, err := theirs.Verify(ctx, repo.VerifyOptions{Integrity: true, KeyReuse: true})
-	if err != nil {
-		return fmt.Errorf("verify %s: %w", rev, err)
-	}
-
-	if !report.OK() {
-		printReport(repo.VerifyOptions{Integrity: true, KeyReuse: true}, report)
-		return fmt.Errorf("the branch being merged in does not verify - refusing to merge it")
-	}
 
 	state, err := theirs.VerifiedState()
 	if err != nil {
@@ -457,6 +486,48 @@ func ensureTheirsVerified(ctx context.Context, sesamDir, rev string, identityPat
 	}
 
 	return writeJSONFile(filepath.Join(sesamDir, theirsVStatePath(rev)), state)
+}
+
+func (e *unverifiedRevisionError) Error() string {
+	return e.rev + " does not verify"
+}
+
+// loadVerifiedRevision unpacks the .sesam of rev into dir and loads it as a
+// repo of its own, verified as a whole - the equivalent of checking rev out and
+// running `sesam verify` on it. The caller closes the repo.
+func loadVerifiedRevision(ctx context.Context, sesamDir, rev, dir string, identityPaths []string, opts repo.RepoOpts) (*repo.Repo, error) {
+	if err := extractSesamDir(ctx, sesamDir, rev, dir); err != nil {
+		return nil, fmt.Errorf("unpack %s: %w", rev, err)
+	}
+
+	// we need to double check that that the incoming audit log is actually from the same root as ours.
+	// otherwise some attacker could craft an audit log that is not based on ours.
+	// usually, this would be noticed in the audit log merge driver, but it's here as double bolt.
+	if err := requireSameInitAnchor(sesamDir, dir); err != nil {
+		return nil, err
+	}
+
+	r, err := repo.Load(ctx, dir, identityPaths, opts)
+	if err != nil {
+		return nil, fmt.Errorf("load %s: %w", rev, err)
+	}
+
+	// Truncation and forge checks need the history and the network; neither says
+	// anything about whether the objects we are about to use are sound.
+	verifyOpts := repo.VerifyOptions{Integrity: true, KeyReuse: true}
+	report, err := r.Verify(ctx, verifyOpts)
+	if err != nil {
+		_ = r.Close()
+		return nil, fmt.Errorf("verify %s: %w", rev, err)
+	}
+
+	if !report.OK() {
+		_ = r.Close()
+		printReport(verifyOpts, report)
+		return nil, &unverifiedRevisionError{rev: rev}
+	}
+
+	return r, nil
 }
 
 // requireSameInitAnchor refuses a vault that does not belong to this repository.
