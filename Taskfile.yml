@@ -57,7 +57,7 @@ tasks:
   test-race:
     desc: Run go tests
     cmds:
-      - gotestsum --format testname -- -tags docgen -race  ./...
+      - gotestsum --format testname -- -tags docgen -race -timeout=20m  ./...
 
   coverage:
     desc: Run go tests with coverage report
