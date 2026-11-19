@@ -23,7 +23,6 @@ import (
 // non-sesam repo.
 func silentWithRepo(verifyMode repo.VerifyMode, action RepoAction) cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) (err error) {
-		// `sesam revert` holds the repo while it runs git itself.
 		if os.Getenv(envRevert) == "1" {
 			return nil
 		}
@@ -112,9 +111,6 @@ func HandleHookPreCommit(ctx context.Context, cmd *cli.Command) error {
 			return err
 		}
 
-		// `sesam revert` restored plaintext that matches an older object, and it
-		// sealed or conflicted everything itself. Taking that for stale or
-		// diverged would throw a hand-resolved conflict away, so it is sealed.
 		reverting := kind == mergeKindRevert
 
 		if diverged := states.Paths(repo.SecretStateDiverged); len(diverged) > 0 && !reverting {
@@ -447,7 +443,12 @@ func undoPlainRevert(ctx context.Context, sesamDir, rev string) bool {
 		return false
 	}
 
-	reverted, ok := patchID(ctx, worktreeRoot, "diff", rev, rev+"^")
+	commit, ok := commitInHistory(ctx, worktreeRoot, rev)
+	if !ok {
+		return false
+	}
+
+	reverted, ok := patchID(ctx, worktreeRoot, "diff", commit, commit+"^")
 	if !ok || staged != reverted {
 		return false
 	}
@@ -455,12 +456,35 @@ func undoPlainRevert(ctx context.Context, sesamDir, rev string) bool {
 	return runGitAsRevert(ctx, worktreeRoot, "reset", "--merge") == nil
 }
 
+// commitInHistory finds the one commit in HEAD's history whose hash starts with
+// abbrev. The hash handed back is git's own, so the commit message never ends up
+// on a git command line, and a ref that merely looks like a hash cannot match.
+func commitInHistory(ctx context.Context, dir, abbrev string) (string, bool) {
+	out, err := gitOutputRaw(ctx, dir, "rev-list", "HEAD")
+	if err != nil {
+		return "", false
+	}
+
+	found := ""
+	for sha := range strings.FieldsSeq(out) {
+		if !strings.HasPrefix(sha, abbrev) {
+			continue
+		}
+		if found != "" {
+			return "", false // ambiguous
+		}
+		found = sha
+	}
+
+	return found, found != ""
+}
+
 // patchID is the `git patch-id` of a `git diff ...`: equal for the same change,
 // wherever it applies.
 func patchID(ctx context.Context, dir string, diffArgs ...string) (string, bool) {
 	args := append(append([]string{}, diffArgs...), "--binary", "--no-renames", "--no-ext-diff", "--no-textconv")
 
-	//nolint:gosec // fixed git subcommands; the revs come from git's own message.
+	//nolint:gosec // fixed git subcommands; the revs are hashes git printed itself.
 	diff := exec.CommandContext(ctx, "git", args...)
 	diff.Dir = dir
 
