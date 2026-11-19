@@ -2,7 +2,7 @@
 # Reverting that revert tells them again, with the key material on record.
 
 env GIT_EDITOR=true
-sesam-repo admin
+sesam-repo admin extra.txt
 exec sesam hook install
 
 exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
@@ -16,13 +16,31 @@ exec git status --porcelain
 ! stdout .
 
 # A plain git revert of HEAD runs no driver and no pre-commit. The
-# prepare-commit-msg hook catches the truncated log and points to sesam revert.
+# prepare-commit-msg hook catches the truncated log, undoes what git changed
+# and points to sesam revert.
 ! exec git revert --no-edit HEAD
 stderr 'drops entries that HEAD holds'
-stderr 'git reset --merge., then .sesam revert [0-9a-f]+'
-exec git reset --merge
+stderr 'undid what .git revert. changed'
+stderr 'run .sesam revert [0-9a-f]+. instead'
+exec git status --porcelain
+! stdout .
 exec git log --oneline
 ! stdout 'Revert'
+
+# With --no-commit the index may hold more than git's revert: nothing is reset,
+# the revert is left to abort. Plain `git commit` stops at pre-commit already.
+cp $TMPDIR/extra.txt extra.txt
+exec git revert --no-commit HEAD
+exec git add -f extra.txt
+! exec git commit --no-verify --no-edit
+stderr 'drops entries that HEAD holds'
+stderr 'git revert --abort., then .sesam revert [0-9a-f]+'
+! stderr 'undid what'
+exists .git/REVERT_HEAD
+exec git diff --cached --name-only
+stdout 'extra.txt'
+exec git revert --abort
+rm extra.txt
 
 exec sesam revert HEAD
 stdout '^- user bob$'
@@ -48,3 +66,6 @@ exec sesam --identity $BOB_KEY show .sesam/audit/log.jsonl
 stdout '"user.tell"'
 exec sesam verify --all
 ! stderr 'not a prefix'
+
+-- extra.txt --
+not part of the revert

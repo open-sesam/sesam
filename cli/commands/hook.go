@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -360,7 +361,6 @@ func HandleHookPostMerge(ctx context.Context, cmd *cli.Command) error {
 // it commits without pre-commit and would truncate the log unnoticed. Other
 // commits are left to pre-commit, which `--no-verify` may skip on purpose.
 func HandleHookPrepareCommitMsg(ctx context.Context, cmd *cli.Command) error {
-	// git passes (message file, source, commit). "commit" is an amend or -c/-C.
 	msgFile, source := cmd.Args().Get(0), cmd.Args().Get(1)
 	if source == "commit" {
 		return nil
@@ -371,7 +371,6 @@ func HandleHookPrepareCommitMsg(ctx context.Context, cmd *cli.Command) error {
 		return nil
 	}
 
-	// Only load the repo - and ask for a passphrase - when the log changed at all.
 	sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
 	if err != nil {
 		return nil //nolint:nilerr // a hook must never abort a commit outside sesam
@@ -389,10 +388,20 @@ func HandleHookPrepareCommitMsg(ctx context.Context, cmd *cli.Command) error {
 			return err
 		}
 
-		// git already gave up on the commit and keeps no revert state.
+		// git already gave up on the commit and keeps no revert state, so we
+		// undo its changes - but only when they are nothing but git's revert.
+		undo := "git reset --merge"
+		switch {
+		case mergeState(ctx, sesamDir) == mergeKindRevert:
+			undo = "git revert --abort"
+		case undoPlainRevert(ctx, sesamDir, rev):
+			fmt.Fprintln(os.Stderr, "sesam: undid what `git revert` changed (`git reset --merge`).")
+			undo = ""
+		}
+
 		return fmt.Errorf(
 			"the staged audit log drops entries that HEAD holds - refusing to commit:\n  %w\n\n%s",
-			err, gitRevertRefusal(rev, "git reset --merge"),
+			err, gitRevertRefusal(rev, undo),
 		)
 	})(ctx, cmd)
 }
@@ -416,6 +425,66 @@ func revertedCommit(msgFile string) string {
 
 // revertMsgPattern matches the line `git revert` puts into its message.
 var revertMsgPattern = regexp.MustCompile(`This reverts commit ([0-9a-f]{7,64})`)
+
+// undoPlainRevert runs `git reset --merge` for a commit that is nothing but
+// git's own auto-committing revert of rev, and reports whether it did. Anything
+// else - `revert --no-commit` (REVERT_HEAD), a sequence (sequencer dir), edits
+// staged on top - is left alone: the reset would throw that work away.
+func undoPlainRevert(ctx context.Context, sesamDir, rev string) bool {
+	worktreeRoot, _, err := worktreePrefix(ctx, sesamDir)
+	if err != nil || mergeState(ctx, sesamDir).InProgress() {
+		return false
+	}
+
+	if seq, ok := gitProbe(ctx, worktreeRoot, "rev-parse", "--path-format=absolute", "--git-path", "sequencer"); !ok {
+		return false
+	} else if _, err := os.Stat(seq); !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+
+	staged, ok := patchID(ctx, worktreeRoot, "diff", "--cached", "HEAD")
+	if !ok {
+		return false
+	}
+
+	reverted, ok := patchID(ctx, worktreeRoot, "diff", rev, rev+"^")
+	if !ok || staged != reverted {
+		return false
+	}
+
+	return runGitAsRevert(ctx, worktreeRoot, "reset", "--merge") == nil
+}
+
+// patchID is the `git patch-id` of a `git diff ...`: equal for the same change,
+// wherever it applies.
+func patchID(ctx context.Context, dir string, diffArgs ...string) (string, bool) {
+	args := append(append([]string{}, diffArgs...), "--binary", "--no-renames", "--no-ext-diff", "--no-textconv")
+
+	//nolint:gosec // fixed git subcommands; the revs come from git's own message.
+	diff := exec.CommandContext(ctx, "git", args...)
+	diff.Dir = dir
+
+	out, err := diff.Output()
+	if err != nil || len(out) == 0 {
+		return "", false
+	}
+
+	id := exec.CommandContext(ctx, "git", "patch-id", "--stable")
+	id.Dir = dir
+	id.Stdin = bytes.NewReader(out)
+
+	sum, err := id.Output()
+	if err != nil {
+		return "", false
+	}
+
+	fields := strings.Fields(string(sum))
+	if len(fields) == 0 {
+		return "", false
+	}
+
+	return fields[0], true
+}
 
 // stagedLogChanged reports whether the index holds another audit log than HEAD.
 func stagedLogChanged(ctx context.Context, sesamDir string) (bool, error) {

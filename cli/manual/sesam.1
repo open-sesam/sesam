@@ -1655,8 +1655,10 @@ If you decide that all is good you can still continue with \fBgit commit --no-ve
 .SS \fBprepare-commit-msg\fR
 A plain \fBgit revert\fR commits on its own without running \fBpre-commit\fR\&. This hook
 is the one it does run: if the commit is a revert and its staged audit log drops
-entries that \fBHEAD\fR holds, the commit is refused. See Reverting
-commits for what to do instead.
+entries that \fBHEAD\fR holds, the commit is refused. When the staged changes are
+exactly git's revert of that commit, the hook also undoes them with
+\fBgit reset --merge\fR; anything staged on top is left for you to abort. See
+Reverting commits for what to do instead.
 
 .SS Merging branches
 .PP

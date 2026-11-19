@@ -1358,8 +1358,10 @@ If you decide that all is good you can still continue with `git commit --no-veri
 
 A plain `git revert` commits on its own without running `pre-commit`. This hook
 is the one it does run: if the commit is a revert and its staged audit log drops
-entries that `HEAD` holds, the commit is refused. See Reverting
-commits for what to do instead.
+entries that `HEAD` holds, the commit is refused. When the staged changes are
+exactly git's revert of that commit, the hook also undoes them with
+`git reset --merge`; anything staged on top is left for you to abort. See
+Reverting commits for what to do instead.
 
 ### Merging branches
 
