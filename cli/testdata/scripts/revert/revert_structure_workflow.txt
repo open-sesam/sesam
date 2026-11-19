@@ -1,0 +1,118 @@
+# Each structural operation is undone by its inverse, rebased onto HEAD:
+# changes made since the reverted commit are kept.
+
+env GIT_EDITOR=true
+sesam-repo admin s.txt
+exec sesam hook install
+
+exec sesam tell --user bob --recipient $BOB_PUBKEY --group dev
+cp $TMPDIR/s.txt s
+exec sesam add s --group dev
+exec git add -A
+exec git commit -m 'setup'
+
+# Groups: the reverted commit added ops, a later one added qa. Only ops goes.
+exec sesam user change-groups --user bob --group dev --group ops
+exec git add -A
+exec git commit -m 'bob joins ops'
+exec sesam user change-groups --user bob --group dev --group ops --group qa
+exec git add -A
+exec git commit -m 'bob joins qa'
+
+exec sesam revert HEAD~1
+stdout '^~ user bob groups: dev, qa$'
+exec git revert --continue
+exec sesam user list --json
+stdout '"qa"'
+! stdout '"ops"'
+
+# An access change goes back; admin-only counts as a change too.
+exec sesam add s --group admin
+exec git add -A
+exec git commit -m 'admin-only s'
+exec sesam revert HEAD
+stdout '^~ secret s access: dev$'
+exec git revert --continue
+exec sesam --identity $BOB_KEY reveal s
+
+# A secret bob cannot read stays removed when he reverts its removal.
+cp $TMPDIR/s.txt hidden
+exec sesam add hidden --group admin
+exec git add -A
+exec git commit -m 'add hidden'
+exec sesam rm hidden
+exec git add -A
+exec git commit -m 'remove hidden'
+exec sesam --identity $BOB_KEY revert HEAD
+stdout 'skipped secret.remove hidden: you cannot read it, so it cannot come back'
+stderr 'nothing to revert'
+
+# A removed secret comes back with its access list and its content.
+exec sesam rm s
+rm s
+exec git add -A
+exec git commit -m 'remove s'
+exec sesam revert HEAD
+stdout '^\+ secret s \(access: dev\)$'
+exec git revert --continue
+cmp s $TMPDIR/s.txt
+exec sesam --identity $BOB_KEY verify --all
+stderr 'Integrity: ok'
+
+# A move goes back to the old path.
+exec sesam mv s s2
+exec git add -A
+exec git commit -m 'move s'
+exec sesam revert HEAD
+stdout '^~ secret s2 -> s$'
+exec git revert --continue
+exec sesam ls --json
+stdout '"revealed_path": "s"'
+! stdout 's2'
+cmp s $TMPDIR/s.txt
+
+# A rename goes back to the old name.
+exec sesam user rename bob robert
+exec git add -A
+exec git commit -m 'rename bob'
+exec sesam revert HEAD
+stdout '^~ user robert -> bob$'
+exec git revert --continue
+exec sesam user list
+stdout bob
+! stdout robert
+
+# A rotated signing key is never rolled back; with nothing else in the commit
+# there is nothing to revert, and git is left as it was.
+exec sesam user regen-sign-key --user bob
+exec git add -A
+exec git commit -m 'rotate bob'
+exec sesam revert HEAD
+stdout 'skipped user.regenerate_sign_key bob: a signing key is never rolled back'
+stderr 'nothing to revert'
+exec git status --porcelain
+! stdout .
+! exists .git/REVERT_HEAD
+
+# Only an admin may kill, so bob cannot revert a tell; nothing is left behind.
+exec sesam tell --user carol --recipient $CAROL_PUBKEY --group dev
+exec git add -A
+exec git commit -m 'tell carol'
+! exec sesam --identity $BOB_KEY revert HEAD
+stderr 'admin'
+exec git status --porcelain
+! stdout .
+! exists .git/REVERT_HEAD
+
+# Merge commits are refused: revert what they brought in instead.
+exec git checkout -b topic
+cp $TMPDIR/s.txt plain.txt
+exec git add -f plain.txt
+exec git commit -m 'plain file'
+exec git checkout master
+exec git merge --no-ff -m 'merge topic' topic
+! exec sesam revert HEAD
+stderr 'the commit is a merge'
+
+-- s.txt --
+secret=1

@@ -247,6 +247,18 @@ Check sesam installation for possible problems
 .PP
 \fB--help, -h\fP: show help
 
+.SS revert
+Revert a commit by appending the inverse of its audit log entries
+
+.PP
+\fB--dry-run, -n\fP: Only show what the revert would do
+
+.PP
+\fB--help, -h\fP: show help
+
+.PP
+\fB--json\fP: Print output as JSON
+
 .SS hook
 Util to manage git hooks
 
@@ -273,6 +285,12 @@ Execute the pre-merge-commit hook - meant to be run by git!
 
 .SS hook post-merge
 Execute the post-merge hook - meant to be run by git!
+
+.PP
+\fB--help, -h\fP: show help
+
+.SS hook prepare-commit-msg
+Execute the prepare-commit-msg hook - meant to be run by git!
 
 .PP
 \fB--help, -h\fP: show help
@@ -1634,6 +1652,14 @@ Run \fBsesam verify --all\fR\&.
 If errors happen the commit will be aborted and you can check if there is indeed something wrong.
 If you decide that all is good you can still continue with \fBgit commit --no-verify\fR (this skips running the hook temporarily).
 
+.SS \fBprepare-commit-msg\fR
+A plain \fBgit revert\fR commits on its own without running \fBpre-commit\fR\&. This hook
+is the one it does run: if the commit is a revert and its staged audit log drops
+entries that \fBHEAD\fR holds, the commit is refused. When the staged changes are
+exactly git's revert of that commit, the hook also undoes them with
+\fBgit reset --merge\fR; anything staged on top is left for you to abort. See
+Reverting commits for what to do instead.
+
 .SS Merging branches
 .PP
 .RS
@@ -1816,6 +1842,62 @@ If you have a secret that is binary in nature, we can't merge it with conflict m
 Secrets only the other side changed keep your plaintext until you finish: \fBsesam status\fR lists them as stale (S) and the finalize takes the incoming version. Edit one of them before finishing and it is diverged (!) - the finalize refuses, and you pick per secret: \fBsesam reveal <path>\fR takes the incoming version, \fBsesam seal <path>\fR keeps yours (\fB--force-diverged\fR for all of them).
 .IP \(bu 2
 A rebase or cherry-pick uses the same machinery, but \fBgit\fR runs no hook when they finish. Check \fBsesam status\fR afterwards: it names the operation and what is left to do. Secrets that lag behind show as stale there; \fBsesam reveal\fR refreshes them and \fBsesam seal\fR leaves them alone until you do.
+
+.SS Reverting commits
+\fBgit revert <commit>\fR undoes a commit by applying its diff in reverse. For the
+audit log that means removing the entries the commit appended - which is
+exactly what an append-only log must never do. Undoing a sesam change instead
+needs \fInew\fP entries that do the opposite: a kill for a tell, a tell for a kill,
+a reseal with the old content for a seal, and so on.
+
+.PP
+\fBsesam revert <commit>\fR does that:
+
+.EX
+$ sesam revert HEAD~2
+- user bob
+~ content of db/password
+  skipped user.regenerate_sign_key alice: a signing key is never rolled back
+sesam: review the result, then finish with `git revert --continue`
+$ git revert --continue
+.EE
+
+.PP
+What happens on the technical level:
+.IP \(bu 2
+The \fB\&.sesam\fR of the commit and of its parent are unpacked and verified, like
+the incoming branch of a merge.
+.IP \(bu 2
+The difference between the two is turned into inverse operations and rebased
+onto \fBHEAD\fR: whatever changed since the commit is kept. A group the commit
+added is removed again, a group added later stays.
+.IP \(bu 2
+Secrets whose content the commit changed get their old content back via a
+three-way merge onto what \fBHEAD\fR holds now. A conflict leaves markers in the
+revealed file: resolve them, then \fBsesam seal <path>\fR and \fBgit add .sesam\fR\&.
+.IP \(bu 2
+\fBgit revert --no-commit\fR reverts everything outside the vault as usual. The
+inverse entries are then appended and sealed, and the revert is left for you
+to review and finish with \fBgit revert --continue\fR\&.
+
+.PP
+Parts of a commit that cannot be undone are skipped and named in the output:
+.IP \(bu 2
+A rotated signing key is never rolled back.
+.IP \(bu 2
+A user or secret that was renamed, moved or removed since is left alone.
+.IP \(bu 2
+A secret you cannot read keeps its content.
+
+.PP
+Merge commits and commits that hold an audit log merge are refused; revert the
+commits they brought in instead. A re-told user gets the key material recorded
+before, never a freshly resolved forge key, and a new signing key.
+
+.PP
+A plain \fBgit revert\fR is stopped where sesam can see it: the audit log merge
+driver aborts the revert of an older commit, and the \fBprepare-commit-msg\fR hook
+refuses the revert of the last one.
 
 
 .SH VERIFYING
@@ -2181,7 +2263,7 @@ the hooks normally do this for you on checkout.
 \fBgit revert\fR of a vault commit or an audit log merge conflict resolved by
 taking one side, followed by a sesam command that writes on top of it. The
 pre-commit hook refuses such a commit; \fBgit checkout HEAD -- .sesam\fR and
-redoing the change with sesam fixes it.
+redoing the change with sesam fixes it. To undo a commit, use \fBsesam revert\fR\&.
 .IP \(bu 2
 \fBGenuine tampering.\fP Truncation or substitution of the audit log (see below).
 

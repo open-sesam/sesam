@@ -56,6 +56,11 @@ import (
 // The per-operation resolution rules live as doc comments on the individual
 // resolve* functions below.
 
+// ErrBackwardsMerge is returned by AuditMerge for a merge whose incoming side
+// lacks entries of the base. A log only grows, so that is a commit replayed in
+// reverse - `git revert` - which would drop recorded entries.
+var ErrBackwardsMerge = errors.New("the incoming audit log is a truncation of the merge base")
+
 // ConflictResolution is AuditMerge's in-process result: the noteworthy decisions
 // (conflicts plus post-merge advisories) for the UI to show now, and their
 // count. Routine applies/dedupes appear only as the counts in the persisted
@@ -177,6 +182,10 @@ func AuditMerge(ours, theirs, origin *AuditLog, signer Signer, pluginUI *PluginU
 
 	if err := requireSameInit(ours, theirs, origin); err != nil {
 		return nil, nil, err
+	}
+
+	if n := len(theirs.Entries); n < len(origin.Entries) && len(commonPrefix(theirs, origin).Entries) == n {
+		return nil, nil, ErrBackwardsMerge
 	}
 
 	baseState, err := VerifyChain(origin, EmptyKeyring(), pluginUI)

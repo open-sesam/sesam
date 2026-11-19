@@ -497,6 +497,25 @@ func TestAuditMergeNonAdminRejected(t *testing.T) {
 	require.ErrorContains(t, err, "not an admin")
 }
 
+// A revert replays a commit in reverse: theirs is the commit's parent, the base
+// the commit itself. Merging that would drop the commit's entries.
+func TestAuditMergeBackwardsRejected(t *testing.T) {
+	parent, admin, _ := mergeBase(t)
+
+	commit := cloneLog(parent)
+	feed(t, commit, admin.Signer, "admin", &DetailUserKill{User: "bob"})
+
+	head := cloneLog(commit)
+	feed(t, head, admin.Signer, "admin", &DetailSecretAdd{RevealedPath: "s/db", AccessGroups: []string{"dev"}})
+
+	_, _, err := AuditMerge(head, parent, commit, admin.Signer, nil)
+	require.ErrorIs(t, err, ErrBackwardsMerge)
+
+	// The ordinary direction still merges.
+	_, _, err = AuditMerge(parent, head, commit, admin.Signer, nil)
+	require.NotErrorIs(t, err, ErrBackwardsMerge)
+}
+
 func TestAuditMergeDifferentInitRejected(t *testing.T) {
 	base, admin, _ := mergeBase(t)
 	other, _, _ := mergeBase(t) // independent init -> different init hash

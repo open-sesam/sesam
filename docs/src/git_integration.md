@@ -69,6 +69,15 @@ and no accidental tampering was done. This is done by this hook before every com
 If errors happen the commit will be aborted and you can check if there is indeed something wrong.
 If you decide that all is good you can still continue with `git commit --no-verify` (this skips running the hook temporarily).
 
+### `prepare-commit-msg`
+
+A plain `git revert` commits on its own without running `pre-commit`. This hook
+is the one it does run: if the commit is a revert and its staged audit log drops
+entries that `HEAD` holds, the commit is refused. When the staged changes are
+exactly git's revert of that commit, the hook also undoes them with
+`git reset --merge`; anything staged on top is left for you to abort. See
+[Reverting commits](#reverting-commits) for what to do instead.
+
 ## Merging branches
 
 ```admonish warn
@@ -246,3 +255,51 @@ This is the set-up for you via `.gitattributes` and the `sesam-merge-*` entries 
                            └────► (take <ours> signkeys) ├──►signkeys are ──────┘                                                                                           
                                 └────────────────────────┘   merged later                                                                                                   
 ```
+
+## Reverting commits
+
+`git revert <commit>` undoes a commit by applying its diff in reverse. For the
+audit log that means removing the entries the commit appended - which is
+exactly what an append-only log must never do. Undoing a sesam change instead
+needs *new* entries that do the opposite: a kill for a tell, a tell for a kill,
+a reseal with the old content for a seal, and so on.
+
+`sesam revert <commit>` does that:
+
+```shell
+$ sesam revert HEAD~2
+- user bob
+~ content of db/password
+  skipped user.regenerate_sign_key alice: a signing key is never rolled back
+sesam: review the result, then finish with `git revert --continue`
+$ git revert --continue
+```
+
+What happens on the technical level:
+
+- The `.sesam` of the commit and of its parent are unpacked and verified, like
+  the incoming branch of a merge.
+- The difference between the two is turned into inverse operations and rebased
+  onto `HEAD`: whatever changed since the commit is kept. A group the commit
+  added is removed again, a group added later stays.
+- Secrets whose content the commit changed get their old content back via a
+  three-way merge onto what `HEAD` holds now. A conflict leaves markers in the
+  revealed file: resolve them, then `sesam seal <path>` and `git add .sesam`.
+- `git revert --no-commit` reverts everything outside the vault as usual. The
+  inverse entries are then appended and sealed, and the revert is left for you
+  to review and finish with `git revert --continue`.
+
+Parts of a commit that cannot be undone are skipped and named in the output:
+
+- A rotated signing key is never rolled back.
+- A user or secret that was renamed, moved or removed since is left alone.
+- A secret you cannot read keeps its content.
+
+Merge commits and commits that hold an audit log merge are refused; revert the
+commits they brought in instead. A re-told user gets the key material recorded
+before, never a freshly resolved forge key, and a new signing key.
+
+A plain `git revert` is stopped where sesam can see it: the audit log merge
+driver aborts the revert of an older commit, and the `prepare-commit-msg` hook
+refuses the revert of the last one.
+

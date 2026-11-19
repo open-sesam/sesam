@@ -69,7 +69,7 @@ func rewrittenHints(e *core.AuditLogRewrittenError) []string {
 		"  Dropped or rewritten entries could otherwise undo what was recorded, e.g. bring back a removed user.",
 		"  Often this happens due to git commands bringing back an older log, e.g. by one of those cases:",
 		"    - git checkout <rev> -- " + sesam + "   (or git restore --source=<rev>)",
-		"    - git revert of a commit that changed " + sesam,
+		"    - git revert of a commit that changed " + sesam + "   (use `sesam revert <rev>` instead)",
 		"    - a merge conflict in " + sesam + "/audit/log.jsonl resolved by taking one side (git checkout --theirs)",
 	}
 

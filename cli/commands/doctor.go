@@ -695,6 +695,7 @@ func gitHooksCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 			entry("post-checkout (reveal)", "hook.sesam-postcheckout.command"),
 			entry("pre-merge-commit (merge)", "hook.sesam-premergecommit.command"),
 			entry("post-merge (reveal)", "hook.sesam-postmerge.command"),
+			entry("prepare-commit-msg (log guard)", "hook.sesam-preparecommitmsg.command"),
 		},
 	}
 }
