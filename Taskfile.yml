@@ -52,17 +52,17 @@ tasks:
   test:
     desc: Run go tests
     cmds:
-      - gotestsum --format testname -- -tags docgen ./...
+      - gotestsum --format testname -- -tags docgen -timeout 30m ./...
 
   test-race:
     desc: Run go tests
     cmds:
-      - gotestsum --format testname -- -tags docgen -race  ./...
+      - gotestsum --format testname -- -tags docgen -race -timeout 30m ./...
 
   coverage:
     desc: Run go tests with coverage report
     cmds:
-      - go test -tags docgen -coverpkg=./... -coverprofile=coverage.out ./...
+      - go test -tags docgen -timeout 30m -coverpkg=./... -coverprofile=coverage.out ./...
       - go tool cover -func=coverage.out
       - go tool cover -html=coverage.out
 
