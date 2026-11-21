@@ -47,6 +47,16 @@ exec sesam doctor
 stdout 'sesam init --install-diff'
 stdout 'sesam init --install-alias'
 
+# No user needs an age plugin to be encrypted for yet.
+exec sesam doctor
+stdout 'recipient-plugins: no recipient needs an age plugin to encrypt'
+
+# A user with a plugin recipient: sealing for them runs the plugin, so doctor
+# names it (the mock plugin is on $PATH here).
+exec sesam tell --user yubi --recipient $PLUGIN_PUBKEY --group dev
+exec sesam doctor
+stdout 'recipient-plugins: plugin\(s\) installed: age-plugin-sesamtest'
+
 # --sesam-dir points doctor at the repo even from outside any git repo.
 cd $TMPDIR
 exec sesam --sesam-dir $WORK doctor

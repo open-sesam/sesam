@@ -445,6 +445,16 @@ func ParseRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
 	}, err
 }
 
+// PluginName returns the age plugin that encrypting to r runs (`age1<name>1…`).
+// Native recipients, age1tag1 and age1tagpq1 included, need none.
+func (r *Recipient) PluginName() (string, bool) {
+	pr, ok := r.Recipient.(*plugin.Recipient)
+	if !ok {
+		return "", false
+	}
+	return pr.Name(), true
+}
+
 func parsePluginRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
 	if pluginUI == nil {
 		return nil, fmt.Errorf("plugin recipient requires a PluginUI; pass NewInteractivePluginUI()")
