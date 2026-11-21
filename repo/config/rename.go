@@ -110,7 +110,7 @@ func (c *Config) UserChangeGroups(user string, groups []string) error {
 			// The list is shared via an anchor; editing it would change the
 			// other groups using it too.
 			return fmt.Errorf(
-				"%s: group %q shares its member list through an anchor; change %s's membership there by hand",
+				"%s: group %q shares its member list through a YAML anchor (&name); change %s's membership there by hand",
 				src.Path, groupName, user,
 			)
 		}

@@ -25,7 +25,7 @@ exec git add -A
 exec git commit -m 'master: change t'
 
 exec git cherry-pick topic
-stderr 'the audit log was therefore semantically merged'
+stderr 'sesam merged the audit log entry by entry'
 
 # git had nothing to identify itself with when the driver ran (a cherry-pick sets
 # no ref and no env until it stops), so the advice stays deliberately generic.

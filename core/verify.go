@@ -467,7 +467,7 @@ func verifyUserTell(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned
 	}
 
 	if entry.ChangedBy == tellDetails.User {
-		return fmt.Errorf("users cannot add themself (seq_id=%d)", entry.SeqID)
+		return fmt.Errorf("users cannot add themselves (seq_id=%d)", entry.SeqID)
 	}
 
 	state.SealRequiredSeqID = entry.SeqID

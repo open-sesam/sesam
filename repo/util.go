@@ -155,13 +155,13 @@ func ReadGitVersion(ctx context.Context) (*semver.Version, error) {
 func parseGitVersion(raw string) (*semver.Version, error) {
 	fields := strings.Fields(raw)
 	if len(fields) < 3 {
-		return nil, fmt.Errorf("malformed git version: %q", raw)
+		return nil, fmt.Errorf("cannot read git version: %q", raw)
 	}
 
 	core := strings.TrimRight(leadingVersionCore(fields[2]), ".")
 	v, err := semver.NewVersion(core)
 	if err != nil {
-		return nil, fmt.Errorf("malformed git version %q: %w", raw, err)
+		return nil, fmt.Errorf("cannot read git version %q: %w", raw, err)
 	}
 	return v, nil
 }

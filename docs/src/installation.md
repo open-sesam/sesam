@@ -1,8 +1,13 @@
 # Installation
 
-While this is in development you won't find sesam in your package managers yet.
-Once that will be available we will mention it here.
-For now use the release binaries from GitHub, Docker image, go install or build form source.
+For now there are no packages in your package managers yet that we
+know of. Once that will be available we will mention it here. Until that
+happens, we recommend one of the install options below:
+
+- [GitHub Releases](#releases)
+- [mise](#mise)
+- [go install](#go-install)
+- [Docker images](#docker)
 
 ## Releases
 
@@ -99,7 +104,19 @@ cp sesam /usr/local/bin/  # or wherever you want to install it.
 
 This is also the best way to start working on `sesam` if you want to open a PR.
 
-Alternatively, if you already have `go` installed:
+## `mise`
+
+If you use [mise](https://mise.jdx.dev/) for your project then just use this:
+
+```bash
+mise use "github:open-sesam/sesam"
+```
+
+`sesam` is then available inside your `git` repo.
+
+## `go install`
+
+Alternatively, if you already have `go` installed in your system:
 
 ```bash
 # Replace @latest with a git tag of your choice.
@@ -125,7 +142,7 @@ Git integration will not be working with docker. Also storing passphrases will n
 You will also have to mount the sesam repo and your identity into the container with the `-v` option.
 
 For real, interactive usage we very much recommend the regular version of `sesam`, the purpose of this image
-is really to have just a minimal image for automation purposes.
+is really to have just a minimal image for automation purposes and buildserver pipelines.
 ```
 
 ## Changelog

@@ -29,9 +29,9 @@ sesam log
 ```
 
 The audit log is a list of entries, each describing a change to the repository.
-It is stored in encrypted fashion in `.sesam/audit/log.jsonl`. Each entry is
-linked to the previous one via a hash and protected by a signature of the user
-that made the change.
+It is stored in encrypted fashion in `.sesam/audit/log.jsonl` (every user has
+full access to it). Each entry is linked to the previous one via a hash and
+protected by a signature of the user that made the change.
 
 Additionally, we store the hash of the first entry as a trust anchor and can
 check over git history that it was not modified. This makes truncating the log harder.

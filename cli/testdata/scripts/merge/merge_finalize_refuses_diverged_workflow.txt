@@ -23,7 +23,7 @@ exec git add -A
 exec git commit -m 'ours: add bob'
 
 ! exec git merge topic
-stderr 'merge changed the vault - run `git commit` to finalize'
+stderr 'merge changed the vault - run `git commit` to finish the merge'
 
 # The object is theirs, the plaintext still ours: stale, and status says what
 # the finalize will do about it.

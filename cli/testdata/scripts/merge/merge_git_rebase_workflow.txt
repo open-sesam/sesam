@@ -26,7 +26,7 @@ exec git commit -m 'topic: change secret'
 # secret conflict lands as markers in the revealed (gitignored) file.
 ! exec git rebase master
 stderr 'automatically merging revealed file s; 1 conflict'
-stderr 'the audit log was therefore semantically merged'
+stderr 'sesam merged the audit log entry by entry'
 
 # The advice is rebase-specific: git never sets MERGE_HEAD here, so telling the
 # user to run `git commit` (or to abort with `git merge --abort`) would be wrong.

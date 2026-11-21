@@ -19,8 +19,8 @@
 </p>
 
 > [!WARNING]  
-> This is still beta software. It pretty much works (we use it at our company), but it may change.
-> There is no guarantee before v1.0 that APIs and storage will not change.
+> This software is not at version 1.0. It pretty much works (we use it at our company), but it may change without warning.
+> There is no guarantee before v1.0 that APIs and storage will stay fully backwards compatible, although we aim to avoid that.
 > Use at your own risk for now.
 
 # What is it?
@@ -29,7 +29,8 @@
 no unauthorised persons have access to them. Other than a password manager,
 which targets a single user, it is targeting teams that need access to a set of
 secrets. It is more capable [than existing decentralized secret
-managers](https://opensesam.org/docs/alternatives.html).
+managers](https://opensesam.org/docs/alternatives.html) and provides a large
+number of convenience features.
 
 <a href="https://asciinema.org/a/1251104" target="_blank"><img src="https://asciinema.org/a/1251104.svg" /></a>
 
@@ -37,18 +38,16 @@ managers](https://opensesam.org/docs/alternatives.html).
 
 - Modern, multi-user cryptography with [age](https://github.com/FiloSottile/age).
 - Support for SSH keys, age keys and age plugin identities.
-- Allows giving layered access to secrets.
+- Easy support for multiple users with different access levels.
 - Signed, hash chained, encrypted audit log for user, access and secret changes.
-- Well integrated with `git` (diffs and checkout).
+- Well integrated with `git` (diffs, merge, checkout and hooks).
 - Decentralized like `git` - you get versioning and hosting for free.
-- Wide range of verifications thanks to audit log.
-- Integration with popular forges like GitHub.
-- Ergonomic, easy-to-understand CLI.
+- Wide range of verification and tampering detection thanks to audit log.
+- Integration with popular forges like GitHub, GitLab and codeberg.
+- Ergonomic, easy-to-understand CLI with built-in help and completion.
 - Imperative (CLI) and declarative (Config) workflows are supported.
 - Simple modern deployment with a static binary.
 - Highly scriptable and even usable as Go library.
-- Allow merging of git branches due to smart git driver.
-- Declarative `sesam apply` workflow.
 - Password manager like features.
 
 ## Planned features
