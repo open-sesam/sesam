@@ -141,7 +141,7 @@ func completeSecrets(ctx context.Context, cmd *cli.Command) {
 // completionSesamDir finds the sesam dir the way commands do, walking up
 // from the cwd, so completion also works in subdirectories.
 func completionSesamDir(ctx context.Context, cmd *cli.Command) string {
-	if dir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir")); err == nil {
+	if dir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"), false); err == nil {
 		return dir
 	}
 	return cmd.String("sesam-dir")

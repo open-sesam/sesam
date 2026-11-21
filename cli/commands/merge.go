@@ -219,7 +219,7 @@ func openMergeDriver(ctx context.Context, cmd *cli.Command) (*mergeDriver, error
 		return nil, err
 	}
 
-	sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
+	sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"), false)
 	if err != nil {
 		return nil, err
 	}

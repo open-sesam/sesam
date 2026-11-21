@@ -44,7 +44,7 @@ func GitWorktreeRoot(ctx context.Context, dir string) (string, error) {
 // git >= 2.54, the hook commands) against what `sesam init` would install for
 // the repo at sesamDir.
 func CheckGitConfig(ctx context.Context, sesamDir string) ([]GitConfigCheck, error) {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir, false)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func CheckGitIgnore(ctx context.Context, sesamDir string) (ManagedFileCheck, err
 // comparing the raw template would hunt for the literal placeholder and always
 // report a mismatch.
 func CheckGitAttributes(ctx context.Context, sesamDir string) (ManagedFileCheck, error) {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir, false)
 	if err != nil {
 		return ManagedFileCheck{}, err
 	}

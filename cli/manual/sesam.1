@@ -9,6 +9,7 @@ sesam \- Manage encrypted secrets in git repositories
 sesam
 
 .EX
+[--allow-no-git]
 [--askpass]=[value]
 [--clipboard-copy-cmd]=[value]
 [--clipboard-paste-cmd]=[value]
@@ -123,6 +124,9 @@ Deeper support for \fBenv\fR files.
 
 
 .SH GLOBAL OPTIONS
+\fB--allow-no-git\fP: Allow read-only commands without a git repository, skipping the git based checks [$SESAM_ALLOW_NO_GIT]
+
+.PP
 \fB--askpass\fP="": Askpass helper for encrypted identities [$SESAM_ASKPASS, $GIT_ASKPASS, $SSH_ASKPASS]
 
 .PP

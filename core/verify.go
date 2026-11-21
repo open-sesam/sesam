@@ -984,11 +984,16 @@ func (s *VerifiedState) AdvanceTo(seqID uint64) error {
 
 // Verify is like VerifyChain but additionally checks the trust-anchor file
 // (.sesam/audit/init) and the latest seal's root-hash against the on-disk
-// secret footers. See [VerifyChain] for pluginUI semantics.
-func Verify(ctx context.Context, log *AuditLog, kr Keyring, pluginUI *PluginUI) (*VerifiedState, error) {
-	initCommit, err := verifyInitFileUnchanged(ctx, log.SesamDir)
-	if err != nil {
-		return nil, fmt.Errorf("init file check: %w", err)
+// secret footers. See [VerifyChain] for pluginUI semantics. The trust-anchor
+// check needs git history and is skipped when g is nil.
+func Verify(ctx context.Context, log *AuditLog, kr Keyring, pluginUI *PluginUI, g *Git) (*VerifiedState, error) {
+	var initCommit string
+	if g != nil {
+		var err error
+		initCommit, err = verifyInitFileUnchangedWithRepo(ctx, log.SesamDir, g)
+		if err != nil {
+			return nil, fmt.Errorf("init file check: %w", err)
+		}
 	}
 
 	// use an fresh empty state:

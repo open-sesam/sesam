@@ -374,7 +374,9 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 		}
 	}
 
-	if opts.Truncation {
+	if opts.Truncation && v.gitRepo == nil {
+		report.TruncateError = core.JSONError{Err: ErrNoGit}
+	} else if opts.Truncation {
 		var worktree *os.Root
 		if opts.TruncationWorktree {
 			worktree = v.root
@@ -479,6 +481,10 @@ func (v *View) committedConflicts(ctx context.Context, changes []diff.Change) ([
 // would apply on its own, which is how a step is recognised as not coming from
 // the working tree.
 func (v *View) committedConfigChanges(ctx context.Context) ([]diff.Change, error) {
+	if v.gitRepo == nil {
+		return nil, fmt.Errorf("%w: needs the committed config", ErrNoGit)
+	}
+
 	head, err := v.gitRepo.Head(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("resolve HEAD: %w", err)

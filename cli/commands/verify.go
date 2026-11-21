@@ -247,6 +247,14 @@ func printReport(opts repo.VerifyOptions, report *repo.VerifyReport) {
 // HandleVerify verifies repository audit and crypt state.
 func HandleVerify(ctx context.Context, cmd *cli.Command, r *repo.Repo) error {
 	opts := verifyOpts(cmd)
+	if !r.HasGit() {
+		if cmd.Bool("truncate") {
+			return fmt.Errorf("--truncate: %w", repo.ErrNoGit)
+		} else if opts.Truncation {
+			opts.Truncation, opts.TruncationWorktree = false, false
+			slog.Info("Truncation: skipped (no git)")
+		}
+	}
 	report, err := r.Verify(ctx, opts)
 	if err != nil {
 		return err

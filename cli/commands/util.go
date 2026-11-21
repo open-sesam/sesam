@@ -25,13 +25,24 @@ type RepoAction func(ctx context.Context, cmd *cli.Command, r *repo.Repo) error
 //   - if the handler succeeded, a Close error becomes the action's error
 //   - if the handler already failed, a Close error is logged at warn
 func WithRepo(action RepoAction) cli.ActionFunc {
+	return withRepo(action, false)
+}
+
+// WithRepoAllowNoGit is WithRepo for commands that also work without git, once
+// the user allowed that with --allow-no-git.
+func WithRepoAllowNoGit(action RepoAction) cli.ActionFunc {
+	return withRepo(action, true)
+}
+
+func withRepo(action RepoAction, gitOptional bool) cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) (err error) {
 		verifyMode, err := repo.ToVerifyMode(cmd.String("verify-mode"))
 		if err != nil {
 			return err
 		}
 
-		sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
+		allowNoGit := gitOptional && cmd.Bool("allow-no-git")
+		sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"), allowNoGit)
 		if err != nil {
 			return err
 		}
@@ -47,6 +58,7 @@ func WithRepo(action RepoAction) cli.ActionFunc {
 				LockTimeout:     cmd.Duration("lock-timeout"),
 				VerifyMode:      verifyMode,
 				InMerge:         mergeState(ctx, sesamDir).InProgress(),
+				AllowNoGit:      allowNoGit,
 			},
 		)
 		if err != nil {

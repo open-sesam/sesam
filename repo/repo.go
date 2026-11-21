@@ -103,6 +103,11 @@ type RepoOpts struct {
 	// has the tree half-merged. The caller decides: only the CLI knows what git
 	// is doing, and finding out costs a subprocess we do not want on every Load.
 	InMerge bool
+
+	// AllowNoGit allows loading a repository without git. The git based checks
+	// (init file history, truncation) are skipped and git-only operations
+	// fail with ErrNoGit.
+	AllowNoGit bool
 }
 
 type GitConfigOpts struct {
@@ -210,9 +215,11 @@ func guessInitUserNameFromGitConfig(ctx context.Context, repo *core.Git) (string
 // ResolveSesamDir resolves the sesam repository root. It walks up from
 // sesamPath until it finds a directory containing `.sesam/`, or returns
 // the absolute path of sesamPath unchanged if none is found (the latter
-// is used during `sesam init` before `.sesam/` exists).
-func ResolveSesamDir(ctx context.Context, sesamPath string) (string, error) {
-	return resolveSesamDir(ctx, sesamPath)
+// is used during `sesam init` before `.sesam/` exists). noGit is as in
+// RepoOpts.AllowNoGit.
+func ResolveSesamDir(ctx context.Context, sesamPath string, noGit bool) (string, error) {
+	sesamDir, _, err := resolveSesamDirAndGit(ctx, sesamPath, noGit)
+	return sesamDir, err
 }
 
 // Init initializes a new sesam repository at sesamDir.
@@ -223,7 +230,7 @@ func ResolveSesamDir(ctx context.Context, sesamPath string) (string, error) {
 //
 // The initial user's name is derived from git config (if possible) or taken from the options if given explicitly.
 func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitOpts) (*Repo, error) {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir, false)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +325,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 	if opts.VerifyMode == VerifyModeNoDisk {
 		vstate, err = core.VerifyChain(auditLog, r.keyring, r.pluginUI)
 	} else {
-		vstate, err = core.Verify(ctx, auditLog, r.keyring, r.pluginUI)
+		vstate, err = core.Verify(ctx, auditLog, r.keyring, r.pluginUI, gitRepo)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
@@ -376,7 +383,7 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 // at all, so hooks still guard it. A bare .sesam dir does not count: git leaves
 // its ignored files behind when checking out a branch without the vault.
 func IsInitialized(ctx context.Context, sesamDir string) (bool, error) {
-	resolvedDir, _, err := resolveSesamDirAndGit(ctx, sesamDir)
+	resolvedDir, _, err := resolveSesamDirAndGit(ctx, sesamDir, false)
 	if err != nil {
 		return false, err
 	}
@@ -396,7 +403,7 @@ func IsInitialized(ctx context.Context, sesamDir string) (bool, error) {
 // Setup wires sesam's git integration into an already-initialized repository.
 // This is meant to be called to onboard users that cloned the repo but did not run init.
 func Setup(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitOpts) error {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir, false)
 	if err != nil {
 		return err
 	}
@@ -452,7 +459,7 @@ func Setup(ctx context.Context, sesamDir string, idPaths []string, opts RepoInit
 // Load loads an existing sesam repository at sesamDir. The on-disk repo
 // lock is held until Close.
 func Load(ctx context.Context, sesamDir string, ids []string, opts RepoOpts) (*Repo, error) {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir, opts.AllowNoGit)
 	if err != nil {
 		return nil, err
 	}
@@ -505,7 +512,7 @@ func Load(ctx context.Context, sesamDir string, ids []string, opts RepoOpts) (*R
 	if opts.VerifyMode == VerifyModeNoDisk || opts.InMerge {
 		vstate, err = core.VerifyChain(auditLog, r.keyring, r.pluginUI)
 	} else {
-		vstate, err = core.Verify(ctx, auditLog, r.keyring, r.pluginUI)
+		vstate, err = core.Verify(ctx, auditLog, r.keyring, r.pluginUI, gitRepo)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify audit log: %w", err)
@@ -557,6 +564,11 @@ func newRepo(sesamDir string, root *os.Root, gitRepo *core.Git, ids []string, op
 // SesamDir returns the resolved absolute path of the sesam repository.
 func (r *Repo) SesamDir() string {
 	return r.sesamDir
+}
+
+// HasGit reports whether the repository was loaded with git (see RepoOpts.AllowNoGit).
+func (r *Repo) HasGit() bool {
+	return r.gitRepo != nil
 }
 
 // PluginUI returns the plugin UI matching the repo's interactivity.
@@ -852,7 +864,7 @@ type StatusOpts struct {
 // Uninstall removes the git integration of sesam from the git repo,
 // and if all is true it will remove also all sesam specific files.
 func Uninstall(ctx context.Context, sesamDir string, all bool) error {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir, false)
 	if err != nil {
 		return fmt.Errorf("failed to resolve: %w", err)
 	}
@@ -910,7 +922,7 @@ func Uninstall(ctx context.Context, sesamDir string, all bool) error {
 // InstallHooks (re)installs sesam's git hooks for the repo at sesamDir. It only
 // writes git config, so it neither loads the audit log nor takes the repo lock.
 func InstallHooks(ctx context.Context, sesamDir string) error {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir, false)
 	if err != nil {
 		return err
 	}
@@ -929,7 +941,7 @@ func InstallHooks(ctx context.Context, sesamDir string) error {
 // UninstallHooks removes sesam's git hooks from the repo at sesamDir. Like
 // InstallHooks it only touches git config.
 func UninstallHooks(ctx context.Context, sesamDir string) error {
-	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir)
+	resolvedDir, gitRepo, err := resolveSesamDirAndGit(ctx, sesamDir, false)
 	if err != nil {
 		return err
 	}

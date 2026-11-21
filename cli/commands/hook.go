@@ -22,7 +22,7 @@ func silentWithRepo(verifyMode repo.VerifyMode, action RepoAction) cli.ActionFun
 		// while the git helpers below only take Abs() of what they are given. Run
 		// from a subdirectory the two would name different trees, and the git
 		// pathspec would then match nothing.
-		sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
+		sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"), false)
 		if err != nil {
 			slog.Warn("sesam hook: failed to resolve sesam dir", slog.Any("err", err))
 			// do not abort the git operation!
@@ -345,7 +345,7 @@ func HandleHookPostMerge(ctx context.Context, cmd *cli.Command) error {
 // whose pre-commit reseals + reconciles - so a merge finalizes with no `git add`.
 // A merge that never touched sesam auto-commits like any other.
 func HandleHookPreMergeCommit(ctx context.Context, cmd *cli.Command) error {
-	sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
+	sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"), false)
 	if err != nil {
 		//nolint:nilerr // never block a merge on our own resolution error
 		return nil

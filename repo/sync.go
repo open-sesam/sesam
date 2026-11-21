@@ -114,6 +114,10 @@ func (v *View) SyncStates(ctx context.Context, opts SyncOpts) (SyncStates, error
 
 // syncStates is SyncStates without the lock, for callers already holding it.
 func (v *View) syncStates(ctx context.Context, opts SyncOpts) (SyncStates, error) {
+	if v.gitRepo == nil {
+		return nil, fmt.Errorf("%w: sync states compare against git history", ErrNoGit)
+	}
+
 	secrets := v.vstate.Secrets
 	if opts.Paths != nil {
 		want := make(map[string]bool, len(opts.Paths))

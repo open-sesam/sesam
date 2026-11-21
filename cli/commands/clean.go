@@ -38,7 +38,7 @@ func HandleClean(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Bool("aggressive") {
 		// Walk up to the nearest .sesam like WithRepo does; the raw flag value
 		// would only work from the sesam dir itself.
-		sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
+		sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"), false)
 		if err != nil {
 			return err
 		}

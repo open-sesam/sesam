@@ -562,7 +562,7 @@ func gitRepoCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 
 		// The repo --sesam-dir names, not necessarily the one around the cwd.
 		dir := cwd
-		if resolved, err := repo.ResolveSesamDir(ctx, env.sesamDir); err == nil {
+		if resolved, err := repo.ResolveSesamDir(ctx, env.sesamDir, false); err == nil {
 			dir = resolved
 		}
 		root, err := repo.GitWorktreeRoot(ctx, dir)
@@ -766,7 +766,7 @@ func sesamDirCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 	return &genericCheck{
 		name: "sesam-directory",
 		run: func() DoctorDiagnosis {
-			resolved, err := repo.ResolveSesamDir(ctx, env.sesamDir)
+			resolved, err := repo.ResolveSesamDir(ctx, env.sesamDir, false)
 			if err != nil {
 				return docIssue(
 					fmt.Sprintf("could not resolve sesam dir: %v", err),
@@ -798,7 +798,7 @@ func sesamDirPermsCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 		if runtime.GOOS == "windows" {
 			return docInfo("permission check skipped on Windows")
 		}
-		resolved, err := repo.ResolveSesamDir(ctx, env.sesamDir)
+		resolved, err := repo.ResolveSesamDir(ctx, env.sesamDir, false)
 		if err != nil {
 			return docFailed(err.Error())
 		}
