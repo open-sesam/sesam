@@ -194,13 +194,15 @@ smallest level of secret is an environment variable that is being managed,
 while for `sesam` it is files (except for templates).
 
 They fit well for use cases where you inject your configuration via environment
-and don't have a lot of complete files. In some sense `sops` could be added here as well.
+and don't have a lot of complete files. `sops` sits in between: it encrypts values inside
+structured files, but also stores whole files as blobs.
 
 
 | Tool                                              | Lang       | Since | Encryption                                           | Scope                                                    | Multi-user model                                                         | Audit / rotation                                          |
 |---------------------------------------------------|------------|-------|------------------------------------------------------|----------------------------------------------------------|--------------------------------------------------------------------------|-----------------------------------------------------------|
 | [**dotenvx**](https://dotenvx.com)                | JavaScript | 2023  | ECIES (secp256k1) + AES-256-GCM                      | values inside `.env`                                     | shared private key, distributed out of band                              | `dotenvx rotate`, no audit log                            |
 | [**fnox**](https://github.com/jdx/fnox)           | Rust       | 2025  | age (X25519 / SSH) or cloud KMS (AWS / Azure / GCP)⁵ | per-value in `fnox.toml`, env-inject via `fnox exec`     | age recipients or KMS IAM                                                | no audit log; rotation not documented                     |
+| [**sops**](https://github.com/getsops/sops)       | Go         | 2015  | age / PGP / cloud KMS (AWS / GCP / Azure) / Vault    | per-value in YAML / JSON / ENV / INI, else whole-file blob; env-inject via `sops exec-env` | recipients per file via `.sops.yaml` rules                               | no audit log; `sops rotate` per file                      |
 | [**dugout**](https://github.com/usemantle/dugout) | Rust       | 2026  | age (X25519), optionally plus AWS / GCP KMS⁶         | per-value in `.dugout.toml`, env-inject via `dugout run` | flat age recipient list per vault (`knock` / `admit`)                    | no audit log; re-encrypts on `team rm`                    |
 | [**varlock**](https://varlock.dev)                | TypeScript | 2025  | optional / plugin-driven⁴                            | `.env.schema` + values, plugin-resolved                  | delegated to plugins (1Password, AWS, …)                                 | depends on plugin                                         |
 | [**secretspec**](https://secretspec.dev)          | Rust       | 2025  | none (delegates to backend)                          | declares which secrets an app needs                      | delegated to backend (keyring, 1Password, AWS Secrets Manager, Vault, …) | local append-only access log; deeper auditing per backend |
@@ -208,6 +210,22 @@ and don't have a lot of complete files. In some sense `sops` could be added here
 ⁴ varlock's primary security story is leak prevention (schema, scanning, log redaction) rather than a specific encryption scheme - encrypted local state is mentioned but not deeply documented.  
 ⁵ A jack-of-all-trades: behind one `fnox.toml` it spans encryption providers (age/SSH, AWS/Azure/GCP KMS), remote backends (Vault, 1Password, Infisical, cloud secret managers). It leans decentralized — the default age/SSH path keeps secrets git-native with no server — but can equally act as a thin client over a centralized store. Either way the unit is an individual value (per key, providers mixable), not a file.  
 ⁶ In KMS mode every value is stored twice: age-encrypted for developers and KMS-encrypted for servers (decrypt via IAM). Writing a value therefore needs KMS credentials. Every recipient of a vault can read every value; environments are separate vault files.
+
+### Why not just use `sops`?
+
+If you have a few `.env` files and everyone with push access may read and change
+all of them, `sops` is a perfectly fine choice. It makes things easy in reviews,
+as one can clearly see what changed. Also the support for cloud KMS out of the box is nice
+and `sesam` can't do that easily (yet).
+
+There are some weaker spots though:
+
+- Whole files (think x509 certs) are encrypted as one blob, which makes merging and git conflicts
+  [cumbersome](https://getsops.io/docs/security/).
+- There's no audit log in SOPS. There's the git history, but nothing verifies who changed what and when.
+- No authorship check. Anyone can create/replace a secret if they know the right recipients
+  and it will decrypt just fine.
+- Removing a user needs an extra `sops rotate` per file, otherwise they keep access to the data key.
 
 ---
 

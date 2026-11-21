@@ -19,9 +19,9 @@
 </p>
 
 > [!WARNING]  
-> This software is not at version 1.0. It pretty much works (we use it at our company), but it may change without warning.
+> This software is not at version 1.0. It works well enough for us (we use it at our company), but consider it as open beta.
 > There is no guarantee before v1.0 that APIs and storage will stay fully backwards compatible, although we aim to avoid that.
-> Use at your own risk for now.
+> Use at your own risk for now. If you decide to already use it, then we would be happy about short feedback on your use-case.
 
 # What is it?
 
