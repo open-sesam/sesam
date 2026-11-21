@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +67,15 @@ type doctorEnv struct {
 
 	clipboardCopyCmd  string
 	clipboardPasteCmd string
+}
+
+// doctorRepoFacts carries what identity-resolves-to-user learned from loading
+// the repo, so its sub-checks don't load it (and touch a hardware key) again.
+type doctorRepoFacts struct {
+	loaded bool
+	// pluginUsers maps the age plugin binaries other recipients need for
+	// encryption to the users holding such a recipient.
+	pluginUsers map[string][]string
 }
 
 type genericCheck struct {
@@ -289,7 +300,7 @@ func identityCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 			identityTypeCheck(paths),
 			identityPermsCheck(paths),
 			identityPluginCheck(paths),
-			identityUserCheck(ctx, env),
+			identityUserCheck(ctx, env, &doctorRepoFacts{}),
 		},
 	}
 }
@@ -383,8 +394,8 @@ func identityPluginCheck(paths []string) DoctorCheck {
 	}}
 }
 
-func identityUserCheck(ctx context.Context, env doctorEnv) DoctorCheck {
-	return &genericCheck{name: "identity-resolves-to-user", run: func() DoctorDiagnosis {
+func identityUserCheck(ctx context.Context, env doctorEnv, facts *doctorRepoFacts) DoctorCheck {
+	return &genericCheck{name: "identity-resolves-to-user", subChecks: []DoctorCheck{recipientPluginsCheck(facts)}, run: func() DoctorDiagnosis {
 		initialized, err := repo.IsInitialized(ctx, env.sesamDir)
 		if err != nil {
 			return docInfo(fmt.Sprintf("no sesam repo to check against (%v)", err))
@@ -413,8 +424,60 @@ func identityUserCheck(ctx context.Context, env doctorEnv) DoctorCheck {
 		if err != nil {
 			return docIssue(fmt.Sprintf("could not determine the current user: %v", err), "")
 		}
+
+		if users, err := r.ListUsers(); err == nil {
+			facts.loaded = true
+			facts.pluginUsers = pluginUsers(users)
+		}
 		return docHealthy(fmt.Sprintf("recognized as user »%s«", who))
 	}}
+}
+
+// recipientPluginsCheck reports age plugins that encrypting for other users
+// runs (e.g. age1yubikey1…). Missing ones only hurt sealing, not reading.
+func recipientPluginsCheck(facts *doctorRepoFacts) DoctorCheck {
+	return &genericCheck{name: "recipient-plugins", run: func() DoctorDiagnosis {
+		if !facts.loaded {
+			return docInfo("no repo users to inspect")
+		}
+		if len(facts.pluginUsers) == 0 {
+			return docHealthy("no recipient needs an age plugin to encrypt")
+		}
+
+		var missing, found []string
+		for _, bin := range slices.Sorted(maps.Keys(facts.pluginUsers)) {
+			if _, err := exec.LookPath(bin); err != nil && !errors.Is(err, exec.ErrDot) {
+				missing = append(missing, fmt.Sprintf("%s (for %s)", bin, strings.Join(facts.pluginUsers[bin], ", ")))
+			} else {
+				found = append(found, bin)
+			}
+		}
+		if len(missing) > 0 {
+			return docWarn(
+				"cannot seal for some users, missing: "+strings.Join(missing, "; "),
+				"install the plugin(s) on $PATH; not needed if you only read secrets",
+			)
+		}
+		return docHealthy("plugin(s) installed: " + strings.Join(found, ", "))
+	}}
+}
+
+func pluginUsers(users []repo.UserInfo) map[string][]string {
+	out := map[string][]string{}
+	for _, u := range users {
+		for _, r := range u.Recps {
+			if name, ok := r.PluginName(); ok {
+				bin := "age-plugin-" + name
+				if !slices.Contains(out[bin], u.Name) {
+					out[bin] = append(out[bin], u.Name)
+				}
+			}
+		}
+	}
+	for bin := range out {
+		slices.Sort(out[bin])
+	}
+	return out
 }
 
 func askpassCheck() DoctorCheck {

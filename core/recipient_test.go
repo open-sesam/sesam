@@ -129,6 +129,32 @@ func TestParseRecipientTag(t *testing.T) {
 	}
 }
 
+func TestRecipientPluginName(t *testing.T) {
+	x25519 := newTestUser(t, "alice").Recipient.String()
+	tagKey, err := ecdh.P256().GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	pub := tagKey.PublicKey().Bytes()
+	x, y := new(big.Int).SetBytes(pub[1:33]), new(big.Int).SetBytes(pub[33:])
+	tagRec, err := tag.NewClassicRecipient(elliptic.MarshalCompressed(elliptic.P256(), x, y))
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name     string
+		rec      string
+		wantName string
+	}{
+		{"plugin", plugin.EncodeRecipient("yubikey", []byte{1, 2, 3, 4}), "yubikey"},
+		{"x25519", x25519, ""},
+		{"tag needs no plugin", tagRec.String(), ""},
+	} {
+		r, err := ParseRecipient(tc.rec, NewNonInteractivePluginUI())
+		require.NoError(t, err, tc.name)
+		got, ok := r.PluginName()
+		require.Equal(t, tc.wantName != "", ok, tc.name)
+		require.Equal(t, tc.wantName, got, tc.name)
+	}
+}
+
 func TestParseRecipientPluginRequiresUI(t *testing.T) {
 	rec := plugin.EncodeRecipient("yubikey", []byte{1, 2, 3, 4, 5, 6, 7, 8})
 
