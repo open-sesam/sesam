@@ -518,7 +518,7 @@ func Load(ctx context.Context, sesamDir string, ids []string, opts RepoOpts) (*R
 	}
 	r.whoami = whoami
 
-	signer, err := core.LoadUserSignKey(root, whoami, signIdentity, r.keyring)
+	signer, err := core.LazyUserSignKey(root, whoami, signIdentity, r.keyring)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
 	}
@@ -615,6 +615,11 @@ type VerifyOptions struct {
 	// Config checks that sesam.yml does not declare a change that already
 	// arrived committed (see docs/src/design.md, "Invalid modified config").
 	Config bool
+
+	// SignKey unlocks the caller's own sign key and checks it against the
+	// audit log. Off in hooks: it costs a decryption (a touch or KMS request
+	// for plugin identities).
+	SignKey bool
 }
 
 // VerifyReport carries the per-check outcome from Verify.
@@ -622,6 +627,7 @@ type VerifyReport struct {
 	Success       bool                  `json:"success"`
 	Integrity     *core.IntegrityReport `json:"integrity,omitempty"`
 	TruncateError error                 `json:"truncate_error,omitempty"`
+	SignKeyError  error                 `json:"sign_key_error,omitempty"`
 	// TruncateStoppedAt is the commit the history check could not read past.
 	TruncateStoppedAt string                 `json:"truncate_stopped_at,omitempty"`
 	ForgeCheckReport  *core.ForgeReport      `json:"forge_report,omitempty"`
@@ -644,6 +650,10 @@ func (rep *VerifyReport) OK() bool {
 	}
 
 	if rep.TruncateError != nil {
+		return false
+	}
+
+	if rep.SignKeyError != nil {
 		return false
 	}
 

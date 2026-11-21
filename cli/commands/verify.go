@@ -57,6 +57,10 @@ func verifyOpts(cmd *cli.Command) repo.VerifyOptions {
 	}
 
 	opts.TruncationWorktree = opts.Truncation
+
+	// we disable sign key loading for hooks like pre-commit, otherwise
+	// it would require a yubikey touch or other plugin calls, which is surprising to users.
+	opts.SignKey = opts.Integrity
 	return opts
 }
 
@@ -121,6 +125,14 @@ func printReport(opts repo.VerifyOptions, report *repo.VerifyReport) {
 			}
 		} else {
 			slog.Info(fmt.Sprintf("Integrity: %s", green("ok")))
+		}
+	}
+
+	if opts.SignKey {
+		if report.SignKeyError != nil {
+			slog.Error(fmt.Sprintf("Sign key: %s - %s", red("error"), red(report.SignKeyError.Error())))
+		} else {
+			slog.Info(fmt.Sprintf("Sign key: %s", green("ok")))
 		}
 	}
 

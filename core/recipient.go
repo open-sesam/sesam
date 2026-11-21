@@ -18,6 +18,7 @@ import (
 	"filippo.io/age"
 	"filippo.io/age/agessh"
 	"filippo.io/age/plugin"
+	"filippo.io/age/tag"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -365,7 +366,8 @@ func (e *PrivateKeyError) Error() string {
 }
 
 // ParseRecipient turns a public key string into a recipient age can use to
-// encrypt. Accepts X25519 (`age1…`), hybrid (`age1pq1…`), age plugin recipients
+// encrypt. Accepts X25519 (`age1…`), hybrid (`age1pq1…`), tagged P-256
+// (`age1tag1…`, `age1tagpq1…`), age plugin recipients
 // (`age1yubikey1…`, `age1tpm1…`, …) and SSH public keys. pluginUI is required
 // when arg may be a plugin recipient; pass NewInteractivePluginUI() when in
 // doubt - it is invoked only if a plugin actually prompts during Wrap.
@@ -384,6 +386,15 @@ func ParseRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
 		}
 
 		r, s = hr, hr.String()
+	case strings.HasPrefix(arg, "age1tag1") || strings.HasPrefix(arg, "age1tagpq1"):
+		// Native P-256 (or hybrid) recipients for hardware/KMS keys: wrapping
+		// needs no plugin binary, only the identity side does.
+		tr, err := tag.ParseRecipient(arg)
+		if err != nil {
+			return nil, err
+		}
+
+		r, s = tr, tr.String()
 	case strings.HasPrefix(arg, "age1"):
 		// X25519 (HRP "age") and plugin recipients (HRP "age1<name>") share
 		// the `age1` literal prefix. Try X25519 first; on HRP mismatch fall
@@ -432,6 +443,16 @@ func ParseRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {
 		comparablePublicKey: spk,
 		Source:              KeySourceManual,
 	}, err
+}
+
+// PluginName returns the age plugin that encrypting to r runs (`age1<name>1…`).
+// Native recipients, age1tag1 and age1tagpq1 included, need none.
+func (r *Recipient) PluginName() (string, bool) {
+	pr, ok := r.Recipient.(*plugin.Recipient)
+	if !ok {
+		return "", false
+	}
+	return pr.Name(), true
 }
 
 func parsePluginRecipient(arg string, pluginUI *PluginUI) (*Recipient, error) {

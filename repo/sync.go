@@ -237,7 +237,7 @@ func (v *View) probeWorktree(s core.SecretAccess) (syncFacts, string, error) {
 // consultHistory fills in what only git can tell about a plaintext that does
 // not match its worktree object: is it an earlier version, and did the
 // operation in progress replace the object.
-func (v *View) consultHistory(h *objectHistory, revealedPath string, worktree string, f *syncFacts) error {
+func (v *View) consultHistory(h *objectHistory, revealedPath, worktree string, f *syncFacts) error {
 	treePath := path.Join(h.prefix, filepath.ToSlash(core.ObjectPath(revealedPath)))
 	f.unmerged = h.unmerged[treePath]
 

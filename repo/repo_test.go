@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"filippo.io/age"
 	"github.com/stretchr/testify/require"
 	"opensesam.org/sesam/core"
 )
@@ -448,6 +449,47 @@ func TestRepo_Verify_IntegrityOK(t *testing.T) {
 	// nil (omitted from JSON). OK() still reports success.
 	require.Nil(t, report.Integrity, "empty integrity report is omitted")
 	require.True(t, report.OK())
+}
+
+func TestRepo_Verify_SignKey(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		replace  bool
+		wantFail string
+	}{
+		{"matching key file", false, ""},
+		{"replaced key file", true, "does not hold the sign key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			admin := writeTestIdentity(t, "admin")
+			dir := bootstrappedDir(t, admin)
+
+			if tc.replace {
+				// Someone with push access swaps in their own key, encrypted
+				// to admin so it still decrypts.
+				root, err := os.OpenRoot(dir)
+				require.NoError(t, err)
+				defer func() { _ = root.Close() }()
+				recp, err := age.ParseX25519Recipient(admin.Recipient)
+				require.NoError(t, err)
+				_, err = core.GenerateSignKeyAt(root, "", admin.Name, []age.Recipient{recp})
+				require.NoError(t, err)
+			}
+
+			// Load no longer unlocks the key, so only the SignKey check sees it.
+			r := reloadSesamRepo(t, dir, admin)
+			report, err := r.Verify(t.Context(), VerifyOptions{SignKey: true})
+			require.NoError(t, err)
+
+			if tc.wantFail == "" {
+				require.NoError(t, report.SignKeyError)
+				require.True(t, report.OK())
+				return
+			}
+			require.ErrorContains(t, report.SignKeyError, tc.wantFail)
+			require.False(t, report.OK())
+		})
+	}
 }
 
 func TestRepo_Verify_NoChecksMeansOK(t *testing.T) {

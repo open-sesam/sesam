@@ -69,7 +69,7 @@ func (c *Config) UserKill(name string) error {
 // elsewhere in the document. shared is true whenever the sequence was reached
 // through an anchor or alias, meaning it may be visible from other groups too
 // and must not be deleted outright.
-func resolveMemberSeq(root ast.Node, v ast.Node) (seq *ast.SequenceNode, shared bool) {
+func resolveMemberSeq(root, v ast.Node) (seq *ast.SequenceNode, shared bool) {
 	switch n := v.(type) {
 	case *ast.SequenceNode:
 		return n, false
