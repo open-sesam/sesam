@@ -518,7 +518,7 @@ func Load(ctx context.Context, sesamDir string, ids []string, opts RepoOpts) (*R
 	}
 	r.whoami = whoami
 
-	signer, err := core.LoadUserSignKey(root, whoami, signIdentity, r.keyring)
+	signer, err := core.LazyUserSignKey(root, whoami, signIdentity, r.keyring)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sign key for %s: %w", whoami, err)
 	}
