@@ -84,6 +84,65 @@ func TestSignDomainWithSpareCapacityIsNotShared(t *testing.T) {
 	require.Equal(t, SesamDomainSignSecretTag, domain, "the tag itself must come back untouched")
 }
 
+func TestLazyUserSignKey(t *testing.T) {
+	data := []byte("test data")
+
+	for _, tc := range []struct {
+		name       string
+		generate   bool
+		registered func(real []byte) []byte
+		wantErr    string
+	}{
+		{"loads on first sign", true, func(real []byte) []byte { return real }, ""},
+		{"key file missing", false, func(_ []byte) []byte { return make([]byte, 32) }, "failed to load sign key"},
+		{"key file replaced", true, func(_ []byte) []byte { return make([]byte, 32) }, "does not hold the sign key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sesamDir := testRepo(t)
+			root := testRoot(t, sesamDir)
+			user := newTestUser(t, "alice")
+
+			var real []byte
+			if tc.generate {
+				signer, err := GenerateSignKeyAt(root, "", "alice", []age.Recipient{user.Recipient.Recipient})
+				require.NoError(t, err)
+				real = signer.PublicKey()
+			}
+
+			kr := EmptyKeyring()
+			require.NoError(t, kr.SetSignPubKey("alice", tc.registered(real)))
+
+			counter := &countingPluginIdentity{inner: user.Identity}
+			signer, err := LazyUserSignKey(root, "alice", counter, kr)
+			require.NoError(t, err)
+			require.Equal(t, "alice", signer.UserName())
+			require.Zero(t, counter.calls, "nothing decrypted before the first signature")
+
+			for range 2 {
+				sig, err := signer.Sign(SesamDomainSignAuditTag, data)
+				if tc.wantErr != "" {
+					require.ErrorContains(t, err, tc.wantErr)
+					continue
+				}
+				require.NoError(t, err)
+				who, err := kr.Verify(SesamDomainSignAuditTag, data, sig, "alice")
+				require.NoError(t, err)
+				require.Equal(t, "alice", who)
+			}
+			if tc.generate {
+				require.Equal(t, 1, counter.calls, "sign key decrypted exactly once")
+			}
+		})
+	}
+}
+
+func TestLazyUserSignKeyUnregisteredUser(t *testing.T) {
+	sesamDir := testRepo(t)
+	user := newTestUser(t, "alice")
+	_, err := LazyUserSignKey(testRoot(t, sesamDir), "alice", user.Identity, EmptyKeyring())
+	require.ErrorContains(t, err, "no sign key registered")
+}
+
 func TestLoadSignKeyMissing(t *testing.T) {
 	sesamDir := testRepo(t)
 	user := newTestUser(t, "alice")
