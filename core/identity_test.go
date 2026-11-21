@@ -165,6 +165,45 @@ func TestParseIdentityAgePQ(t *testing.T) {
 	require.Equal(t, pqID.Recipient().String(), id.Public().String())
 }
 
+func TestAgeIdentitiesPluginLast(t *testing.T) {
+	t.Parallel()
+	// A plugin that is not installed: age aborts on its error instead of
+	// trying the next identity, so it must never be tried before the SSH key.
+	pluginFile := "# public key: " + plugin.EncodeRecipient("sesamnotinstalled", []byte{1, 2, 3}) + "\n" +
+		plugin.EncodeIdentity("sesamnotinstalled", []byte{1, 2, 3}) + "\n"
+	pluginID, err := ParseIdentity(t.Context(), pluginFile, nil, NewNonInteractivePluginUI(), "")
+	require.NoError(t, err)
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	pemBlock, err := ssh.MarshalPrivateKey(priv, "")
+	require.NoError(t, err)
+	sshID, err := ParseIdentity(t.Context(), string(pem.EncodeToMemory(pemBlock)), nil, nil, "")
+	require.NoError(t, err)
+
+	sshPub, err := ssh.NewPublicKey(pub)
+	require.NoError(t, err)
+	recipient, err := ParseRecipient(string(ssh.MarshalAuthorizedKey(sshPub)), nil)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	w, err := age.Encrypt(&buf, recipient.Recipient)
+	require.NoError(t, err)
+	_, err = w.Write([]byte("secret"))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	ids := Identities{pluginID, sshID}
+	require.Equal(t, []age.Identity{sshID.Identity, pluginID.Identity}, ids.AgeIdentities())
+	require.Equal(t, Identities{pluginID, sshID}, ids, "caller's order must stay untouched")
+
+	r, err := age.Decrypt(&buf, ids.AgeIdentities()...)
+	require.NoError(t, err)
+	plain, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.Equal(t, "secret", string(plain))
+}
+
 func TestParseIdentitySSHEd25519Unencrypted(t *testing.T) {
 	t.Parallel()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)

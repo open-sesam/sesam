@@ -15,9 +15,9 @@ import (
 
 // ErrNoTTY is returned by PluginUI callbacks when sesam runs in a non-interactive
 // context (typically the git smudge filter) and an age plugin asks for input.
-// age.Decrypt surfaces this as an identity-level failure and falls through to
-// the next identity in the list, which is how plugin identities stay
-// inert during checkout. Surfaced to the user as a hint to re-run interactively.
+// age.Decrypt aborts on it rather than trying the next identity, which is why
+// Identities.AgeIdentities orders plugin identities last. Surfaced to the user
+// as a hint to re-run interactively.
 var ErrNoTTY = errors.New("plugin requested interaction but no terminal is available; run `sesam reveal` and tap your key if necessary")
 
 // PluginUI bridges sesam to the age plugin protocol's user-interaction
