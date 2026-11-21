@@ -23,6 +23,8 @@
     select.style.cssText =
         'height: 2.4rem; margin: auto 8px; padding: 0 4px; cursor: pointer;' +
         'font: inherit; font-size: 1.6rem; font-weight: 700;' +
+        // The box is as wide as "VERSIONS"; keep shorter names next to the arrow.
+        'text-align: right; text-align-last: right;' +
         'color: var(--links); background: transparent; border: none;';
 
     const header = new Option('VERSIONS', '');
@@ -35,6 +37,7 @@
         }
         select.add(new Option(name, v, false, v === current));
     }
+    for (const o of select.options) o.style.textAlign = 'left';
     select.addEventListener('change', () => {
         const prefix = select.value === 'main' ? '/docs/' : `/docs/${select.value}/`;
         location.href = prefix + page + location.hash;
