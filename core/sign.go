@@ -115,6 +115,18 @@ func LazyUserSignKey(root *os.Root, user string, userIdentity age.Identity, kr K
 	}, nil
 }
 
+// CheckSignKey unlocks a lazily loaded sign key now, reporting whether its
+// key file still holds the key the audit log registered. Eager signers were
+// checked when they were loaded.
+func CheckSignKey(s Signer) error {
+	ls, ok := s.(*lazySigner)
+	if !ok {
+		return nil
+	}
+	_, err := ls.load()
+	return err
+}
+
 // LoadUserSignKey is LoadSignKey plus a check against the key kr registered for
 // user. The key file itself is not signed, so anyone who can push could replace
 // it with their own key encrypted to user.
