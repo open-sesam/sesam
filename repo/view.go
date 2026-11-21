@@ -361,6 +361,12 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 		}
 	}
 
+	if opts.SignKey && v.secret != nil {
+		if err := core.CheckSignKey(v.secret.Signer); err != nil {
+			report.SignKeyError = core.JSONError{Err: err}
+		}
+	}
+
 	if opts.ForgeCheck {
 		report.ForgeCheckReport = core.VerifyForgeIds(ctx, v.root, v.vstate, v.keyring, v.opts.pluginUI())
 		if report.ForgeCheckReport.IsZero() {
