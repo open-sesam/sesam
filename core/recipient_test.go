@@ -2,9 +2,13 @@ package core
 
 import (
 	"context"
+	"crypto/ecdh"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"fmt"
+	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +19,8 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/plugin"
+	"filippo.io/age/tag"
+	"filippo.io/hpke"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
@@ -85,6 +91,42 @@ func TestParseRecipientPluginHRP(t *testing.T) {
 	r, err := ParseRecipient(rec, NewInteractivePluginUI())
 	require.NoError(t, err)
 	require.Equal(t, rec, r.String())
+}
+
+func TestParseRecipientTag(t *testing.T) {
+	classic, err := hpke.DHKEM(ecdh.P256()).GenerateKey()
+	require.NoError(t, err)
+	// tag recipients encode the compressed point; hpke yields the uncompressed one.
+	pub := classic.PublicKey().Bytes()
+	x, y := new(big.Int).SetBytes(pub[1:33]), new(big.Int).SetBytes(pub[33:])
+	classicRec, err := tag.NewClassicRecipient(elliptic.MarshalCompressed(elliptic.P256(), x, y))
+	require.NoError(t, err)
+
+	hybrid, err := hpke.MLKEM768P256().GenerateKey()
+	require.NoError(t, err)
+	hybridRec, err := tag.NewHybridRecipient(hybrid.PublicKey().Bytes())
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name string
+		rec  string
+	}{
+		{"classic", classicRec.String()},
+		{"hybrid", hybridRec.String()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// nil PluginUI: tag recipients must not be routed to a plugin.
+			r, err := ParseRecipient(tc.rec, nil)
+			require.NoError(t, err)
+			require.Equal(t, tc.rec, r.String())
+			require.IsType(t, &tag.Recipient{}, r.Recipient)
+
+			// Wrapping works without any age-plugin-* binary on PATH.
+			w, err := age.Encrypt(io.Discard, r.Recipient)
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
+		})
+	}
 }
 
 func TestParseRecipientPluginRequiresUI(t *testing.T) {
@@ -430,7 +472,7 @@ func TestIdentitiesRecipientStringsMatchesRecipient(t *testing.T) {
 
 // ageKeygenFile is what `age-keygen -o key.age` writes: two header comments
 // and the private key.
-func ageKeygenFile(t *testing.T) (content string, recipient, private string) {
+func ageKeygenFile(t *testing.T) (content, recipient, private string) {
 	t.Helper()
 
 	id, err := age.GenerateX25519Identity()
