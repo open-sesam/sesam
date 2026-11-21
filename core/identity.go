@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 
@@ -135,11 +136,27 @@ func (gi *Identity) Public() comparablePublicKey {
 	return gi.pub
 }
 
+// AgeIdentities returns the identities in -i order, but with plugin identities
+// last: age aborts on any plugin error (missing binary, no tty, ...) instead of
+// trying the next identity, so a working software key must get its turn first.
 func (ids Identities) AgeIdentities() []age.Identity {
 	ageIds := make([]age.Identity, 0, len(ids))
 	for _, id := range ids {
 		ageIds = append(ageIds, id.Identity)
 	}
+
+	slices.SortStableFunc(ageIds, func(a, b age.Identity) int {
+		_, aIsPlugin := a.(*pluginIdentityWithHint)
+		_, bIsPlugin := b.(*pluginIdentityWithHint)
+		switch {
+		case aIsPlugin == bIsPlugin:
+			return 0
+		case aIsPlugin:
+			return 1
+		default:
+			return -1
+		}
+	})
 
 	return ageIds
 }
