@@ -51,8 +51,8 @@ type syncFacts struct {
 	recipientsChanged bool
 	// matchesOlder: ... of some earlier version of it that git holds.
 	matchesOlder bool
-	// objectNewer: the worktree object was written after the plaintext.
-	objectNewer bool
+	// objectNotOlder: the worktree object was not written before the plaintext.
+	objectNotOlder bool
 	// objectMoved: the worktree object differs from the one at SyncOpts.Before.
 	objectMoved bool
 	// unmerged: git still lists the object as conflicted, so a plaintext that
@@ -96,11 +96,11 @@ func (s SyncStates) Paths(states ...SecretState) []string {
 // SyncStates says, per secret, which side moved since plaintext and object were
 // last written together. The plaintext is matched against the object versions
 // git knows: the worktree's, HEAD's, then opts.Before and opts.Candidates.
-// Matching the worktree object is in sync; matching an older, newer-on-disk
-// object is stale; matching none is modified - or diverged, when opts.Before
-// shows the object moved as well. Nothing is stored between passes: git holds
-// the object's history and every object's footer holds a keyed hash of its
-// plaintext.
+// Matching the worktree object is in sync; matching an older object that is not
+// older on disk is stale; matching none is modified - or diverged, when
+// opts.Before shows the object moved as well. Nothing is stored between passes:
+// git holds the object's history and every object's footer holds a keyed hash
+// of its plaintext.
 func (v *View) SyncStates(ctx context.Context, opts SyncOpts) (SyncStates, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -191,7 +191,7 @@ func classify(f syncFacts) SecretState {
 	case f.unmerged:
 		// A resolution in progress, whatever it happens to equal.
 		return SecretStateNotInSync
-	case f.matchesOlder && f.objectNewer:
+	case f.matchesOlder && f.objectNotOlder:
 		return SecretStateStale
 	case f.objectMoved:
 		return SecretStateDiverged
@@ -233,7 +233,7 @@ func (v *View) probeWorktree(s core.SecretAccess) (syncFacts, string, error) {
 	if err != nil {
 		return f, "", fmt.Errorf("stat object of %s: %w", s.RevealedPath, err)
 	}
-	f.objectNewer = objectInfo.ModTime().After(plaintextInfo.ModTime())
+	f.objectNotOlder = !objectInfo.ModTime().Before(plaintextInfo.ModTime())
 
 	match, err := v.secret.MatchObject(s.RevealedPath, bytes.NewReader(data))
 	if err != nil {

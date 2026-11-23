@@ -24,9 +24,9 @@ func TestClassify(t *testing.T) {
 		{"plaintext is the object's", syncFacts{access: true, plaintext: true, object: true, matchesObject: true}, SecretStateInSync},
 		{"plaintext matches, recipients moved: needs a reseal, not an edit", syncFacts{access: true, plaintext: true, object: true, matchesObject: true, recipientsChanged: true}, SecretStateRecipientsChanged},
 		{"matching the worktree object beats an older match", syncFacts{access: true, plaintext: true, object: true, matchesObject: true, matchesOlder: true}, SecretStateInSync},
-		{"plaintext is an earlier version and object is newer: stale", syncFacts{access: true, plaintext: true, object: true, matchesOlder: true, objectNewer: true}, SecretStateStale},
+		{"plaintext is an earlier version and object is not older: stale", syncFacts{access: true, plaintext: true, object: true, matchesOlder: true, objectNotOlder: true}, SecretStateStale},
 		{"older match written after object: modified", syncFacts{access: true, plaintext: true, object: true, matchesOlder: true}, SecretStateNotInSync},
-		{"stale even when the operation moved the object", syncFacts{access: true, plaintext: true, object: true, matchesOlder: true, objectNewer: true, objectMoved: true}, SecretStateStale},
+		{"stale even when the operation moved the object", syncFacts{access: true, plaintext: true, object: true, matchesOlder: true, objectNotOlder: true, objectMoved: true}, SecretStateStale},
 		{"matches nothing, object untouched: modified", syncFacts{access: true, plaintext: true, object: true}, SecretStateNotInSync},
 		{"matches nothing, object moved: diverged", syncFacts{access: true, plaintext: true, object: true, objectMoved: true}, SecretStateDiverged},
 		{"a conflict being resolved is modified, not diverged", syncFacts{access: true, plaintext: true, object: true, objectMoved: true, unmerged: true}, SecretStateNotInSync},
@@ -86,6 +86,11 @@ func TestSyncStatesOlderMatchUsesMtime(t *testing.T) {
 	states, err := r.SyncStates(t.Context(), SyncOpts{})
 	require.NoError(t, err)
 	require.Equal(t, SecretStateNotInSync, states[secret])
+
+	require.NoError(t, os.Chtimes(plaintext, objectTime, objectTime))
+	states, err = r.SyncStates(t.Context(), SyncOpts{})
+	require.NoError(t, err)
+	require.Equal(t, SecretStateStale, states[secret])
 
 	require.NoError(t, os.Chtimes(plaintext, objectTime.Add(-time.Minute), objectTime.Add(-time.Minute)))
 	states, err = r.SyncStates(t.Context(), SyncOpts{})
