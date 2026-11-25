@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"filippo.io/age"
 	"github.com/sahib/renameio/v2"
@@ -63,8 +64,67 @@ type renamedSigner struct {
 	name string
 }
 
+// lazySigner decrypts the sign key on the first signature, so read-only
+// commands never unlock it (Matters most for plugin identities, where every call costs a touch or a request)
+type lazySigner struct {
+	user string
+	pub  []byte
+	load func() (Signer, error)
+}
+
 func (rs renamedSigner) UserName() string {
 	return rs.name
+}
+
+func (ls *lazySigner) Sign(domain SignDomain, data []byte) (string, error) {
+	signer, err := ls.load()
+	if err != nil {
+		return "", err
+	}
+	return signer.Sign(domain, data)
+}
+
+// PublicKey is the key registered in the audit log; Sign fails if the key
+// file holds a different one.
+func (ls *lazySigner) PublicKey() []byte {
+	return ls.pub
+}
+
+func (ls *lazySigner) UserName() string {
+	return ls.user
+}
+
+// LazyUserSignKey is LoadUserSignKey, deferred until the first Sign call.
+// root must stay open until then.
+func LazyUserSignKey(root *os.Root, user string, userIdentity age.Identity, kr Keyring) (Signer, error) {
+	pub, ok := kr.SignPubKey(user)
+	if !ok {
+		return nil, fmt.Errorf("the audit log has no sign key registered for %s", user)
+	}
+
+	return &lazySigner{
+		user: user,
+		pub:  pub,
+		load: sync.OnceValues(func() (Signer, error) {
+			signer, err := LoadUserSignKey(root, user, userIdentity, kr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load sign key for %s: %w", user, err)
+			}
+			return signer, nil
+		}),
+	}, nil
+}
+
+// CheckSignKey unlocks a lazily loaded sign key now, reporting whether its
+// key file still holds the key the audit log registered. Eager signers were
+// checked when they were loaded.
+func CheckSignKey(s Signer) error {
+	ls, ok := s.(*lazySigner)
+	if !ok {
+		return nil
+	}
+	_, err := ls.load()
+	return err
 }
 
 // LoadUserSignKey is LoadSignKey plus a check against the key kr registered for

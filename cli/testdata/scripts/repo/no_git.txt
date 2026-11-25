@@ -1,0 +1,185 @@
+# Without git, sesam refuses to run unless --allow-no-git (or
+# SESAM_ALLOW_NO_GIT=true) allows it. Then read-only commands work, minus the
+# git based checks, and git-only commands still fail right away.
+#
+# Every command that touches a repo is listed here. Not listed, as they never
+# open one: help, --version, keyring clear, unclip, rotate.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+exec sesam init --user admin
+exec sesam add secret.txt
+exec git add -A
+exec git commit -m 'add secret'
+
+# A deployment that got the files, but not the history.
+rm .git
+rm secret.txt
+
+# --- without the flag everything stops, with a hint ---
+
+! exec sesam ls
+stderr 'no git repository found'
+stderr 'use --allow-no-git if that''s ok'
+
+! exec sesam show secret.txt
+stderr 'use --allow-no-git if that''s ok'
+
+! exec sesam status
+stderr 'use --allow-no-git if that''s ok'
+
+# --- the flag works before and after the command ---
+
+exec sesam --allow-no-git ls
+stdout 'secret.txt'
+
+exec sesam ls --allow-no-git
+stdout 'secret.txt'
+
+env SESAM_ALLOW_NO_GIT=true
+
+# --- read-only commands work ---
+
+exec sesam show secret.txt
+stdout 's3cr3t'
+
+exec sesam run --secret S=secret.txt -- sh -c 'cat "$S"'
+stdout 's3cr3t'
+
+exec sesam log
+stdout 'added secret.txt'
+
+exec sesam id
+stdout 'admin'
+
+exec sesam user list
+stdout 'admin'
+
+exec sesam config print
+stdout 'secret.txt'
+
+exec sesam verify
+stderr 'Truncation: skipped \(no git\)'
+stderr 'Integrity: ok'
+
+exec sesam verify --all --json
+stdout '"success": true'
+
+exec sesam verify --integrity
+stderr 'Integrity: ok'
+! stderr 'Truncation'
+
+exec sesam verify --key-reuse
+stderr 'Key re-use: ok'
+
+exec sesam verify --forge-check
+stderr 'Forge Check: ok'
+
+exec sesam reveal --all
+exists secret.txt
+
+# --- git-only commands fail right away ---
+
+! exec sesam verify --truncate
+stderr 'this command needs git'
+
+! exec sesam verify --config
+stderr 'this command needs git'
+
+! exec sesam reveal
+stderr 'this command needs git'
+
+! exec sesam reveal secret.txt
+stderr 'this command needs git'
+
+! exec sesam status
+stderr 'this command needs git'
+
+! exec sesam seal
+stderr 'this command needs git'
+
+! exec sesam add other.txt
+stderr 'this command needs git'
+
+! exec sesam rm secret.txt
+stderr 'this command needs git'
+
+! exec sesam mv secret.txt moved.txt
+stderr 'this command needs git'
+
+env EDITOR=true
+! exec sesam edit secret.txt
+stderr 'this command needs git'
+
+! exec sesam tell --user bob --recipient $BOB_PUBKEY
+stderr 'this command needs git'
+
+! exec sesam kill --user admin
+stderr 'this command needs git'
+
+! exec sesam user change-groups --user admin --group dev
+stderr 'this command needs git'
+
+! exec sesam user add-recipient --user admin --recipient $BOB_PUBKEY
+stderr 'this command needs git'
+
+! exec sesam user remove-recipient --user admin --recipient $BOB_PUBKEY
+stderr 'this command needs git'
+
+! exec sesam user regen-sign-key --user admin
+stderr 'this command needs git'
+
+! exec sesam user rename admin root
+stderr 'this command needs git'
+
+! exec sesam config apply
+stderr 'this command needs git'
+
+! exec sesam config diff
+stderr 'this command needs git'
+
+! exec sesam config reset
+stderr 'this command needs git'
+
+! exec sesam apply
+stderr 'this command needs git'
+
+! exec sesam clean
+stderr 'this command needs git'
+
+! exec sesam clean --aggressive
+stderr 'this command needs git'
+
+! exec sesam init --user admin
+stderr 'this command needs git'
+
+! exec sesam uninstall
+stderr 'this command needs git'
+
+! exec sesam hook install
+stderr 'this command needs git'
+
+! exec sesam hook uninstall
+stderr 'this command needs git'
+
+# The merge drivers only run under git.
+! exec sesam merge secret o a b 7 secret.txt
+stderr 'no git repository'
+
+! exec sesam merge log o a b 7 secret.txt
+stderr 'no git repository'
+
+# Hooks never block git: they warn and succeed.
+exec sesam hook pre-commit
+exec sesam hook post-checkout
+exec sesam hook post-merge
+exec sesam hook pre-merge-commit
+
+# doctor reports the missing git as an issue, it does not crash.
+! exec sesam doctor
+stdout '# sesam doctor'
+
+-- secret.txt --
+s3cr3t

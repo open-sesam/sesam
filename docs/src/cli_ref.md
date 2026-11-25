@@ -7,6 +7,7 @@ sesam - Manage encrypted secrets in git repositories
 sesam
 
 ```
+[--allow-no-git]
 [--askpass]=[value]
 [--clipboard-copy-cmd]=[value]
 [--clipboard-paste-cmd]=[value]
@@ -38,6 +39,8 @@ sesam [GLOBAL OPTIONS] [command [COMMAND OPTIONS]] [ARGUMENTS...]
 ```
 
 # GLOBAL OPTIONS
+
+**--allow-no-git**: Allow read-only commands without a git repository, skipping the git based checks \[$SESAM_ALLOW_NO_GIT\]
 
 **--askpass**="": Askpass helper for encrypted identities \[$SESAM_ASKPASS, $GIT_ASKPASS, $SSH_ASKPASS\]
 

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/pem"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -163,6 +164,139 @@ func TestParseIdentityAgePQ(t *testing.T) {
 	id, err := ParseIdentity(t.Context(), pqID.String(), nil, nil, "")
 	require.NoError(t, err)
 	require.Equal(t, pqID.Recipient().String(), id.Public().String())
+}
+
+func TestAgeIdentitiesPluginLast(t *testing.T) {
+	t.Parallel()
+	// A plugin that is not installed: age aborts on its error instead of
+	// trying the next identity, so it must never be tried before the SSH key.
+	pluginFile := "# public key: " + plugin.EncodeRecipient("sesamnotinstalled", []byte{1, 2, 3}) + "\n" +
+		plugin.EncodeIdentity("sesamnotinstalled", []byte{1, 2, 3}) + "\n"
+	pluginID, err := ParseIdentity(t.Context(), pluginFile, nil, NewNonInteractivePluginUI(), "")
+	require.NoError(t, err)
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	pemBlock, err := ssh.MarshalPrivateKey(priv, "")
+	require.NoError(t, err)
+	sshID, err := ParseIdentity(t.Context(), string(pem.EncodeToMemory(pemBlock)), nil, nil, "")
+	require.NoError(t, err)
+
+	sshPub, err := ssh.NewPublicKey(pub)
+	require.NoError(t, err)
+	recipient, err := ParseRecipient(string(ssh.MarshalAuthorizedKey(sshPub)), nil)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	w, err := age.Encrypt(&buf, recipient.Recipient)
+	require.NoError(t, err)
+	_, err = w.Write([]byte("secret"))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	ids := Identities{pluginID, sshID}
+	require.Equal(t, []age.Identity{sshID.Identity, pluginID.Identity}, ids.AgeIdentities())
+	require.Equal(t, Identities{pluginID, sshID}, ids, "caller's order must stay untouched")
+
+	r, err := age.Decrypt(&buf, ids.AgeIdentities()...)
+	require.NoError(t, err)
+	plain, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.Equal(t, "secret", string(plain))
+}
+
+// countingPluginIdentity stands in for a plugin subprocess and counts calls.
+type countingPluginIdentity struct {
+	inner age.Identity
+	calls int
+	err   error
+}
+
+func (c *countingPluginIdentity) Name() string { return "counting" }
+
+func (c *countingPluginIdentity) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
+	c.calls++
+	if c.err != nil {
+		return nil, c.err
+	}
+	return c.inner.Unwrap(stanzas)
+}
+
+func TestPluginIdentityMemoizesHeaders(t *testing.T) {
+	t.Parallel()
+	ours, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+	other, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+
+	encrypt := func(r age.Recipient) []byte {
+		var buf bytes.Buffer
+		w, err := age.Encrypt(&buf, r)
+		require.NoError(t, err)
+		_, err = w.Write([]byte("secret"))
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+		return buf.Bytes()
+	}
+	fileA, fileB := encrypt(ours.Recipient()), encrypt(ours.Recipient())
+	foreign := encrypt(other.Recipient())
+
+	counter := &countingPluginIdentity{inner: ours}
+	id := &pluginIdentityWithHint{inner: counter, ui: NewNonInteractivePluginUI()}
+
+	decrypt := func(file []byte) error {
+		r, err := age.Decrypt(bytes.NewReader(file), id)
+		if err != nil {
+			return err
+		}
+		plain, err := io.ReadAll(r)
+		require.NoError(t, err)
+		require.Equal(t, "secret", string(plain))
+		return nil
+	}
+
+	for _, tc := range []struct {
+		name      string
+		file      []byte
+		wantErr   bool
+		wantCalls int
+	}{
+		{"first header", fileA, false, 1},
+		{"same header again", fileA, false, 1},
+		{"other header", fileB, false, 2},
+		{"foreign header", foreign, true, 3},
+		{"foreign header again", foreign, true, 3},
+	} {
+		err := decrypt(tc.file)
+		if tc.wantErr {
+			require.ErrorIs(t, err, age.ErrIncorrectIdentity, tc.name)
+		} else {
+			require.NoError(t, err, tc.name)
+		}
+		require.Equal(t, tc.wantCalls, counter.calls, tc.name)
+	}
+}
+
+func TestPluginIdentityDoesNotMemoizeFailures(t *testing.T) {
+	t.Parallel()
+	ours, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	w, err := age.Encrypt(&buf, ours.Recipient())
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	counter := &countingPluginIdentity{inner: ours, err: errors.New("wrong PIN")}
+	id := &pluginIdentityWithHint{inner: counter, ui: NewNonInteractivePluginUI()}
+
+	_, err = age.Decrypt(bytes.NewReader(buf.Bytes()), id)
+	require.ErrorContains(t, err, "wrong PIN")
+
+	counter.err = nil
+	_, err = age.Decrypt(bytes.NewReader(buf.Bytes()), id)
+	require.NoError(t, err)
+	require.Equal(t, 2, counter.calls)
 }
 
 func TestParseIdentitySSHEd25519Unencrypted(t *testing.T) {

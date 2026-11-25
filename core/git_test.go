@@ -9,6 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func verifyInitFileUnchanged(ctx context.Context, sesamDir string) (string, error) {
+	g, err := OpenGit(ctx, sesamDir)
+	if err != nil {
+		return "", err
+	}
+
+	return verifyInitFileUnchangedWithRepo(ctx, sesamDir, g)
+}
+
 func TestVerifyInitFileUnchangedNoCommitsTouchingInit(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
 

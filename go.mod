@@ -4,6 +4,7 @@ go 1.27.4
 
 require (
 	filippo.io/age v1.3.2
+	filippo.io/hpke v0.4.0
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/chzyer/readline v1.5.1
 	github.com/cpuguy83/go-md2man/v2 v2.0.7
@@ -34,7 +35,7 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
-	filippo.io/hpke v0.4.0 // indirect
+	filippo.io/nistec v0.0.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect

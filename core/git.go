@@ -422,7 +422,7 @@ func SesamGitPrefix(g *Git, sesamDir string) (string, error) {
 	return filepath.ToSlash(rel), nil
 }
 
-// verifyInitFileUnchanged checks via git that .sesam/audit/init keeps the same
+// verifyInitFileUnchangedWithRepo checks via git that .sesam/audit/init keeps the same
 // content throughout history: it is written once at `sesam init` and must never
 // change. It inspects both the committed history and the working tree / index.
 //
@@ -432,18 +432,7 @@ func SesamGitPrefix(g *Git, sesamDir string) (string, error) {
 // tampering.
 //
 // Returns the anchor (earliest) commit hash and nil when the content is
-// constant and there are no pending changes; "" and an error otherwise. If
-// sesamDir is not a git repo a warning-level error is returned (caller decides
-// whether to treat it as fatal).
-func verifyInitFileUnchanged(ctx context.Context, sesamDir string) (string, error) {
-	g, err := OpenGit(ctx, sesamDir)
-	if err != nil {
-		return "", fmt.Errorf("not a git repository (skipping init-file history check): %w", err)
-	}
-
-	return verifyInitFileUnchangedWithRepo(ctx, sesamDir, g)
-}
-
+// constant and there are no pending changes; "" and an error otherwise.
 func verifyInitFileUnchangedWithRepo(ctx context.Context, sesamDir string, g *Git) (string, error) {
 	prefix, err := SesamGitPrefix(g, sesamDir)
 	if err != nil {

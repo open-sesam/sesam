@@ -37,7 +37,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 
 	gitCommitAll(t, repo, "sesam init")
 
-	vstate, err := Verify(t.Context(), auditLog, keyring, nil)
+	vstate, err := Verify(t.Context(), auditLog, keyring, nil, testOpenGit(t, auditLog.SesamDir))
 	require.NoError(t, err, "Verify after init")
 
 	sm, err := BuildSecretManager(
@@ -68,7 +68,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 	auditLog2, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.NoError(t, err)
 
-	vstate2, err := Verify(t.Context(), auditLog2, keyring2, nil)
+	vstate2, err := Verify(t.Context(), auditLog2, keyring2, nil, testOpenGit(t, auditLog2.SesamDir))
 	require.NoError(t, err, "Verify on reload")
 
 	resolvedUser, err := IdentityToUser(admin.Identity, keyring2.ListUsers())
@@ -116,7 +116,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	require.NoError(t, err)
 	gitCommitAll(t, repo, "init")
 
-	vstate, err := Verify(t.Context(), al, keyring, nil)
+	vstate, err := Verify(t.Context(), al, keyring, nil, testOpenGit(t, al.SesamDir))
 	require.NoError(t, err)
 
 	// ── Admin adds bob ──
@@ -145,7 +145,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	gitCommitAll(t, repo, "add bob and secret")
 
 	// Re-verify to pick up the new entries.
-	vstate, err = Verify(t.Context(), al, keyring, nil)
+	vstate, err = Verify(t.Context(), al, keyring, nil, testOpenGit(t, al.SesamDir))
 	require.NoError(t, err)
 
 	smBob, err := BuildSecretManager(
@@ -171,7 +171,7 @@ func TestIntegrationMultiUser(t *testing.T) {
 	al3, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.NoError(t, err)
 
-	vstate3, err := Verify(t.Context(), al3, keyring3, nil)
+	vstate3, err := Verify(t.Context(), al3, keyring3, nil, testOpenGit(t, al3.SesamDir))
 	require.NoError(t, err, "full re-verify")
 
 	require.Len(t, vstate3.Users, 2)
@@ -206,7 +206,7 @@ func TestIntegrationTamperDetection(t *testing.T) {
 	gitCommitAll(t, repo, "tamper")
 
 	keyring := EmptyKeyring()
-	_, err = Verify(t.Context(), al, keyring, nil)
+	_, err = Verify(t.Context(), al, keyring, nil, testOpenGit(t, al.SesamDir))
 	require.Error(t, err, "should detect init file tampering")
 }
 
@@ -229,7 +229,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	gitCommitAll(t, repo, "init")
 
 	kr := EmptyKeyring()
-	vs, err := Verify(t.Context(), al, kr, nil)
+	vs, err := Verify(t.Context(), al, kr, nil, testOpenGit(t, al.SesamDir))
 	require.NoError(t, err)
 
 	sm, err := BuildSecretManager(
@@ -261,7 +261,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 
 	// 4. Re-seal.
 	writeSecret(t, sesamDir, "secrets/token", "tok-abc")
-	vs, err = Verify(t.Context(), al, kr, nil)
+	vs, err = Verify(t.Context(), al, kr, nil, testOpenGit(t, al.SesamDir))
 	require.NoError(t, err)
 	sm, err = BuildSecretManager(
 		sesamDir,
@@ -298,7 +298,7 @@ func TestIntegrationSecretLifecycle(t *testing.T) {
 	al2, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.NoError(t, err)
 
-	vs2, err := Verify(t.Context(), al2, kr2, nil)
+	vs2, err := Verify(t.Context(), al2, kr2, nil, testOpenGit(t, al2.SesamDir))
 	require.NoError(t, err, "final verify")
 	require.Empty(t, vs2.Secrets)
 }
@@ -345,7 +345,7 @@ func TestKeySourcePreservedThroughReplay(t *testing.T) {
 	al2, err := LoadAuditLog(testRoot(t, sesamDir), Identities{admin.Identity})
 	require.NoError(t, err)
 
-	vstate, err := Verify(t.Context(), al2, EmptyKeyring(), nil)
+	vstate, err := Verify(t.Context(), al2, EmptyKeyring(), nil, testOpenGit(t, al2.SesamDir))
 	require.NoError(t, err)
 
 	adminUser, ok := vstate.UserExists("admin")

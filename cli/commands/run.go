@@ -59,6 +59,7 @@ func HandleRun(ctx context.Context, cmd *cli.Command) (err error) {
 			AskpassRequired: askpassRequired(),
 			LockTimeout:     cmd.Duration("lock-timeout"),
 			VerifyMode:      verifyMode,
+			AllowNoGit:      cmd.Bool("allow-no-git"),
 		},
 	)
 	if err != nil {

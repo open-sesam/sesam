@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"opensesam.org/sesam/cli/commands"
+	"opensesam.org/sesam/repo"
 )
 
 // Command categories group subcommands in `sesam --help`. urfave/cli sorts
@@ -84,7 +86,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 				Name:     "verify",
 				Category: catRepository,
 				Flags:    flagsVerify,
-				Action:   commands.WithRepo(commands.HandleVerify),
+				Action:   commands.WithRepoAllowNoGit(commands.HandleVerify),
 				Usage:    "Verify sesam signatures and encryption state",
 			},
 			{
@@ -262,7 +264,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 				Aliases:       []string{"reveal"},
 				Flags:         flagsReveal,
 				ArgsUsage:     "[<path>...]",
-				Action:        commands.WithRepo(commands.HandleOpen),
+				Action:        commands.WithRepoAllowNoGit(commands.HandleOpen),
 				ShellComplete: completeSecrets,
 				Usage:         "Decrypt all secrets available to the current user, and the given ones over your edits",
 			},
@@ -317,7 +319,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 				Category: catSecrets,
 				Aliases:  []string{"list-secrets"},
 				Flags:    flagsListSecrets,
-				Action:   commands.WithRepo(commands.HandleListSecrets),
+				Action:   commands.WithRepoAllowNoGit(commands.HandleListSecrets),
 				Usage:    "List known secrets and metadata",
 				Arguments: []cli.Argument{
 					&cli.StringArgs{
@@ -379,7 +381,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 						Name:    "list",
 						Aliases: []string{"ls"},
 						Flags:   flagsListUsers,
-						Action:  commands.WithRepo(commands.HandleListUsers),
+						Action:  commands.WithRepoAllowNoGit(commands.HandleListUsers),
 						Usage:   "List persons, groups, and access",
 					},
 					{
@@ -450,7 +452,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 						Name:   "print",
 						Flags:  flagsConfigPrint,
 						Usage:  "Print the whole config as one document, sub-configs merged (YAML, or JSON with --json)",
-						Action: commands.WithRepo(commands.HandleConfigPrint),
+						Action: commands.WithRepoAllowNoGit(commands.HandleConfigPrint),
 					},
 					{
 						Name:   "reset",
@@ -473,7 +475,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 				Name:     "id",
 				Category: catMeta,
 				Flags:    flagsID,
-				Action:   commands.WithRepo(commands.HandleID),
+				Action:   commands.WithRepoAllowNoGit(commands.HandleID),
 				Usage:    "Identify the current user by age identity",
 			},
 			{
@@ -492,7 +494,7 @@ we assume 'sesam show path/to/secret' as convenience.`,
 				Name:     "log",
 				Category: catMeta,
 				Flags:    flagsLog,
-				Action:   commands.WithRepo(commands.HandleLog),
+				Action:   commands.WithRepoAllowNoGit(commands.HandleLog),
 				Usage:    "Show the audit log of secret changes",
 			},
 			{
@@ -545,7 +547,14 @@ we assume 'sesam show path/to/secret' as convenience.`,
 		return activeProfile.stop(cmd.String("memprofile"))
 	}
 
-	return app.Run(ctx, args)
+	err := app.Run(ctx, args)
+	if errors.Is(err, repo.ErrNoGit) {
+		if app.Bool("allow-no-git") {
+			return fmt.Errorf("%w (this command needs git)", err)
+		}
+		return fmt.Errorf("%w (use --allow-no-git if that's ok)", err)
+	}
+	return err
 }
 
 // pinGitWorkTree makes the worktree git meant explicit. With GIT_DIR set but no

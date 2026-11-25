@@ -73,7 +73,7 @@ func HandleShow(ctx context.Context, cmd *cli.Command) error {
 		return copyToClipboard(ctx, clipBuf.Bytes(), clipOpts)
 	}
 
-	sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"))
+	sesamDir, err := repo.ResolveSesamDir(ctx, cmd.String("sesam-dir"), cmd.Bool("allow-no-git"))
 	if err != nil {
 		return err
 	}

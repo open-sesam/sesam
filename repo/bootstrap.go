@@ -32,13 +32,18 @@ var sesamReadmeTemplate string
 //go:embed assets/config.default
 var configTemplate string
 
+// ErrNoGit is returned when an operation needs git but there is no repository.
+var ErrNoGit = errors.New("no git repository")
+
 // resolveSesamDirAndGit resolves the sesam repository root and opens the git
 // repository close to it.
 //
 // It starts at sesamPath and walks upward until the git worktree root,
 // returning the first directory that contains .sesam. If none is found, it
-// returns sesamPath (used by init before .sesam exists).
-func resolveSesamDirAndGit(ctx context.Context, sesamPath string) (string, *core.Git, error) {
+// returns sesamPath (used by init before .sesam exists). With noGit a missing
+// git repository is no error: the walk goes up to the filesystem root and the
+// returned handle is nil.
+func resolveSesamDirAndGit(ctx context.Context, sesamPath string, noGit bool) (string, *core.Git, error) {
 	if strings.TrimSpace(sesamPath) == "" {
 		sesamPath = "."
 	}
@@ -57,12 +62,17 @@ func resolveSesamDirAndGit(ctx context.Context, sesamPath string) (string, *core
 		return "", nil, fmt.Errorf("repo path %s is not a directory", absPath)
 	}
 
+	var worktreeRoot string // empty: no git, search up to the filesystem root
 	gitRepo, err := core.OpenGit(ctx, absPath)
-	if err != nil {
-		return "", nil, fmt.Errorf("no git repository found at %s: %w", absPath, err)
+	switch {
+	case err == nil:
+		worktreeRoot = filepath.Clean(gitRepo.Root())
+	case !noGit:
+		return "", nil, fmt.Errorf("%w found at %s: %w", ErrNoGit, absPath, err)
+	default:
+		gitRepo = nil
 	}
 
-	worktreeRoot := filepath.Clean(gitRepo.Root())
 	current := absPath
 	for {
 		if _, err := os.Stat(filepath.Join(current, sesamSuffix)); err == nil {
@@ -85,7 +95,7 @@ func resolveSesamDirAndGit(ctx context.Context, sesamPath string) (string, *core
 
 // resolveSesamDir is a convenience wrapper that drops the git handle.
 func resolveSesamDir(ctx context.Context, sesamPath string) (string, error) {
-	sesamDir, _, err := resolveSesamDirAndGit(ctx, sesamPath)
+	sesamDir, _, err := resolveSesamDirAndGit(ctx, sesamPath, false)
 	return sesamDir, err
 }
 

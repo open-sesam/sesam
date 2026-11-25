@@ -254,6 +254,13 @@ func testGitRepo(t *testing.T) (string, *Git) {
 }
 
 // gitCommitAll stages all files and commits them.
+func testOpenGit(t *testing.T, dir string) *Git {
+	t.Helper()
+	g, err := OpenGit(t.Context(), dir)
+	require.NoError(t, err)
+	return g
+}
+
 func gitCommitAll(t *testing.T, repo *Git, msg string) {
 	t.Helper()
 	gitCommit(t, repo, msg)

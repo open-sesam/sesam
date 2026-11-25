@@ -7,12 +7,14 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 
@@ -135,11 +137,27 @@ func (gi *Identity) Public() comparablePublicKey {
 	return gi.pub
 }
 
+// AgeIdentities returns the identities in -i order, but with plugin identities
+// last: age aborts on any plugin error (missing binary, no tty, ...) instead of
+// trying the next identity, so a working software key must get its turn first.
 func (ids Identities) AgeIdentities() []age.Identity {
 	ageIds := make([]age.Identity, 0, len(ids))
 	for _, id := range ids {
 		ageIds = append(ageIds, id.Identity)
 	}
+
+	slices.SortStableFunc(ageIds, func(a, b age.Identity) int {
+		_, aIsPlugin := a.(*pluginIdentityWithHint)
+		_, bIsPlugin := b.(*pluginIdentityWithHint)
+		switch {
+		case aIsPlugin == bIsPlugin:
+			return 0
+		case aIsPlugin:
+			return 1
+		default:
+			return -1
+		}
+	})
 
 	return ageIds
 }
@@ -417,21 +435,78 @@ func parsePluginIdentity(ageLine, recipientHint string, pluginUI *PluginUI) (*Id
 	}, nil
 }
 
+// namedIdentity is what pluginIdentityWithHint needs of *plugin.Identity.
+type namedIdentity interface {
+	age.Identity
+	Name() string
+}
+
 // pluginIdentityWithHint prints a user-facing notice before the plugin
 // subprocess starts, so the PIN prompt and the touch wait aren't
 // uninterpreted silence to the user. The hint fires only on the first
 // Unwrap: age.Decrypt tries each identity against every recipient stanza
 // in the file, so without the guard we'd announce N times in a row for an
 // audit key encrypted to N users.
+//
+// Results are memoized per header: sesam decrypts the same header repeatedly
+// (the audit key once per history snapshot, a secret's header before its body),
+// and every plugin call costs a subprocess and maybe a yubikey touch or a KMS request.
 type pluginIdentityWithHint struct {
-	inner    *plugin.Identity
+	inner    namedIdentity
 	ui       *PluginUI
 	announce sync.Once
+
+	mu   sync.Mutex
+	memo map[[sha256.Size]byte][]byte // nil value: not our header
 }
 
 func (p *pluginIdentityWithHint) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
+	digest := stanzasDigest(stanzas)
+
+	p.mu.Lock()
+	fileKey, ok := p.memo[digest]
+	p.mu.Unlock()
+	if ok {
+		if fileKey == nil {
+			return nil, age.ErrIncorrectIdentity
+		}
+		return bytes.Clone(fileKey), nil
+	}
+
 	p.announce.Do(func() { p.ui.announcePluginCall(p.inner.Name()) })
-	return p.inner.Unwrap(stanzas)
+	fileKey, err := p.inner.Unwrap(stanzas)
+	// Only definite answers are memoized; a failed PIN or network error may
+	// succeed on the next try.
+	if err != nil && !errors.Is(err, age.ErrIncorrectIdentity) {
+		return nil, err
+	}
+
+	p.mu.Lock()
+	if p.memo == nil {
+		p.memo = make(map[[sha256.Size]byte][]byte)
+	}
+	p.memo[digest] = bytes.Clone(fileKey)
+	p.mu.Unlock()
+	return fileKey, err
+}
+
+// stanzasDigest identifies a header's recipient stanzas, length-prefixing
+// every field so distinct stanza lists can't collide.
+func stanzasDigest(stanzas []*age.Stanza) [sha256.Size]byte {
+	var buf []byte
+	field := func(b []byte) {
+		buf = binary.AppendUvarint(buf, uint64(len(b)))
+		buf = append(buf, b...)
+	}
+	for _, s := range stanzas {
+		field([]byte(s.Type))
+		buf = binary.AppendUvarint(buf, uint64(len(s.Args)))
+		for _, a := range s.Args {
+			field([]byte(a))
+		}
+		field(s.Body)
+	}
+	return sha256.Sum256(buf)
 }
 
 func (spp *StdinPassphraseProvider) ReadPassphrase(ctx context.Context, prompt string) ([]byte, error) {

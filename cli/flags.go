@@ -88,6 +88,11 @@ var flagsGeneral = []cli.Flag{
 		Usage:   "Directory where .sesam lives",
 		Sources: cli.EnvVars("SESAM_DIR"),
 	},
+	&cli.BoolFlag{
+		Name:    "allow-no-git",
+		Usage:   "Allow read-only commands without a git repository, skipping the git based checks",
+		Sources: cli.EnvVars("SESAM_ALLOW_NO_GIT"),
+	},
 	&cli.DurationFlag{
 		Name:    "lock-timeout",
 		Value:   5 * time.Second,

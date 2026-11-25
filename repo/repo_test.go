@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"filippo.io/age"
 	"github.com/stretchr/testify/require"
 	"opensesam.org/sesam/core"
 )
@@ -450,6 +451,47 @@ func TestRepo_Verify_IntegrityOK(t *testing.T) {
 	require.True(t, report.OK())
 }
 
+func TestRepo_Verify_SignKey(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		replace  bool
+		wantFail string
+	}{
+		{"matching key file", false, ""},
+		{"replaced key file", true, "does not hold the sign key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			admin := writeTestIdentity(t, "admin")
+			dir := bootstrappedDir(t, admin)
+
+			if tc.replace {
+				// Someone with push access swaps in their own key, encrypted
+				// to admin so it still decrypts.
+				root, err := os.OpenRoot(dir)
+				require.NoError(t, err)
+				defer func() { _ = root.Close() }()
+				recp, err := age.ParseX25519Recipient(admin.Recipient)
+				require.NoError(t, err)
+				_, err = core.GenerateSignKeyAt(root, "", admin.Name, []age.Recipient{recp})
+				require.NoError(t, err)
+			}
+
+			// Load no longer unlocks the key, so only the SignKey check sees it.
+			r := reloadSesamRepo(t, dir, admin)
+			report, err := r.Verify(t.Context(), VerifyOptions{SignKey: true})
+			require.NoError(t, err)
+
+			if tc.wantFail == "" {
+				require.NoError(t, report.SignKeyError)
+				require.True(t, report.OK())
+				return
+			}
+			require.ErrorContains(t, report.SignKeyError, tc.wantFail)
+			require.False(t, report.OK())
+		})
+	}
+}
+
 func TestRepo_Verify_NoChecksMeansOK(t *testing.T) {
 	admin := writeTestIdentity(t, "admin")
 	_, r := bootstrapRepo(t, admin)
@@ -602,7 +644,7 @@ func TestResolveSesamDir(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ResolveSesamDir(t.Context(), tc.in)
+			got, err := ResolveSesamDir(t.Context(), tc.in, false)
 			require.NoError(t, err)
 			gotResolved, err := filepath.EvalSymlinks(got)
 			require.NoError(t, err)
@@ -611,6 +653,38 @@ func TestResolveSesamDir(t *testing.T) {
 			require.Equal(t, wantResolved, gotResolved)
 		})
 	}
+}
+
+func TestLoad_NoGit(t *testing.T) {
+	admin := writeTestIdentity(t, "admin")
+	// A copy, as OpenGit caches the handle of the original dir.
+	dir := t.TempDir()
+	require.NoError(t, os.CopyFS(dir, os.DirFS(bootstrappedDir(t, admin))))
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, ".git")))
+
+	_, err := ResolveSesamDir(t.Context(), dir, false)
+	require.ErrorIs(t, err, ErrNoGit)
+	_, err = Load(t.Context(), dir, []string{admin.Path}, RepoOpts{})
+	require.ErrorIs(t, err, ErrNoGit)
+
+	subdir := filepath.Join(dir, "deep")
+	require.NoError(t, os.MkdirAll(subdir, 0o700))
+	got, err := ResolveSesamDir(t.Context(), subdir, true)
+	require.NoError(t, err)
+	require.Equal(t, dir, got)
+
+	r, err := Load(t.Context(), dir, []string{admin.Path}, RepoOpts{AllowNoGit: true})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+	require.False(t, r.HasGit())
+
+	_, err = r.SyncStates(t.Context(), SyncOpts{})
+	require.ErrorIs(t, err, ErrNoGit)
+
+	report, err := r.Verify(t.Context(), VerifyOptions{Integrity: true, Truncation: true})
+	require.NoError(t, err)
+	require.Nil(t, report.Integrity)
+	require.ErrorIs(t, report.TruncateError, ErrNoGit)
 }
 
 // --- RepoOpts helpers ------------------------------------------------------
