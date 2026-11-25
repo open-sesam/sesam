@@ -65,7 +65,7 @@ type renamedSigner struct {
 }
 
 // lazySigner decrypts the sign key on the first signature, so read-only
-// commands never unlock it (mostly important for plugin identities where counts call)
+// commands never unlock it (Matters most for plugin identities, where every call costs a touch or a request)
 type lazySigner struct {
 	user string
 	pub  []byte
