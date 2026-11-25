@@ -39,6 +39,7 @@ func TestIntegrationInitAndRegular(t *testing.T) {
 
 	vstate, err := Verify(t.Context(), auditLog, keyring, nil)
 	require.NoError(t, err, "Verify after init")
+	require.True(t, vstate.Extensions().DisableLegacyMergeVerify, "new repos opt out of legacy merge verify")
 
 	sm, err := BuildSecretManager(
 		sesamDir,

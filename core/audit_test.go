@@ -1001,8 +1001,9 @@ func TestLegacyAuditLogStillLoads(t *testing.T) {
 	require.Equal(t, anchor, loaded.Entries[0].Hash())
 
 	loaded.InitHash = anchor
-	_, err = VerifyChain(loaded, EmptyKeyring(), nil)
+	state, err := VerifyChain(loaded, EmptyKeyring(), nil)
 	require.NoError(t, err, "and must still verify")
+	require.False(t, state.Extensions().DisableLegacyMergeVerify, "repos without the flag keep legacy merge verify")
 
 	// Re-encrypted with current code it round-trips, anchor unmoved.
 	var rewritten bytes.Buffer

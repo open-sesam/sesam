@@ -378,7 +378,13 @@ func (v *View) Verify(ctx context.Context, opts VerifyOptions) (*VerifyReport, e
 		// history for it - VerifyHistory would otherwise walk it a second time.
 		stoppedAt, err := core.VerifyHistory(
 			ctx,
-			v.sesamDir, v.gitRepo, v.identities, v.opts.pluginUI(), v.vstate.InitCommit(), worktree,
+			v.sesamDir,
+			v.gitRepo,
+			v.identities,
+			v.opts.pluginUI(),
+			v.vstate.InitCommit(),
+			worktree,
+			v.vstate.Extensions(),
 		)
 		if err != nil {
 			report.TruncateError = core.JSONError{Err: err}

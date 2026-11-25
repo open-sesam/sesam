@@ -137,6 +137,9 @@ type VerifiedState struct {
 	// Empty when that check did not run (VerifyChain) or nothing is committed.
 	initCommit string
 
+	// extensions are parsed from the init entry by verifyInit.
+	extensions Extensions
+
 	auditLog *AuditLog
 	keyring  Keyring
 	pluginUI *PluginUI
@@ -147,6 +150,11 @@ type VerifiedState struct {
 // nothing was committed yet; callers then have to determine it themselves.
 func (s *VerifiedState) InitCommit() string {
 	return s.initCommit
+}
+
+// Extensions returns the extensions enabled by the verified init entry.
+func (s *VerifiedState) Extensions() Extensions {
+	return s.extensions
 }
 
 func (vu *VerifiedUser) IsAdmin() bool {
@@ -451,6 +459,17 @@ func verifyInit(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned, kr
 
 	if !slices.Contains(admin.Groups, "admin") {
 		return fmt.Errorf("init admin user %s is not in the admin group", admin.User)
+	}
+
+	for _, ext := range initDetail.InitExtensions {
+		switch ext.Name {
+		case InitExtensionMergeTipHash:
+			state.extensions.DisableLegacyMergeVerify = true
+		default:
+			if ext.Required {
+				return fmt.Errorf("repo requires extension %q unknown to this sesam version; please upgrade", ext.Name)
+			}
+		}
 	}
 
 	return registerUser(state, admin, kr)
@@ -915,8 +934,13 @@ func verifyMerge(log *AuditLog, state *VerifiedState, entry *AuditEntrySigned) e
 		return err
 	}
 
-	if _, err := parseDetail[DetailMerge](entry); err != nil {
+	d, err := parseDetail[DetailMerge](entry)
+	if err != nil {
 		return fmt.Errorf("parse merge detail: %w", err)
+	}
+
+	if state.extensions.DisableLegacyMergeVerify && d.TheirTipHash == "" {
+		return fmt.Errorf("merge entry has no tip hash (required by %s)", InitExtensionMergeTipHash)
 	}
 
 	// The last seal's root hash describes neither merged side, so drop the claim
@@ -1292,6 +1316,7 @@ func (s *VerifiedState) Clone(log *AuditLog, kr Keyring) *VerifiedState {
 		keyring:           kr,
 		pluginUI:          s.pluginUI,
 		initCommit:        s.initCommit,
+		extensions:        s.extensions,
 	}
 	cloned.BuildIndexes()
 	return cloned
