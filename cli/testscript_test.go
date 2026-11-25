@@ -53,6 +53,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestWorkflows(t *testing.T) {
+	t.Parallel()
 	// Scripts are grouped into per-topic subdirectories under testdata/scripts;
 	// each subdirectory runs as its own subtest (testscript reads a Dir
 	// non-recursively) so `-run TestWorkflows/<category>` targets one group.
@@ -166,6 +167,7 @@ func TestWorkflows(t *testing.T) {
 		ran = true
 		category := entry.Name()
 		t.Run(category, func(t *testing.T) {
+			t.Parallel()
 			testscript.Run(t, testscript.Params{
 				Dir:   filepath.Join(root, category),
 				Setup: setup,

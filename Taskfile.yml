@@ -52,7 +52,7 @@ tasks:
   test:
     desc: Run go tests
     cmds:
-      - gotestsum --format testname -- -tags docgen ./...
+      - gotestsum --format testname -- -parallel 32 -tags docgen ./...
 
   test-race:
     desc: Run go tests
