@@ -29,12 +29,12 @@ func atomicSwapDirs(a, b string) error {
 	}
 	if err := os.Rename(tmp, b); err != nil {
 		slog.Warn(
-			"atomic swap: could not relocate old tree; discarding it",
+			"atomic swap: could not move old tree; deleting it",
 			slog.String("tmp", tmp), slog.String("dst", b), slog.String("err", err.Error()),
 		)
 		if rmErr := os.RemoveAll(tmp); rmErr != nil {
 			slog.Warn(
-				"atomic swap: could not remove orphaned old tree",
+				"atomic swap: could not remove leftover old tree",
 				slog.String("tmp", tmp), slog.String("err", rmErr.Error()),
 			)
 		}

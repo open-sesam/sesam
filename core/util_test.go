@@ -172,10 +172,10 @@ func TestValidSecretPathFormat(t *testing.T) {
 		// ones a split on "/" alone would miss.
 		{name: "traversal os separator", path: filepath.Join("..", "secret"), wantErr: "'..' segment"},
 		{name: "absolute os separator", path: string(filepath.Separator) + "etc", wantErr: "absolute paths"},
-		{name: "dot prefix", path: "./x", wantErr: "canonical form"},
-		{name: "double slash", path: "a//x", wantErr: "canonical form"},
-		{name: "trailing slash", path: "a/x/", wantErr: "canonical form"},
-		{name: "dot segment", path: "a/./x", wantErr: "canonical form"},
+		{name: "dot prefix", path: "./x", wantErr: "path is not clean"},
+		{name: "double slash", path: "a//x", wantErr: "path is not clean"},
+		{name: "trailing slash", path: "a/x/", wantErr: "path is not clean"},
+		{name: "dot segment", path: "a/./x", wantErr: "path is not clean"},
 	}
 
 	for _, tc := range tests {

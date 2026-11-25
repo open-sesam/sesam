@@ -416,7 +416,7 @@ func (o *GitObjects) Commit(rev string) (*GitCommit, bool, error) {
 func SesamGitPrefix(g *Git, sesamDir string) (string, error) {
 	rel, err := filepath.Rel(g.root, sesamDir)
 	if err != nil {
-		return "", fmt.Errorf("failed to relativize sesam dir against worktree root: %w", err)
+		return "", fmt.Errorf("failed to make sesam dir relative to worktree root: %w", err)
 	}
 
 	return filepath.ToSlash(rel), nil
@@ -567,7 +567,7 @@ func pickInitAnchor(ctx context.Context, g *Git, objs *GitObjects, head string, 
 			}
 
 			if ok, err := g.IsAncestor(ctx, a, b); err != nil {
-				return "", fmt.Errorf("check ancestry of %s: %w", a, err)
+				return "", fmt.Errorf("check whether %s is an ancestor: %w", a, err)
 			} else if ok {
 				return "", fmt.Errorf(
 					".sesam/audit/init was removed and re-added in history (introduced by %s, again by %s)",

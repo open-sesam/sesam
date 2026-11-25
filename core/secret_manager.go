@@ -759,7 +759,7 @@ func (sm *SecretManager) footerOutdated(footer *secretFooter, revealedPath strin
 	// Either the sealer's key was regenerated or the footer was tampered with.
 	// Both look the same from here, and resealing erases the evidence.
 	slog.Warn(
-		"seal: footer signature does not verify (might happen after regen-sign-key, but could be tampering)",
+		"seal: footer signature does not verify (might happen after regen-sign-key, but could mean someone changed the file)",
 		slog.String("path", revealedPath),
 		slog.String("sealed_by", footer.SealedBy),
 	)

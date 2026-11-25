@@ -67,12 +67,12 @@ func (r *Repo) Stage() (*Stage, error) {
 
 	// Drop any fork left behind by a crashed previous run before re-forking.
 	if err := r.root.RemoveAll(forkSuffix); err != nil {
-		return nil, fmt.Errorf("clear stale fork: %w", err)
+		return nil, fmt.Errorf("remove leftover staging copy: %w", err)
 	}
 
 	if err := r.materializeFork(); err != nil {
 		_ = r.root.RemoveAll(forkSuffix)
-		return nil, fmt.Errorf("materialize fork: %w", err)
+		return nil, fmt.Errorf("create staging copy: %w", err)
 	}
 
 	s, err := r.buildStage()
@@ -192,17 +192,17 @@ func (s *Stage) PruneUnusedAfterMerge() error {
 
 	prunedKeys, err := core.PruneOrphanSignKeys(s.root, forkSuffix, users)
 	if err != nil {
-		return fmt.Errorf("reconcile signkeys: %w", err)
+		return fmt.Errorf("sync signkeys with the log: %w", err)
 	}
 
 	prunedObjs, err := core.PruneOrphanObjects(s.root, forkSuffix, secrets)
 	if err != nil {
-		return fmt.Errorf("reconcile objects: %w", err)
+		return fmt.Errorf("sync objects with the log: %w", err)
 	}
 
 	if len(prunedKeys) > 0 || len(prunedObjs) > 0 {
 		slog.Info(
-			"merge reconcile: pruned derived files to match the merged log",
+			"merge: removed files the merged log no longer has",
 			slog.Any("signkeys", prunedKeys),
 			slog.Any("objects", prunedObjs),
 		)
@@ -295,7 +295,7 @@ func (s *Stage) Commit() error {
 	// Reap the old tree (now sitting at .sesam-tmp).
 	if err := s.repo.root.RemoveAll(forkSuffix); err != nil {
 		slog.Warn(
-			"committed, but failed to reap the old tree (.sesam-tmp); it is reaped on next load",
+			"committed, but failed to remove the old tree (.sesam-tmp); it is removed on next load",
 			slog.String("err", err.Error()),
 		)
 	}

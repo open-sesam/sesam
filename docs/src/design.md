@@ -514,3 +514,17 @@ through `user.change_groups`. Admin status is determined by membership in the
 ```admonish note
 The set of operations may still grow as sesam gains features.
 ```
+
+### Merge specifics
+
+- `git` will call merge drivers only if both sides have changed, no merge driver is being called otherwise.
+- Audit log stays linear, we need to figure out the change set from `ours` (i.e. HEAD), the `base` (if available) and `theirs`.
+- Any meaningful change on any side will cause a change in the audit log (e.g. changing a secret), so the audit log merge driver is the core of the logic.
+- Order of execution between files (secrets vs audit log vs signing keys) is not guaranteed. Operations that need to run after all merges (e.g. re-seal) need to be done by a hook. Drivers see only their own output, the worktree is only updated afterwards.
+- We need to apply `their` changes on top of ours and re-sign them. By doing so we vouch for the incoming changes as if we would have done them ourselves.
+- All audit logs (ours, theirs, base) have to be verified before merging, as well the resulting audit log has to be verified.
+- Audit log merging has to be done non-interactively and by best effort. Conflicts should be noted down for later manual review.
+- Some conflicts like us having revoked a user and their side having that user add a new secret should choose the most secure option (drop it).
+- Operations on their side that touch the merging user are not allowed and should abort or at the very least ignored.
+- Merges should be recorded as entry in the audit log to allow later introspection.
+- For now, the merge has to be done by an admin user.

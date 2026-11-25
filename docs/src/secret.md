@@ -35,8 +35,8 @@ What this means for you:
 
 - The revealed files are ignored by git.
 - Commands like `git log` will print paths like `.sesam/objects/secret.txt` but not `secret.txt`. This is because
-  the actual revealed file is of course not tracked.
-- If you want to run `git` commands explicitly on secrets, you have to run e.g. `git log .sesam/objects/secret.txt` not `git log secret.txt` therefore.
+  the actual revealed file is of course not tracked by `git`.
+- If you want to run `git` commands explicitly on secrets, you have to run e.g. `git log -- .sesam/objects/secret.txt.sesam` not `git log -- secret.txt` therefore.
 
 ## Adding a secret via config (declarative)
 
@@ -123,7 +123,12 @@ Secrets whose files you deleted stay tracked; remove them with `sesam rm`.
 ## Modifying secrets
 
 Running `sesam add` will work here too, similar to `git add`. By default this will also re-seal the secrets,
-except if you pass `--no-seal`.
+except if you pass `--no-seal`. However, you don't need to do this explicitly if the pre-commit hook is installed:
+
+```bash
+# This will re-seal any secrets that were modified automatically:
+git commit -am 'secrets changed'
+```
 
 If you want to change the access groups of a user, then just pass a different set of `--group / -g` flags.
 Note that this will overwrite the existing groups. If you would rather like to append, then use `--group-add / -G`.
@@ -150,13 +155,72 @@ This will show you files you edited directly without calling `sesam add` on them
 
 The letter says what happened to a secret since its plaintext and its sealed
 object were last written together. `sesam` works that out from the object
-versions `git` holds, so nothing has to be remembered on your machine:
+versions `git` holds:
 
-- `M` modified: you edited the plaintext. `sesam seal` takes it.
-- `S` stale: the object moved on (a pull, checkout or merge) and the plaintext is the old version. `sesam reveal` takes it; `sesam seal` leaves it alone unless named (`sesam seal <path>`) or `--force-stale` is given.
+- `✓`: Sealed and revealed state are in sync.
+- `x`: We don't have access to this secret.
+- `A`: This revealed secret was not yet sealed (can happen with `--no-seal`).
+- `∅`: This sealed secret was not revealed yet (can happen without hooks).
+- `M` modified: you edited the revealed secret, but it was not sealed yet.
+- `S` stale: the object moved on (a pull, checkout or merge) and the revealed file is the old version. `sesam reveal` takes it; `sesam seal` leaves it alone unless it is explicitly specified (`sesam seal <path>`) or `--force-stale` is given.
 - `!` diverged: both at once, seen during a merge or by the hooks. Pick a side with `sesam reveal --force-diverged` or `sesam seal --force-diverged`, or per secret with `sesam reveal <path>` / `sesam seal <path>`.
-- `R` recipients changed: the content agrees, but who may read it changed. `sesam seal` re-encrypts it.
-- `U` conflicted: a merge left conflict markers in the plaintext.
+- `R` recipients changed: the content is the same, but who may read it changed, needs a seal.
+- `U` conflicted: a merge left conflict markers in the plaintext. You need to clear them up.
+
+## Removing secrets
+
+To stop managing secrets and delete their plaintext:
+
+```bash
+sesam rm files/ dir/
+```
+
+`rm` refuses plaintext with changes that were never sealed, since it is the
+only copy of them. Seal first to keep them in history, or pass `--force` to
+delete them anyway. To keep the content outside sesam, copy it with
+`sesam show path > elsewhere` before removing.
+
+```admonish warning
+Please do not delete secrets just with `rm`. This will just remove the revealed file, but the
+sealed file in `.sesam/` will still exist. On the next `sesam open` it will suddenly be back.
+```
+
+## Moving secrets
+
+Probably not very surprising by now, but we have a `mv` command as well:
+
+```bash
+sesam mv old_name new_name
+```
+
+```admonish warning
+The same warning as with `sesam rm` applies: Please do not just move the file
+with `mv`. This will just move  the revealed file to a new name, but the sealed
+file in `.sesam/` will still exist. On the next `sesam open` it will suddenly
+be back with the old path.
+```
+
+## Listing secrets
+
+```bash
+sesam ls
+╭───────────────────────────────────────────────────────────────╮
+│                            Secrets                            │
+├─────────────────────────────────┬───────────────┬─────────────┤
+│ Path                            │ Access Groups │ Description │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ README.md                       │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ dir/of/secrets/some_file        │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│ dir/of/secrets/sub/another_file │ admin         │ —           │
+├─────────────────────────────────┼───────────────┼─────────────┤
+│                                 │               │ 3 secrets   │
+╰─────────────────────────────────┴───────────────┴─────────────╯
+```
+
+You can also use the ``--json`` switch to print it in a more scriptable way.
+The description comes from the config, if filled.
 
 ## Running a command with secrets
 
@@ -244,57 +308,3 @@ filename. Generated names that collide with each other, dotenv variables, or
 the inherited environment are rejected rather than overwritten. File secrets
 are streamed into their descriptors; dotenv values remain subject to the
 operating system's process-environment limits.
-
-## Removing secrets
-
-To stop managing secrets and delete their plaintext:
-
-```bash
-sesam rm files/ dir/
-```
-
-`rm` refuses plaintext with changes that were never sealed, since it is the
-only copy of them. Seal first to keep them in history, or pass `--force` to
-delete them anyway. To keep the content outside sesam, copy it with
-`sesam show path > elsewhere` before removing.
-
-```admonish warning
-Please do not delete secrets just with `rm`. This will just remove the revealed file, but the
-sealed file in `.sesam/` will still exist. On the next `sesam open` it will suddenly be back.
-```
-
-## Moving secrets
-
-Probably not very surprising by now, but we have a `mv` command as well:
-
-```bash
-sesam mv old_name new_name
-```
-
-```admonish warning
-The same warning as with `sesam rm` applies: Please do not just move the file
-with `mv`. This will just move  the revealed file to a new name, but the sealed
-file in `.sesam/` will still exist. On the next `sesam open` it will suddenly
-be back with the old path.
-```
-
-## Listing secrets
-
-```bash
-sesam ls
-╭───────────────────────────────────────────────────────────────╮
-│                            Secrets                            │
-├─────────────────────────────────┬───────────────┬─────────────┤
-│ Path                            │ Access Groups │ Description │
-├─────────────────────────────────┼───────────────┼─────────────┤
-│ README.md                       │ admin         │ —           │
-├─────────────────────────────────┼───────────────┼─────────────┤
-│ dir/of/secrets/some_file        │ admin         │ —           │
-├─────────────────────────────────┼───────────────┼─────────────┤
-│ dir/of/secrets/sub/another_file │ admin         │ —           │
-├─────────────────────────────────┼───────────────┼─────────────┤
-│                                 │               │ 3 secrets   │
-╰─────────────────────────────────┴───────────────┴─────────────╯
-```
-
-You can also use the ``--json`` switch to print it in a more scriptable way.

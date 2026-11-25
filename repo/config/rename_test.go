@@ -405,5 +405,5 @@ func TestUserChangeGroups_AnchoredGroups(t *testing.T) {
 	// Leaving dev alone would edit the list admin shares too.
 	cr, err = loadConfig(t, main)
 	require.NoError(t, err)
-	require.ErrorContains(t, cr.UserChangeGroups("bob", []string{"admin"}), "through an anchor")
+	require.ErrorContains(t, cr.UserChangeGroups("bob", []string{"admin"}), "through a YAML anchor")
 }

@@ -29,7 +29,7 @@ stderr 'exec command.*environment variable contains NUL'
 ! exists nul.env
 
 ! exec sesam run --secret RAW=raw.txt -- command-that-does-not-exist
-stderr 'find command.*using inherited PATH'
+stderr 'find command.*in your PATH'
 
 exec chmod +x bad-exec
 ! exec sesam run --secret RAW=raw.txt -- ./bad-exec
@@ -59,7 +59,7 @@ stderr 'a command is required after --'
 # Inherited names are never overwritten.
 env RAW=parent
 ! exec sesam run --secret RAW=raw.txt -- touch started-collision
-stderr 'RAW.*collides with inherited environment'
+stderr 'RAW.*is set by both your environment'
 ! exists started-collision
 
 -- raw-fixture --

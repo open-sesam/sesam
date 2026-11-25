@@ -8,9 +8,9 @@
 
 **`sesam` is a tool for managing secrets in git.**
 
-Let's discuss the sentence above some more:
+This deserves some more explanation:
 
-- `secrets`: Are just regular files that contain something precious to you. They are on your filesystem *revealed* (decrypted) and *sealed* (encrypted).
+- `secrets`: Are just regular files that contain something precious to you. They live in the worktree *revealed* (decrypted) and in git storage *sealed* (encrypted).
 - `managing`: Making sure *sealed* and *revealed* are in sync and allow the user to define who has access to what secret.
 - `in git`: Developers are naturally used to `git` and `sesam` integrates well with it.
 
