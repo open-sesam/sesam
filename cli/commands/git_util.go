@@ -111,7 +111,7 @@ func inspectMerge(ctx context.Context, sesamDir string) (mergeKind, string) {
 		return mergeKindNone, ""
 	}
 
-	gitDir, err := gitOutput(ctx, worktreeRoot, "rev-parse", "--absolute-git-dir")
+	gitDir, err := repo.GitDir(ctx, sesamDir)
 	if err != nil {
 		return mergeKindNone, ""
 	}
@@ -124,16 +124,13 @@ func inspectMerge(ctx context.Context, sesamDir string) (mergeKind, string) {
 		}
 	}
 
-	for _, probe := range []struct {
-		ref  string
-		kind mergeKind
-	}{
-		{"CHERRY_PICK_HEAD", mergeKindCherryPick},
-		{"REVERT_HEAD", mergeKindRevert},
-		{"MERGE_HEAD", mergeKindMerge},
-	} {
-		if sha, err := gitOutput(ctx, worktreeRoot, "rev-parse", "-q", "--verify", probe.ref); err == nil {
-			return probe.kind, sha
+	refs := []string{"CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_HEAD"}
+	kinds := []mergeKind{mergeKindCherryPick, mergeKindRevert, mergeKindMerge}
+	if shas, err := resolveRefs(ctx, worktreeRoot, refs...); err == nil {
+		for i, sha := range shas {
+			if sha != "" {
+				return kinds[i], sha
+			}
 		}
 	}
 
@@ -375,6 +372,34 @@ func gitOutputRaw(ctx context.Context, dir string, args ...string) (string, erro
 	}
 
 	return buf.String(), nil
+}
+
+// resolveRefs resolves several refs with one git call; a ref that names no
+// object resolves to "". For a multi-line MERGE_HEAD (octopus) it is the first.
+func resolveRefs(ctx context.Context, dir string, refs ...string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "cat-file", "--batch-check=%(objectname)")
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(strings.Join(refs, "\n") + "\n")
+	cmd.Stderr = os.Stderr
+
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	if len(lines) != len(refs) {
+		return nil, fmt.Errorf("git cat-file: want %d lines, got %q", len(refs), out)
+	}
+
+	// Anything but an object id is git's "<ref> missing" or "<ref> ambiguous".
+	for i, line := range lines {
+		if !isCommitHash(line) {
+			lines[i] = ""
+		}
+	}
+
+	return lines, nil
 }
 
 // rebasePickedCommit reads the commit a rebase is currently replaying.
