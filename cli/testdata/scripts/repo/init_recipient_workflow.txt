@@ -1,0 +1,37 @@
+# `sesam init --recipient` stores the spec instead of the raw key, so the admin's
+# key source lands in sesam.yml and the audit log. file:// stands in for forge
+# specs, which need a live forge.
+
+exec git init
+exec git config user.email test@sesam.dev
+exec git config user.name 'Sesam Test'
+
+mkdir keys
+exec sh -c 'echo "$ADMIN_PUBKEY" > keys/admin.pub'
+exec sh -c 'echo "$BOB_PUBKEY" > keys/bob.pub'
+exec sh -c 'printf "%s\n%s\n" "$BOB_PUBKEY" "$ADMIN_PUBKEY" > keys/both.pub'
+
+# A spec that does not match the identity is refused and leaves nothing behind.
+! exec sesam init --user admin --recipient file://keys/bob.pub
+stderr 'do not include identity key'
+stderr $ADMIN_PUBKEY
+! exists .sesam
+! exists sesam.yml
+
+# Unresolvable specs fail before anything is written.
+! exec sesam init --user admin --recipient file://keys/missing.pub
+! exists .sesam
+
+# Like a forge account with several devices: the spec resolves to more keys
+# than the identity holds. The extra ones are kept as admin recipients.
+exec sesam init --user admin --recipient file://keys/both.pub
+grep 'file://keys/both.pub' sesam.yml
+! grep 'age1' sesam.yml
+exec sesam show .sesam/audit/log.jsonl
+stdout 'file://keys/both.pub'
+stdout $ADMIN_PUBKEY
+stdout $BOB_PUBKEY
+
+exec git add -A
+exec git commit -m 'init sesam'
+exec sesam verify

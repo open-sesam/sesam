@@ -332,18 +332,7 @@ func (um *UserManager) UserRegenerateSignKey(user string) error {
 }
 
 // InitAdminUser has to be called on init to create the initial user.
-// pluginUI is used when any of pubKeySpecs is a plugin recipient; pass nil
-// to default to a non-interactive UI.
-func InitAdminUser(
-	ctx context.Context,
-	root *os.Root, user string, pubKeySpecs []string,
-	pluginUI *PluginUI,
-) (Signer, *AuditLog, error) {
-	recps, err := ParseAndResolveRecipients(ctx, root, pubKeySpecs, pluginUI)
-	if err != nil {
-		return nil, nil, err
-	}
-
+func InitAdminUser(root *os.Root, user string, recps Recipients) (Signer, *AuditLog, error) {
 	signer, err := GenerateSignKeyAt(
 		root,
 		"",

@@ -140,6 +140,8 @@ Initialize sesam in the current repository
 
 **--install-merge**: Install merge support in repo git config
 
+**--recipient**="": Recipient key spec (e.g. github:alice) - can be given several times
+
 **--user, -u**="": Initial admin user name (if not given, git config is used to guess)
 
 ### uninstall

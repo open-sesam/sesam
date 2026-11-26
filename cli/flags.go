@@ -166,6 +166,7 @@ var flagsInit = []cli.Flag{
 		Usage: "Make it possible to call sesam as `git sesam`",
 	},
 	userFlag(false, "Initial admin user name (if not given, git config is used to guess)"),
+	recipientsFlag(false),
 }
 
 var flagsUninstall = []cli.Flag{

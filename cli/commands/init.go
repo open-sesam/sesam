@@ -57,6 +57,7 @@ func HandleInit(ctx context.Context, cmd *cli.Command) (err error) {
 			InstallDiff:  boolWithDefault(cmd, "install-diff", true),
 			InstallAlias: boolWithDefault(cmd, "install-alias", true),
 		},
+		RecipientSpecs: cmd.StringSlice("recipient"),
 	}
 
 	ids := cmd.StringSlice("identity")
