@@ -56,6 +56,9 @@ tasks:
 
   test-race:
     desc: Run go tests
+    env:
+      # The race runtime sleeps 1s on every exit; testscripts spawn sesam >1000 times.
+      GORACE: atexit_sleep_ms=0
     cmds:
       - gotestsum --format pkgname -- -tags docgen -parallel 32 -race -timeout=20m  ./...
 
