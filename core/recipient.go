@@ -491,11 +491,15 @@ func ParseAndResolveRecipients(ctx context.Context, root *os.Root, pubKeySpecs [
 			return nil, fmt.Errorf("failed to parse recipient %q (#%d): %w", pubKeySpec, idx, err)
 		}
 
-		for i := range subRecps {
-			subRecps[i].Source = source
-		}
+		for _, recp := range subRecps {
+			// The same key via two specs would be recorded twice; first spec wins.
+			if slices.ContainsFunc(recps, func(r *Recipient) bool { return recp.Equal(r) }) {
+				continue
+			}
 
-		recps = append(recps, subRecps...)
+			recp.Source = source
+			recps = append(recps, recp)
+		}
 	}
 
 	return recps, nil
