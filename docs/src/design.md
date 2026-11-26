@@ -493,7 +493,7 @@ Operation types:
 
 | Operation                  | Detail fields                       | Notes                                          |
 |----------------------------|-------------------------------------|------------------------------------------------|
-| `init`                     | InitUUID, Admin (embedded UserTell) | Trust root. Pins the first admin. See below.   |
+| `init`                     | InitUUID, Extensions, Admin (embedded UserTell) | Trust root. Pins the first admin. See below.   |
 | `user.tell`                | User, PubKeys, SignPubKeys, Groups  | Add a user. Must be signed by an admin.        |
 | `user.kill`                | User                                | Must not remove the last user or last admin.   |
 | `user.rename`              | OldName, NewName                    | May not rename to an existing user.            |
@@ -511,6 +511,16 @@ Initial group membership is part of the `user.tell` detail; later changes go
 through `user.change_groups`. Admin status is determined by membership in the
 "admin" group.
 
-```admonish note
-The set of operations may still grow as sesam gains features.
-```
+## Extensions
+
+`Extensions` consists of `{name, required}` pairs in the `init` entry.
+They allow us to set new behavior for new repositories and phase out old behavior.
+Required extensions will error out on loading when a binary does not know them.
+Optional extensions take only effect if the binary knows them.
+Right now there are the following extensions:
+
+- `merge-tip-hash` (optional, set on all new repos): every `merge` entry must name
+  the hash of the upstream log it took in. Merges that bind by content only
+  are rejected.
+
+If the need arise, we might introduce an audit entry type that also enables extensions for existing repos.

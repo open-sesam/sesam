@@ -39,6 +39,17 @@ func GitWorktreeRoot(ctx context.Context, dir string) (string, error) {
 	return g.Root(), nil
 }
 
+// GitDir is GitWorktreeRoot's counterpart for the absolute git dir, which for a
+// linked worktree is its own and not the main one.
+func GitDir(ctx context.Context, dir string) (string, error) {
+	g, err := core.OpenGit(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+
+	return g.GitDir(), nil
+}
+
 // CheckGitConfig compares the git-config entries sesam surfaces in `sesam
 // doctor` (those flagged report in expectedGitConfig - merge/diff/alias and, on
 // git >= 2.54, the hook commands) against what `sesam init` would install for

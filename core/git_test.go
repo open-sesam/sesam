@@ -252,3 +252,17 @@ func TestGitObjects(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 }
+
+func TestGitDir(t *testing.T) {
+	sesamDir, repo := testGitRepo(t)
+	require.True(t, sameDir(filepath.Join(sesamDir, ".git"), repo.GitDir()), repo.GitDir())
+
+	// A linked worktree has a git dir of its own, where its merge state lives.
+	testGit(t, sesamDir, "commit", "-q", "--allow-empty", "-m", "first")
+	linked := filepath.Join(t.TempDir(), "linked")
+	testGit(t, sesamDir, "worktree", "add", "-q", linked)
+
+	linkedRepo, err := OpenGit(t.Context(), linked)
+	require.NoError(t, err)
+	require.True(t, sameDir(filepath.Join(sesamDir, ".git", "worktrees", "linked"), linkedRepo.GitDir()), linkedRepo.GitDir())
+}

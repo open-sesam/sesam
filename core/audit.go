@@ -227,6 +227,11 @@ type DetailInit struct {
 	// and as input for the initial hash.
 	InitUUID string `json:"init_uuid"`
 
+	// InitExtensions lists the extensions enabled for this repo. They phase out
+	// legacy behavior for repos created by a sesam version that knows them.
+	// See verifyInit() for the reader part and InitAuditLog() for the writer.
+	InitExtensions []InitExtension `json:"extensions,omitempty"`
+
 	// Admin is the initial admin user established at repo creation.
 	// This pins the admin's signing pubkey to the trust anchor.
 	Admin DetailUserTell `json:"admin"`
@@ -397,6 +402,26 @@ type DetailMerge struct {
 	Applied       int                       `json:"applied"`
 	Dropped       int                       `json:"dropped"`
 	Resolutions   []ConflictResolutionEntry `json:"resolutions,omitempty"`
+}
+
+// InitExtensionName names an extension as stored in DetailInit.Extensions.
+type InitExtensionName string
+
+// InitExtension is one entry of DetailInit.Extensions. A sesam version that does
+// not know a required extension refuses the repo; an optional one is ignored.
+type InitExtension struct {
+	Name     InitExtensionName `json:"name"`
+	Required bool              `json:"required"`
+}
+
+const (
+	// InitExtensionMergeTipHash requires every merge to bind their tip by hash.
+	InitExtensionMergeTipHash InitExtensionName = "merge-tip-hash"
+)
+
+// InitExtensions is the parsed form of DetailInit.InitExtensions.
+type InitExtensions struct {
+	DisableLegacyMergeVerify bool
 }
 
 // AuditLog records all operations that change the state of the sesam repo.
@@ -801,6 +826,13 @@ func InitAuditLog(root *os.Root, signer Signer, recps Recipients, admin DetailUs
 	initEntry := newAuditEntry(signer.UserName(), &DetailInit{
 		InitUUID: uuid.New().String(),
 		Admin:    admin,
+		InitExtensions: []InitExtension{
+			{
+				Name: InitExtensionMergeTipHash,
+				// Optional: older versions keep working, they just verify merges laxer.
+				Required: false,
+			},
+		},
 	})
 
 	signedEntry, err := al.AddEntry(signer, initEntry, nil)

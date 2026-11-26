@@ -72,6 +72,43 @@ func TestVerifyInitNegative(t *testing.T) {
 	})
 }
 
+func TestVerifyInitExtensions(t *testing.T) {
+	tests := []struct {
+		name       string
+		extensions []InitExtension
+		wantErr    string
+		want       InitExtensions
+	}{
+		{"none", nil, "", InitExtensions{}},
+		{"known", []InitExtension{{Name: InitExtensionMergeTipHash}}, "", InitExtensions{DisableLegacyMergeVerify: true}},
+		{"known and required", []InitExtension{{Name: InitExtensionMergeTipHash, Required: true}}, "", InitExtensions{DisableLegacyMergeVerify: true}},
+		{"unknown optional is ignored", []InitExtension{{Name: "from-the-future"}}, "", InitExtensions{}},
+		{"unknown required is refused", []InitExtension{{Name: "from-the-future", Required: true}}, `requires extension "from-the-future"`, InitExtensions{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			admin := newTestUser(t, "admin")
+			al := &AuditLog{}
+			feed(t, al, admin.Signer, "admin", &DetailInit{
+				InitUUID:       "extensions",
+				Admin:          admin.DetailUserTell([]string{"admin"}),
+				InitExtensions: tt.extensions,
+			})
+			al.InitHash = al.Entries[0].Hash()
+
+			state, err := VerifyChain(al, EmptyKeyring(), nil)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, tt.want, state.Extensions())
+		})
+	}
+}
+
 // --- verifyUserTell tests ---
 
 func TestVerifyUserTellBasic(t *testing.T) {
@@ -691,6 +728,35 @@ func TestVerifySealResetsRequirement(t *testing.T) {
 	state := verifyState(t, al, EmptyKeyring())
 	require.Equal(t, uint64(0), state.SealRequiredSeqID)
 	require.Equal(t, "some-hash", state.LastSealRootHash)
+}
+
+func TestVerifyMergeRequiresTipHash(t *testing.T) {
+	tests := []struct {
+		name    string
+		tipHash string
+		wantErr string
+	}{
+		{"hash-bound merge", "some-hash", ""},
+		{"legacy merge without hash", "", "merge entry has no tip hash"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			admin := newTestUser(t, "admin")
+			al := initAuditLog(t, testRepo(t), admin)
+			_, err := al.AddEntry(admin.Signer, newAuditEntry("admin", &DetailMerge{
+				BaseSeqID: 1, OurTipSeqID: 1, TheirTipSeqID: 1, TheirTipHash: tt.tipHash,
+			}), nil)
+			require.NoError(t, err)
+
+			err = verifyStateFail(t, al, EmptyKeyring())
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tt.wantErr)
+			}
+		})
+	}
 }
 
 // --- Signature verification tests ---

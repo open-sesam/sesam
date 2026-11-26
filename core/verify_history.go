@@ -365,9 +365,9 @@ func auditLogIsPrefix(new, old *AuditLog) error {
 // either `old` is a prefix of `new`, or `new` holds a merge that took in
 // exactly `old`. The latter is what a branch looks like that merged its
 // upstream and was then squashed into it.
-func auditLogCovers(new, old *AuditLog) error {
+func auditLogCovers(extensions InitExtensions, new, old *AuditLog) error {
 	prefixErr := auditLogIsPrefix(new, old)
-	if prefixErr == nil || mergeTookIn(new.Entries, old.Entries) {
+	if prefixErr == nil || mergeTookIn(extensions, new.Entries, old.Entries) {
 		return nil
 	}
 
@@ -377,7 +377,7 @@ func auditLogCovers(new, old *AuditLog) error {
 // mergeTookIn reports whether a merge entry in `entries` took in exactly `taken`.
 // A merge takes in all of theirs: each entry was in its base, which ours carries
 // too, or the merge decided on it.
-func mergeTookIn(entries, taken []AuditEntrySigned) bool {
+func mergeTookIn(extensions InitExtensions, entries, taken []AuditEntrySigned) bool {
 	tip := &taken[len(taken)-1]
 	for i := range entries {
 		if entries[i].Operation != OpMerge {
@@ -397,9 +397,11 @@ func mergeTookIn(entries, taken []AuditEntrySigned) bool {
 			continue
 		}
 
-		// Merges from before TheirTipHash: bind by content instead.
-		if legacyMergeTookIn(entries, taken) {
-			return true
+		if !extensions.DisableLegacyMergeVerify {
+			// Merges from before TheirTipHash: bind by content instead.
+			if legacyMergeTookIn(entries, taken) {
+				return true
+			}
 		}
 	}
 
@@ -490,6 +492,7 @@ func VerifyHistory(
 	pluginUI *PluginUI,
 	initCommitRev string,
 	worktree *os.Root,
+	extensions InitExtensions,
 ) (stoppedAt string, err error) {
 	prefix, err := SesamGitPrefix(g, sesamDir)
 	if err != nil {
@@ -530,7 +533,7 @@ func VerifyHistory(
 		} else {
 			// Walking backward: prev is the newer log, curr is the older one
 			// whose entries it has to account for.
-			if err := auditLogCovers(prev.Log, curr.Log); err != nil {
+			if err := auditLogCovers(extensions, prev.Log, curr.Log); err != nil {
 				return "", &AuditLogRewrittenError{
 					Older:     curr.Commit,
 					Newer:     prev.Commit,

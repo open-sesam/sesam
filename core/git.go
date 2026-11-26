@@ -27,6 +27,9 @@ type Git struct {
 	// so sesam paths can be relativized against it.
 	root string
 
+	// gitDir is the absolute git dir; a linked worktree's own, not the main one.
+	gitDir string
+
 	// newHash matches the repository's object format.
 	newHash func() hash.Hash
 }
@@ -63,18 +66,18 @@ func OpenGit(ctx context.Context, dir string) (*Git, error) {
 		return g.(*Git), nil
 	}
 
-	out, err := runGit(ctx, abs, "rev-parse", "--show-object-format", "--show-toplevel", "--show-prefix")
+	out, err := runGit(ctx, abs, "rev-parse", "--show-object-format", "--show-toplevel", "--show-prefix", "--absolute-git-dir")
 	if err != nil {
 		return nil, err
 	}
 
 	// --show-prefix prints an empty line at the worktree root.
 	lines := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
-	if len(lines) != 3 {
+	if len(lines) != 4 {
 		return nil, fmt.Errorf("unexpected git rev-parse output %q", out)
 	}
 
-	g := &Git{root: lines[1]}
+	g := &Git{root: lines[1], gitDir: lines[3]}
 	switch lines[0] {
 	case "sha1":
 		g.newHash = sha1.New
@@ -143,6 +146,11 @@ func gitExitCode(err error) int {
 // Root returns the absolute path of the worktree root.
 func (g *Git) Root() string {
 	return g.root
+}
+
+// GitDir returns the absolute path of the git dir.
+func (g *Git) GitDir() string {
+	return g.gitDir
 }
 
 // Output runs git in the worktree root and returns its stdout.

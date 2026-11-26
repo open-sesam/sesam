@@ -5,15 +5,23 @@ on:
     branches: ["main"]
   pull_request:
 
+# Workflow-level: at job level, the matrix jobs would share one group and cancel each other.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   ci:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
 
-    concurrency:
-      group: ci-${{ github.ref }}
-      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [lint, test-race, vuln]
+
+    name: ${{ matrix.task }}
 
     steps:
       - uses: actions/checkout@v7
@@ -24,26 +32,11 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: "go.mod"
-          cache: true
+          # The first job to finish saves the cache; keep it the one with -race artifacts.
+          cache: ${{ matrix.task == 'test-race' }}
 
       - name: Set up tools
         uses: jdx/mise-action@v4
 
-      - name: Cache Go modules and build
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-${{ runner.os }}-
-
-      - name: Lint
-        run: task lint
-
-      - name: Test
-        run: task test-race
-
-      - name: Vulncheck
-        run: task vuln
+      - name: Run ${{ matrix.task }}
+        run: task ${{ matrix.task }}

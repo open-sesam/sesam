@@ -232,6 +232,7 @@ func TestAuditLogCovers(t *testing.T) {
 
 	tests := []struct {
 		name    string
+		flags   InitExtensions
 		newLog  *AuditLog
 		oldLog  *AuditLog
 		wantErr string
@@ -269,6 +270,19 @@ func TestAuditLogCovers(t *testing.T) {
 		{
 			name:   "legacy merge, dropped seal accounted for",
 			newLog: log(initE, a, f, resigned(d1), merge("m", 2, &tip, false, 1)),
+			oldLog: develop,
+		},
+		{
+			name:    "legacy merge rejected once disabled",
+			flags:   InitExtensions{DisableLegacyMergeVerify: true},
+			newLog:  log(initE, a, f, resigned(d1), merge("m", 2, &tip, false, 1)),
+			oldLog:  develop,
+			wantErr: "differ at index 2",
+		},
+		{
+			name:   "hash-bound merge unaffected by the flag",
+			flags:  InitExtensions{DisableLegacyMergeVerify: true},
+			newLog: log(initE, a, f, resigned(d1), merge("m", 2, &tip, true, 1)),
 			oldLog: develop,
 		},
 		{
@@ -315,7 +329,7 @@ func TestAuditLogCovers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := auditLogCovers(tt.newLog, tt.oldLog)
+			err := auditLogCovers(tt.flags, tt.newLog, tt.oldLog)
 			if tt.wantErr == "" {
 				require.NoError(t, err)
 			} else {
@@ -570,7 +584,7 @@ func TestVerifyHistory(t *testing.T) {
 				t.Cleanup(func() { _ = worktree.Close() })
 			}
 
-			stoppedAt, err := VerifyHistory(t.Context(), f.SesamDir, f.Repo, f.Ids, NewNonInteractivePluginUI(), "", worktree)
+			stoppedAt, err := VerifyHistory(t.Context(), f.SesamDir, f.Repo, f.Ids, NewNonInteractivePluginUI(), "", worktree, InitExtensions{})
 			require.Equal(t, tt.wantStopped, stoppedAt != "", "stoppedAt=%q", stoppedAt)
 			if tt.wantErr == "" {
 				require.NoError(t, err)
@@ -595,14 +609,14 @@ func TestVerifyHistoryAnchorHandedDown(t *testing.T) {
 	require.NotEmpty(t, anchor)
 
 	ui := NewNonInteractivePluginUI()
-	require.NoError(t, errOnly(VerifyHistory(t.Context(), f.SesamDir, f.Repo, f.Ids, ui, anchor, nil)))
-	require.NoError(t, errOnly(VerifyHistory(t.Context(), f.SesamDir, f.Repo, f.Ids, ui, "", nil)))
+	require.NoError(t, errOnly(VerifyHistory(t.Context(), f.SesamDir, f.Repo, f.Ids, ui, anchor, nil, InitExtensions{})))
+	require.NoError(t, errOnly(VerifyHistory(t.Context(), f.SesamDir, f.Repo, f.Ids, ui, "", nil, InitExtensions{})))
 
 	f.truncateLog(t)
 	f.commit(t, "truncate")
 
-	require.ErrorContains(t, errOnly(VerifyHistory(t.Context(), f.SesamDir, f.Repo, f.Ids, ui, anchor, nil)), "not a prefix")
-	require.ErrorContains(t, errOnly(VerifyHistory(t.Context(), f.SesamDir, f.Repo, f.Ids, ui, "", nil)), "not a prefix")
+	require.ErrorContains(t, errOnly(VerifyHistory(t.Context(), f.SesamDir, f.Repo, f.Ids, ui, anchor, nil, InitExtensions{})), "not a prefix")
+	require.ErrorContains(t, errOnly(VerifyHistory(t.Context(), f.SesamDir, f.Repo, f.Ids, ui, "", nil, InitExtensions{})), "not a prefix")
 }
 
 // TestVerifyHistory_NoCommitsYet covers the case where the repo has no commits
@@ -612,7 +626,7 @@ func TestVerifyHistoryAnchorHandedDown(t *testing.T) {
 // nil because there's nothing to verify.
 func TestVerifyHistory_NoCommitsYet(t *testing.T) {
 	sesamDir, repo := testGitRepo(t)
-	require.NoError(t, errOnly(VerifyHistory(t.Context(), sesamDir, repo, Identities{}, NewNonInteractivePluginUI(), "", nil)))
+	require.NoError(t, errOnly(VerifyHistory(t.Context(), sesamDir, repo, Identities{}, NewNonInteractivePluginUI(), "", nil, InitExtensions{})))
 }
 
 // TestVerifyHistory_NoSesamInit covers the case where the repo has commits but
@@ -625,7 +639,7 @@ func TestVerifyHistory_NoSesamInit(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(sesamDir, "README.md"), []byte("hi"), 0o600))
 	gitCommitAll(t, repo, "unrelated commit, no sesam init")
 
-	require.NoError(t, errOnly(VerifyHistory(t.Context(), sesamDir, repo, Identities{}, NewNonInteractivePluginUI(), "", nil)))
+	require.NoError(t, errOnly(VerifyHistory(t.Context(), sesamDir, repo, Identities{}, NewNonInteractivePluginUI(), "", nil, InitExtensions{})))
 }
 
 // TestVerifyHistory_NoLogJsonl exercises the iter.Next() == io.EOF branch:
@@ -647,7 +661,7 @@ func TestVerifyHistory_NoLogJsonl(t *testing.T) {
 
 	gitCommitAll(t, repo, "init file only, no log.jsonl")
 
-	require.NoError(t, errOnly(VerifyHistory(t.Context(), sesamDir, repo, Identities{}, NewNonInteractivePluginUI(), "", nil)))
+	require.NoError(t, errOnly(VerifyHistory(t.Context(), sesamDir, repo, Identities{}, NewNonInteractivePluginUI(), "", nil, InitExtensions{})))
 }
 
 // TestVerifyHistoryVaultAddedOnSideBranch covers the shape a normal PR flow
@@ -675,7 +689,7 @@ func TestVerifyHistoryVaultAddedOnSideBranch(t *testing.T) {
 
 	require.NoError(
 		t,
-		errOnly(VerifyHistory(t.Context(), sesamDir, repo, Identities{admin.Identity}, NewNonInteractivePluginUI(), "", nil)),
+		errOnly(VerifyHistory(t.Context(), sesamDir, repo, Identities{admin.Identity}, NewNonInteractivePluginUI(), "", nil, InitExtensions{})),
 		"walking past the commit that introduced the vault is the end of history, not tampering",
 	)
 }
