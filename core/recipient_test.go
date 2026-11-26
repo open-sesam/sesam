@@ -294,6 +294,26 @@ func TestParseAndResolveRecipients(t *testing.T) {
 	require.Equal(t, KeySourceManual, recps[1].Source)
 }
 
+func TestParseAndResolveRecipientsDeduplicates(t *testing.T) {
+	alice := newTestUser(t, "alice")
+	bob := newTestUser(t, "bob")
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "alice.pub"), []byte(alice.Recipient.String()+"\n"), 0o600))
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	defer root.Close()
+
+	recps, err := ParseAndResolveRecipients(
+		context.Background(),
+		root,
+		[]string{"file://alice.pub", alice.Recipient.String(), bob.Recipient.String(), alice.Recipient.String()},
+		nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{"file://alice.pub", bob.Recipient.String()}, recps.Specs())
+}
+
 func TestParseAndResolveRecipientsInvalidKey(t *testing.T) {
 	_, err := ParseAndResolveRecipients(context.Background(), nil, []string{"not-a-key"}, nil)
 	require.Error(t, err)

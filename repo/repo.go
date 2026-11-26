@@ -19,6 +19,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -124,6 +125,9 @@ type RepoInitOpts struct {
 
 	// GitConfigOpts tells init what to configure
 	GitConfigOpts GitConfigOpts
+
+	// RecipientSpecs are stored for the initial admin instead of the identities' raw public keys.
+	RecipientSpecs []string
 }
 
 func (rio *RepoInitOpts) PrintStep(fmt string, args ...any) {
@@ -283,12 +287,40 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 		return nil, err
 	}
 
+	initialSpecs := identities.RecipientStrings()
+	initialRecipients, err := core.ParseAndResolveRecipients(ctx, root, initialSpecs, r.pluginUI)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(opts.RecipientSpecs) > 0 {
+		resolved, err := core.ParseAndResolveRecipients(ctx, root, opts.RecipientSpecs, r.pluginUI)
+		if err != nil {
+			return nil, fmt.Errorf("passed recipient cannot be parsed: %w", err)
+		}
+
+		// Every identity must be a recipient, or the admin locks themselves out.
+		// Extra keys (e.g. other devices on a forge account) are kept.
+		var missing []string
+		for _, idRecp := range initialRecipients {
+			if !slices.ContainsFunc(resolved, func(r *core.Recipient) bool { return idRecp.Equal(r) }) {
+				missing = append(missing, idRecp.String())
+			}
+		}
+
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("passed recipients do not include identity key(s): %s", strings.Join(missing, ", "))
+		}
+
+		initialSpecs, initialRecipients = opts.RecipientSpecs, resolved
+	}
+
 	opts.PrintStep("Creating initial sesam.yml")
 	configPath := filepath.Join(resolvedDir, "sesam.yml")
 	if err := createInitialConfig(
 		configPath,
 		opts.InitialUserName,
-		identities.RecipientStrings(),
+		initialSpecs,
 	); err != nil {
 		return nil, err
 	}
@@ -301,11 +333,9 @@ func Init(ctx context.Context, sesamDir string, idPaths []string, opts RepoInitO
 
 	opts.PrintStep("Creating initial user »%s«…", opts.InitialUserName)
 	signer, auditLog, err := core.InitAdminUser(
-		ctx,
 		root,
 		opts.InitialUserName,
-		identities.RecipientStrings(),
-		r.pluginUI,
+		initialRecipients,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize admin user: %w", err)
