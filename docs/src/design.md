@@ -513,7 +513,7 @@ through `user.change_groups`. Admin status is determined by membership in the
 
 ## Extensions
 
-`Extensions` lists `{name, required}` in the `init` entry.
+`Extensions` consists of `{name, required}` pairs in the `init` entry.
 They allow us to set new behavior for new repositories and phase out old behavior.
 Required extensions will error out on loading when a binary does not know them.
 Optional extensions take only effect if the binary knows them.

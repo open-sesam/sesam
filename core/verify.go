@@ -138,7 +138,7 @@ type VerifiedState struct {
 	initCommit string
 
 	// extensions are parsed from the init entry by verifyInit.
-	extensions Extensions
+	extensions InitExtensions
 
 	auditLog *AuditLog
 	keyring  Keyring
@@ -153,7 +153,7 @@ func (s *VerifiedState) InitCommit() string {
 }
 
 // Extensions returns the extensions enabled by the verified init entry.
-func (s *VerifiedState) Extensions() Extensions {
+func (s *VerifiedState) Extensions() InitExtensions {
 	return s.extensions
 }
 

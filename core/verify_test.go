@@ -77,13 +77,13 @@ func TestVerifyInitExtensions(t *testing.T) {
 		name       string
 		extensions []InitExtension
 		wantErr    string
-		want       Extensions
+		want       InitExtensions
 	}{
-		{"none", nil, "", Extensions{}},
-		{"known", []InitExtension{{Name: ExtensionMergeTipHash}}, "", Extensions{DisableLegacyMergeVerify: true}},
-		{"known and required", []InitExtension{{Name: ExtensionMergeTipHash, Required: true}}, "", Extensions{DisableLegacyMergeVerify: true}},
-		{"unknown optional is ignored", []InitExtension{{Name: "from-the-future"}}, "", Extensions{}},
-		{"unknown required is refused", []InitExtension{{Name: "from-the-future", Required: true}}, `requires extension "from-the-future"`, Extensions{}},
+		{"none", nil, "", InitExtensions{}},
+		{"known", []InitExtension{{Name: InitExtensionMergeTipHash}}, "", InitExtensions{DisableLegacyMergeVerify: true}},
+		{"known and required", []InitExtension{{Name: InitExtensionMergeTipHash, Required: true}}, "", InitExtensions{DisableLegacyMergeVerify: true}},
+		{"unknown optional is ignored", []InitExtension{{Name: "from-the-future"}}, "", InitExtensions{}},
+		{"unknown required is refused", []InitExtension{{Name: "from-the-future", Required: true}}, `requires extension "from-the-future"`, InitExtensions{}},
 	}
 
 	for _, tt := range tests {
@@ -91,9 +91,9 @@ func TestVerifyInitExtensions(t *testing.T) {
 			admin := newTestUser(t, "admin")
 			al := &AuditLog{}
 			feed(t, al, admin.Signer, "admin", &DetailInit{
-				InitUUID:   "extensions",
-				Admin:      admin.DetailUserTell([]string{"admin"}),
-				Extensions: tt.extensions,
+				InitUUID:       "extensions",
+				Admin:          admin.DetailUserTell([]string{"admin"}),
+				InitExtensions: tt.extensions,
 			})
 			al.InitHash = al.Entries[0].Hash()
 
@@ -737,7 +737,7 @@ func TestVerifyMergeRequiresTipHash(t *testing.T) {
 		wantErr string
 	}{
 		{"hash-bound merge", "some-hash", ""},
-		{"legacy merge without hash", "", "does not bind their tip by hash"},
+		{"legacy merge without hash", "", "merge entry has no tip hash"},
 	}
 
 	for _, tt := range tests {

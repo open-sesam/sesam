@@ -419,8 +419,8 @@ const (
 	InitExtensionMergeTipHash InitExtensionName = "merge-tip-hash"
 )
 
-// Extensions is the parsed form of DetailInit.Extensions.
-type Extensions struct {
+// InitExtensions is the parsed form of DetailInit.InitExtensions.
+type InitExtensions struct {
 	DisableLegacyMergeVerify bool
 }
 
