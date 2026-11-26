@@ -29,16 +29,6 @@ jobs:
       - name: Set up tools
         uses: jdx/mise-action@v4
 
-      - name: Cache Go modules and build
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-${{ runner.os }}-
-
       - name: Lint
         run: task lint
 
